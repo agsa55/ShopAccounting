@@ -1,0 +1,10 @@
+{
+  "description": "ابزارهای اضافی که باید نصب شوند",
+  "dependencies": {
+    "mssql": "^10.0.2"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "install-mssql": "npm install mssql"
+  }
+}
