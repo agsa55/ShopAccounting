@@ -28,7 +28,7 @@ import { PurchaseInvoicePrintModal } from '@/components/purchases/purchase-invoi
 
 interface Supplier { id: string; name: string; code: string }
 interface Warehouse { id: string; name: string; code: string; isDefault?: boolean }
-interface Product { id: string; name: string; code: string; salePrice: number; currentStock: number }
+interface Product { id: string; name: string; code: string; salePrice: number; purchasePrice?: number; currentStock: number }
 
 interface PurchaseInvoice {
   id: string
@@ -510,12 +510,10 @@ function PersianNumberInput({
   className?: string
   dir?: 'ltr' | 'rtl'
 }) {
-  // ★ نمایش: اعداد فارسی با جداکننده هزارگان
   const displayValue = value ? toFaNum(value.toLocaleString('en-US')) : ''
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value
-    // ★ تبدیل اعداد فارسی/عربی به انگلیسی + حذف هر چیزی غیر از رقم
     const englishDigits = raw
       .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
       .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
@@ -540,7 +538,7 @@ function PersianNumberInput({
 
 export function PurchaseInvoicesPage() {
   const tenantId = useAppStore((s) => s.tenantId)
-  const setCurrentView = useAppStore((s) => s.setCurrentView)  // ★★★ v8.7.2: برای رفتن به صفحه طرف حساب
+  const setCurrentView = useAppStore((s) => s.setCurrentView)
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -550,7 +548,6 @@ export function PurchaseInvoicesPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  // ★ فرم فاکتور خرید
   const [supplierId, setSupplierId] = useState<string>('')
   const [warehouseId, setWarehouseId] = useState<string>('')
   const [paymentType, setPaymentType] = useState<string>('cash')
@@ -560,37 +557,30 @@ export function PurchaseInvoicesPage() {
   const [productSearch, setProductSearch] = useState('')
   const [productSearchResults, setProductSearchResults] = useState<Product[]>([])
 
-  // ★★★ v6.1.2: state برای ویرایش/حذف
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
-  // ★★★ v6.4 FIX: state برای نمایش loading هنگام بارگذاری آیتم‌های فاکتور در مودال ویرایش
-  // این state جلوی disabled شدن دکمه ثبت به‌خاطر cart خالی را می‌گیرد
   const [loadingEditItems, setLoadingEditItems] = useState(false)
   const [deletingInvoice, setDeletingInvoice] = useState<PurchaseInvoice | null>(null)
   const [deleting, setDeleting] = useState(false)
-  // ★★★ v6.9: state برای مودال چاپ
   const [printModalOpen, setPrintModalOpen] = useState(false)
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null)
   const [printInvoiceNumber, setPrintInvoiceNumber] = useState<string>('')
-  // ★★★ v8.7: state برای برگشتی خرید
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnInvoice, setReturnInvoice] = useState<PurchaseInvoice | null>(null)
- 
-  // جدید — اضافه کردن originalQuantity و currentStock:
-const [returnItems, setReturnItems] = useState<Array<{
-  purchaseInvoiceItemId: string
-  productId: string | null        // ★ برای fetch موجودی
-  productName: string
-  originalQuantity: number        // ★ مقدار اصلی فاکتور خرید
-  currentStock: number            // ★ موجودی فعلی انبار
-  maxQuantity: number             // ★ حداکثر قابل برگشت = min(original, currentStock)
-  quantity: number
-  returnReason: string
-  unitPrice: number
-  lineTotal: number
-}>>([])
+
+  const [returnItems, setReturnItems] = useState<Array<{
+    purchaseInvoiceItemId: string
+    productId: string | null
+    productName: string
+    originalQuantity: number
+    currentStock: number
+    maxQuantity: number
+    quantity: number
+    returnReason: string
+    unitPrice: number
+    lineTotal: number
+  }>>([])
   const [returnSubmitting, setReturnSubmitting] = useState(false)
 
-  // ★★★ v8.7.2: State برای فاکتور خرید تعمیرات و خدمات ★★★
   const [serviceDialogOpen, setServiceDialogOpen] = useState(false)
   const [serviceSubmitting, setServiceSubmitting] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<'repair' | 'service'>('repair')
@@ -609,7 +599,7 @@ const [returnItems, setReturnItems] = useState<Array<{
     unitPrice: number
     discountAmount: number
     taxAmount: number
-  }>>([])  // ★★★ v8.7.2: آرایه خالی — رکورد پیش‌فرض حذف شد
+  }>>([])
 
   const { toast } = useToast()
 
@@ -642,7 +632,6 @@ const [returnItems, setReturnItems] = useState<Array<{
 
   useEffect(() => { loadData() }, [loadData])
 
-  // ★ جستجوی محصول
   useEffect(() => {
     if (productSearch.trim().length < 2) {
       setProductSearchResults([])
@@ -675,10 +664,10 @@ const [returnItems, setReturnItems] = useState<Array<{
         productId: product.id,
         productName: product.name,
         quantity: 1,
-        unitPrice: product.salePrice || 0,
+        unitPrice: product.purchasePrice || 0,
         discountAmount: 0,
         taxAmount: 0,
-        lineTotal: product.salePrice || 0,
+        lineTotal: product.purchasePrice || 0,
       }])
     }
     setProductSearch('')
@@ -705,29 +694,21 @@ const [returnItems, setReturnItems] = useState<Array<{
     return acc
   }, { subTotal: 0, discount: 0, tax: 0, total: 0 })
 
-  // ★★★ v6.1.2: باز کردن دیالوگ ویرایش با pre-fill اطلاعات فاکتور
-  // ★★★ v6.4 FIX: اضافه شدن loadingEditItems برای جلوگیری از disabled شدن دکمه ثبت
   const openEditDialog = async (inv: PurchaseInvoice) => {
     setEditingInvoiceId(inv.id)
     setPaymentType(inv.paymentType || 'cash')
     setDescription(inv.description || '')
-
-    // ★★★ v6.1.6: استفاده مستقیم از supplierId و warehouseId فاکتور
     setSupplierId(inv.supplierId || '')
     setWarehouseId(inv.warehouseId || '')
 
-    // ★ تنظیم تاریخ فاکتور (ISO format)
     if (inv.invoiceDate) {
       setInvoiceDate(new Date(inv.invoiceDate).toISOString().split('T')[0])
     }
 
-    // ★★★ v6.4 FIX: ابتدا مودال را باز کن و سپس آیتم‌ها را به‌صورت async بارگذاری کن
-    // این کار باعث می‌شود کاربر بلافاصله مودال را ببیند و دکمه ثبت (با spinner) قابل مشاهده باشد
-    setCart([])  // ابتدا cart را خالی کن
-    setLoadingEditItems(true)  // نمایش loading
-    setDialogOpen(true)  // ★ مودال را همین حالا باز کن
+    setCart([])
+    setLoadingEditItems(true)
+    setDialogOpen(true)
 
-    // ★ گرفتن فاکتور با items از API
     try {
       const tid = tenantId || useAppStore.getState().currentTenant?.id
       const res = await fetch(`/api/purchase-invoices/${inv.id}?tenantId=${tid}`)
@@ -745,7 +726,6 @@ const [returnItems, setReturnItems] = useState<Array<{
           }))
           setCart(items)
         } else {
-          // fallback: از inv.items استفاده کن
           const items = (inv.items || []).map((item: any) => ({
             productId: item.productId || undefined,
             productName: item.productName || '',
@@ -771,12 +751,10 @@ const [returnItems, setReturnItems] = useState<Array<{
       }))
       setCart(items)
     } finally {
-      setLoadingEditItems(false)  // پایان loading
+      setLoadingEditItems(false)
     }
   }
 
-  // ★★★ v6.1.2: بستن دیالوگ و reset state
-  // ★★★ v6.4 FIX: reset کردن loadingEditItems هم اضافه شد
   const closeDialog = () => {
     setDialogOpen(false)
     setEditingInvoiceId(null)
@@ -784,12 +762,11 @@ const [returnItems, setReturnItems] = useState<Array<{
     setSupplierId('')
     setDescription('')
     setInvoiceDate(new Date().toISOString().split('T')[0])
-    setLoadingEditItems(false)  // ★ reset
+    setLoadingEditItems(false)
     const defaultWh = warehouses.find(w => w.isDefault)
     if (defaultWh) setWarehouseId(defaultWh.id)
   }
 
-  // ★★★ v6.1.2: حذف فاکتور
   const handleDeleteInvoice = async () => {
     if (!deletingInvoice) return
     setDeleting(true)
@@ -812,97 +789,87 @@ const [returnItems, setReturnItems] = useState<Array<{
     setDeleting(false)
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★★★ v8.7: برگشتی فاکتور خرید ★★★
-  // ═══════════════════════════════════════════════════════════════
-
   const handleReturnClick = async (inv: PurchaseInvoice) => {
-  if ((inv as any).invoiceType === 'purchase_return') {
-    toast({ 
-      title: 'خطا', 
-      description: 'این فاکتور خودش برگشتی است', 
-      variant: 'destructive' 
-    })
-    return
-  }
-
-  setReturnInvoice(inv)
-  setReturnItems([])  // ★ ریست قبل از بارگذاری
-  setReturnDialogOpen(true)  // ★ مودال را زودتر باز کن
-
-  try {
-    const tid = tenantId || useAppStore.getState().currentTenant?.id
-
-    // ★ مرحله ۱: دریافت آیتم‌های فاکتور
-    const res = await fetch(`/api/purchase-invoices/${inv.id}?tenantId=${tid}`)
-    const data = await res.json()
-
-    if (!data.success || !data.data?.items) {
-      toast({ 
-        title: 'خطا', 
-        description: 'بارگذاری آیتم‌ها ناموفق بود', 
-        variant: 'destructive' 
+    if ((inv as any).invoiceType === 'purchase_return') {
+      toast({
+        title: 'خطا',
+        description: 'این فاکتور خودش برگشتی است',
+        variant: 'destructive'
       })
       return
     }
 
-    const items = data.data.items
+    setReturnInvoice(inv)
+    setReturnItems([])
+    setReturnDialogOpen(true)
 
-    // ★ مرحله ۲: دریافت موجودی فعلی هر محصول به‌صورت موازی
-    const stockPromises = items.map(async (item: any) => {
-      if (!item.productId) return null
+    try {
+      const tid = tenantId || useAppStore.getState().currentTenant?.id
+      const res = await fetch(`/api/purchase-invoices/${inv.id}?tenantId=${tid}`)
+      const data = await res.json()
 
-      try {
-        const stockRes = await fetch(
-          `/api/products/lookup?q=${encodeURIComponent(item.productName)}&tenantId=${tid}`
-        )
-        const stockData = await stockRes.json()
-        if (stockData.success) {
-          const prods = Array.isArray(stockData.data) 
-            ? stockData.data 
-            : (stockData.data?.products || [])
-          const found = prods.find((p: Product) => p.id === item.productId)
-          return found ? found.currentStock : null
+      if (!data.success || !data.data?.items) {
+        toast({
+          title: 'خطا',
+          description: 'بارگذاری آیتم‌ها ناموفق بود',
+          variant: 'destructive'
+        })
+        return
+      }
+
+      const items = data.data.items
+
+      const stockPromises = items.map(async (item: any) => {
+        if (!item.productId) return null
+        try {
+          const stockRes = await fetch(
+            `/api/products/lookup?q=${encodeURIComponent(item.productName)}&tenantId=${tid}`
+          )
+          const stockData = await stockRes.json()
+          if (stockData.success) {
+            const prods = Array.isArray(stockData.data)
+              ? stockData.data
+              : (stockData.data?.products || [])
+            const found = prods.find((p: Product) => p.id === item.productId)
+            return found ? found.currentStock : null
+          }
+          return null
+        } catch {
+          return null
         }
-        return null
-      } catch {
-        return null
-      }
-    })
+      })
 
-    const stockResults = await Promise.all(stockPromises)
+      const stockResults = await Promise.all(stockPromises)
 
-    // ★ مرحله ۳: ترکیب اطلاعات
-    const mappedItems = items.map((item: any, idx: number) => {
-      const originalQuantity = item.quantity
-      const currentStock = stockResults[idx] ?? originalQuantity  // ★ اگر موجودی نگرفتیم، fallback به مقدار اصلی
-      // ★ حداکثر قابل برگشت: نمی‌توان بیشتر از موجودی فعلی یا بیشتر از مقدار خریداری‌شده برگشت داد
-      const maxQuantity = Math.min(originalQuantity, Math.max(0, currentStock))
+      const mappedItems = items.map((item: any, idx: number) => {
+        const originalQuantity = item.quantity
+        const currentStock = stockResults[idx] ?? originalQuantity
+        const maxQuantity = Math.min(originalQuantity, Math.max(0, currentStock))
 
-      return {
-        purchaseInvoiceItemId: item.id,
-        productId: item.productId || null,
-        productName: item.productName,
-        originalQuantity,
-        currentStock: stockResults[idx] ?? originalQuantity,
-        maxQuantity,
-        quantity: 0,
-        returnReason: '',
-        unitPrice: item.unitPrice || 0,
-        lineTotal: item.lineTotal || 0,
-      }
-    })
+        return {
+          purchaseInvoiceItemId: item.id,
+          productId: item.productId || null,
+          productName: item.productName,
+          originalQuantity,
+          currentStock: stockResults[idx] ?? originalQuantity,
+          maxQuantity,
+          quantity: 0,
+          returnReason: '',
+          unitPrice: item.unitPrice || 0,
+          lineTotal: item.lineTotal || 0,
+        }
+      })
 
-    setReturnItems(mappedItems)
+      setReturnItems(mappedItems)
 
-  } catch (err: any) {
-    toast({ 
-      title: 'خطا', 
-      description: 'بارگذاری آیتم‌ها ناموفق بود', 
-      variant: 'destructive' 
-    })
+    } catch (err: any) {
+      toast({
+        title: 'خطا',
+        description: 'بارگذاری آیتم‌ها ناموفق بود',
+        variant: 'destructive'
+      })
+    }
   }
-}
 
   const handleReturnItemChange = (index: number, field: string, value: any) => {
     const updated = [...returnItems]
@@ -958,17 +925,11 @@ const [returnItems, setReturnItems] = useState<Array<{
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★★★ v8.7.2: فاکتور خرید تعمیرات و خدمات ★★★
-  // ═══════════════════════════════════════════════════════════════
-
   const handleAddServiceItem = () => {
-    // ★★★ v8.7.2: اگه لیست خالی هست، اولین ردیف رو اضافه کن (بدون هشدار)
     if (serviceItems.length === 0) {
       setServiceItems([{ serviceName: '', description: '', quantity: 1, unitLabel: 'عدد', unitPrice: 0, discountAmount: 0, taxAmount: 0 }])
       return
     }
-    // بررسی ردیف آخر — اگه خالی هست، اجازه نده
     const lastItem = serviceItems[serviceItems.length - 1]
     if (lastItem && (!lastItem.serviceName || lastItem.serviceName.trim().length < 2)) {
       toast({
@@ -984,7 +945,6 @@ const [returnItems, setReturnItems] = useState<Array<{
   }
 
   const handleRemoveServiceItem = (index: number) => {
-    // ★★★ v8.7.2: اجازه حذف تا صفر (حتی آخرین ردیف)
     setServiceItems(serviceItems.filter((_, i) => i !== index))
   }
 
@@ -1049,7 +1009,6 @@ const [returnItems, setReturnItems] = useState<Array<{
     }
   }
 
-
   const handleSubmit = async () => {
     if (cart.length === 0) {
       toast({ title: 'خطا', description: 'سبد خرید خالی است', variant: 'destructive' })
@@ -1112,7 +1071,6 @@ const [returnItems, setReturnItems] = useState<Array<{
             <p className="text-xs text-gray-500">{formatNumber(filteredInvoices.length)} فاکتور</p>
           </div>
         </div>
-        {/* ★★★ v8.7.2: هر دو دکمه در یک گروه کنار هم */}
         <div className="flex items-center gap-2">
           <Button onClick={() => {
             setEditingInvoiceId(null)
@@ -1127,7 +1085,6 @@ const [returnItems, setReturnItems] = useState<Array<{
             <Plus className="w-4 h-4" />
             فاکتور خرید جدید
           </Button>
-          {/* ★★★ v8.7.2: دکمه فاکتور تعمیرات و خدمات */}
           <Button
             onClick={() => setServiceDialogOpen(true)}
             className="gap-1.5 bg-blue-600 hover:bg-blue-700"
@@ -1148,7 +1105,6 @@ const [returnItems, setReturnItems] = useState<Array<{
             className="pr-9"
           />
         </div>
-        {/* ★ راهنمای وضعیت‌ها */}
         <div className="flex items-center gap-1.5 text-[10px] text-gray-500 flex-wrap">
           <Badge className="bg-emerald-100 text-emerald-700">ثبت نهایی</Badge>
           <span>= ثبت شده + موجودی + سند</span>
@@ -1191,67 +1147,60 @@ const [returnItems, setReturnItems] = useState<Array<{
                     <TableCell className="text-xs hidden sm:table-cell">{inv.supplier?.name || '—'}</TableCell>
                     <TableCell className="text-xs hidden md:table-cell">{inv.warehouse?.name || '—'}</TableCell>
                     <TableCell className="text-xs font-bold" dir="ltr">{formatNumber(inv.totalAmount)}</TableCell>
-                
-<TableCell className="text-center">
-  <div className="flex flex-col items-center gap-0.5">
-    <Badge variant="outline" className="text-[9px]">
-      {inv.paymentType === 'credit' ? 'نسیه' : 'نقدی'}
-    </Badge>
-    {(inv as any).invoiceType === 'service' && (
-      <Badge className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200">
-        خدمات
-      </Badge>
-    )}
-    {(inv as any).invoiceType === 'repair' && (
-      <Badge className="text-[9px] bg-amber-50 text-amber-600 border border-amber-200">
-        تعمیرات
-      </Badge>
-    )}
-  </div>
-</TableCell>
-<TableCell className="text-center">
-  {(inv as any).invoiceType === 'purchase_return' ? (
-    <Badge
-      title="فاکتور برگشتی از خرید"
-      className="bg-amber-100 text-amber-700"
-    >
-      برگشتی خرید
-    </Badge>
-  ) : (inv as any).invoiceType === 'service' ? (
-    <Badge
-      title="فاکتور خدمات/تعمیرات"
-      className="bg-blue-100 text-blue-700"
-    >
-      {inv.status === 'confirmed' ? 'ثبت نهایی' :
-       inv.status === 'paid' ? 'پرداخت شده' :
-       inv.status === 'draft' ? 'پیش‌نویس' :
-       inv.status === 'cancelled' ? 'لغو شده' :
-       inv.status}
-    </Badge>
-  ) : (
-    <Badge
-      title={
-        inv.status === 'confirmed' ? 'فاکتور ثبت شده و موجودی انبار و سند حسابداری به‌روزرسانی شده است.' :
-        inv.status === 'paid' ? 'فاکتور پرداخت شده.' :
-        inv.status === 'draft' ? 'فاکتور پیش‌نویس.' :
-        inv.status === 'cancelled' ? 'این فاکتور لغو شده است.' :
-        'وضعیت نامشخص'
-      }
-      className={
-        inv.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
-        inv.status === 'paid' ? 'bg-blue-100 text-blue-700' :
-        inv.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-        'bg-gray-100 text-gray-500'
-      }
-    >
-      {inv.status === 'confirmed' ? 'ثبت نهایی' :
-       inv.status === 'paid' ? 'پرداخت شده' :
-       inv.status === 'draft' ? 'پیش‌نویس' :
-       inv.status === 'cancelled' ? 'لغو شده' :
-       inv.status}
-    </Badge>
-  )}
-</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <Badge variant="outline" className="text-[9px]">
+                          {inv.paymentType === 'credit' ? 'نسیه' : 'نقدی'}
+                        </Badge>
+                        {(inv as any).invoiceType === 'service' && (
+                          <Badge className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200">
+                            خدمات
+                          </Badge>
+                        )}
+                        {(inv as any).invoiceType === 'repair' && (
+                          <Badge className="text-[9px] bg-amber-50 text-amber-600 border border-amber-200">
+                            تعمیرات
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {(inv as any).invoiceType === 'purchase_return' ? (
+                        <Badge title="فاکتور برگشتی از خرید" className="bg-amber-100 text-amber-700">
+                          برگشتی خرید
+                        </Badge>
+                      ) : (inv as any).invoiceType === 'service' ? (
+                        <Badge title="فاکتور خدمات/تعمیرات" className="bg-blue-100 text-blue-700">
+                          {inv.status === 'confirmed' ? 'ثبت نهایی' :
+                           inv.status === 'paid' ? 'پرداخت شده' :
+                           inv.status === 'draft' ? 'پیش‌نویس' :
+                           inv.status === 'cancelled' ? 'لغو شده' :
+                           inv.status}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          title={
+                            inv.status === 'confirmed' ? 'فاکتور ثبت شده و موجودی انبار و سند حسابداری به‌روزرسانی شده است.' :
+                            inv.status === 'paid' ? 'فاکتور پرداخت شده.' :
+                            inv.status === 'draft' ? 'فاکتور پیش‌نویس.' :
+                            inv.status === 'cancelled' ? 'این فاکتور لغو شده است.' :
+                            'وضعیت نامشخص'
+                          }
+                          className={
+                            inv.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
+                            inv.status === 'paid' ? 'bg-blue-100 text-blue-700' :
+                            inv.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-500'
+                          }
+                        >
+                          {inv.status === 'confirmed' ? 'ثبت نهایی' :
+                           inv.status === 'paid' ? 'پرداخت شده' :
+                           inv.status === 'draft' ? 'پیش‌نویس' :
+                           inv.status === 'cancelled' ? 'لغو شده' :
+                           inv.status}
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1">
                         <Button
@@ -1277,7 +1226,6 @@ const [returnItems, setReturnItems] = useState<Array<{
                         >
                           <Edit2 className="w-3.5 h-3.5 text-blue-600" />
                         </Button>
-                        {/* ★★★ v8.7: دکمه برگشتی خرید */}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1308,209 +1256,229 @@ const [returnItems, setReturnItems] = useState<Array<{
         </CardContent>
       </Card>
 
-      {/* ★ دیالوگ فاکتور خرید جدید/ویرایش — ساختار قبلی حفظ شده */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); else setDialogOpen(true) }}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh]" dir="rtl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingInvoiceId ? `ویرایش فاکتور خرید` : 'فاکتور خرید جدید'}
-            </DialogTitle>
-            {editingInvoiceId && (
-              <DialogDescription className="text-[11px]">
-                هنگام ویرایش، ابتدا اثرات فاکتور قدیمی (موجودی، سند، بدهی تامین‌کننده) برگشت می‌خورد و سپس اطلاعات جدید اعمال می‌شود.
-              </DialogDescription>
-            )}
-          </DialogHeader>
+      {/* ★★★ دیالوگ فاکتور خرید جدید/ویرایش — ساختار flex کامل با اسکرول صحیح */}
+ {/* ★★★ مودال فاکتور خرید — کد کامل و اصلاح شده */}
+{dialogOpen && (
+  <>
+    {/* Overlay */}
+    <div
+      onClick={closeDialog}
+      className="fixed inset-0 bg-black/50 z-[9998]"
+    />
 
-          <div className="space-y-3 overflow-y-auto max-h-[70vh] pr-1">
-            {/* ★ ردیف اول: تامین‌کننده + انبار + نوع پرداخت + تاریخ */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">تامین‌کننده</Label>
-                <Select value={supplierId || 'none'} onValueChange={setSupplierId}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">بدون تامین‌کننده</SelectItem>
-                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">انبار <span className="text-red-500">*</span></Label>
-                <Select value={warehouseId} onValueChange={setWarehouseId}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">نوع پرداخت</Label>
-                <Select value={paymentType} onValueChange={setPaymentType}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">نقدی</SelectItem>
-                    <SelectItem value="credit">نسیه</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* ★ دیتا پیکر شمسی (نسخه صفحه حسابداری) */}
-              <PersianDatePicker
-                value={invoiceDate}
-                onChange={(iso) => setInvoiceDate(iso)}
-                label="تاریخ فاکتور"
-              />
-            </div>
+    {/* مودال */}
+    <div
+      dir="rtl"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+    >
+      <div className="w-full max-w-[800px] max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden">
+        
+        {/* ★ هدر ثابت */}
+        <div className="px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+          <h2 className="text-base font-bold">
+            {editingInvoiceId ? 'ویرایش فاکتور خرید' : 'فاکتور خرید جدید'}
+          </h2>
+          {editingInvoiceId && (
+            <p className="text-[10px] text-amber-600 mt-1">
+              هنگام ویرایش، ابتدا اثرات فاکتور قدیمی برگشت می‌خورد و سپس اطلاعات جدید اعمال می‌شود.
+            </p>
+          )}
+        </div>
 
-            {/* ★ جستجوی محصول */}
-            {/* ★★★ v6.4 FIX: در حالت ویرایش، جستجوی محصول مخفی می‌شود (فقط آیتم‌های موجود قابل ویرایش) */}
-            {!editingInvoiceId && !loadingEditItems && (
-              <div className="relative">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  placeholder="جستجوی محصول برای افزودن..."
-                  value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
-                  className="pr-9"
-                />
-                {productSearchResults.length > 0 && (
-                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {productSearchResults.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => handleAddProduct(p)}
-                        className="w-full text-right p-2 hover:bg-emerald-50 border-b border-gray-100 last:border-0"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium">{p.name}</span>
-                          <span className="text-[10px] text-gray-400" dir="ltr">{p.code}</span>
-                        </div>
-                      </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            )}
-
-            {/* ★ سبد خرید — با PersianNumberInput برای اعداد فارسی */}
-            {/* ★★★ v6.4 FIX: نمایش loading هنگام بارگذاری آیتم‌های فاکتور در ویرایش */}
-            {loadingEditItems ? (
-              <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2">
-                <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-                <p className="text-xs text-gray-500">در حال بارگذاری آیتم‌های فاکتور...</p>
-                <p className="text-[10px] text-gray-400">لطفاً صبر کنید</p>
-              </div>
-            ) : cart.length > 0 ? (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-gray-50">
-                      <TableHead className="text-right text-[10px]">محصول</TableHead>
-                      <TableHead className="text-center text-[10px] w-20">تعداد</TableHead>
-                      <TableHead className="text-center text-[10px] w-28">قیمت واحد</TableHead>
-                      <TableHead className="text-center text-[10px] w-28">تخفیف</TableHead>
-                      <TableHead className="text-center text-[10px] w-28">جمع</TableHead>
-                      <TableHead className="w-8"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cart.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="text-xs">{item.productName}</TableCell>
-                        <TableCell>
-                          <PersianNumberInput
-                            value={item.quantity}
-                            onChange={(v) => handleUpdateItem(index, 'quantity', v)}
-                            className="h-7 text-xs text-center"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <PersianNumberInput
-                            value={item.unitPrice}
-                            onChange={(v) => handleUpdateItem(index, 'unitPrice', v)}
-                            className="h-7 text-xs text-center"
-                            dir="ltr"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <PersianNumberInput
-                            value={item.discountAmount}
-                            onChange={(v) => handleUpdateItem(index, 'discountAmount', v)}
-                            className="h-7 text-xs text-center"
-                            dir="ltr"
-                          />
-                        </TableCell>
-                        <TableCell className="text-xs font-bold text-center" dir="ltr">{formatNumber(item.lineTotal)}</TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(index)} className="text-red-500 p-1">
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="p-3 bg-gray-50 border-t space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-gray-500">جمع کل:</span>
-                    <span className="font-bold" dir="ltr">{formatNumber(totals.subTotal)}</span>
-                  </div>
-                  {totals.discount > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">تخفیف:</span>
-                      <span className="text-red-500" dir="ltr">-{formatNumber(totals.discount)}</span>
-                    </div>
-                  )}
-                  {totals.tax > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">مالیات:</span>
-                      <span className="text-amber-600" dir="ltr">+{formatNumber(totals.tax)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm pt-1 border-t border-gray-200">
-                    <span className="font-bold">مبلغ نهایی:</span>
-                    <span className="font-black text-emerald-600" dir="ltr">{formatNumber(totals.total)} ریال</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* ★★★ v6.4 FIX: حالت سوم — cart خالی (فقط در حالت افزودن، نه ویرایش) */
-              <div className="border border-dashed border-gray-200 rounded-lg p-6 flex flex-col items-center justify-center gap-1 text-center">
-                <Package className="w-8 h-8 text-gray-300" />
-                <p className="text-xs text-gray-500">
-                  {editingInvoiceId 
-                    ? 'این فاکتور آیتمی ندارد یا آیتم‌ها بارگذاری نشدند' 
-                    : 'سبد خرید خالی است — محصولی برای افزودن جستجو کنید'}
-                </p>
-              </div>
-            )}
-
+        {/* ★ محتوای اسکرول‌پذیر */}
+        <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3 min-h-0">
+          
+          {/* فیلدهای بالا */}
+          <div className="grid grid-cols-4 gap-2">
             <div>
-              <Label className="text-xs">توضیحات</Label>
-              <Input value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1" placeholder="اختیاری" />
+              <Label className="text-[10px]">تامین‌کننده</Label>
+              <Select value={supplierId || 'none'} onValueChange={setSupplierId}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">بدون</SelectItem>
+                  {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[10px]">انبار <span className="text-red-500">*</span></Label>
+              <Select value={warehouseId} onValueChange={setWarehouseId}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
+                <SelectContent>
+                  {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[10px]">پرداخت</Label>
+              <Select value={paymentType} onValueChange={setPaymentType}>
+                <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">نقدی</SelectItem>
+                  <SelectItem value="credit">نسیه</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <PersianDatePicker value={invoiceDate} onChange={(iso) => setInvoiceDate(iso)} label="تاریخ" />
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog}>انصراف</Button>
-            {/* ★★★ v6.4 FIX: دکمه ثبت در حالت ویرایش همیشه قابل مشاهده است (با spinner اگر در حال loading) */}
-            <Button 
-              onClick={handleSubmit} 
-              disabled={submitting || loadingEditItems || (!editingInvoiceId && cart.length === 0)} 
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {submitting || loadingEditItems ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              {loadingEditItems 
-                ? 'در حال بارگذاری...' 
-                : submitting 
-                  ? 'در حال ثبت...' 
-                  : editingInvoiceId ? 'ذخیره تغییرات' : 'ثبت فاکتور خرید'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {/* جستجوی محصول */}
+          <div className="relative">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              placeholder="جستجو محصول..."
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              className="pr-9 h-9"
+            />
+            {productSearchResults.length > 0 && (
+              <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                {productSearchResults.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => handleAddProduct(p)}
+                    className="w-full text-right p-2 hover:bg-emerald-50 border-b border-gray-100 last:border-0 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-[10px] text-gray-400" dir="ltr">{p.code}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-      {/* ★★★ v6.1.2: دیالوگ تأیید حذف/لغو فاکتور */}
+          {/* ★ سبد خرید */}
+          {loadingEditItems ? (
+            <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+              <p className="text-xs text-gray-500">در حال بارگذاری...</p>
+            </div>
+          ) : cart.length > 0 ? (
+            <>
+              {/* جدول با اسکرول داخلی */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="overflow-y-auto max-h-72">
+                  <Table>
+                    <TableHeader className="sticky top-0 z-10">
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-right text-[10px] py-2">محصول</TableHead>
+                        <TableHead className="text-center text-[10px] py-2 w-16">تعداد</TableHead>
+                        <TableHead className="text-center text-[10px] py-2 w-24">قیمت</TableHead>
+                        <TableHead className="text-center text-[10px] py-2 w-20">تخفیف</TableHead>
+                        <TableHead className="text-center text-[10px] py-2 w-20">جمع</TableHead>
+                        <TableHead className="w-8"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {cart.map((item, index) => (
+                        <TableRow key={index} className="hover:bg-gray-50/50">
+                          <TableCell className="text-xs py-1.5">{item.productName}</TableCell>
+                          <TableCell className="py-1 px-1">
+                            <PersianNumberInput
+                              value={item.quantity}
+                              onChange={(v) => handleUpdateItem(index, 'quantity', v)}
+                              className="h-7 text-xs text-center"
+                            />
+                          </TableCell>
+                          <TableCell className="py-1 px-1">
+                            <PersianNumberInput
+                              value={item.unitPrice}
+                              onChange={(v) => handleUpdateItem(index, 'unitPrice', v)}
+                              className="h-7 text-xs text-center"
+                              dir="ltr"
+                            />
+                          </TableCell>
+                          <TableCell className="py-1 px-1">
+                            <PersianNumberInput
+                              value={item.discountAmount}
+                              onChange={(v) => handleUpdateItem(index, 'discountAmount', v)}
+                              className="h-7 text-xs text-center"
+                              dir="ltr"
+                            />
+                          </TableCell>
+                          <TableCell className="text-xs font-bold text-center py-1" dir="ltr">{formatNumber(item.lineTotal)}</TableCell>
+                          <TableCell className="py-1">
+                            <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(index)} className="text-red-500 p-0 h-6 w-6">
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {/* ★ جمع کل — خارج از جدول */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-600">جمع کل:</span>
+                  <span className="font-semibold" dir="ltr">{formatNumber(totals.subTotal)}</span>
+                </div>
+                {totals.discount > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">تخفیف:</span>
+                    <span className="text-red-600" dir="ltr">-{formatNumber(totals.discount)}</span>
+                  </div>
+                )}
+                {totals.tax > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">مالیات:</span>
+                    <span className="text-amber-600" dir="ltr">+{formatNumber(totals.tax)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm pt-2 border-t border-emerald-200 font-bold">
+                  <span>مبلغ نهایی:</span>
+                  <span className="text-emerald-700" dir="ltr">{formatNumber(totals.total)} ریال</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="border border-dashed border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2 text-center">
+              <Package className="w-8 h-8 text-gray-300" />
+              <p className="text-xs text-gray-500">
+                {editingInvoiceId ? 'آیتمی ندارد' : 'سبد خالی است'}
+              </p>
+            </div>
+          )}
+
+          {/* توضیحات */}
+          <div>
+            <Label className="text-[10px]">توضیحات</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 h-9" placeholder="اختیاری" />
+          </div>
+        </div>
+
+        {/* ★ فوتر ثابت — دکمه‌ها ۱۰۰% دیده میشن */}
+        <div className="px-6 py-4 border-t border-gray-100 bg-white flex-shrink-0 flex items-center justify-end gap-2">
+          {cart.length > 0 && (
+            <span className="text-xs text-gray-400 mr-auto">{toFaNum(cart.length)} قلم کالا</span>
+          )}
+          <Button variant="outline" onClick={closeDialog} className="h-9">
+            انصراف
+          </Button>
+          <Button 
+            onClick={handleSubmit} 
+            disabled={submitting || loadingEditItems || (!editingInvoiceId && cart.length === 0)} 
+            className="bg-emerald-600 hover:bg-emerald-700 h-9 gap-2"
+          >
+            {submitting || loadingEditItems ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            {loadingEditItems 
+              ? 'بارگذاری...' 
+              : submitting 
+                ? 'ثبت...' 
+                : editingInvoiceId ? 'ذخیره' : 'ثبت'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  </>
+)}
+      {/* دیالوگ تأیید حذف/لغو فاکتور */}
       <Dialog open={!!deletingInvoice} onOpenChange={(open) => !open && setDeletingInvoice(null)}>
         <DialogContent className="sm:max-w-[450px]" dir="rtl">
           <DialogHeader>
@@ -1552,7 +1520,7 @@ const [returnItems, setReturnItems] = useState<Array<{
         </DialogContent>
       </Dialog>
 
-      {/* ★★★ v6.9: مودال چاپ رسید فاکتور خرید */}
+      {/* مودال چاپ رسید فاکتور خرید */}
       <PurchaseInvoicePrintModal
         invoiceId={printInvoiceId}
         invoiceNumber={printInvoiceNumber}
@@ -1561,197 +1529,159 @@ const [returnItems, setReturnItems] = useState<Array<{
         storeName={useAppStore.getState().storeName || 'فروشگاه'}
       />
 
-      {/* ★★★ v8.7: دیالوگ برگشتی فاکتور خرید */}
-     {/* ★★★ v8.7: دیالوگ برگشتی فاکتور خرید */}
-<Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
-  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
-    <DialogHeader>
-      <DialogTitle className="flex items-center gap-2 text-base">
-        <RotateCcw className="w-5 h-5 text-amber-600" />
-        ثبت برگشتی فاکتور خرید
-      </DialogTitle>
-      <DialogDescription className="text-xs">
-        {returnInvoice && 
-          `فاکتور ${returnInvoice.number} — انتخاب کالاهای مرجوعی به تامین‌کننده`
-        }
-      </DialogDescription>
-    </DialogHeader>
+      {/* دیالوگ برگشتی فاکتور خرید */}
+      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <RotateCcw className="w-5 h-5 text-amber-600" />
+              ثبت برگشتی فاکتور خرید
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {returnInvoice &&
+                `فاکتور ${returnInvoice.number} — انتخاب کالاهای مرجوعی به تامین‌کننده`
+              }
+            </DialogDescription>
+          </DialogHeader>
 
-    <div className="space-y-3 py-2">
+          <div className="space-y-3 py-2">
+            {returnDialogOpen && returnItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-2">
+                <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                <p className="text-xs text-gray-500">در حال بارگذاری آیتم‌ها و موجودی انبار...</p>
+              </div>
+            ) : (
+              <>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-right p-2 font-medium">نام کالا</th>
+                        <th className="text-center p-2 font-medium">
+                          <span className="block">مقدار خرید</span>
+                        </th>
+                        <th className="text-center p-2 font-medium">
+                          <span className="block text-emerald-700">موجودی فعلی</span>
+                        </th>
+                        <th className="text-center p-2 font-medium">مقدار برگشتی</th>
+                        <th className="text-center p-2 font-medium">مبلغ برگشتی</th>
+                        <th className="text-right p-2 font-medium">دلیل برگشت</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {returnItems.map((item, index) => {
+                        const itemReturnAmount = item.lineTotal > 0 && item.originalQuantity > 0
+                          ? (item.lineTotal * (item.quantity / item.originalQuantity))
+                          : (item.unitPrice * item.quantity)
+                        const isDisabled = item.maxQuantity === 0
 
-      {/* ★ حالت loading — وقتی مودال باز است ولی آیتم‌ها هنوز نیامده‌اند */}
-      {returnDialogOpen && returnItems.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 gap-2">
-          <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
-          <p className="text-xs text-gray-500">در حال بارگذاری آیتم‌ها و موجودی انبار...</p>
-        </div>
-      ) : (
-        <>
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-right p-2 font-medium">نام کالا</th>
-                  {/* ★ تغییر عنوان: از "مقدار اصلی" به دو ستون جداگانه */}
-                  <th className="text-center p-2 font-medium">
-                    <span className="block">مقدار خرید</span>
-                  </th>
-                  <th className="text-center p-2 font-medium">
-                    <span className="block text-emerald-700">موجودی فعلی</span>
-                  </th>
-                  <th className="text-center p-2 font-medium">مقدار برگشتی</th>
-                  <th className="text-center p-2 font-medium">مبلغ برگشتی</th>
-                  <th className="text-right p-2 font-medium">دلیل برگشت</th>
-                </tr>
-              </thead>
-              <tbody>
-                {returnItems.map((item, index) => {
-                  // محاسبه مبلغ برگشتی هر آیتم
-                  const itemReturnAmount = item.lineTotal > 0 && item.originalQuantity > 0
-                    ? (item.lineTotal * (item.quantity / item.originalQuantity))
-                    : (item.unitPrice * item.quantity)
+                        return (
+                          <tr key={index} className={`border-t border-gray-100 ${isDisabled ? 'bg-gray-50 opacity-60' : ''}`}>
+                            <td className="p-2">
+                              <span>{item.productName}</span>
+                              {isDisabled && (
+                                <span className="mr-1 text-[9px] bg-red-100 text-red-600 px-1 py-0.5 rounded">
+                                  موجودی ندارد
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2 text-center text-gray-500">
+                              {item.originalQuantity.toLocaleString('fa-IR')}
+                            </td>
+                            <td className="p-2 text-center">
+                              <span className={`font-bold ${
+                                item.currentStock === 0
+                                  ? 'text-red-600'
+                                  : item.currentStock < item.originalQuantity
+                                    ? 'text-amber-600'
+                                    : 'text-emerald-600'
+                              }`}>
+                                {item.currentStock.toLocaleString('fa-IR')}
+                              </span>
+                            </td>
+                            <td className="p-2 text-center">
+                              <Input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => handleReturnItemChange(index, 'quantity', e.target.value)}
+                                min={0}
+                                max={item.maxQuantity}
+                                disabled={isDisabled}
+                                className={`h-8 text-xs w-20 text-center ${isDisabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                              />
+                              {!isDisabled && (
+                                <p className="text-[9px] text-gray-400 mt-0.5">
+                                  حداکثر: {item.maxQuantity.toLocaleString('fa-IR')}
+                                </p>
+                              )}
+                            </td>
+                            <td className="p-2 text-center font-medium text-amber-700">
+                              {itemReturnAmount > 0 ? itemReturnAmount.toLocaleString('fa-IR') : '—'}
+                            </td>
+                            <td className="p-2">
+                              <Input
+                                value={item.returnReason}
+                                onChange={(e) => handleReturnItemChange(index, 'returnReason', e.target.value)}
+                                placeholder="اختیاری"
+                                disabled={isDisabled}
+                                className="h-8 text-xs"
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
-                  // ★ اگر موجودی صفر است، این آیتم قابل برگشت نیست
-                  const isDisabled = item.maxQuantity === 0
+                {returnItems.length > 0 && returnItems.every(i => i.maxQuantity === 0) && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-700">
+                    <AlertTriangle className="w-3.5 h-3.5 inline ml-1" />
+                    موجودی تمام کالاهای این فاکتور صفر است و امکان ثبت برگشتی وجود ندارد.
+                  </div>
+                )}
 
-                  return (
-                    <tr 
-                      key={index} 
-                      className={`border-t border-gray-100 ${
-                        isDisabled ? 'bg-gray-50 opacity-60' : ''
-                      }`}
-                    >
-                      <td className="p-2">
-                        <span>{item.productName}</span>
-                        {/* ★ نمایش badge اگر موجودی صفر است */}
-                        {isDisabled && (
-                          <span className="mr-1 text-[9px] bg-red-100 text-red-600 px-1 py-0.5 rounded">
-                            موجودی ندارد
-                          </span>
-                        )}
-                      </td>
-
-                      {/* ستون مقدار خرید */}
-                      <td className="p-2 text-center text-gray-500">
-                        {item.originalQuantity.toLocaleString('fa-IR')}
-                      </td>
-
-                      {/* ★ ستون موجودی فعلی — رنگی بر اساس وضعیت */}
-                      <td className="p-2 text-center">
-                        <span className={`font-bold ${
-                          item.currentStock === 0
-                            ? 'text-red-600'
-                            : item.currentStock < item.originalQuantity
-                              ? 'text-amber-600'
-                              : 'text-emerald-600'
-                        }`}>
-                          {item.currentStock.toLocaleString('fa-IR')}
-                        </span>
-                      </td>
-
-                      {/* ستون مقدار برگشتی */}
-                      <td className="p-2 text-center">
-                        <Input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => 
-                            handleReturnItemChange(index, 'quantity', e.target.value)
-                          }
-                          min={0}
-                          max={item.maxQuantity}  // ★ max = min(originalQty, currentStock)
-                          disabled={isDisabled}
-                          className={`h-8 text-xs w-20 text-center ${
-                            isDisabled ? 'bg-gray-100 cursor-not-allowed' : ''
-                          }`}
-                        />
-                        {/* ★ نمایش حداکثر قابل برگشت */}
-                        {!isDisabled && (
-                          <p className="text-[9px] text-gray-400 mt-0.5">
-                            حداکثر: {item.maxQuantity.toLocaleString('fa-IR')}
-                          </p>
-                        )}
-                      </td>
-
-                      {/* ستون مبلغ برگشتی */}
-                      <td className="p-2 text-center font-medium text-amber-700">
-                        {itemReturnAmount > 0 
-                          ? itemReturnAmount.toLocaleString('fa-IR') 
-                          : '—'
-                        }
-                      </td>
-
-                      {/* ستون دلیل برگشت */}
-                      <td className="p-2">
-                        <Input
-                          value={item.returnReason}
-                          onChange={(e) => 
-                            handleReturnItemChange(index, 'returnReason', e.target.value)
-                          }
-                          placeholder="اختیاری"
-                          disabled={isDisabled}
-                          className="h-8 text-xs"
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-700">
+                  ★ با ثبت برگشتی، موجودی انبار کاهش یافته و سند معکوس صادر می‌شود.
+                </div>
+              </>
+            )}
           </div>
 
-          {/* ★ هشدار اگر همه آیتم‌ها موجودی صفر دارند */}
-          {returnItems.length > 0 && returnItems.every(i => i.maxQuantity === 0) && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-700">
-              <AlertTriangle className="w-3.5 h-3.5 inline ml-1" />
-              موجودی تمام کالاهای این فاکتور صفر است و امکان ثبت برگشتی وجود ندارد.
-            </div>
-          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setReturnDialogOpen(false)
+                setReturnItems([])
+                setReturnInvoice(null)
+              }}
+              disabled={returnSubmitting}
+            >
+              انصراف
+            </Button>
+            <Button
+              onClick={handleReturnSubmit}
+              disabled={returnSubmitting || returnItems.length === 0 || returnItems.every(i => i.quantity === 0)}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {returnSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin ml-1" />
+                  در حال ثبت...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 ml-1" />
+                  ثبت برگشتی
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-700">
-            ★ با ثبت برگشتی، موجودی انبار کاهش یافته و سند معکوس صادر می‌شود.
-          </div>
-        </>
-      )}
-    </div>
-
-    <DialogFooter className="gap-2">
-      <Button 
-        variant="outline" 
-        onClick={() => {
-          setReturnDialogOpen(false)
-          setReturnItems([])
-          setReturnInvoice(null)
-        }} 
-        disabled={returnSubmitting}
-      >
-        انصراف
-      </Button>
-      <Button
-        onClick={handleReturnSubmit}
-        disabled={
-          returnSubmitting || 
-          returnItems.length === 0 ||
-          returnItems.every(i => i.quantity === 0)
-        }
-        className="bg-amber-600 hover:bg-amber-700"
-      >
-        {returnSubmitting ? (
-          <>
-            <Loader2 className="w-4 h-4 animate-spin ml-1" />
-            در حال ثبت...
-          </>
-        ) : (
-          <>
-            <RotateCcw className="w-4 h-4 ml-1" />
-            ثبت برگشتی
-          </>
-        )}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-      {/* ★★★ v8.7.2: دیالوگ فاکتور خرید تعمیرات و خدمات */}
+      {/* دیالوگ فاکتور خرید تعمیرات و خدمات */}
       <Dialog open={serviceDialogOpen} onOpenChange={setServiceDialogOpen}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" dir="rtl">
           <DialogHeader className="border-b border-gray-100 pb-3">
@@ -1765,7 +1695,6 @@ const [returnItems, setReturnItems] = useState<Array<{
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            {/* ─── بخش ۱: انتخاب نوع (تعمیرات یا خدمات) ─── */}
             <div>
               <Label className="text-xs font-bold">نوع فاکتور *</Label>
               <div className="grid grid-cols-2 gap-2 mt-1">
@@ -1810,7 +1739,6 @@ const [returnItems, setReturnItems] = useState<Array<{
               </div>
             </div>
 
-            {/* ─── بخش ۲: اطلاعات تامین‌کننده و دستگاه ─── */}
             <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-2.5 space-y-2">
               <div className="grid grid-cols-1 gap-2">
                 <div>
@@ -1818,7 +1746,6 @@ const [returnItems, setReturnItems] = useState<Array<{
                     <Label className="text-xs">
                       تامین‌کننده / تعمیرکار {serviceForm.paymentType === 'credit' && <span className="text-red-500">*</span>}
                     </Label>
-                    {/* ★★★ v8.7.2: لینک افزودن شخص جدید به صفحه طرف حساب */}
                     <button
                       type="button"
                       onClick={() => {
@@ -1874,7 +1801,6 @@ const [returnItems, setReturnItems] = useState<Array<{
               </div>
             </div>
 
-            {/* ─── بخش ۳: لیست خدمات/تعمیرات ─── */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-bold text-gray-700">
@@ -1886,7 +1812,6 @@ const [returnItems, setReturnItems] = useState<Array<{
                 </Button>
               </div>
 
-              {/* ★★★ v8.7.2: وقتی لیست خالی هست، پیام مناسب نمایش بده */}
               {serviceItems.length === 0 && (
                 <div className="text-center py-4 border border-dashed border-gray-300 rounded-lg bg-gray-50">
                   <Wrench className="w-6 h-6 mx-auto mb-1 text-gray-300" />
@@ -1978,7 +1903,6 @@ const [returnItems, setReturnItems] = useState<Array<{
               ))}
             </div>
 
-            {/* ─── بخش ۴: توضیحات کلی ─── */}
             <div>
               <Label className="text-xs">توضیحات کلی (اختیاری)</Label>
               <Textarea
@@ -1989,7 +1913,6 @@ const [returnItems, setReturnItems] = useState<Array<{
               />
             </div>
 
-            {/* ─── بخش ۵: جمع‌بندی ─── */}
             <div className="bg-blue-600 text-white rounded-lg p-2.5 flex justify-between items-center">
               <span className="text-xs">مبلغ قابل پرداخت:</span>
               <span className="font-bold text-sm">
@@ -2025,4 +1948,3 @@ const [returnItems, setReturnItems] = useState<Array<{
     </div>
   )
 }
-
