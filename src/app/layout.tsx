@@ -1,38 +1,59 @@
-import type { Metadata } from 'next'
-import './globals.css'
-import { FetchInterceptorLoader } from '@/components/fetch-interceptor-loader'
-// ★★★ v5.1 (Phase 4): نوار هشدار انقضای اشتراک — فقط در صفحات داخلی فعال می‌شود
-import { SubscriptionWarningBanner } from '@/components/subscription/subscription-warning-banner'
+// src/app/layout.tsx
+import type { Metadata, Viewport } from 'next';
+import { PWARegister } from '@/components/pwa-register';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'حسابداری فروشگاهی | ShopAccounting',
-  description: 'سیستم حسابداری فروشگاهی چندمستاجری',
-}
+  title: 'ShopAccounting — حسابداری فروشگاهی',
+  description: 'پلتفرم SaaS حسابداری فروشگاهی چندمستاجره',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'حسابداری',
+  },
+  icons: {
+    icon: [
+      { url: '/icons/icon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/icons/icon-180x180.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#7C7BEB',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
-    <html lang="fa" dir="rtl" suppressHydrationWarning>
+    <html lang="fa" dir="rtl">
       <head>
-        <link
-          rel="preconnect"
-          href="https://cdn.jsdelivr.net"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css"
-          rel="stylesheet"
-        />
+        {/* Apple PWA meta tags */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="حسابداری" />
+        <link rel="apple-touch-icon" href="/icons/icon-180x180.png" />
+        <link rel="mask-icon" href="/icons/icon-192x192.png" color="#7C7BEB" />
+        
+        {/* Microsoft */}
+        <meta name="msapplication-TileColor" content="#7C7BEB" />
+        <meta name="msapplication-TileImage" content="/icons/icon-192x192.png" />
       </head>
-      <body className="min-h-screen antialiased" suppressHydrationWarning>
-        <FetchInterceptorLoader />
-        {/* ★★★ v5.1: نوار هشدار بالای همه صفحات (وقتی توکن موجود باشد فعال می‌شود) */}
-        <SubscriptionWarningBanner />
+      <body>
+        <PWARegister />
         {children}
       </body>
     </html>
-  )
+  );
 }

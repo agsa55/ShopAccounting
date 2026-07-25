@@ -1,3 +1,5 @@
+// src/app/api/categories/[id]/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
@@ -15,12 +17,9 @@ export async function PUT(
     if (name !== undefined) updateData.name = name
     if (parentId !== undefined) updateData.parentId = parentId || null
 
-    const category = await db.category.update({
+    const category = await db.client.category.update({
       where: { id },
       data: updateData,
-      include: {
-        parent: true,
-      },
     })
 
     return NextResponse.json({ success: true, data: category })
@@ -41,9 +40,12 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    await db.category.delete({ where: { id } })
+    await db.client.category.delete({ where: { id } })
 
-    return NextResponse.json({ success: true, message: 'دسته‌بندی با موفقیت حذف شد' })
+    return NextResponse.json({ 
+      success: true, 
+      message: 'دسته‌بندی با موفقیت حذف شد' 
+    })
   } catch (error) {
     console.error('Delete category error:', error)
     return NextResponse.json(

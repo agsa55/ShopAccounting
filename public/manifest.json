@@ -1,56 +1,22 @@
 {
-  "name": "ShopAccounting - حسابداری فروشگاهی هوشمند",
-  "short_name": "حسابت",
-  "description": "مدیریت فروش، مشتریان و اقساط در یک پلتفرم هوشمند. حسابداری ساده برای فروشگاه‌ها.",
+  "name": "ShopAccounting — حسابداری فروشگاهی",
+  "short_name": "حسابداری",
+  "description": "پلتفرم حسابداری و مدیریت فروشگاه",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#059669",
-  "dir": "rtl",
+  "background_color": "#FAFAFC",
+  "theme_color": "#7C7BEB",
+  "orientation": "portrait-primary",
   "lang": "fa",
-  "orientation": "any",
+  "dir": "rtl",
   "scope": "/",
-  "categories": ["business", "finance", "productivity"],
+  "id": "/",
   "icons": [
-    {
-      "src": "/icons/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-128x128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-152x152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
+   
+   
     {
       "src": "/icons/icon-192x192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-384x384.png",
-      "sizes": "384x384",
       "type": "image/png",
       "purpose": "any maskable"
     },
@@ -61,22 +27,32 @@
       "purpose": "any maskable"
     }
   ],
+  "categories": ["finance", "business", "productivity"],
+  "screenshots": [],
   "shortcuts": [
     {
-      "name": "صندوق فروش",
-      "short_name": "صندوق",
-      "description": "ثبت فاکتور فروش جدید",
-      "url": "/?view=pos",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "name": "داشبورد",
+      "short_name": "داشبورد",
+      "description": "رفتن به داشبورد",
+      "url": "/?section=dashboard",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
     },
     {
-      "name": "محصولات",
-      "short_name": "محصولات",
-      "description": "مدیریت محصولات",
-      "url": "/?view=products",
-      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+      "name": "فاکتور جدید",
+      "short_name": "فاکتور",
+      "description": "صدور فاکتور فروش",
+      "url": "/?section=invoices",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
-  ],
-  "screenshots": [],
-  "prefer_related_applications": false
+  ]
 }

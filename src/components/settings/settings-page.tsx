@@ -5008,16 +5008,16 @@ function InitialBalanceTab() {
               <AlertTriangle className="w-5 h-5" />
               حذف سند افتتاحیه
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-right text-xs leading-relaxed">
-              این عملیات:
-              <ul className="mt-2 space-y-1 list-disc list-inside text-gray-600">
-                <li>
-                  تمام {savedItems.length} آیتم موجودی اولیه را حذف می‌کند
-                </li>
-                <li>سند حسابداری مرتبط را ابطال می‌کند</li>
-                <li>قابل بازگشت نیست</li>
-              </ul>
-            </AlertDialogDescription>
+           <AlertDialogDescription asChild>
+  <div className="text-right text-xs leading-relaxed">
+    <p className="text-gray-500">این عملیات:</p>
+    <ul className="mt-2 space-y-1 list-disc list-inside text-gray-600">
+      <li>
+        تمام {savedItems.length} آیتم موجودی اولیه را حذف می‌کند
+      </li>
+    </ul>
+  </div>
+</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row-reverse gap-2">
             <AlertDialogCancel disabled={submitting}>

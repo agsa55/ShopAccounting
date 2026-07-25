@@ -1,14 +1,7 @@
-// src/lib/store.ts — Unified Zustand Store (v25.0)
+// src/lib/store.ts — Unified Zustand Store (v25.1-fixed)
 // ============================================================================
-// ★ v25.1: اضافه شدن resolvedPlanName (PlanName واقعی) و planInfo (اطلاعات کامل پلن)
-//          حفظ ۴ پلن: رایگان/ساده/حرفه‌ای/سازمانی — رایگان+ساده = سطح قابلیت basic
-// ★ v25.0: اضافه شدن planTier محاسبه‌شده + استفاده از plan-features.ts
-//          گیتینگ متمرکز قابلیت‌ها بر اساس پلن
-// ★ v24.0: اضافه شدن InstallmentPlanType، lastSyncAt، syncStatus
-//          پشتیبانی کامل از نسیه و قسطی در POS
-// ★ v19.0: اضافه شدن _hasHydrated flag برای رفع مشکل addToCart
-// ★ v8.0: اضافه شدن POS state (cart, addToCart, removeFromCart, etc.)
-// ★ v7.0: اضافه شدن currentTenant, planName در login()
+// ★ v25.1-fixed: اصلاح logout — ریدایرکت به لندینگ پیج اصلی (/)
+//                پاک‌کردن کامل localStorage، کوکی‌ها و state
 // ============================================================================
 
 import { create } from 'zustand';
@@ -26,22 +19,16 @@ export type AppView =
   | 'settings-pos' | 'settings-invoice' | 'settings-backup'
   | 'settings-subscription' | 'settings-employees'
   | 'reports' | 'upgrade-plan'
-  // ★★★ v6.1: view های جدید
   | 'suppliers'
   | 'purchase-invoices'
   | 'warehouses'
   | 'stock-movements'
-   | 'stock-transfer'
-  // ★★★ v6.5: انبار گردانی
+  | 'stock-transfer'
   | 'stock-count'
-  // ★★★ v7.1: شعب
   | 'branches'
-  // ★★★ v8.6: تیکت پشتیبانی
-  | 'tickets'                         
-  | 'ticket-detail'                  
+  | 'tickets'
+  | 'ticket-detail'
 
-
-// backward-compatible alias
 export type ViewType = AppView;
 
 // ─── Notification type ──────────────────────────────────────────
@@ -79,23 +66,23 @@ export interface CartItem {
   discount: number;
   taxRate: number;
   lineTotal: number;
-  currentStock?: number;       // ★★★ v24: موجودی فعلی محصول
-  unitLabel?: string;          // ★★★ v24: واحد اندازه‌گیری
+  currentStock?: number;
+  unitLabel?: string;
 }
 
-// ─── ★★★ v24: Installment Plan Type ──────────────────────────
+// ─── InstallmentPlanData type ───────────────────────────────────
 
 export interface InstallmentPlanData {
-  downPayment: number;           // پیش‌پرداخت
-  numberOfInstallments: number;  // تعداد اقساط
-  interestRate: number;          // درصد سود
-  installmentPeriod: 'monthly' | 'biweekly' | 'weekly'; // دوره قسط
-  totalWithInterest: number;     // مبلغ کل با سود
-  installmentAmount: number;     // مبلغ هر قسط
-  remainingAmount: number;       // مبلغ باقیمانده (کل - پیش‌پرداخت)
+  downPayment: number;
+  numberOfInstallments: number;
+  interestRate: number;
+  installmentPeriod: 'monthly' | 'biweekly' | 'weekly';
+  totalWithInterest: number;
+  installmentAmount: number;
+  remainingAmount: number;
 }
 
-// ─── ★★★ v24: Sync Status Type ──────────────────────────────
+// ─── SyncStatus type ────────────────────────────────────────────
 
 export type SyncStatus = 'synced' | 'syncing' | 'pending' | 'error' | 'offline';
 
@@ -105,8 +92,8 @@ export interface SyncInfo {
   pendingCount: number;
   lastError: string | null;
   tenantId: string | null;
-  isIsolated: boolean;          // آیا پنل پولی (بانک اختصاصی) است
-  planName: string | null;      // نام پلن فعلی
+  isIsolated: boolean;
+  planName: string | null;
 }
 
 // ─── App State ──────────────────────────────────────────────────
@@ -122,8 +109,6 @@ export interface AppState {
   currentView: AppView;
   selectedPlanId: string | null;
   selectedBillingCycle: string | null;
-
-  // ★★★ v28: Navigation — انتخاب سند حسابداری برای صفحه جزئیات ★★★
   selectedJournalEntryId: string | null;
 
   // Tenant
@@ -132,41 +117,34 @@ export interface AppState {
   currentTenant: any | null;
   planName: string | null;
 
-  // ★★★ v25: Plan Tier — محاسبه‌شده از planName ★★★
+  // Plan
   planTier: PlanTier;
   planFeatures: PlanFeatureSet;
+  resolvedPlanName: PlanName;
+  planInfo: PlanInfo;
 
-  // ★★★ v25.1: Plan Name واقعی — ۴ پلن: free/simple/professional/enterprise ★★★
-  resolvedPlanName: PlanName;       // نام واقعی پلن (free/simple/professional/enterprise)
-  planInfo: PlanInfo;               // اطلاعات کامل پلن (قیمت، محدودیت‌ها و غیره)
-
-  // ★★★ POS State ★★★
+  // POS State
   cart: CartItem[];
   selectedCustomerId: string | null;
   selectedCustomerName: string | null;
   paymentType: string;
-
-  // ★★★ v24: Installment/Credit data ★★★
   installmentPlan: InstallmentPlanData | null;
 
   // Network & Sync
   isOnline: boolean;
   pendingSyncCount: number;
-
-  // ★★★ v24: Sync Info — وضعیت همگام‌سازی بر اساس پنل ★★★
   syncInfo: SyncInfo;
 
   // Notifications
   notifications: Notification[];
 
-  // ★★★ v19: Hydration state ★★★
+  // Hydration
   _hasHydrated: boolean;
 
   // ─── Actions ──────────────────────────────────────────────────
   setCurrentView: (view: AppView) => void;
   setSelectedPlanId: (id: string | null) => void;
   setSelectedBillingCycle: (cycle: string | null) => void;
-  // ★★★ v28: setter for selectedJournalEntryId ★★★
   setSelectedJournalEntryId: (id: string | null) => void;
   login: (user: User, token: string, refreshToken?: string, tenant?: any) => void;
   logout: () => void;
@@ -178,37 +156,25 @@ export interface AppState {
   setPlanName: (planName: string | null) => void;
   setOnline: (online: boolean) => void;
   setPendingSyncCount: (count: number) => void;
-
-  // ★★★ v25: Plan actions ★★★
   setPlanTier: (tier: PlanTier) => void;
-
-  // ★★★ v24: Sync actions ★★★
   setSyncInfo: (info: Partial<SyncInfo>) => void;
   startSync: () => Promise<void>;
-
-  // ★★★ POS Actions ★★★
   addToCart: (item: CartItem) => void;
   removeFromCart: (productId: string) => void;
   updateCartItemQuantity: (productId: string, quantity: number) => void;
   clearCart: () => void;
   setCustomer: (customerId: string | null, customerName?: string | null) => void;
   setPaymentType: (type: string) => void;
-
-  // ★★★ v24: Installment/Credit actions ★★★
   setInstallmentPlan: (plan: InstallmentPlanData | null) => void;
-
-  // Notification actions
   addNotification: (notification: Omit<Notification, 'id' | 'isRead'>) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   clearNotifications: () => void;
   removeNotification: (id: string) => void;
-
-  // ★★★ v19: Hydration action ★★★
   setHasHydrated: (state: boolean) => void;
 }
 
-// ─── ★★★ v25: Helper — محاسبه planTier و features ★★★ ──────
+// ─── Helper — محاسبه planState ──────────────────────────────────
 
 function computePlanState(planName: string | null) {
   const resolvedName = resolvePlanName(planName)
@@ -218,47 +184,115 @@ function computePlanState(planName: string | null) {
   return { planTier: tier, planFeatures: features, resolvedPlanName: resolvedName, planInfo }
 }
 
+// ─── ★★★ تابع کمکی پاک‌سازی کامل مرورگر ★★★ ──────────────────
+
+function clearBrowserStorage(): void {
+  if (typeof window === 'undefined') return
+
+  try {
+    // ★ پاک کردن localStorage
+    const keysToRemove = [
+      'token',
+      'refreshToken', 
+      'user',
+      'storeName',
+      'tenant',
+      'planName',
+      'tenant-slug',
+      'auth-token',
+      'shop-accounting-store', // ★★★ کل Zustand persist store
+    ]
+    keysToRemove.forEach((key) => {
+      try { localStorage.removeItem(key) } catch { }
+    })
+
+    // ★ پاک کردن sessionStorage
+    try { sessionStorage.clear() } catch { }
+
+    // ★ پاک کردن تمام کوکی‌ها
+    const cookiesToClear = [
+      'tenant-slug',
+      'tenant-view', 
+      'auth-token',
+      'token',
+      'refreshToken',
+    ]
+    const hostname = window.location.hostname
+
+    cookiesToClear.forEach((name) => {
+      // بدون domain
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`
+      // با domain
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname};`
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname};`
+    })
+
+    console.log('[Store] ✅ Browser storage cleared')
+  } catch (err) {
+    console.warn('[Store] ⚠️ Error clearing storage:', err)
+  }
+}
+
+// ─── State پاک بعد از logout ────────────────────────────────────
+
+const CLEAN_STATE = {
+  user: null,
+  isAuthenticated: false,
+  token: null,
+  refreshToken: null,
+  tenantId: null,
+  storeName: null,
+  currentTenant: null,
+  planName: null,
+  ...computePlanState(null),
+  currentView: 'landing' as AppView,
+  selectedPlanId: null,
+  selectedBillingCycle: null,
+  selectedJournalEntryId: null,
+  notifications: [],
+  pendingSyncCount: 0,
+  cart: [],
+  selectedCustomerId: null,
+  selectedCustomerName: null,
+  paymentType: 'Cash',
+  installmentPlan: null,
+  syncInfo: {
+    status: 'synced' as SyncStatus,
+    lastSyncAt: null,
+    pendingCount: 0,
+    lastError: null,
+    tenantId: null,
+    isIsolated: false,
+    planName: null,
+  },
+}
+
 // ─── Store ──────────────────────────────────────────────────────
 
 const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
-      // Auth defaults
+      // ── Defaults ──
       user: null,
       isAuthenticated: false,
       token: null,
       refreshToken: null,
-
-      // Navigation defaults
       currentView: 'landing',
       selectedPlanId: null,
       selectedBillingCycle: null,
-      // ★★★ v28: default selectedJournalEntryId ★★★
       selectedJournalEntryId: null,
-
-      // Tenant defaults
       tenantId: null,
       storeName: null,
       currentTenant: null,
       planName: null,
-
-      // ★★★ v25: Plan defaults — محاسبه‌شده ★★★
       ...computePlanState(null),
-
-      // ★★★ POS defaults ★★★
       cart: [],
       selectedCustomerId: null,
       selectedCustomerName: null,
       paymentType: 'Cash',
-
-      // ★★★ v24: Installment plan default ★★★
       installmentPlan: null,
-
-      // Network defaults
       isOnline: true,
       pendingSyncCount: 0,
-
-      // ★★★ v24: Sync Info defaults ★★★
       syncInfo: {
         status: 'synced',
         lastSyncAt: null,
@@ -268,21 +302,16 @@ const useAppStore = create<AppState>()(
         isIsolated: false,
         planName: null,
       },
-
-      // Notifications defaults
       notifications: [],
-
-      // ★★★ v19: Hydration state ★★★
       _hasHydrated: false,
 
-      // ─── Navigation actions ───────────────────────────────────
+      // ── Navigation ──
       setCurrentView: (view) => set({ currentView: view }),
       setSelectedPlanId: (id) => set({ selectedPlanId: id }),
       setSelectedBillingCycle: (cycle) => set({ selectedBillingCycle: cycle }),
-      // ★★★ v28: setter for selectedJournalEntryId ★★★
-      setSelectedJournalEntryId: (id: string | null) => set({ selectedJournalEntryId: id }),
+      setSelectedJournalEntryId: (id) => set({ selectedJournalEntryId: id }),
 
-      // ─── Auth actions ─────────────────────────────────────────
+      // ── Auth: login ──
       login: (user, token, refreshToken, tenant) =>
         set({
           user,
@@ -293,9 +322,7 @@ const useAppStore = create<AppState>()(
           storeName: user.storeName || null,
           currentTenant: tenant || null,
           planName: tenant?.planName || tenant?.planTierName || null,
-          // ★★★ v25: محاسبه planTier هنگام لاگین ★★★
           ...computePlanState(tenant?.planName || tenant?.planTierName || null),
-          // ★★★ v24: بروزرسانی syncInfo بر اساس پنل ★★★
           syncInfo: {
             status: 'synced',
             lastSyncAt: new Date().toISOString(),
@@ -307,97 +334,105 @@ const useAppStore = create<AppState>()(
           },
         }),
 
-      logout: () =>
-        set({
-          user: null,
-          isAuthenticated: false,
-          token: null,
-          refreshToken: null,
-          tenantId: null,
-          storeName: null,
-          currentTenant: null,
-          planName: null,
-          // ★★★ v25: ریست plan state ★★★
-          ...computePlanState(null),
-          selectedPlanId: null,
-          selectedBillingCycle: null,
-          // ★★★ v28: پاک کردن selectedJournalEntryId در logout ★★★
-          selectedJournalEntryId: null,
-          notifications: [],
-          pendingSyncCount: 0,
-          // ★★★ پاک کردن POS state ★★★
-          cart: [],
-          selectedCustomerId: null,
-          selectedCustomerName: null,
-          paymentType: 'Cash',
-          installmentPlan: null,
-          // ★★★ پاک کردن syncInfo ★★★
-          syncInfo: {
-            status: 'synced',
-            lastSyncAt: null,
-            pendingCount: 0,
-            lastError: null,
-            tenantId: null,
-            isIsolated: false,
-            planName: null,
-          },
-        }),
+      // ★★★★★ ── Auth: logout — اصلاح‌شده با ریدایرکت ★★★★★
+    // ★★★ تابع logout — ریدایرکت با پارامتر ?logout=1
+logout: () => {
+  console.log('[Store] 🚪 Logging out...')
 
+  // ۱. پاک کردن Zustand state
+  set(CLEAN_STATE)
+
+  // ۲. پاک کردن browser storage
+  clearBrowserStorage()
+
+  if (typeof window !== 'undefined') {
+    // ۳. Call logout API برای پاک کردن کوکی‌های server-side
+    fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    }).catch(() => { /* ignore */ })
+
+    // ۴. ★★★ ریدایرکت با پارامتر logout=1
+    // middleware این پارامتر را می‌بیند و کوکی‌ها را پاک می‌کند
+    setTimeout(() => {
+      window.location.replace('/?logout=1')
+    }, 100)
+  }
+},
+
+      // ── Setters ──
       setUser: (user) => set({ user }),
       setToken: (token) => set({ token }),
       setTenantId: (tenantId) => set({ tenantId }),
       setStoreName: (storeName) => set({ storeName }),
       setCurrentTenant: (tenant) => set({ currentTenant: tenant }),
 
-      // ★★★ v25: setPlanName حالا planTier رو هم بروز می‌کنه ★★★
       setPlanName: (planName) => set({
         planName,
         ...computePlanState(planName),
       }),
 
-      // ★★★ v25: setPlanTier مستقیم ★★★
       setPlanTier: (tier) => set({
         planTier: tier,
         planFeatures: getPlanFeatures(tier),
       }),
 
-      // ─── Network actions ──────────────────────────────────────
+      // ── Network ──
       setOnline: (online) => set((state) => ({
         isOnline: online,
         syncInfo: {
           ...state.syncInfo,
-          status: online ? (state.syncInfo.pendingCount > 0 ? 'pending' : 'synced') : 'offline',
+          status: online
+            ? (state.syncInfo.pendingCount > 0 ? 'pending' : 'synced')
+            : 'offline',
         },
       })),
+
       setPendingSyncCount: (count) => set((state) => ({
         pendingSyncCount: count,
         syncInfo: {
           ...state.syncInfo,
           pendingCount: count,
-          status: count > 0 ? 'pending' : state.syncInfo.status === 'offline' ? 'offline' : 'synced',
+          status: count > 0
+            ? 'pending'
+            : state.syncInfo.status === 'offline' ? 'offline' : 'synced',
         },
       })),
 
-      // ─── ★★★ v24: Sync actions ★★★ ───────────────────────────
+      // ── Sync ──
       setSyncInfo: (info) => set((state) => ({
         syncInfo: { ...state.syncInfo, ...info },
       })),
 
       startSync: async () => {
-        const state = get();
+        const state = get()
         if (!state.isOnline) {
-          set((s) => ({ syncInfo: { ...s.syncInfo, status: 'offline', lastError: 'اتصال اینترنت برقرار نیست' } }));
-          return;
+          set((s) => ({
+            syncInfo: {
+              ...s.syncInfo,
+              status: 'offline',
+              lastError: 'اتصال اینترنت برقرار نیست',
+            },
+          }))
+          return
         }
-        if (state.syncInfo.status === 'syncing') return; // جلوگیری از سینک همزمان
+        if (state.syncInfo.status === 'syncing') return
 
-        set((s) => ({ syncInfo: { ...s.syncInfo, status: 'syncing', lastError: null } }));
+        set((s) => ({
+          syncInfo: { ...s.syncInfo, status: 'syncing', lastError: null },
+        }))
 
         try {
-          const tenantId = state.tenantId || state.user?.tenantId;
+          const tenantId = state.tenantId || state.user?.tenantId
           if (!tenantId) {
-            set((s) => ({ syncInfo: { ...s.syncInfo, status: 'error', lastError: 'شناسه فروشگاه نامشخص' } }));
-            return;
+            set((s) => ({
+              syncInfo: {
+                ...s.syncInfo,
+                status: 'error',
+                lastError: 'شناسه فروشگاه نامشخص',
+              },
+            }))
+            return
           }
 
           const res = await fetch('/api/sync', {
@@ -410,10 +445,9 @@ const useAppStore = create<AppState>()(
               tenantId,
               lastSyncAt: state.syncInfo.lastSyncAt,
             }),
-          });
+          })
 
           if (res.ok) {
-            const data = await res.json();
             set((s) => ({
               syncInfo: {
                 ...s.syncInfo,
@@ -423,16 +457,16 @@ const useAppStore = create<AppState>()(
                 lastError: null,
               },
               pendingSyncCount: 0,
-            }));
+            }))
           } else {
-            const errorData = await res.json().catch(() => ({}));
+            const errorData = await res.json().catch(() => ({}))
             set((s) => ({
               syncInfo: {
                 ...s.syncInfo,
                 status: 'error',
                 lastError: errorData.error || 'خطا در همگام‌سازی',
               },
-            }));
+            }))
           }
         } catch (error: any) {
           set((s) => ({
@@ -441,12 +475,11 @@ const useAppStore = create<AppState>()(
               status: 'error',
               lastError: error?.message || 'خطای شبکه',
             },
-          }));
+          }))
         }
       },
 
-      // ─── ★★★ POS Actions ★★★ ───────────────────────────────
-
+      // ── POS ──
       addToCart: (item) => set((state) => {
         const existingIndex = state.cart.findIndex(c => c.productId === item.productId)
 
@@ -454,19 +487,16 @@ const useAppStore = create<AppState>()(
           const updated = [...state.cart]
           const existing = updated[existingIndex]
           const newQuantity = existing.quantity + item.quantity
-
           const maxStock = item.currentStock ?? existing.currentStock ?? Infinity
-          if (newQuantity > maxStock) {
-            return state
-          }
 
-          const newLineTotal = Math.round(
-            newQuantity * existing.unitPrice * (1 + existing.taxRate / 100)
-          )
+          if (newQuantity > maxStock) return state
+
           updated[existingIndex] = {
             ...existing,
             quantity: newQuantity,
-            lineTotal: newLineTotal,
+            lineTotal: Math.round(
+              newQuantity * existing.unitPrice * (1 + existing.taxRate / 100)
+            ),
           }
           return { cart: updated }
         }
@@ -478,18 +508,17 @@ const useAppStore = create<AppState>()(
         cart: state.cart.filter(c => c.productId !== productId),
       })),
 
-      updateCartItemQuantity: (productId, quantity) => set((state) => {
-        const updated = state.cart.map(c => {
-          if (c.productId === productId) {
-            const newLineTotal = Math.round(
-              quantity * c.unitPrice * (1 + c.taxRate / 100)
-            )
-            return { ...c, quantity, lineTotal: newLineTotal }
-          }
-          return c
-        })
-        return { cart: updated }
-      }),
+      updateCartItemQuantity: (productId, quantity) => set((state) => ({
+        cart: state.cart.map(c =>
+          c.productId === productId
+            ? {
+                ...c,
+                quantity,
+                lineTotal: Math.round(quantity * c.unitPrice * (1 + c.taxRate / 100)),
+              }
+            : c
+        ),
+      })),
 
       clearCart: () => set({
         cart: [],
@@ -505,11 +534,9 @@ const useAppStore = create<AppState>()(
       }),
 
       setPaymentType: (type) => set({ paymentType: type }),
-
-      // ─── ★★★ v24: Installment/Credit actions ★★★ ──────────────
       setInstallmentPlan: (plan) => set({ installmentPlan: plan }),
 
-      // ─── Notification actions ─────────────────────────────────
+      // ── Notifications ──
       addNotification: (notification) =>
         set((state) => ({
           notifications: [
@@ -542,129 +569,120 @@ const useAppStore = create<AppState>()(
           notifications: state.notifications.filter((n) => n.id !== id),
         })),
 
-      // ★★★ v19: Hydration action ★★★
-      setHasHydrated: (state) => set({ _hasHydrated: state }),
+      // ── Hydration ──
+      setHasHydrated: (hydrated) => set({ _hasHydrated: hydrated }),
     }),
+
     {
       name: 'shop-accounting-store',
-      // ★ v25 — اضافه شدن planTier و planFeatures
       version: 8,
+
       migrate: (persistedState: any, version: number) => {
         if (version < 2) {
-          const newState = { ...persistedState }
-          delete newState.currentView
-          return newState as AppState
+          const s = { ...persistedState }
+          delete s.currentView
+          return s as AppState
         }
         if (version < 3) {
-          const newState = { ...persistedState }
-          if (!newState.notifications) newState.notifications = []
-          if (newState.pendingSyncCount === undefined) newState.pendingSyncCount = 0
-          return newState as AppState
+          const s = { ...persistedState }
+          if (!s.notifications) s.notifications = []
+          if (s.pendingSyncCount === undefined) s.pendingSyncCount = 0
+          return s as AppState
         }
         if (version < 4) {
-          const newState = { ...persistedState }
-          if (!newState.selectedBillingCycle) newState.selectedBillingCycle = null
-          return newState as AppState
+          const s = { ...persistedState }
+          if (!s.selectedBillingCycle) s.selectedBillingCycle = null
+          return s as AppState
         }
         if (version < 5) {
-          const newState = { ...persistedState }
-          if (!newState.cart) newState.cart = []
-          if (!newState.selectedCustomerId) newState.selectedCustomerId = null
-          if (!newState.selectedCustomerName) newState.selectedCustomerName = null
-          if (!newState.paymentType) newState.paymentType = 'Cash'
-          return newState as AppState
+          const s = { ...persistedState }
+          if (!s.cart) s.cart = []
+          if (!s.selectedCustomerId) s.selectedCustomerId = null
+          if (!s.selectedCustomerName) s.selectedCustomerName = null
+          if (!s.paymentType) s.paymentType = 'Cash'
+          return s as AppState
         }
         if (version < 6) {
-          const newState = { ...persistedState }
-          newState._hasHydrated = false
-          return newState as AppState
+          const s = { ...persistedState }
+          s._hasHydrated = false
+          return s as AppState
         }
         if (version < 7) {
-          const newState = { ...persistedState }
-          if (!newState.syncInfo) {
-            newState.syncInfo = {
+          const s = { ...persistedState }
+          if (!s.syncInfo) {
+            s.syncInfo = {
               status: 'synced',
               lastSyncAt: null,
               pendingCount: 0,
               lastError: null,
-              tenantId: newState.tenantId || null,
+              tenantId: s.tenantId || null,
               isIsolated: false,
-              planName: newState.planName || null,
+              planName: s.planName || null,
             }
           }
-          if (!newState.installmentPlan) {
-            newState.installmentPlan = null
-          }
-          return newState as AppState
+          if (!s.installmentPlan) s.installmentPlan = null
+          return s as AppState
         }
-        // ★★★ v25: version 8 migration — اضافه شدن planTier ★★★
         if (version < 8) {
-          const newState = { ...persistedState }
-          const planState = computePlanState(newState.planName || null)
-          newState.planTier = planState.planTier
-          newState.planFeatures = planState.planFeatures
-          // ★★★ v25.1: اضافه شدن resolvedPlanName و planInfo ★★★
-          newState.resolvedPlanName = planState.resolvedPlanName
-          newState.planInfo = planState.planInfo
-          return newState as AppState
+          const s = { ...persistedState }
+          const planState = computePlanState(s.planName || null)
+          s.planTier = planState.planTier
+          s.planFeatures = planState.planFeatures
+          s.resolvedPlanName = planState.resolvedPlanName
+          s.planInfo = planState.planInfo
+          return s as AppState
         }
         return persistedState as AppState
       },
-      // ★ فقط فیلدهای غیر حساس ذخیره بشن — cart ذخیره نمیشه (حجیم)
+
+      // ★ فقط فیلدهای ضروری persist میشن — token و user ذخیره نمیشن (امنیت)
       partialize: (state) => ({
         selectedPlanId: state.selectedPlanId,
         selectedBillingCycle: state.selectedBillingCycle,
         tenantId: state.tenantId,
         storeName: state.storeName,
         planName: state.planName,
-        // ★★★ v25: planTier و planFeatures و resolvedPlanName و planInfo از planName محاسبه میشن، ذخیره نمیشن
         notifications: state.notifications,
         syncInfo: {
           ...state.syncInfo,
-          status: 'synced',
+          status: 'synced' as SyncStatus,
         },
       }),
-      // ★★★ v19: بعد از hydration، _hasHydrated = true ★★★
-      onRehydrateStorage: () => {
-        return (state, error) => {
-          if (error) {
-            console.error('[Store] Hydration error:', error)
-          }
-          if (state) {
-            // ★★★ v25: محاسبه planTier بعد از hydration ★★★
-            const planState = computePlanState(state.planName)
-            state.planTier = planState.planTier
-            state.planFeatures = planState.planFeatures
-            // ★★★ v25.1: محاسبه resolvedPlanName و planInfo ★★★
-            state.resolvedPlanName = planState.resolvedPlanName
-            state.planInfo = planState.planInfo
 
-            state.setHasHydrated(true)
-          }
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[Store] Hydration error:', error)
+        }
+        if (state) {
+          const planState = computePlanState(state.planName)
+          state.planTier = planState.planTier
+          state.planFeatures = planState.planFeatures
+          state.resolvedPlanName = planState.resolvedPlanName
+          state.planInfo = planState.planInfo
+          state.setHasHydrated(true)
         }
       },
     }
   )
-);
+)
 
-export const useStore = useAppStore;
-export { useAppStore };
+export const useStore = useAppStore
+export { useAppStore }
 
-// ★★★ v25.2: اکسپوز useStore به window برای تست در کنسول مرورگر ★★★
-// این کار فقط در حالت غیر production انجام میشه
+// ─── Dev helpers ────────────────────────────────────────────────
+
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-  (window as any).useStore = useAppStore;
-  (window as any).store = useAppStore;
-  (window as any).appStore = useAppStore;
+  (window as any).useStore = useAppStore
+  ;(window as any).store = useAppStore
+  ;(window as any).appStore = useAppStore
 
-  // ★ هلپرهای کاربردی برای تست
-  (window as any).setPlan = (plan: string) => {
-    console.log(`%c[ShopAccounting] تغییر پلن به: ${plan}`, 'color:#10b981;font-weight:bold');
-    useAppStore.getState().setPlanName(plan);
-  };
+  ;(window as any).setPlan = (plan: string) => {
+    console.log(`%c[ShopAccounting] تغییر پلن به: ${plan}`, 'color:#10b981;font-weight:bold')
+    useAppStore.getState().setPlanName(plan)
+  }
 
-  (window as any).getPlan = () => {
-    const state = useAppStore.getState();
+  ;(window as any).getPlan = () => {
+    const state = useAppStore.getState()
     console.table({
       planName: state.planName,
       resolvedPlanName: state.resolvedPlanName,
@@ -672,9 +690,9 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
       isPaid: state.planInfo?.isPaid,
       isIsolated: state.planInfo?.isIsolated,
       label: state.planInfo?.label,
-    });
-    return state;
-  };
+    })
+    return state
+  }
 
   console.log(
     '%c[ShopAccounting] Store در دسترس است\n' +
@@ -685,71 +703,78 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
     '★ setPlan("enterprise") — تغییر به سازمانی\n' +
     '★ getPlan() — مشاهده اطلاعات پلن فعلی',
     'color:#3b82f6;font-weight:bold'
-  );
+  )
 }
 
 // ─── Initialize Auth ────────────────────────────────────────────
 
 export async function initializeAuth(): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof window !== 'undefined'
+    ? localStorage.getItem('token')
+    : null
 
   if (!token) {
-    const state = useAppStore.getState();
+    const state = useAppStore.getState()
     if (state.isAuthenticated) {
-      useAppStore.setState({ isAuthenticated: false, user: null, token: null, refreshToken: null });
+      useAppStore.setState({
+        isAuthenticated: false,
+        user: null,
+        token: null,
+        refreshToken: null,
+      })
     }
-    return;
+    return
   }
 
   try {
     const res = await fetch('/api/auth/verify', {
       headers: { Authorization: `Bearer ${token}` },
-    });
+    })
 
     if (res.ok) {
-      const data = await res.json();
+      const data = await res.json()
       if (data.success && data.user) {
-        useAppStore.getState().login(data.user, token);
-        localStorage.setItem('user', JSON.stringify(data.user));
+        useAppStore.getState().login(data.user, token)
+        localStorage.setItem('user', JSON.stringify(data.user))
       }
     } else {
-      const refreshToken = localStorage.getItem('refreshToken');
+      // تلاش برای refresh
+      const refreshToken = localStorage.getItem('refreshToken')
       if (refreshToken) {
         try {
           const refreshRes = await fetch('/api/auth/refresh', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refreshToken }),
-          });
+          })
           if (refreshRes.ok) {
-            const refreshData = await refreshRes.json();
+            const refreshData = await refreshRes.json()
             if (refreshData.success && refreshData.data) {
-              const newAccessToken = refreshData.data.accessToken || refreshData.data.token;
-              const refreshedUser = refreshData.data.user;
-
-              if (newAccessToken && refreshedUser) {
-                useAppStore.getState().login(refreshedUser, newAccessToken);
-                localStorage.setItem('token', newAccessToken);
-                localStorage.setItem('user', JSON.stringify(refreshedUser));
-                return;
+              const newToken = refreshData.data.accessToken || refreshData.data.token
+              const refreshedUser = refreshData.data.user
+              if (newToken && refreshedUser) {
+                useAppStore.getState().login(refreshedUser, newToken)
+                localStorage.setItem('token', newToken)
+                localStorage.setItem('user', JSON.stringify(refreshedUser))
+                return
               }
             }
           }
-        } catch {}
+        } catch { /* ignore */ }
       }
 
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      localStorage.removeItem('storeName');
-      localStorage.removeItem('tenant');
-      localStorage.removeItem('planName');
-      useAppStore.setState({ isAuthenticated: false, user: null, token: null, refreshToken: null });
+      // پاک کردن همه چیز
+      clearBrowserStorage()
+      useAppStore.setState({
+        isAuthenticated: false,
+        user: null,
+        token: null,
+        refreshToken: null,
+      })
     }
   } catch {
-    // خطای شبکه — تغییر state نمیدیم
+    // خطای شبکه — state تغییر نمیده
   }
 }
 
-export default useAppStore;
-
+export default useAppStore

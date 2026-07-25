@@ -1,11 +1,10 @@
 'use client'
 
 // ============================================================================
-// src/components/products/products-page.tsx (v8.9)
-// ★ تولید کد اتوماتیک هنگام باز شدن مودال افزودن
-// ★ چک‌باکس «تولید بارکد خودکار» در مودال افزودن
-// ★ دکمه «چاپ بارکد» بالای جدول
-// ★ اصلاح نمایش واحدها (فقط نام، بدون پرانتز و سیمبول)
+// src/components/products/products-page.tsx (v8.9.0)
+// ★ ریسپانسیو کامل موبایل / تبلت / دسکتاپ
+// ★ نمای کارتی برای موبایل و تبلت (جدول فقط در lg به بالا)
+// ★ هدر و دیالوگ‌ها اصلاح شد برای صفحات کوچک
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
@@ -79,6 +78,7 @@ interface Product {
   name: string
   categoryId?: string | null
   unitId?: string | null
+  unitLabel?: string  // ★ واحد محصول
   purchasePrice: number
   salePrice: number
   taxRate: number
@@ -183,6 +183,7 @@ export default function ProductsPage() {
     barcode: '',
     categoryId: 'none',
     unitId: 'none',
+    unitLabel: '',  // ★ واحد محصول
     purchasePrice: '0',
     salePrice: '0',
     taxRate: '0',
@@ -462,6 +463,7 @@ export default function ProductsPage() {
         categoryId:
           editForm.categoryId === 'none' ? null : editForm.categoryId,
         unitId: editForm.unitId === 'none' ? null : editForm.unitId,
+        unitLabel: editForm.unitLabel,  // ★ ارسال واحد
         purchasePrice: parseFloat(editForm.purchasePrice) || 0,
         salePrice: parseFloat(editForm.salePrice) || 0,
         taxRate: parseFloat(editForm.taxRate) || 0,
@@ -521,6 +523,9 @@ export default function ProductsPage() {
   }
 
   const openEditDialog = (product: Product) => {
+    // ★ دریافت واحد از product.unit یا unitLabel
+    const unitLabel = product.unit ? getUnitLabel(product.unit) : product.unitLabel || ''
+
     setEditForm({
       id: product.id,
       name: product.name,
@@ -528,6 +533,7 @@ export default function ProductsPage() {
       barcode: product.barcode || '',
       categoryId: product.categoryId || 'none',
       unitId: product.unitId || 'none',
+      unitLabel,  // ★ نمایش واحد
       purchasePrice: String(product.purchasePrice),
       salePrice: String(product.salePrice),
       taxRate: String(product.taxRate),
@@ -546,15 +552,15 @@ export default function ProductsPage() {
   // ★ Render
   // ══════════════════════════════════════════════════════════════
   return (
-    <div className="space-y-4" dir="rtl">
-      {/* ★ Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-3 sm:space-y-4" dir="rtl">
+      {/* ★ Header — ریسپانسیو: موبایل ستونی، دسکتاپ ردیفی */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
             <Package className="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">محصولات</h1>
+            <h1 className="text-base sm:text-lg font-bold text-gray-900">محصولات</h1>
             <p className="text-xs text-gray-500">{toFaNum(total)} محصول</p>
           </div>
         </div>
@@ -567,10 +573,10 @@ export default function ProductsPage() {
               loadAllProducts()
               setPrintModalOpen(true)
             }}
-            className="gap-1.5 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            className="flex-1 sm:flex-none gap-1.5 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50 h-8 sm:h-9"
           >
             <Printer className="w-3.5 h-3.5" />
-            چاپ بارکد
+            <span className="hidden xs:inline sm:inline">چاپ بارکد</span>
             {productsWithBarcodeCount > 0 && (
               <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded-full">
                 {toFaNum(productsWithBarcodeCount)}
@@ -581,11 +587,11 @@ export default function ProductsPage() {
           {/* ★ دکمه افزودن محصول */}
           <Button
             onClick={handleOpenAddDialog}
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-xs"
+            className="flex-1 sm:flex-none gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-xs h-8 sm:h-9"
             disabled={planLimits ? !planLimits.canAdd : false}
           >
             <Plus className="w-4 h-4" />
-            محصول جدید
+            <span>محصول جدید</span>
           </Button>
         </div>
       </div>
@@ -602,112 +608,223 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      {/* ★ Search & Filter */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
+      {/* ★ Search & Filter — ریسپانسیو */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
             placeholder="جستجوی محصول (نام، کد، بارکد)..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="pr-9"
+            className="pr-9 h-9"
           />
         </div>
-        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-          <SelectTrigger className="w-[150px] h-9">
-            <Filter className="w-3.5 h-3.5 ml-1 text-gray-400" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">همه دسته‌ها</SelectItem>
-            {categories.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id}>
-                {cat.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setSearchInput('')
-            setSearch('')
-            loadProducts(1, '')
-          }}
-          className="gap-1"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          پاک کردن
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <SelectTrigger className="flex-1 sm:flex-none sm:w-[150px] h-9">
+              <Filter className="w-3.5 h-3.5 ml-1 text-gray-400 shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">همه دسته‌ها</SelectItem>
+              {categories.map((cat) => (
+                <SelectItem key={cat.id} value={cat.id}>
+                  {cat.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSearchInput('')
+              setSearch('')
+              loadProducts(1, '')
+            }}
+            className="gap-1 h-9 shrink-0 px-2.5"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">پاک کردن</span>
+          </Button>
+        </div>
       </div>
 
-      {/* ★ Table */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-            </div>
-          ) : products.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-              <Package className="w-12 h-12 mb-2 text-gray-300" />
-              <p className="text-sm">
-                {search
-                  ? `نتیجه‌ای برای "${search}" یافت نشد`
-                  : 'محصولی ثبت نشده است'}
-              </p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="text-right text-xs">کد</TableHead>
-                  <TableHead className="text-right text-xs">نام محصول</TableHead>
-                  <TableHead className="text-right text-xs hidden sm:table-cell">
-                    بارکد
-                  </TableHead>
-                  <TableHead className="text-right text-xs hidden sm:table-cell">
-                    دسته
-                  </TableHead>
-                  <TableHead className="text-center text-xs">موجودی</TableHead>
-                  <TableHead className="text-center text-xs hidden sm:table-cell">
-                    قیمت فروش
-                  </TableHead>
-                  <TableHead className="text-center text-xs hidden md:table-cell">
-                    واحد
-                  </TableHead>
-                  <TableHead className="text-center text-xs">وضعیت</TableHead>
-                  <TableHead className="text-center text-xs">عملیات</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((product) => (
-                  <TableRow key={product.id} className="hover:bg-emerald-50/50">
-                    <TableCell className="text-xs font-mono" dir="ltr">
-                      {product.code}
-                    </TableCell>
-                    <TableCell className="text-xs font-medium">
-                      {product.name}
-                    </TableCell>
-                    <TableCell
-                      className="text-xs hidden sm:table-cell"
-                      dir="ltr"
-                    >
-                      {product.barcode ? (
-                        <span className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">
-                          {product.barcode}
+      {/* ★ محتوای اصلی */}
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+          </CardContent>
+        </Card>
+      ) : products.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 text-gray-400">
+            <Package className="w-12 h-12 mb-2 text-gray-300" />
+            <p className="text-sm">
+              {search
+                ? `نتیجه‌ای برای "${search}" یافت نشد`
+                : 'محصولی ثبت نشده است'}
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* ═══ Desktop Table View (lg و بالاتر) ═══ */}
+          <Card className="hidden lg:block">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="text-right text-xs">کد</TableHead>
+                    <TableHead className="text-right text-xs">نام محصول</TableHead>
+                    <TableHead className="text-right text-xs">بارکد</TableHead>
+                    <TableHead className="text-right text-xs">دسته</TableHead>
+                    <TableHead className="text-center text-xs">موجودی</TableHead>
+                    <TableHead className="text-center text-xs">قیمت فروش</TableHead>
+                    <TableHead className="text-center text-xs">واحد</TableHead>
+                    <TableHead className="text-center text-xs">وضعیت</TableHead>
+                    <TableHead className="text-center text-xs">عملیات</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {products.map((product) => (
+                    <TableRow key={product.id} className="hover:bg-emerald-50/50">
+                      <TableCell className="text-xs font-mono" dir="ltr">
+                        {product.code}
+                      </TableCell>
+                      <TableCell className="text-xs font-medium">
+                        {product.name}
+                      </TableCell>
+                      <TableCell className="text-xs" dir="ltr">
+                        {product.barcode ? (
+                          <span className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">
+                            {product.barcode}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[11px]">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {product.category?.name || '—'}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span
+                          className={`text-xs font-bold ${
+                            product.currentStock <= product.minStock
+                              ? 'text-red-500'
+                              : 'text-emerald-600'
+                          }`}
+                        >
+                          {toFaNum(product.currentStock)}
                         </span>
-                      ) : (
-                        <span className="text-gray-400 text-[11px]">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs hidden sm:table-cell">
-                      {product.category?.name || '—'}
-                    </TableCell>
-                    <TableCell className="text-center">
+                      </TableCell>
+                      <TableCell className="text-center text-xs" dir="ltr">
+                        {toFaNum(product.salePrice)}
+                      </TableCell>
+                      <TableCell className="text-center text-xs">
+                        {product.unit
+                          ? getUnitLabel(product.unit)
+                          : product.unitLabel || '—'}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge
+                          className={
+                            product.isActive
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }
+                        >
+                          {product.isActive ? 'فعال' : 'غیرفعال'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(product)}
+                            className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            title="ویرایش"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeletingProduct(product)}
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                            title="حذف"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* ═══ Mobile / Tablet Card View (زیر lg) ═══ */}
+          <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {products.map((product) => (
+              <Card key={product.id} className="border-gray-200">
+                <CardContent className="p-3">
+                  {/* ردیف بالا: نام + وضعیت */}
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm text-gray-900 truncate">
+                        {product.name}
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-mono mt-0.5" dir="ltr">
+                        {product.code}
+                      </p>
+                    </div>
+                    <Badge
+                      className={`shrink-0 text-[9px] ${
+                        product.isActive
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {product.isActive ? 'فعال' : 'غیرفعال'}
+                    </Badge>
+                  </div>
+
+                  {/* بارکد */}
+                  {product.barcode && (
+                    <div className="mb-2">
                       <span
-                        className={`text-xs font-bold ${
+                        className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[10px]"
+                        dir="ltr"
+                      >
+                        {product.barcode}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* جزئیات */}
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-gray-500 border-t border-gray-100 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span>دسته:</span>
+                      <span className="text-gray-700 truncate">
+                        {product.category?.name || '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>واحد:</span>
+                      <span className="text-gray-700">
+                        {product.unit
+                          ? getUnitLabel(product.unit)
+                          : product.unitLabel || '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>موجودی:</span>
+                      <span
+                        className={`font-bold ${
                           product.currentStock <= product.minStock
                             ? 'text-red-500'
                             : 'text-emerald-600'
@@ -715,64 +832,47 @@ export default function ProductsPage() {
                       >
                         {toFaNum(product.currentStock)}
                       </span>
-                    </TableCell>
-                    <TableCell
-                      className="text-center text-xs hidden sm:table-cell"
-                      dir="ltr"
-                    >
-                      {toFaNum(product.salePrice)}
-                    </TableCell>
-                    <TableCell className="text-center text-xs hidden md:table-cell">
-                      {/* ★ در جدول هم فقط nameFa یا name */}
-                      {product.unit
-                        ? getUnitLabel(product.unit)
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Badge
-                        className={
-                          product.isActive
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-gray-100 text-gray-500'
-                        }
-                      >
-                        {product.isActive ? 'فعال' : 'غیرفعال'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(product)}
-                          className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          title="ویرایش"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeletingProduct(product)}
-                          className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
-                          title="حذف"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>قیمت فروش:</span>
+                      <span className="text-gray-700 font-medium" dir="ltr">
+                        {toFaNum(product.salePrice)}
+                      </span>
+                    </div>
+                  </div>
 
-      {/* ★ Pagination */}
+                  {/* عملیات */}
+                  <div className="flex items-center justify-end gap-1 mt-2.5 pt-2 border-t border-gray-100">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditDialog(product)}
+                      className="h-7 px-2 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                    >
+                      <Edit2 className="w-3 h-3 ml-1" />
+                      ویرایش
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeletingProduct(product)}
+                      className="h-7 px-2 text-[10px] text-red-500 hover:text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3 h-3 ml-1" />
+                      حذف
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ★ Pagination — ریسپانسیو */}
       {!loading && products.length > 0 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-          <p className="text-xs text-gray-500">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-1 sm:px-4 py-3 border-t border-gray-200">
+          <p className="text-xs text-gray-500 text-center sm:text-right">
             نمایش {toFaNum((page - 1) * 12 + 1)} تا{' '}
             {toFaNum(Math.min(page * 12, total))} از {toFaNum(total)} محصول
           </p>
@@ -806,18 +906,18 @@ export default function ProductsPage() {
       {/* ★ Add Dialog                                              */}
       {/* ══════════════════════════════════════════════════════════ */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-[520px]" dir="rtl">
+        <DialogContent className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
-            <DialogTitle>محصول جدید</DialogTitle>
+            <DialogTitle className="text-sm sm:text-base">محصول جدید</DialogTitle>
             <DialogDescription className="text-[11px]">
               موجودی محصول از طریق فاکتور خرید افزایش می‌یابد. فقط اطلاعات
               پایه را وارد کنید.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* نام */}
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <Label className="text-xs">
                 نام محصول <span className="text-red-500">*</span>
               </Label>
@@ -853,7 +953,7 @@ export default function ProductsPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="px-2 h-9 text-[11px] whitespace-nowrap"
+                  className="px-2 h-9 text-[11px] whitespace-nowrap shrink-0"
                   onClick={fetchNextCode}
                   disabled={generatingCode}
                   title="تولید کد جدید"
@@ -1012,14 +1112,14 @@ export default function ProductsPage() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)} className="h-9">
               انصراف
             </Button>
             <Button
               onClick={handleAddProduct}
               disabled={submitting}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-emerald-600 hover:bg-emerald-700 h-9"
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin ml-1" />
@@ -1034,15 +1134,15 @@ export default function ProductsPage() {
       {/* ★ Edit Dialog                                             */}
       {/* ══════════════════════════════════════════════════════════ */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[520px]" dir="rtl">
+        <DialogContent className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
-            <DialogTitle>ویرایش محصول</DialogTitle>
+            <DialogTitle className="text-sm sm:text-base">ویرایش محصول</DialogTitle>
             <DialogDescription className="text-[11px]">
               موجودی محصول فقط از طریق فاکتور خرید/فروش تغییر می‌کند.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* نام */}
             <div>
               <Label className="text-xs">
@@ -1073,7 +1173,7 @@ export default function ProductsPage() {
             </div>
 
             {/* بارکد */}
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <Label className="text-xs">بارکد</Label>
               <Input
                 value={editForm.barcode}
@@ -1187,7 +1287,7 @@ export default function ProductsPage() {
             </div>
 
             {/* وضعیت فعال */}
-            <div className="flex items-center justify-between col-span-2">
+            <div className="flex items-center justify-between col-span-1 sm:col-span-2">
               <Label className="text-xs">وضعیت فعال</Label>
               <Switch
                 checked={editForm.isActive}
@@ -1198,14 +1298,14 @@ export default function ProductsPage() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="h-9">
               انصراف
             </Button>
             <Button
               onClick={handleEditProduct}
               disabled={submitting}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-emerald-600 hover:bg-emerald-700 h-9"
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin ml-1" />
@@ -1221,9 +1321,9 @@ export default function ProductsPage() {
         open={!!deletingProduct}
         onOpenChange={(v) => !v && setDeletingProduct(null)}
       >
-        <DialogContent className="sm:max-w-[400px]" dir="rtl">
+        <DialogContent className="sm:max-w-[400px] w-[calc(100%-2rem)]" dir="rtl">
           <DialogHeader>
-            <DialogTitle>حذف محصول</DialogTitle>
+            <DialogTitle className="text-sm sm:text-base">حذف محصول</DialogTitle>
             <DialogDescription className="text-xs">
               این عملیات قابل بازگشت نیست.
             </DialogDescription>
@@ -1238,14 +1338,14 @@ export default function ProductsPage() {
               </span>
             </p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeletingProduct(null)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDeletingProduct(null)} className="h-9">
               انصراف
             </Button>
             <Button
               onClick={handleDeleteProduct}
               disabled={deleting}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-red-600 hover:bg-red-700 h-9"
             >
               {deleting ? (
                 <Loader2 className="w-4 h-4 animate-spin ml-1" />

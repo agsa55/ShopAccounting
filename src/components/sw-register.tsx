@@ -1,0 +1,60 @@
+'use client'
+
+// ============================================================================
+// src/components/sw-register.tsx — Service Worker Registration
+// ثبت و مدیریت Service Worker برای قابلیت آفلاین
+// ============================================================================
+
+import { useEffect } from 'react'
+import { useAppStore } from '@/lib/store'
+
+export function ServiceWorkerRegister() {
+  const { setOnline } = useAppStore()
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+      console.warn('[SW] Service Worker پشتیبانی نمی‌شود')
+      return
+    }
+
+    // ثبت Service Worker
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((registration) => {
+        console.log('[SW] ✅ ثبت شد:', registration.scope)
+
+        // بررسی بروزرسانی
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing
+          if (!newWorker) return
+
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[SW] 🔄 نسخه جدید در دسترس است')
+              // می‌توانید نوتیفیکیشن نمایش دهید
+            }
+          })
+        })
+      })
+      .catch((error) => {
+        console.error('[SW] خطا در ثبت:', error)
+      })
+
+    // دریافت پیام از SW
+    navigator.serviceWorker.addEventListener('message', async (event) => {
+      if (event.data?.type === 'TRIGGER_SYNC') {
+        console.log('[SW] درخواست همگام‌سازی از SW')
+        try {
+          const { syncEngine } = await import('@/lib/sync-engine')
+          await syncEngine.sync()
+        } catch (err) {
+          console.error('[SW] خطا در همگام‌سازی:', err)
+        }
+      }
+    })
+  }, [setOnline])
+
+  return null
+}
+
+export default ServiceWorkerRegister

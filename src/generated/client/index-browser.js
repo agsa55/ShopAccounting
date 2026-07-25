@@ -291,6 +291,7 @@ exports.Prisma.ProductScalarFieldEnum = {
   name: 'name',
   categoryId: 'categoryId',
   unitId: 'unitId',
+  unitLabel: 'unitLabel',
   purchasePrice: 'purchasePrice',
   salePrice: 'salePrice',
   taxRate: 'taxRate',
@@ -392,13 +393,13 @@ exports.Prisma.InvoiceItemScalarFieldEnum = {
   invoiceId: 'invoiceId',
   productId: 'productId',
   productName: 'productName',
+  unitLabel: 'unitLabel',
   quantity: 'quantity',
   unitPrice: 'unitPrice',
   discountAmount: 'discountAmount',
   taxAmount: 'taxAmount',
   lineTotal: 'lineTotal',
-  description: 'description',
-  unitLabel: 'unitLabel'
+  description: 'description'
 };
 
 exports.Prisma.InvoicePaymentScalarFieldEnum = {
@@ -712,6 +713,7 @@ exports.Prisma.StockLevelScalarFieldEnum = {
   warehouseId: 'warehouseId',
   productId: 'productId',
   quantity: 'quantity',
+  unitLabel: 'unitLabel',
   averageCost: 'averageCost',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -724,6 +726,7 @@ exports.Prisma.StockMovementScalarFieldEnum = {
   fromWarehouseId: 'fromWarehouseId',
   toWarehouseId: 'toWarehouseId',
   quantity: 'quantity',
+  unitLabel: 'unitLabel',
   unitCost: 'unitCost',
   movementType: 'movementType',
   referenceType: 'referenceType',
@@ -781,6 +784,8 @@ exports.Prisma.PurchaseInvoiceItemScalarFieldEnum = {
   purchaseInvoiceId: 'purchaseInvoiceId',
   productId: 'productId',
   productName: 'productName',
+  productCode: 'productCode',
+  unitLabel: 'unitLabel',
   quantity: 'quantity',
   unitPrice: 'unitPrice',
   discountAmount: 'discountAmount',
@@ -811,6 +816,7 @@ exports.Prisma.StockCountItemScalarFieldEnum = {
   id: 'id',
   stockCountId: 'stockCountId',
   productId: 'productId',
+  unitLabel: 'unitLabel',
   systemQty: 'systemQty',
   countedQty: 'countedQty',
   difference: 'difference',

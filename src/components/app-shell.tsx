@@ -1,19 +1,24 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx
-// ★ اصلاح: وقتی دمو منقضی شده، بلاک دمو پنهان و SidebarPlanCard نمایش داده میشه
+// src/components/app-shell.tsx — v8.8.10
+// ★ PWA Install Button + دکمه نصب در هدر
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
 import { useStore, type AppView } from '@/lib/store'
 import { resolvePlan, getFeaturesByPlanName } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
+
+// ★ PWA
+import { usePWAInstall } from '@/components/pwa-register'
+
 import {
   LayoutDashboard, ShoppingCart, Package, Grid3x3, Users, FileText,
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
-  Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw,
+  Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
+  Download, // ★ آیکون نصب PWA
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -33,7 +38,9 @@ import {
 } from '@/components/ui/breadcrumb'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { OfflineIndicator, OfflineBanner } from '@/components/ui/offline-indicator'
+import { OfflineBanner } from '@/components/ui/offline-indicator'
+import { OfflineModal } from '@/components/ui/offline-modal'
+
 import { DemoBanner } from '@/components/demo/demo-banner'
 import { useDemoStatus } from '@/lib/use-demo-status'
 
@@ -58,6 +65,7 @@ import { BranchesPage } from '@/components/branches/branches-page'
 import { ContactsPage } from '@/components/contacts/contacts-page'
 import { TicketsPage } from '@/components/tickets/tickets-page'
 import { TicketDetail } from '@/components/tickets/ticket-detail'
+import { useSidebar } from '@/components/ui/sidebar'
 
 /* ══════════════════════════════════════════════════════════════════
    ★ InvoicesHub
@@ -112,6 +120,88 @@ function InvoicesHub() {
   )
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   ★ WarehousesHub
+   ══════════════════════════════════════════════════════════════════ */
+
+type WarehouseTab = 'warehouses' | 'stock-transfer' | 'stock-count'
+
+function WarehousesHub() {
+  const planName = useStore((s) => s.planName)
+  const planFeatures = getFeaturesByPlanName(planName)
+  const [activeTab, setActiveTab] = useState<WarehouseTab>('warehouses')
+
+  useEffect(() => {
+    if (activeTab === 'stock-transfer' && !planFeatures.canStockTransfer) {
+      setActiveTab('warehouses')
+    }
+    if (activeTab === 'stock-count' && !planFeatures.canStockCount) {
+      setActiveTab('warehouses')
+    }
+  }, [activeTab, planFeatures])
+
+  return (
+    <div className="space-y-0" dir="rtl">
+      <div className="flex border-b border-gray-200 bg-white sticky top-0 z-10">
+        <button
+          onClick={() => setActiveTab('warehouses')}
+          className={`
+            relative flex items-center gap-2 px-5 py-3 text-sm font-medium
+            transition-colors duration-150 select-none
+            ${activeTab === 'warehouses'
+              ? 'text-emerald-700 border-b-2 border-emerald-600 bg-emerald-50/60'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }
+          `}
+        >
+          <WarehouseIcon className="w-4 h-4" />
+          انبارها
+        </button>
+
+        {planFeatures.canStockTransfer && (
+          <button
+            onClick={() => setActiveTab('stock-transfer')}
+            className={`
+              relative flex items-center gap-2 px-5 py-3 text-sm font-medium
+              transition-colors duration-150 select-none
+              ${activeTab === 'stock-transfer'
+                ? 'text-emerald-700 border-b-2 border-emerald-600 bg-emerald-50/60'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }
+            `}
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            انتقال بین انبارها
+          </button>
+        )}
+
+        {planFeatures.canStockCount && (
+          <button
+            onClick={() => setActiveTab('stock-count')}
+            className={`
+              relative flex items-center gap-2 px-5 py-3 text-sm font-medium
+              transition-colors duration-150 select-none
+              ${activeTab === 'stock-count'
+                ? 'text-emerald-700 border-b-2 border-emerald-600 bg-emerald-50/60'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }
+            `}
+          >
+            <ClipboardList className="w-4 h-4" />
+            انبار گردانی
+          </button>
+        )}
+      </div>
+
+      <div className="pt-4">
+        {activeTab === 'warehouses' && <WarehousesPage />}
+        {activeTab === 'stock-transfer' && planFeatures.canStockTransfer && <StockTransferPage />}
+        {activeTab === 'stock-count' && planFeatures.canStockCount && <StockCountPage />}
+      </div>
+    </div>
+  )
+}
+
 /* ─── Navigation ─────────────────────────────────────────────── */
 
 interface NavItem {
@@ -141,9 +231,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
-      { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses', permKey: 'accounting' },
-      { label: 'انتقال بین انبارها', icon: ArrowRightLeft, view: 'stock-transfer', permKey: 'accounting', requiredFeature: 'canStockTransfer' },
-      { label: 'انبار گردانی', icon: ClipboardList, view: 'stock-count', permKey: 'accounting', requiredFeature: 'canStockCount' },
+      { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
     ],
   },
   {
@@ -203,6 +291,7 @@ const viewLabels: Record<string, string> = {
   reports: 'گزارش‌ها',
   'upgrade-plan': 'ارتقای پلن',
   suppliers: 'تامین‌کنندگان',
+  'warehouses-hub': 'انبارها',
   warehouses: 'انبارها',
   'stock-transfer': 'انتقال بین انبارها',
   'stock-count': 'انبار گردانی',
@@ -285,9 +374,10 @@ function renderCurrentView(view: AppView) {
     case 'reports':               return <ReportsPage />
     case 'upgrade-plan':          return <SettingsPage />
     case 'suppliers':             return <SuppliersPage />
-    case 'warehouses':            return <WarehousesPage />
-    case 'stock-transfer':        return <StockTransferPage />
-    case 'stock-count':           return <StockCountPage />
+    case 'warehouses-hub':        return <WarehousesHub />
+    case 'warehouses':            return <WarehousesHub />
+    case 'stock-transfer':        return <WarehousesHub />
+    case 'stock-count':           return <WarehousesHub />
     case 'branches':              return <BranchesPage />
     case 'contacts':              return <ContactsPage />
     case 'tickets':               return <TicketsPage />
@@ -301,6 +391,7 @@ function renderCurrentView(view: AppView) {
    ═══════════════════════════════════════════════════════════════ */
 
 function AppSidebar() {
+  const { isMobile, setOpenMobile } = useSidebar()
   const currentView = useStore((s) => s.currentView)
   const setCurrentView = useStore((s) => s.setCurrentView)
   const storeName = useStore((s) => s.storeName)
@@ -310,10 +401,7 @@ function AppSidebar() {
 
   const planFeatures = getFeaturesByPlanName(planName)
 
-  // ★ hook دمو
   const { isDemo, status: demoStatus } = useDemoStatus()
-
-  // ★ آیا دمو هنوز فعال است (نه منقضی)
   const isDemoActive = isDemo && !demoStatus?.isExpired
 
   const [daysRemaining, setDaysRemaining] = useState(0)
@@ -325,13 +413,16 @@ function AppSidebar() {
       try {
         const token = localStorage.getItem('token')
         if (!token) return
+
         const res = await fetch('/api/tenants/trial-check', {
           headers: { Authorization: `Bearer ${token}` },
         })
         const data = await res.json()
+
         if (data.success) {
           setDaysRemaining(data.data.daysRemaining)
           setIsExpired(data.data.isExpired)
+
           if (data.data.planName) {
             setRealPlanName(data.data.planName)
             useStore.getState().setPlanName(data.data.planName)
@@ -339,9 +430,44 @@ function AppSidebar() {
             setRealPlanName(data.data.tierName)
             useStore.getState().setPlanName(data.data.tierName)
           }
+
+          const { cachePlan } = await import('@/lib/offline-db')
+          await cachePlan({
+            planName: data.data.planName || data.data.tierName,
+            daysRemaining: data.data.daysRemaining,
+            isExpired: data.data.isExpired,
+            cached_at: Date.now(),
+          })
+        } else {
+          console.warn('[AppSidebar] trial-check failed with success:false')
+          const { getCachedPlan } = await import('@/lib/offline-db')
+          const cachedPlan = await getCachedPlan()
+
+          if (cachedPlan?.planName) {
+            setRealPlanName(cachedPlan.planName)
+            useStore.getState().setPlanName(cachedPlan.planName)
+            setDaysRemaining(cachedPlan.daysRemaining || 0)
+            setIsExpired(cachedPlan.isExpired || false)
+          }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.warn('[AppSidebar] Fetch error, using cached plan:', err)
+        try {
+          const { getCachedPlan } = await import('@/lib/offline-db')
+          const cachedPlan = await getCachedPlan()
+
+          if (cachedPlan?.planName) {
+            setRealPlanName(cachedPlan.planName)
+            useStore.getState().setPlanName(cachedPlan.planName)
+            setDaysRemaining(cachedPlan.daysRemaining || 0)
+            setIsExpired(cachedPlan.isExpired || false)
+          }
+        } catch (cacheErr) {
+          console.error('[AppSidebar] Error reading cached plan:', cacheErr)
+        }
+      }
     }
+
     checkSubscription()
     const interval = setInterval(checkSubscription, 60000)
     return () => clearInterval(interval)
@@ -375,6 +501,9 @@ function AppSidebar() {
     if (view === 'journal-entry-detail') return 'accounting'
     if (view === 'ticket-detail') return 'tickets'
     if (view === 'upgrade-plan') return 'upgrade-plan'
+    if (view === 'warehouses' || view === 'stock-transfer' || view === 'stock-count') {
+      return 'warehouses-hub' as any
+    }
     return view
   }
 
@@ -388,7 +517,11 @@ function AppSidebar() {
   }, [user])
 
   return (
-    <Sidebar side="right" collapsible="icon" className="border-l border-r-0">
+    <Sidebar
+      side="right"
+      collapsible="icon"
+      className="border-l-2 border-gray-200 bg-gradient-to-b from-gray-50 to-white shadow-lg"
+    >
       <SidebarHeader className="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
@@ -406,11 +539,7 @@ function AppSidebar() {
         </SidebarMenu>
 
         <div className="mt-1.5 px-1 group-data-[collapsible=icon]:hidden">
-          {/* ══════════════════════════════════════════════════
-              ★★★ اصلاح اصلی: فقط وقتی دمو فعال است (نه منقضی)
-              ══════════════════════════════════════════════════ */}
           {isDemoActive ? (
-            /* ★ دمو فعال — بنر زرد */
             <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-amber-700">
@@ -430,7 +559,6 @@ function AppSidebar() {
               </a>
             </div>
           ) : (
-            /* ★ دمو منقضی شده یا اصلاً دمو نیست — کارت پلن معمولی */
             <div className="space-y-1.5">
               <SidebarPlanCard onClick={() => setCurrentView('settings-subscription' as AppView)} />
               <a
@@ -441,13 +569,11 @@ function AppSidebar() {
                 تمدید / ارتقا اشتراک
               </a>
 
-              {/* ★ دمو منقضی — پیام ویژه به جای زمان باقی‌مانده */}
               {isDemo && demoStatus?.isExpired ? (
                 <p className="text-[9px] text-red-600 text-center font-medium">
                   دوره آزمایشی پایان یافت — اشتراک تهیه کنید
                 </p>
               ) : (
-                /* ★ اشتراک عادی — نمایش زمان باقی‌مانده */
                 <>
                   {!isExpired && daysRemaining > 0 && daysRemaining !== -1 && (
                     <p className="text-[9px] text-gray-500 text-center flex items-center justify-center gap-0.5">
@@ -458,7 +584,6 @@ function AppSidebar() {
                       {' '}تا پایان اشتراک
                     </p>
                   )}
-                  {/* ★ پلن مادام‌العمر — بدون نمایش زمان */}
                   {daysRemaining === -1 && (
                     <p className="text-[9px] text-emerald-600 text-center font-medium flex items-center justify-center gap-0.5">
                       <Sparkles className="w-2.5 h-2.5" />
@@ -497,6 +622,9 @@ function AppSidebar() {
                         onClick={() => {
                           if (isItemDisabled) return
                           setCurrentView(item.view)
+                          if (isMobile) {
+                            setTimeout(() => setOpenMobile(false), 150)
+                          }
                         }}
                         tooltip={item.label}
                         className={`gap-2 sm:gap-2.5 h-8 sm:h-9 ${
@@ -509,11 +637,7 @@ function AppSidebar() {
                       >
                         <item.icon className={`size-4 ${isActive && !isItemDisabled ? 'text-emerald-600' : ''}`} />
                         <span className="text-xs sm:text-sm">{item.label}</span>
-                        {item.view === 'installments' && unreadCount > 0 && (
-                          <Badge className="ms-auto bg-orange-500 text-white text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0 h-4 min-w-4">
-                            {unreadCount}
-                          </Badge>
-                        )}
+
                         {isItemDisabled && (
                           <Badge className="ms-auto bg-amber-100 text-amber-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
                             دمو
@@ -550,6 +674,62 @@ function AppSidebar() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ★ PWAInstallButton — دکمه نصب اپ
+   ═══════════════════════════════════════════════════════════════ */
+
+function PWAInstallButton() {
+  const { canInstall, isInstalled, install } = usePWAInstall()
+  const [installing, setInstalling] = useState(false)
+  const [justInstalled, setJustInstalled] = useState(false)
+
+  // اگر نصب شده یا قابل نصب نیست، نمایش نده
+  if (isInstalled || !canInstall) return null
+
+  const handleInstall = async () => {
+    setInstalling(true)
+    try {
+      const accepted = await install()
+      if (accepted) {
+        setJustInstalled(true)
+        setTimeout(() => setJustInstalled(false), 3000)
+      }
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleInstall}
+      disabled={installing}
+      className={`
+        gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3
+        border-emerald-300 text-emerald-700
+        hover:bg-emerald-50 hover:border-emerald-400
+        transition-all duration-200 shrink-0
+        ${installing ? 'opacity-70 cursor-not-allowed' : ''}
+        ${justInstalled ? 'border-green-400 text-green-700 bg-green-50' : ''}
+      `}
+      title="نصب اپلیکیشن روی دستگاه"
+    >
+      {justInstalled ? (
+        <>
+          <span className="text-green-600">✓</span>
+          <span className="hidden sm:inline">نصب شد</span>
+        </>
+      ) : (
+        <>
+          <Download className={`h-3 w-3 sm:h-3.5 sm:w-3.5 ${installing ? 'animate-bounce' : ''}`} />
+          <span className="hidden sm:inline">نصب اپ</span>
+        </>
+      )}
+    </Button>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
 
@@ -560,10 +740,91 @@ function AppHeader() {
   const notifications = useStore((s) => s.notifications) ?? []
   const markNotificationRead = useStore((s) => s.markNotificationRead)
   const markAllNotificationsRead = useStore((s) => s.markAllNotificationsRead)
-  const logout = useStore((s) => s.logout)
 
   const unreadCount = notifications.filter(n => !n.isRead).length
   const canAccessSettings = isFullAccessRole(user?.role)
+
+  const handleLogout = async () => {
+    try {
+      console.log('[AppHeader] 🚪 Starting logout process...')
+
+      if ('serviceWorker' in navigator) {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations()
+          for (const registration of registrations) {
+            await registration.unregister()
+          }
+        } catch (err) {
+          console.warn('[AppHeader] Error unregistering SW:', err)
+        }
+      }
+
+      if ('caches' in window) {
+        try {
+          const cacheNames = await caches.keys()
+          await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)))
+        } catch (err) {
+          console.warn('[AppHeader] Error clearing caches:', err)
+        }
+      }
+
+      const keysToRemove = [
+        'token', 'refreshToken', 'user', 'storeName', 'tenant',
+        'planName', 'tenant-slug', 'auth-token', 'shop-accounting-store',
+      ]
+      keysToRemove.forEach((key) => {
+        try { localStorage.removeItem(key) } catch (e) {}
+      })
+
+      try { sessionStorage.clear() } catch (e) {}
+
+      const cookiesToClear = ['tenant-slug', 'tenant-view', 'auth-token', 'token', 'refreshToken']
+      const hostname = window.location.hostname
+      cookiesToClear.forEach((name) => {
+        try {
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname}; SameSite=Lax;`
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname}; SameSite=Lax;`
+        } catch (e) {}
+      })
+
+      useStore.setState({
+        user: null,
+        isAuthenticated: false,
+        token: null,
+        refreshToken: null,
+        tenantId: null,
+        storeName: null,
+        currentTenant: null,
+        planName: null,
+        selectedPlanId: null,
+        selectedBillingCycle: null,
+        selectedJournalEntryId: null,
+        cart: [],
+        selectedCustomerId: null,
+        selectedCustomerName: null,
+        notifications: [],
+        pendingSyncCount: 0,
+        currentView: 'landing',
+      })
+
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+        })
+      } catch (err) {}
+
+      setTimeout(() => {
+        window.location.href = `/?logout=1&t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`
+      }, 300)
+
+    } catch (err) {
+      console.error('[AppHeader] Logout error:', err)
+      window.location.href = `/?logout=1&t=${Date.now()}`
+    }
+  }
 
   return (
     <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b bg-white px-2 sm:px-3 md:px-4 shadow-sm sticky top-0 z-10">
@@ -587,8 +848,13 @@ function AppHeader() {
       </Breadcrumb>
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
-        <div className="hidden sm:block"><OfflineIndicator /></div>
 
+        {/* ★ دکمه نصب PWA */}
+        <PWAInstallButton />
+
+        <OfflineModal />
+
+        {/* ── Notifications ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0">
@@ -604,14 +870,19 @@ function AppHeader() {
             <DropdownMenuLabel className="flex items-center justify-between">
               <span className="text-xs sm:text-sm">اعلان‌ها</span>
               {unreadCount > 0 && (
-                <button onClick={() => markAllNotificationsRead()} className="text-[10px] text-emerald-600 hover:text-emerald-700 font-medium">
+                <button
+                  onClick={() => markAllNotificationsRead()}
+                  className="text-[10px] text-emerald-600 hover:text-emerald-700 font-medium"
+                >
                   خواندن همه
                 </button>
               )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
-              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-muted-foreground">اعلانی وجود ندارد</div>
+              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-muted-foreground">
+                اعلانی وجود ندارد
+              </div>
             ) : (
               notifications.slice(0, 5).map((notification) => (
                 <DropdownMenuItem
@@ -620,16 +891,23 @@ function AppHeader() {
                   className="flex flex-col items-start gap-1 p-2 sm:p-2.5 md:p-3 cursor-pointer"
                 >
                   <div className="flex items-center gap-1.5 sm:gap-2 w-full">
-                    {!notification.isRead && <div className="size-1.5 sm:size-2 rounded-full bg-emerald-500 shrink-0" />}
-                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate">{notification.title}</span>
+                    {!notification.isRead && (
+                      <div className="size-1.5 sm:size-2 rounded-full bg-emerald-500 shrink-0" />
+                    )}
+                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate">
+                      {notification.title}
+                    </span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] md:text-xs text-muted-foreground line-clamp-2 leading-relaxed">{notification.message}</span>
+                  <span className="text-[9px] sm:text-[10px] md:text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                    {notification.message}
+                  </span>
                 </DropdownMenuItem>
               ))
             )}
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* ── User Menu ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0">
@@ -658,21 +936,28 @@ function AppHeader() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {canAccessSettings && (
-              <DropdownMenuItem onClick={() => useStore.getState().setCurrentView('settings')}>
-                <Settings className="size-4 ms-2" /> تنظیمات
+              <DropdownMenuItem
+                onClick={() => useStore.getState().setCurrentView('settings')}
+              >
+                <Settings className="size-4 ms-2" />
+                تنظیمات
               </DropdownMenuItem>
             )}
             {canAccessSettings && (
-              <DropdownMenuItem onClick={() => useStore.getState().setCurrentView('settings-subscription' as AppView)}>
-                <CreditCard className="size-4 ms-2" /> اشتراک و پلن
+              <DropdownMenuItem
+                onClick={() => useStore.getState().setCurrentView('settings-subscription' as AppView)}
+              >
+                <CreditCard className="size-4 ms-2" />
+                اشتراک و پلن
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={logout}
-              className="text-red-600 focus:text-red-600 focus:bg-red-50"
+              onClick={handleLogout}
+              className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
             >
-              <LogOut className="size-4 ms-2" /> خروج از حساب
+              <LogOut className="size-4 ms-2" />
+              خروج از حساب
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -707,12 +992,105 @@ export default function AppShell() {
     }
   }, [user, currentView, setCurrentView, planFeatures])
 
+  // ★ Service Worker + Online/Offline + Sync
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const updateOnlineStatus = () => { useStore.getState().setOnline(navigator.onLine) }
-    updateOnlineStatus()
-    window.addEventListener('online', updateOnlineStatus)
-    window.addEventListener('offline', updateOnlineStatus)
+
+    let syncInterval: NodeJS.Timeout | null = null
+    let domContentLoadedListener: (() => void) | null = null
+
+    const triggerSync = async () => {
+      try {
+        const { syncEngine } = await import('@/lib/sync-engine')
+        const result = await syncEngine.sync()
+
+        if (result.succeeded > 0) {
+          useStore.getState().addNotification({
+            title: '✅ همگام‌سازی موفق',
+            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
+            type: 'success',
+          })
+        }
+
+        if (result.failed > 0) {
+          useStore.getState().addNotification({
+            title: '⚠️ خطا در همگام‌سازی',
+            message: `${result.failed} تغییر همگام‌سازی نشد — مجدداً تلاش می‌شود`,
+            type: 'warning',
+          })
+        }
+
+        const { getSyncQueueCount } = await import('@/lib/offline-db')
+        const count = await getSyncQueueCount()
+        useStore.getState().setPendingSyncCount(count)
+      } catch (err) {
+        console.error('[AppShell] triggerSync error:', err)
+      }
+    }
+
+    const handleOnline = () => {
+      useStore.getState().setOnline(true)
+      useStore.getState().addNotification({
+        title: '🌐 اتصال برقرار شد',
+        message: 'در حال همگام‌سازی تغییرات...',
+        type: 'info',
+      })
+      triggerSync()
+
+      if (syncInterval) clearInterval(syncInterval)
+      syncInterval = setInterval(async () => {
+        const count = useStore.getState().pendingSyncCount
+        if (count > 0) {
+          await triggerSync()
+        } else {
+          if (syncInterval) clearInterval(syncInterval)
+        }
+      }, 30000)
+    }
+
+    const handleOffline = () => {
+      useStore.getState().setOnline(false)
+      if (syncInterval) clearInterval(syncInterval)
+      useStore.getState().addNotification({
+        title: '📡 اتصال قطع شد',
+        message: 'تغییرات شما ذخیره و پس از اتصال همگام‌سازی می‌شوند',
+        type: 'warning',
+      })
+    }
+
+    // ★ ثبت Service Worker — از pwa-register.tsx مجزا است
+    // ★ این فقط برای sync پیام‌رسانی است، ثبت اصلی در PWARegister انجام می‌شود
+    const listenToSW = async () => {
+      if (!('serviceWorker' in navigator)) return
+      try {
+        // ★ فقط listen می‌کنیم، ثبت نمی‌کنیم (PWARegister انجام می‌دهد)
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data?.type === 'TRIGGER_SYNC') {
+            console.log('[AppShell] TRIGGER_SYNC from SW')
+            triggerSync()
+          }
+          if (event.data?.type === 'SW_UPDATED') {
+            console.log('[AppShell] SW updated, new version available')
+          }
+        })
+
+        // ★ Handle controller change (new SW activated)
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          console.log('[AppShell] SW controller changed (new version active)')
+        })
+
+      } catch (err) {
+        console.warn('[AppShell] SW listener error:', err)
+      }
+    }
+
+    const initialOnline = navigator.onLine
+    useStore.getState().setOnline(initialOnline)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    listenToSW()
 
     const updatePendingCount = async () => {
       try {
@@ -721,17 +1099,41 @@ export default function AppShell() {
         useStore.getState().setPendingSyncCount(count)
       } catch { /* ignore */ }
     }
+
     updatePendingCount()
-    const interval = setInterval(updatePendingCount, 10000)
+    const countInterval = setInterval(updatePendingCount, 10000)
+
+    let preloadTimer: NodeJS.Timeout | null = null
+    if (initialOnline) {
+      preloadTimer = setTimeout(async () => {
+        try {
+          const { syncEngine } = await import('@/lib/sync-engine')
+          await syncEngine.preloadData()
+          console.log('[AppShell] ✅ Preload data completed')
+        } catch (err) {
+          console.warn('[AppShell] ⚠️ Preload failed:', err)
+        }
+      }, 2000)
+    }
 
     return () => {
-      window.removeEventListener('online', updateOnlineStatus)
-      window.removeEventListener('offline', updateOnlineStatus)
-      clearInterval(interval)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+      clearInterval(countInterval)
+      if (syncInterval) clearInterval(syncInterval)
+      if (preloadTimer) clearTimeout(preloadTimer)
+      if (domContentLoadedListener) {
+        document.removeEventListener('DOMContentLoaded', domContentLoadedListener)
+      }
     }
   }, [])
 
-  const canViewCurrentPage = checkAccess(currentView, user?.role, user?.permissions, planFeatures)
+  const canViewCurrentPage = checkAccess(
+    currentView,
+    user?.role,
+    user?.permissions,
+    planFeatures
+  )
   const isPosView = currentView === 'pos'
 
   return (
@@ -741,6 +1143,7 @@ export default function AppShell() {
         <OfflineBanner />
         <DemoBanner />
         <AppHeader />
+
         {isPosView ? (
           <div className="flex-1 min-h-0 overflow-hidden">
             {canViewCurrentPage ? <PosPage /> : <DashboardPage />}

@@ -331,14 +331,18 @@ model StoreUser {
 model Product {
   id            String   @id @default(uuid()) @db.NVarChar(450)
   code          String
-  barcode       String?
-  name          String
-  categoryId    String?   @db.NVarChar(450)
-  unitId        String?   @db.NVarChar(450)
+  barcode       String?  @db.NVarChar(50)
+  name          String   @db.NVarChar(500)
+  categoryId    String?  @db.NVarChar(450)
+  unitId        String?  @db.NVarChar(450)
+  
+  // ★★★ v8.8.7: واحد محصول پیش‌فرض (عدد، کیلوگرم، متر، لیتر، ...)
+  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  
   purchasePrice Float    @default(0)
   salePrice     Float    @default(0)
   taxRate       Float    @default(0)
-  currentStock  Float    @default(0)
+  currentStock  Float    @default(0)          // ★ تغییر: از Int به Float
   minStock      Float    @default(0)
   isActive      Boolean  @default(true)
   tenantId      String   @db.NVarChar(1000)
@@ -349,12 +353,9 @@ model Product {
   category Category? @relation(fields: [categoryId], references: [id])
   unit     Unit?     @relation(fields: [unitId], references: [id])
 
-  // ★★★ v6.1: relation‌های انبارداری
   StockLevels          StockLevel[]
   StockMovements       StockMovement[]
   PurchaseInvoiceItems PurchaseInvoiceItem[]
-
-  // ★★★ v6.5: انبار گردانی
   StockCountItems      StockCountItem[]
 
   @@unique([code, tenantId])
@@ -535,27 +536,28 @@ model InvoiceItem {
   id             String   @id @default(uuid()) @db.NVarChar(450)
   invoiceId      String   @db.NVarChar(450)
   productId      String?  @db.NVarChar(450)
-  productName    String
-  quantity       Float    @default(1)
+  productName    String   @db.NVarChar(500)
+  
+  // ★★★ v8.8.7: واحد محصول / خدمت
+  unitLabel      String   @default("عدد") @db.NVarChar(50)
+  
+  quantity       Float    @default(1)          // ★ تغییر: از Int به Float
   unitPrice      Float    @default(0)
   discountAmount Float    @default(0)
   taxAmount      Float    @default(0)
   lineTotal      Float    @default(0)
 
   // ★★★ v8.7: فیلدهای اضافی برای آیتم‌های خدماتی
-  //   برای فاکتورهای service: توضیحات کامل خدمت (مثلاً «تعمیر موتور یخچال»)
-  //   برای فاکتورهای sale_return: دلیل برگشت (اختیاری)
+  // برای فاکتورهای service: توضیحات کامل خدمت (مثلاً «تعمیر موتور یخچال»)
+  // برای فاکتورهای sale_return: دلیل برگشت (اختیاری)
   description    String?  @db.NVarChar(500)
-  //   واحد خدمت: عدد/ساعت/روز/ماه/بازه (برای خدمات)
-  unitLabel      String?  @db.NVarChar(50)
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
   @@index([productId])
   @@map("InvoiceItems")
 }
-
 model InvoicePayment {
   id          String   @id @default(uuid()) @db.NVarChar(450)
   invoiceId   String   @db.NVarChar(450)
@@ -1094,7 +1096,11 @@ model StockLevel {
   tenantId    String   @db.NVarChar(1000)
   warehouseId String   @db.NVarChar(450)
   productId   String   @db.NVarChar(450)
-  quantity    Float    @default(0)
+  
+  quantity    Float    @default(0)            // ★ تغییر: از Int به Float
+  // ★★★ v8.8.7: واحد محصول (برای محاسبه صحیح)
+  unitLabel   String   @default("عدد") @db.NVarChar(50)
+  
   averageCost Float    @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1115,10 +1121,14 @@ model StockMovement {
   productId       String   @db.NVarChar(450)
   fromWarehouseId String?  @db.NVarChar(450)
   toWarehouseId   String?  @db.NVarChar(450)
-  quantity        Float
+  quantity        Float                        // ★ تغییر: از Int به Float
+  
+  // ★★★ v8.8.7: واحد محصول در حرکت
+  unitLabel       String   @default("عدد") @db.NVarChar(50)
+  
   unitCost        Float    @default(0)
-  movementType    String
-  referenceType   String?
+  movementType    String   @db.NVarChar(50)  // purchase_in | sale_out | transfer | adjustment
+  referenceType   String?  @db.NVarChar(50)  // purchase_invoice | sale_invoice | stock_count | transfer
   referenceId     String?  @db.NVarChar(450)
   description     String?  @db.NVarChar(500)
   createdAt       DateTime @default(now())
@@ -1129,6 +1139,7 @@ model StockMovement {
   @@index([tenantId])
   @@index([productId])
   @@index([referenceType, referenceId])
+  @@index([movementType])
   @@map("StockMovements")
 }
 
@@ -1208,14 +1219,19 @@ model PurchaseInvoice {
 model PurchaseInvoiceItem {
   id                String   @id @default(uuid()) @db.NVarChar(450)
   purchaseInvoiceId String   @db.NVarChar(450)
-  productId         String?   @db.NVarChar(450)
-  productName       String
-  quantity          Float    @default(1)
+  productId         String?  @db.NVarChar(450)
+  productName       String   @db.NVarChar(500)
+  productCode       String?  @db.NVarChar(50)     // ★ اضافه: کد محصول
+  
+  // ★★★ v8.8.7: واحد محصول (عدد، کیلوگرم، متر، ...)
+  unitLabel         String   @default("عدد") @db.NVarChar(50)
+  
+  quantity          Float    @default(1)          // ★ تغییر: از Int به Float (برای اعشاری)
   unitPrice         Float    @default(0)
   discountAmount    Float    @default(0)
   taxAmount         Float    @default(0)
   lineTotal         Float    @default(0)
-
+  
   // ★★★ v8.7: دلیل برگشت (فقط برای فاکتورهای برگشتی خرید، اختیاری)
   returnReason      String?  @db.NVarChar(500)
 
@@ -1226,7 +1242,6 @@ model PurchaseInvoiceItem {
   @@index([productId])
   @@map("PurchaseInvoiceItems")
 }
-
 // ═══════════════════════════════════════════════════════════════
 //  ★★★ v6.5: مدل‌های انبار گردانی (Stock Count / Inventory Audit)
 // ═══════════════════════════════════════════════════════════════
@@ -1266,12 +1281,16 @@ model StockCountItem {
   id            String   @id @default(uuid()) @db.NVarChar(450)
   stockCountId  String   @db.NVarChar(450)
   productId     String   @db.NVarChar(450)
-  systemQty     Float    @default(0) // موجودی سیستمی هنگام شمارش
-  countedQty    Float    @default(0) // تعداد فیزیکی شمرده‌شده
-  difference    Float    @default(0) // countedQty - systemQty (محاسبه خودکار)
-  unitCost      Float    @default(0) // برای محاسبه مالی اختلاف (از StockLevel.averageCost)
-  differenceAmount Float @default(0) // difference × unitCost
-  reason        String?  @db.NVarChar(500) // دلیل اختلاف (اختیاری)
+  
+  // ★★★ v8.8.7: واحد محصول
+  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  
+  systemQty     Float    @default(0)           // ★ تغییر: از Int به Float
+  countedQty    Float    @default(0)
+  difference    Float    @default(0)
+  unitCost      Float    @default(0)
+  differenceAmount Float @default(0)
+  reason        String?  @db.NVarChar(500)
   countedAt     DateTime @default(now())
 
   stockCount StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)

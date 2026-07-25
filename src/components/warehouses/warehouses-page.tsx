@@ -1,7 +1,7 @@
 'use client'
 
 // ============================================================================
-// src/components/warehouses/warehouses-page.tsx — با اصلاح فونت + محدودیت پلن
+// src/components/warehouses/warehouses-page.tsx — ریسپانسیو کامل موبایل/تبلت/دسکتاپ
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
@@ -116,21 +116,22 @@ export function WarehousesPage() {
   }
 
   return (
-    <div className="font-fa space-y-4" dir="rtl">
-      <div className="flex items-center justify-between">
+    <div className="font-fa space-y-3 sm:space-y-4" dir="rtl">
+      {/* ★ Header — ریسپانسیو */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
             <Building2 className="w-5 h-5 text-amber-600" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900">انبارها</h1>
+            <h1 className="text-base sm:text-lg font-bold text-gray-900">انبارها</h1>
             <p className="text-xs text-gray-500">
               {formatNumber(warehouses.length)} انبار
               {planInfo && <span className="mr-2">• سقف پلن: {planInfo.maxWarehouses === 'نامحدود' || planInfo.maxWarehouses === 0 ? 'نامحدود' : formatNumber(planInfo.maxWarehouses)}</span>}
             </p>
           </div>
         </div>
-        <Button onClick={handleOpenAdd} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700">
+        <Button onClick={handleOpenAdd} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto h-9">
           <Plus className="w-4 h-4" />انبار جدید
         </Button>
       </div>
@@ -139,7 +140,7 @@ export function WarehousesPage() {
       {planInfo && !canAddWarehouse && (
         <Card className="border-amber-200 bg-amber-50/50">
           <CardContent className="p-3 flex items-center gap-2">
-            <Crown className="w-4 h-4 text-amber-600" />
+            <Crown className="w-4 h-4 text-amber-600 shrink-0" />
             <p className="text-xs text-amber-700">
               در پلن فعلی به سقف انبار رسیده‌اید. برای افزودن انبار بیشتر، به پلن بالاتر ارتقا دهید.
             </p>
@@ -152,21 +153,21 @@ export function WarehousesPage() {
       ) : warehouses.length === 0 ? (
         <Card><CardContent className="py-12 text-center"><Building2 className="w-12 h-12 mx-auto mb-2 text-gray-300" /><p className="text-sm text-gray-400">انباری تعریف نشده</p></CardContent></Card>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {warehouses.map((wh) => (
             <Card key={wh.id} className={wh.isDefault ? 'border-emerald-300 bg-emerald-50/30' : ''}>
               <CardContent className="p-4">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${wh.isDefault ? 'bg-emerald-100' : 'bg-gray-100'}`}>
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${wh.isDefault ? 'bg-emerald-100' : 'bg-gray-100'}`}>
                       <Package className={`w-4 h-4 ${wh.isDefault ? 'text-emerald-600' : 'text-gray-500'}`} />
                     </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-gray-900">{wh.name}</h3>
-                      <p className="text-[10px] text-gray-400" dir="ltr">{wh.code}</p>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-gray-900 truncate">{wh.name}</h3>
+                      <p className="text-[10px] text-gray-400 truncate" dir="ltr">{wh.code}</p>
                     </div>
                   </div>
-                  {wh.isDefault && <Badge className="text-[9px] bg-emerald-100 text-emerald-700">پیش‌فرض</Badge>}
+                  {wh.isDefault && <Badge className="text-[9px] bg-emerald-100 text-emerald-700 shrink-0">پیش‌فرض</Badge>}
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                   <div><p className="text-[9px] text-gray-400">اقلام</p><p className="text-xs font-bold">{formatNumber(wh._count?.StockLevels || 0)}</p></div>
@@ -176,8 +177,8 @@ export function WarehousesPage() {
                 <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
                   <Badge className={wh.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}>{wh.isActive ? 'فعال' : 'غیرفعال'}</Badge>
                   <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(wh)}><Edit2 className="w-3.5 h-3.5" /></Button>
-                    {!wh.isDefault && <Button variant="ghost" size="sm" onClick={() => handleDelete(wh)} className="text-red-500"><Trash2 className="w-3.5 h-3.5" /></Button>}
+                    <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(wh)} className="h-7 w-7 p-0"><Edit2 className="w-3.5 h-3.5" /></Button>
+                    {!wh.isDefault && <Button variant="ghost" size="sm" onClick={() => handleDelete(wh)} className="h-7 w-7 p-0 text-red-500"><Trash2 className="w-3.5 h-3.5" /></Button>}
                   </div>
                 </div>
               </CardContent>
@@ -187,17 +188,17 @@ export function WarehousesPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="font-fa sm:max-w-[400px]" dir="rtl">
-          <DialogHeader><DialogTitle>{editingWarehouse ? 'ویرایش انبار' : 'انبار جدید'}</DialogTitle></DialogHeader>
+        <DialogContent className="font-fa sm:max-w-[400px] w-[calc(100%-2rem)]" dir="rtl">
+          <DialogHeader><DialogTitle className="text-sm sm:text-base">{editingWarehouse ? 'ویرایش انبار' : 'انبار جدید'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">نام انبار <span className="text-red-500">*</span></Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1" placeholder="مثلاً: انبار اصلی" /></div>
             <div><Label className="text-xs">کد (اختیاری)</Label><Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} className="mt-1" placeholder="خودکار" /></div>
             <div className="flex items-center justify-between"><Label className="text-xs">انبار پیش‌فرض</Label><Switch checked={form.isDefault} onCheckedChange={(v) => setForm({ ...form, isDefault: v })} /></div>
             <div className="flex items-center justify-between"><Label className="text-xs">فعال</Label><Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} /></div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>انصراف</Button>
-            <Button onClick={handleSubmit} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}{editingWarehouse ? 'به‌روزرسانی' : 'ایجاد'}</Button>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="h-9">انصراف</Button>
+            <Button onClick={handleSubmit} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700 h-9">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}{editingWarehouse ? 'به‌روزرسانی' : 'ایجاد'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

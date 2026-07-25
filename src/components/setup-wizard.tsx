@@ -328,28 +328,35 @@ export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps
 
   // ── ذخیره سال مالی
   const saveFY = async (): Promise<boolean> => {
-    setFyError('')
-    if(!fyName.trim()){setFyError('نام سال مالی الزامی است');return false}
-    try{
-      const r=await fetch('/api/fiscal-years',{
-        method:'POST',
-        headers:{'Content-Type':'application/json',...getToken()},
-        body:JSON.stringify({name:fyName.trim(),startDate:fyStart,endDate:fyEnd,activate:true}),
-      })
-      const d=await r.json()
-      if(d.success){
-        setFyDone(true)
-        const ys=d.data?.year?[d.data.year]:[]
-        if(ys.length)setFyExisting(p=>[...p,...ys])
-        return true
-      }
-      setFyError(d.error||'خطا در ایجاد سال مالی')
-      return false
-    }catch{
-      setFyError('خطا در ارتباط با سرور')
-      return false
+  setFyError('')
+  if (!fyName.trim()) { setFyError('نام سال مالی الزامی است'); return false }
+  
+  try {
+    const r = await fetch('/api/fiscal-years', {
+      method: 'POST',
+      headers: getAuthHeaders(), // ★ جایگزین شد
+      body: JSON.stringify({
+        name: fyName.trim(),
+        startDate: fyStart,
+        endDate: fyEnd,
+        activate: true,
+      }),
+    })
+    const d = await r.json()
+    if (d.success) {
+      setFyDone(true)
+      const ys = d.data?.year ? [d.data.year] : []
+      if (ys.length) setFyExisting(p => [...p, ...ys])
+      return true
     }
+    setFyError(d.error || 'خطا در ایجاد سال مالی')
+    return false
+  } catch {
+    setFyError('خطا در ارتباط با سرور')
+    return false
   }
+}
+
 
   // ── سال مالی پیش‌فرض (auto)
   const autoCreateFY = async (): Promise<boolean> => {
@@ -365,29 +372,31 @@ export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps
     }catch{return false}
   }
 
-  // ── ذخیره انبار
-  const saveWH = async (name:string,code?:string): Promise<boolean> => {
-    setWhError('')
-    try{
-      const r=await fetch('/api/warehouses',{
-        method:'POST',
-        headers:{'Content-Type':'application/json',...getToken()},
-        body:JSON.stringify({name:name.trim(),code:code?.trim()||undefined}),
-      })
-      const d=await r.json()
-      if(d.success){
-        setWhDone(true)
-        setWarehouses(p=>[...p,d.data])
-        return true
-      }
-      setWhError(d.error||'خطا در ایجاد انبار')
-      return false
-    }catch{
-      setWhError('خطا در ارتباط با سرور')
-      return false
+ // ── ذخیره انبار
+const saveWH = async (name: string, code?: string): Promise<boolean> => {
+  setWhError('')
+  try {
+    const r = await fetch('/api/warehouses', {
+      method: 'POST',
+      headers: getAuthHeaders(), // ★ جایگزین شد
+      body: JSON.stringify({
+        name: name.trim(),
+        code: code?.trim() || undefined,
+      }),
+    })
+    const d = await r.json()
+    if (d.success) {
+      setWhDone(true)
+      setWarehouses(p => [...p, d.data])
+      return true
     }
+    setWhError(d.error || 'خطا در ایجاد انبار')
+    return false
+  } catch {
+    setWhError('خطا در ارتباط با سرور')
+    return false
   }
-
+}
   // ── حذف انبار
   const deleteWH = async (id:string) => {
     try{
@@ -402,93 +411,138 @@ export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps
     }catch{}
   }
 
-  // ── افزودن آیتم سند
-  const addBalItem = () => {
-    setBalError('')
-    if(!balTitle.trim()){setBalError('عنوان الزامی است');return}
-    const amt=parseFloat(balAmount)
-    if(isNaN(amt)||amt<0){setBalError('مبلغ معتبر وارد کنید');return}
-    setBalItems(p=>[...p,{type:balType,title:balTitle.trim(),amount:amt,description:balDesc.trim()||undefined}])
-    setBalTitle('');setBalAmount('');setBalDesc('')
+ // ─────────────────────────────────────────────────────────────────────────────
+//  افزودن آیتم — اصلاح‌شده (اطمینان از number بودن amount)
+// ─────────────────────────────────────────────────────────────────────────────
+const addBalItem = () => {
+  setBalError('')
+
+  if (!balTitle.trim()) {
+    setBalError('عنوان الزامی است')
+    return
   }
+
+  const amt = parseFloat(balAmount)
+  if (isNaN(amt) || amt <= 0) {  // ★ 0 هم مجاز نیست
+    setBalError('مبلغ باید عدد مثبت باشد')
+    return
+  }
+
+  setBalItems(prev => [
+    ...prev,
+    {
+      type: balType,
+      title: balTitle.trim(),
+      amount: amt,            // ★ number خالص
+      description: balDesc.trim() || undefined,
+    }
+  ])
+
+  // ★ پاک کردن فرم
+  setBalTitle('')
+  setBalAmount('')
+  setBalDesc('')
+  setBalError('')
+}
+
+
+  function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return { 'Content-Type': 'application/json' }
+  
+  const token = localStorage.getItem('token')
+  if (!token) {
+    console.warn('[SetupWizard] No token found in localStorage!')
+  }
+  
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 
  // src/components/setup-wizard.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 //  ثبت سند افتتاحیه — FIX v2
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  ثبت سند افتتاحیه — دو مرحله‌ای (مثل InitialBalanceTab در تنظیمات)
+//  مرحله ۱: ذخیره آیتم‌ها در DB
+//  مرحله ۲: صدور سند (postToJournal: true)
+// ─────────────────────────────────────────────────────────────────────────────
 const saveBalance = async (): Promise<boolean> => {
-  if (balItems.length === 0) {
-    console.log('[SetupWizard] saveBalance - skipped (no items)')
-    return true // اختیاری
+  // اگه آیتمی نیست → رد شو (اختیاری)
+  if (balItems.length === 0) return true
+
+  setBalError('')
+
+  // ★ اعتبارسنجی آیتم‌ها قبل از ارسال
+  for (const item of balItems) {
+    if (!item.title?.trim()) {
+      setBalError('عنوان همه آیتم‌ها الزامی است')
+      return false
+    }
+    if (typeof item.amount !== 'number' || item.amount <= 0) {
+      setBalError(`مبلغ آیتم "${item.title}" نامعتبر است`)
+      return false
+    }
   }
 
-  try {
-    // ★ استفاده از tenantId از store (نه localStorage)
-    const tid = useAppStore.getState().tenantId 
-      || useAppStore.getState().currentTenant?.id 
-      || ''
+  const requestBody = {
+    items: balItems.map((b) => ({
+      type: b.type,
+      title: b.title.trim(),
+      amount: Number(b.amount), // ★ اطمینان از number بودن
+      description: b.description?.trim() || '',
+    })),
+    postToJournal: true, // ★ هم ذخیره هم سند
+  }
 
-    console.log('[SetupWizard] saveBalance - START', {
-      tenantId: tid,
-      itemsCount: balItems.length,
-      items: balItems,
+  console.log('[SetupWizard] saveBalance - request:', {
+    itemsCount: requestBody.items.length,
+    postToJournal: requestBody.postToJournal,
+    items: requestBody.items,
+  })
+
+  try {
+    const res = await fetch('/api/initial-balance', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(requestBody),
     })
 
-    if (!tid) {
-      const errMsg = 'خطا: شناسه فروشگاه یافت نشد'
-      console.error('[SetupWizard] saveBalance - ERROR:', errMsg)
+    // ★ بررسی status قبل از parse
+    if (!res.ok && res.status !== 200) {
+      const text = await res.text()
+      console.error('[SetupWizard] saveBalance - HTTP error:', res.status, text)
+      const errMsg = `خطای سرور (${res.status})`
       setBalError(errMsg)
       toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
       return false
     }
 
-    const requestBody = {
-      items: balItems.map((b) => ({
-        type: b.type,
-        title: b.title,
-        amount: b.amount,
-        description: b.description || '',
-      })),
-      postToJournal: true,
-    }
-
-    console.log('[SetupWizard] saveBalance - Sending POST:', requestBody)
-
-    const res = await fetch('/api/initial-balance', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getToken(),
-      },
-      body: JSON.stringify(requestBody),
-    })
-
     const data = await res.json()
-
-    console.log('[SetupWizard] saveBalance - Response:', {
-      status: res.status,
-      success: data.success,
-      error: data.error,
-      data: data.data,
-    })
+    console.log('[SetupWizard] saveBalance - response:', data)
 
     if (data.success) {
       setBalIsPosted(true)
       toast({
         title: '✅ سند افتتاحیه ثبت شد',
-        description: `${balItems.length} آیتم ثبت شد`,
+        description: data.message || `${balItems.length} آیتم با موفقیت ثبت شد`,
       })
       return true
     }
 
+    // ★ خطای API
     const errMsg = data.error || 'خطا در ثبت سند افتتاحیه'
+    console.error('[SetupWizard] saveBalance - API error:', errMsg)
     setBalError(errMsg)
     toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
     return false
 
   } catch (err: any) {
-    const errMsg = 'خطا در ارتباط با سرور: ' + err.message
-    console.error('[SetupWizard] saveBalance - CATCH:', err)
+    const errMsg = 'خطا در ارتباط با سرور'
+    console.error('[SetupWizard] saveBalance - catch:', err)
     setBalError(errMsg)
     toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
     return false
@@ -499,63 +553,75 @@ const saveBalance = async (): Promise<boolean> => {
   const totalLiab=balItems.filter(b=>b.type==='liability').reduce((s,b)=>s+b.amount,0)
   const totalEquity=totalAssets-totalLiab
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  handleNext — منطق اصلی هر مرحله
-  // ──────────────────────────────────────────────────────────────────────────
-  const handleNext = async () => {
-    setSaving(true)
-    setFyError('')
-    setWhError('')
-    setBalError('')
+  // ─────────────────────────────────────────────────────────────────────────────
+//  handleNext — اصلاح‌شده برای مرحله ۲
+// ─────────────────────────────────────────────────────────────────────────────
+const handleNext = async () => {
+  setSaving(true)
+  setFyError('')
+  setWhError('')
+  setBalError('')
 
-    try{
-      // ── مرحله ۰: سال مالی
-      if(step===0){
-        if(fyDone){
-          // قبلاً ثبت شده → برو بعدی
-          setStep(1)
-          return
-        }
-        const ok=await saveFY()
-        if(ok)setStep(1)
+  try {
+    // ── مرحله ۰: سال مالی
+    if (step === 0) {
+      if (fyDone) {
+        setStep(1)
         return
       }
+      const ok = await saveFY()
+      if (ok) setStep(1)
+      return
+    }
 
-      // ── مرحله ۱: انبار
-      if(step===1){
-        if(whDone||warehouses.length>0){
-          // انبار موجود است
-          if(whName.trim()){
-            // کاربر می‌خواد انبار جدید هم اضافه کنه
-            await saveWH(whName,whCode)
-            setWhName('');setWhCode('')
-          }
+    // ── مرحله ۱: انبار
+    if (step === 1) {
+      if (whDone || warehouses.length > 0) {
+        if (whName.trim()) {
+          await saveWH(whName, whCode)
+          setWhName('')
+          setWhCode('')
+        }
+        setStep(2)
+        return
+      }
+      if (whName.trim()) {
+        const ok = await saveWH(whName, whCode)
+        if (ok) {
+          setWhName('')
+          setWhCode('')
           setStep(2)
-          return
         }
-        if(whName.trim()){
-          const ok=await saveWH(whName,whCode)
-          if(ok){setWhName('');setWhCode('');setStep(2)}
-        }else{
-          setWhError('حداقل یک انبار ایجاد کنید یا روی «رد کردن» کلیک کنید')
-        }
+      } else {
+        setWhError('حداقل یک انبار ایجاد کنید یا روی «رد کردن» کلیک کنید')
+      }
+      return
+    }
+
+    // ── مرحله ۲: سند افتتاحیه
+    if (step === 2) {
+      // ★ اگه آیتمی در فرم هنوز اضافه نشده، هشدار بده
+      if (balTitle.trim() && balAmount) {
+        setBalError('آیتم در حال ورود را ابتدا با دکمه «افزودن» اضافه کنید')
         return
       }
 
-      // ── مرحله ۲: سند افتتاحیه
-      if(step===2){
-        if(balItems.length>0){
-          const ok=await saveBalance()
-          if(!ok)return
-        }
+      if (balItems.length === 0) {
+        // هیچ آیتمی نیست → رد شو به مرحله بعد
         setStep(3)
         return
       }
-    }finally{
-      setSaving(false)
-    }
-  }
 
+      // ★ ثبت سند
+      const ok = await saveBalance()
+      if (ok) setStep(3)
+      return
+    }
+
+  } finally {
+    setSaving(false)
+  }
+}
   // ──────────────────────────────────────────────────────────────────────────
   //  handleSkip — رد کردن مرحله با ثبت پیش‌فرض
   // ──────────────────────────────────────────────────────────────────────────

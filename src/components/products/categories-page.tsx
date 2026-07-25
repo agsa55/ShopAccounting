@@ -43,6 +43,7 @@ import {
   ChevronLeft,
   ChevronDown,
   AlertTriangle,
+  X,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -65,7 +66,6 @@ interface Category {
 export default function CategoriesPage() {
   const { toast } = useToast()
 
-  // Store fields
   const currentTenant = useAppStore((s) => s.currentTenant)
   const tenantId = useAppStore((s) => s.tenantId)
   const isOnline = useAppStore((s) => s.isOnline)
@@ -81,6 +81,7 @@ export default function CategoriesPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
   // Add form state
   const [formName, setFormName] = useState('')
@@ -150,7 +151,7 @@ export default function CategoriesPage() {
     return roots
   }, [categories])
 
-  // ============ Flat list for table (with level) ============
+  // ============ Flat list for table ============
 
   const flatCategories = useMemo(() => {
     const result: (Category & { level: number })[] = []
@@ -217,7 +218,7 @@ export default function CategoriesPage() {
 
   const collapseAll = useCallback(() => {
     setExpandedIds(new Set())
-  }, [categoryTree])
+  }, [])
 
   // ============ Auto-expand all on first load ============
 
@@ -362,142 +363,236 @@ export default function CategoriesPage() {
   const activeCategories = categories.filter((c) => c.isActive).length
   const rootCount = categories.filter((c) => !c.parentId).length
 
-  // Check if deleting category has children
   const hasChildren = deletingCategory?.children && deletingCategory.children.length > 0
 
   // ============ Render ============
 
   return (
     <div className="flex flex-col h-full bg-gray-50/80" dir="rtl">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-blue-600 text-white">
-              <Grid3x3 className="w-4 h-4 sm:w-5 sm:h-5" />
+
+      {/* ─── Header ─── */}
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-5 lg:px-6 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-2">
+
+          {/* Title */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 rounded-lg bg-blue-600 text-white shrink-0">
+              <Grid3x3 className="w-4 h-4 sm:w-4.5 sm:h-4.5 lg:w-5 lg:h-5" />
             </div>
-            <div>
-              <h1 className="text-sm sm:text-lg font-bold text-gray-900">دسته‌بندی‌ها</h1>
-              <p className="text-[10px] sm:text-xs text-gray-500">مدیریت دسته‌بندی‌های محصولات</p>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900 leading-tight">
+                دسته‌بندی‌ها
+              </h1>
+              <p className="text-[10px] sm:text-xs text-gray-500 hidden sm:block">
+                مدیریت دسته‌بندی‌های محصولات
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {!isOnline && (
-              <Badge variant="outline" className="gap-1 text-[10px] sm:text-xs border-amber-300 text-amber-700 bg-amber-50">
-                <WifiOff className="w-3 h-3" />
+              <Badge
+                variant="outline"
+                className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5 py-0.5"
+              >
+                <WifiOff className="w-2.5 h-2.5" />
                 <span className="hidden sm:inline">آفلاین</span>
               </Badge>
             )}
+
+            {/* Mobile search toggle */}
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 sm:hidden border-gray-200"
+              onClick={() => setMobileSearchOpen((v) => !v)}
+            >
+              <Search className="w-3.5 h-3.5" />
+            </Button>
+
             <Button
               onClick={openAddDialog}
-              className="bg-blue-600 hover:bg-blue-700 text-white h-8 sm:h-9 px-2.5 sm:px-4 text-xs sm:text-sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white h-8 sm:h-9 px-2.5 sm:px-3 lg:px-4 text-xs sm:text-sm gap-1 sm:gap-1.5"
             >
-              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 ml-1 sm:ml-1.5" />
-              <span className="hidden sm:inline">افزودن دسته‌بندی</span>
-              <span className="sm:hidden">افزودن</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline sm:inline">افزودن</span>
+              <span className="hidden lg:inline"> دسته‌بندی</span>
             </Button>
           </div>
         </div>
+
+        {/* Mobile Search (expandable) */}
+        {mobileSearchOpen && (
+          <div className="mt-2 sm:hidden">
+            <div className="relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <Input
+                autoFocus
+                type="text"
+                placeholder="جستجوی دسته‌بندی..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pr-9 pl-9 h-8 bg-gray-50 border-gray-200 text-xs"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                >
+                  <X className="w-3.5 h-3.5 text-gray-400" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
-      {/* Stats Bar */}
-      <div className="bg-white border-b border-gray-100 px-3 sm:px-6 py-2 sm:py-2.5 shrink-0">
-        <div className="flex items-center gap-3 sm:gap-6 text-[10px] sm:text-xs text-gray-500">
+      {/* ─── Stats Bar ─── */}
+      <div className="bg-white border-b border-gray-100 px-3 sm:px-5 lg:px-6 py-2 shrink-0">
+        <div className="flex items-center gap-3 sm:gap-5 lg:gap-6 text-[10px] sm:text-xs text-gray-500 flex-wrap">
           <span>
-            مجموع: <strong className="text-gray-900">{totalCategories}</strong> دسته‌بندی
+            مجموع:{' '}
+            <strong className="text-gray-900">{totalCategories}</strong>{' '}
+            <span className="hidden sm:inline">دسته‌بندی</span>
           </span>
           <span className="hidden sm:inline">
             فعال: <strong className="text-emerald-600">{activeCategories}</strong>
           </span>
-          <span className="hidden sm:inline">
+          <span className="hidden md:inline">
             دسته اصلی: <strong className="text-blue-600">{rootCount}</strong>
+          </span>
+          <span className="hidden lg:inline text-gray-300">|</span>
+          <span className="hidden lg:inline text-gray-400">
+            {filteredCategories.length} آیتم نمایش داده می‌شود
           </span>
         </div>
       </div>
 
-      {/* Search + Controls */}
-      <div className="bg-white border-b border-gray-100 px-3 sm:px-6 py-2 sm:py-3 shrink-0">
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-          <div className="relative flex-1">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      {/* ─── Search + Controls (Desktop / Tablet) ─── */}
+      <div className="bg-white border-b border-gray-100 px-3 sm:px-5 lg:px-6 py-2 sm:py-2.5 shrink-0 hidden sm:block">
+        <div className="flex items-center gap-2 lg:gap-3">
+          {/* Search */}
+          <div className="relative flex-1 max-w-xs lg:max-w-sm">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <Input
               type="text"
               placeholder="جستجوی دسته‌بندی..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pr-9 h-8 sm:h-9 bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-400 focus:ring-blue-400/20 text-xs sm:text-sm"
+              className="pr-9 h-8 lg:h-9 bg-gray-50 border-gray-200 focus:bg-white focus:border-blue-400 text-xs sm:text-sm"
             />
           </div>
-          <div className="flex items-center gap-1.5">
+
+          {/* Expand/Collapse */}
+          <div className="flex items-center gap-1.5 mr-auto">
             <Button
               variant="outline"
               size="sm"
-              className="h-7 sm:h-8 text-[10px] sm:text-xs border-gray-200 text-gray-600"
+              className="h-7 lg:h-8 text-[10px] sm:text-xs border-gray-200 text-gray-600 px-2 lg:px-3 gap-1"
               onClick={expandAll}
             >
-              <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 ml-1" />
-              <span className="hidden sm:inline">باز کردن همه</span>
+              <ChevronDown className="w-3 h-3 lg:w-3.5 lg:h-3.5" />
+              <span className="hidden md:inline">باز کردن همه</span>
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 sm:h-8 text-[10px] sm:text-xs border-gray-200 text-gray-600"
+              className="h-7 lg:h-8 text-[10px] sm:text-xs border-gray-200 text-gray-600 px-2 lg:px-3 gap-1"
               onClick={collapseAll}
             >
-              <ChevronLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5 ml-1" />
-              <span className="hidden sm:inline">بستن همه</span>
+              <ChevronLeft className="w-3 h-3 lg:w-3.5 lg:h-3.5" />
+              <span className="hidden md:inline">بستن همه</span>
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* ─── Mobile Controls Bar ─── */}
+      <div className="bg-white border-b border-gray-100 px-3 py-1.5 shrink-0 sm:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-gray-400">
+            {filteredCategories.length} دسته‌بندی
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-gray-500 gap-0.5"
+              onClick={expandAll}
+            >
+              <ChevronDown className="w-3 h-3" />
+              باز
+            </Button>
+            <span className="text-gray-200">|</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-[10px] text-gray-500 gap-0.5"
+              onClick={collapseAll}
+            >
+              <ChevronLeft className="w-3 h-3" />
+              بسته
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Main Content ─── */}
       <div className="flex-1 overflow-auto">
         {loading ? (
-          /* Loading State */
-          <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-gray-400">
+          <div className="flex flex-col items-center justify-center py-20 sm:py-24 lg:py-32 text-gray-400">
             <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-blue-600 mb-3" />
             <p className="text-xs sm:text-sm font-medium">در حال بارگذاری</p>
           </div>
+
         ) : filteredCategories.length === 0 ? (
-          /* Empty State */
-          <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-gray-400">
-            <FolderTree className="w-10 h-10 sm:w-14 sm:h-14 mb-3 opacity-40" />
+          <div className="flex flex-col items-center justify-center py-20 sm:py-24 lg:py-32 text-gray-400 px-4">
+            <FolderTree className="w-12 h-12 sm:w-14 sm:h-14 mb-3 opacity-40" />
             <p className="text-xs sm:text-sm font-medium">دسته‌بندی یافت نشد</p>
-            <p className="text-[10px] sm:text-xs mt-1 text-gray-300">
+            <p className="text-[10px] sm:text-xs mt-1 text-gray-300 text-center">
               {searchQuery ? 'عبارت دیگری را جستجو کنید' : 'اولین دسته‌بندی خود را ایجاد کنید'}
             </p>
             {!searchQuery && (
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-4 border-blue-300 text-blue-600 text-xs"
+                className="mt-4 border-blue-300 text-blue-600 text-xs gap-1"
                 onClick={openAddDialog}
               >
-                <Plus className="w-3.5 h-3.5 ml-1" />
+                <Plus className="w-3.5 h-3.5" />
                 افزودن دسته‌بندی
               </Button>
             )}
           </div>
+
         ) : (
-          /* Categories List */
           <>
-            {/* Desktop Table View */}
+            {/* ══ Desktop/Tablet Table (md+) ══ */}
             <div className="hidden md:block">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-gray-50/80 hover:bg-gray-50/80">
-                    <TableHead className="text-xs font-semibold text-gray-600 h-9">نام دسته‌بندی</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-600 h-9">دسته والد</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center">تعداد محصولات</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center">وضعیت</TableHead>
-                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center">عملیات</TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-600 h-9 w-[40%]">
+                      نام دسته‌بندی
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-600 h-9 w-[25%] hidden lg:table-cell">
+                      دسته والد
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center w-[15%]">
+                      محصولات
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center w-[10%]">
+                      وضعیت
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center w-[10%]">
+                      عملیات
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredCategories.map((cat) => {
-                    const hasChildren = cat.children && cat.children.length > 0
+                    const nodeHasChildren = cat.children && cat.children.length > 0
                     const isExpanded = expandedIds.has(cat.id)
 
                     return (
@@ -507,13 +602,13 @@ export default function CategoriesPage() {
                           cat._isOffline ? 'bg-amber-50/50' : ''
                         }`}
                       >
+                        {/* Name */}
                         <TableCell className="py-2">
                           <div
                             className="flex items-center gap-1.5"
-                            style={{ paddingRight: `${cat.level * 24}px` }}
+                            style={{ paddingRight: `${cat.level * 20}px` }}
                           >
-                            {/* Expand/collapse toggle */}
-                            {hasChildren ? (
+                            {nodeHasChildren ? (
                               <button
                                 onClick={() => toggleExpand(cat.id)}
                                 className="flex items-center justify-center w-5 h-5 rounded hover:bg-gray-200 transition-colors shrink-0"
@@ -529,44 +624,60 @@ export default function CategoriesPage() {
                                 <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
                               </span>
                             )}
-
-                            {/* Category icon + name */}
                             <Grid3x3 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                            <span className="font-medium text-sm text-gray-900">{cat.name}</span>
+                            <span className="font-medium text-sm text-gray-900 truncate max-w-[180px] lg:max-w-none">
+                              {cat.name}
+                            </span>
                             {cat._isOffline && (
-                              <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1 mr-1">
+                              <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1 shrink-0">
                                 آفلاین
                               </Badge>
                             )}
-                            {hasChildren && (
-                              <Badge variant="secondary" className="text-[9px] bg-gray-100 text-gray-500 h-4 px-1 mr-1">
+                            {nodeHasChildren && (
+                              <Badge variant="secondary" className="text-[9px] bg-gray-100 text-gray-500 h-4 px-1 shrink-0">
                                 {cat.children!.length}
                               </Badge>
                             )}
+                            {/* Show parent inline on tablet when column hidden */}
+                            {cat.parent?.name && (
+                              <span className="text-[10px] text-gray-400 lg:hidden truncate">
+                                ({cat.parent.name})
+                              </span>
+                            )}
                           </div>
                         </TableCell>
-                        <TableCell className="py-2 text-xs text-gray-500">
+
+                        {/* Parent – desktop only */}
+                        <TableCell className="py-2 text-xs text-gray-500 hidden lg:table-cell">
                           {cat.parent?.name || (
-                            <span className="text-gray-300">بدون والد (دسته اصلی)</span>
+                            <span className="text-gray-300">دسته اصلی</span>
                           )}
                         </TableCell>
+
+                        {/* Product count */}
                         <TableCell className="py-2 text-center">
-                          <Badge variant="outline" className="text-[10px] font-medium border-gray-200">
-                            {cat.productCount} محصول
+                          <Badge variant="outline" className="text-[10px] font-medium border-gray-200 whitespace-nowrap">
+                            {cat.productCount}
+                            <span className="hidden lg:inline"> محصول</span>
                           </Badge>
                         </TableCell>
+
+                        {/* Status */}
                         <TableCell className="py-2 text-center">
                           {cat.isActive ? (
-                            <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
-                              <CheckCircle2 className="w-3 h-3 ml-0.5" />
-                              فعال
+                            <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 gap-0.5">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span className="hidden lg:inline">فعال</span>
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="text-[10px] border-gray-300 text-gray-500">
-                              غیرفعال
+                              <span className="hidden lg:inline">غیرفعال</span>
+                              <span className="lg:hidden">—</span>
                             </Badge>
                           )}
                         </TableCell>
+
+                        {/* Actions */}
                         <TableCell className="py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button
@@ -574,6 +685,7 @@ export default function CategoriesPage() {
                               size="icon"
                               className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
                               onClick={() => openEditDialog(cat)}
+                              title="ویرایش"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </Button>
@@ -582,6 +694,7 @@ export default function CategoriesPage() {
                               size="icon"
                               className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
                               onClick={() => openDeleteDialog(cat)}
+                              title="حذف"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
@@ -594,66 +707,94 @@ export default function CategoriesPage() {
               </Table>
             </div>
 
-            {/* Mobile Card View */}
-            <div className="md:hidden p-3 space-y-2">
+            {/* ══ Mobile Card View (< md) ══ */}
+            <div className="md:hidden p-2.5 space-y-2">
               {filteredCategories.map((cat) => {
-                const hasChildren = cat.children && cat.children.length > 0
+                const nodeHasChildren = cat.children && cat.children.length > 0
                 const isExpanded = expandedIds.has(cat.id)
 
                 return (
                   <Card
                     key={cat.id}
-                    className={`border transition-colors ${
-                      cat._isOffline ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200'
+                    className={`border transition-colors shadow-none ${
+                      cat._isOffline
+                        ? 'border-amber-200 bg-amber-50/30'
+                        : 'border-gray-200 bg-white'
                     }`}
-                    style={{ marginRight: `${cat.level * 16}px` }}
+                    style={{ marginRight: `${Math.min(cat.level * 12, 36)}px` }}
                   >
                     <CardContent className="p-3">
-                      {/* Top row: name + status */}
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                          {hasChildren ? (
-                            <button
-                              onClick={() => toggleExpand(cat.id)}
-                              className="flex items-center justify-center w-6 h-6 rounded-md hover:bg-gray-100 transition-colors shrink-0"
-                            >
-                              {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-gray-500" />
-                              ) : (
-                                <ChevronLeft className="w-4 h-4 text-gray-500" />
-                              )}
-                            </button>
-                          ) : (
-                            <span className="w-6 h-6 flex items-center justify-center shrink-0">
-                              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                            </span>
-                          )}
-                          <Grid3x3 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span className="font-bold text-sm text-gray-900 truncate">{cat.name}</span>
-                        </div>
+                      {/* Row 1: expand + icon + name + status */}
+                      <div className="flex items-center gap-1.5">
+                        {/* Expand button */}
+                        {nodeHasChildren ? (
+                          <button
+                            onClick={() => toggleExpand(cat.id)}
+                            className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-100 transition-colors shrink-0"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-gray-500" />
+                            ) : (
+                              <ChevronLeft className="w-4 h-4 text-gray-500" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="w-6 h-6 flex items-center justify-center shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                          </span>
+                        )}
+
+                        <Grid3x3 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+
+                        {/* Name */}
+                        <span className="font-semibold text-sm text-gray-900 flex-1 truncate">
+                          {cat.name}
+                        </span>
+
+                        {/* Status badge */}
                         {cat.isActive ? (
-                          <Badge className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 shrink-0">
+                          <Badge className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 shrink-0 px-1.5">
                             فعال
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-[9px] border-gray-300 text-gray-500 shrink-0">
+                          <Badge variant="outline" className="text-[9px] border-gray-300 text-gray-500 shrink-0 px-1.5">
                             غیرفعال
                           </Badge>
                         )}
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            onClick={() => openEditDialog(cat)}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => openDeleteDialog(cat)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </div>
 
-                      {/* Details row */}
-                      <div className="flex items-center gap-3 text-[10px] text-gray-500 mr-7.5">
+                      {/* Row 2: meta info */}
+                      <div className="flex items-center gap-2.5 mt-1.5 pr-8 flex-wrap">
                         {cat.parent?.name && (
-                          <span>
-                            والد: {cat.parent.name}
+                          <span className="text-[10px] text-gray-400">
+                            والد: <span className="text-gray-600">{cat.parent.name}</span>
                           </span>
                         )}
-                        <span>
+                        <span className="text-[10px] text-gray-400">
                           {cat.productCount} محصول
                         </span>
-                        {hasChildren && (
-                          <span className="text-blue-600">
+                        {nodeHasChildren && (
+                          <span className="text-[10px] text-blue-500">
                             {cat.children!.length} زیردسته
                           </span>
                         )}
@@ -662,28 +803,6 @@ export default function CategoriesPage() {
                             آفلاین
                           </Badge>
                         )}
-                      </div>
-
-                      {/* Actions row */}
-                      <div className="flex items-center justify-end gap-1 mt-2 mr-7.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-[10px] text-gray-500 hover:text-blue-600 hover:bg-blue-50"
-                          onClick={() => openEditDialog(cat)}
-                        >
-                          <Edit2 className="w-3 h-3 ml-1" />
-                          ویرایش
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-[10px] text-gray-500 hover:text-red-600 hover:bg-red-50"
-                          onClick={() => openDeleteDialog(cat)}
-                        >
-                          <Trash2 className="w-3 h-3 ml-1" />
-                          حذف
-                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -694,11 +813,14 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Add Category Dialog
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* ════════════════════════════════
+          Add Dialog
+      ════════════════════════════════ */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-[480px] w-[calc(100%-2rem)]" dir="rtl">
+        <DialogContent
+          className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-md lg:max-w-lg mx-auto rounded-xl"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-blue-700 text-sm sm:text-base">
               <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -709,26 +831,24 @@ export default function CategoriesPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3 sm:py-4">
-            {/* Category Name */}
+          <div className="space-y-4 py-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-gray-700">
                 نام دسته‌بندی <span className="text-red-500">*</span>
               </label>
               <Input
+                autoFocus
                 type="text"
                 placeholder="مثلاً: لباس مردانه"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                className="h-9 sm:h-10 text-sm border-gray-200 focus:border-blue-400 focus:ring-blue-400/20"
+                onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+                className="h-9 sm:h-10 text-sm border-gray-200 focus:border-blue-400"
               />
             </div>
 
-            {/* Parent Category */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-gray-700">
-                دسته والد
-              </label>
+              <label className="text-xs font-medium text-gray-700">دسته والد</label>
               <Select value={formParentId} onValueChange={setFormParentId}>
                 <SelectTrigger className="h-9 sm:h-10 text-sm border-gray-200">
                   <SelectValue placeholder="انتخاب دسته والد" />
@@ -746,55 +866,48 @@ export default function CategoriesPage() {
               </Select>
             </div>
 
-            {/* Active Toggle */}
-            <div className="flex items-center justify-between py-1">
+            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
               <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
               <div className="flex items-center gap-2">
-                <span className={`text-xs ${formIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <span className={`text-xs font-medium ${formIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
                   {formIsActive ? 'فعال' : 'غیرفعال'}
                 </span>
-                <Switch
-                  checked={formIsActive}
-                  onCheckedChange={setFormIsActive}
-                />
+                <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
               </div>
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setAddDialogOpen(false)}
-              className="border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
-            >
-              انصراف
-            </Button>
+          <DialogFooter className="flex-row-reverse sm:flex-row gap-2">
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10"
+              className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10 gap-1.5"
             >
               {saving ? (
-                <>
-                  <Loader2 className="w-4 h-4 ml-1.5 animate-spin" />
-                  در حال ذخیره
-                </>
+                <><Loader2 className="w-4 h-4 animate-spin" />در حال ذخیره</>
               ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 ml-1.5" />
-                  ذخیره
-                </>
+                <><CheckCircle2 className="w-4 h-4" />ذخیره</>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setAddDialogOpen(false)}
+              className="flex-1 sm:flex-none border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
+            >
+              انصراف
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Edit Category Dialog
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* ════════════════════════════════
+          Edit Dialog
+      ════════════════════════════════ */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[480px] w-[calc(100%-2rem)]" dir="rtl">
+        <DialogContent
+          className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-md lg:max-w-lg mx-auto rounded-xl"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-blue-700 text-sm sm:text-base">
               <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -805,26 +918,24 @@ export default function CategoriesPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3 sm:py-4">
-            {/* Category Name */}
+          <div className="space-y-4 py-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-gray-700">
                 نام دسته‌بندی <span className="text-red-500">*</span>
               </label>
               <Input
+                autoFocus
                 type="text"
                 placeholder="مثلاً: لباس مردانه"
                 value={editFormName}
                 onChange={(e) => setEditFormName(e.target.value)}
-                className="h-9 sm:h-10 text-sm border-gray-200 focus:border-blue-400 focus:ring-blue-400/20"
+                onKeyDown={(e) => e.key === 'Enter' && handleUpdate()}
+                className="h-9 sm:h-10 text-sm border-gray-200 focus:border-blue-400"
               />
             </div>
 
-            {/* Parent Category */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-gray-700">
-                دسته والد
-              </label>
+              <label className="text-xs font-medium text-gray-700">دسته والد</label>
               <Select value={editFormParentId} onValueChange={setEditFormParentId}>
                 <SelectTrigger className="h-9 sm:h-10 text-sm border-gray-200">
                   <SelectValue placeholder="انتخاب دسته والد" />
@@ -834,7 +945,7 @@ export default function CategoriesPage() {
                     <span className="text-gray-500">بدون والد (دسته اصلی)</span>
                   </SelectItem>
                   {rootCategories
-                    .filter((cat) => cat.id !== editingCategory?.id) // جلوگیری از انتخاب خودش به عنوان والد
+                    .filter((cat) => cat.id !== editingCategory?.id)
                     .map((cat) => (
                       <SelectItem key={cat.id} value={cat.id}>
                         {cat.name}
@@ -844,55 +955,48 @@ export default function CategoriesPage() {
               </Select>
             </div>
 
-            {/* Active Toggle */}
-            <div className="flex items-center justify-between py-1">
+            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
               <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
               <div className="flex items-center gap-2">
-                <span className={`text-xs ${editFormIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <span className={`text-xs font-medium ${editFormIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
                   {editFormIsActive ? 'فعال' : 'غیرفعال'}
                 </span>
-                <Switch
-                  checked={editFormIsActive}
-                  onCheckedChange={setEditFormIsActive}
-                />
+                <Switch checked={editFormIsActive} onCheckedChange={setEditFormIsActive} />
               </div>
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setEditDialogOpen(false)}
-              className="border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
-            >
-              انصراف
-            </Button>
+          <DialogFooter className="flex-row-reverse sm:flex-row gap-2">
             <Button
               onClick={handleUpdate}
               disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10"
+              className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10 gap-1.5"
             >
               {saving ? (
-                <>
-                  <Loader2 className="w-4 h-4 ml-1.5 animate-spin" />
-                  در حال بروزرسانی
-                </>
+                <><Loader2 className="w-4 h-4 animate-spin" />بروزرسانی...</>
               ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 ml-1.5" />
-                  بروزرسانی
-                </>
+                <><CheckCircle2 className="w-4 h-4" />بروزرسانی</>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              className="flex-1 sm:flex-none border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
+            >
+              انصراف
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ════════════════════════════════════════════════════════════════════
-          Delete Category Confirmation Dialog
-      ════════════════════════════════════════════════════════════════════ */}
+      {/* ════════════════════════════════
+          Delete Dialog
+      ════════════════════════════════ */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[420px] w-[calc(100%-2rem)]" dir="rtl">
+        <DialogContent
+          className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-sm lg:max-w-md mx-auto rounded-xl"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-700 text-sm sm:text-base">
               <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -903,82 +1007,74 @@ export default function CategoriesPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-3 sm:py-4">
-            {deletingCategory && (
-              <div className="space-y-3">
-                {/* Category info */}
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Grid3x3 className="w-4 h-4 text-red-600" />
-                    <span className="font-bold text-sm text-gray-900">{deletingCategory.name}</span>
-                  </div>
-                  {deletingCategory.parent?.name && (
-                    <p className="text-xs text-gray-500 mr-6">
-                      والد: {deletingCategory.parent.name}
-                    </p>
-                  )}
-                  <p className="text-xs text-gray-500 mr-6">
-                    {deletingCategory.productCount} محصول
-                  </p>
+          {deletingCategory && (
+            <div className="space-y-3 py-3">
+              {/* Category info */}
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Grid3x3 className="w-4 h-4 text-red-600 shrink-0" />
+                  <span className="font-bold text-sm text-gray-900">{deletingCategory.name}</span>
                 </div>
-
-                {/* Warning for children */}
-                {hasChildren && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-xs text-amber-700">
-                        <p className="font-medium">این دسته‌بندی {deletingCategory.children!.length} زیردسته دارد.</p>
-                        <p className="mt-1">با حذف این دسته‌بندی، زیردسته‌ها نیز ممکن است受到影响 شوند.</p>
-                      </div>
-                    </div>
-                  </div>
+                {deletingCategory.parent?.name && (
+                  <p className="text-xs text-gray-500 pr-6">والد: {deletingCategory.parent.name}</p>
                 )}
-
-                {/* Warning for products */}
-                {deletingCategory.productCount > 0 && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-xs text-amber-700">
-                        <p className="font-medium">{deletingCategory.productCount} محصول در این دسته‌بندی وجود دارد.</p>
-                        <p className="mt-1">قبل از حذف، محصولات را به دسته‌بندی دیگری منتقل کنید.</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <p className="text-xs text-red-600 font-medium text-center">
-                  این عملیات قابل بازگشت نیست!
-                </p>
+                <p className="text-xs text-gray-500 pr-6">{deletingCategory.productCount} محصول</p>
               </div>
-            )}
-          </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              className="border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
-            >
-              انصراف
-            </Button>
+              {/* Children warning */}
+              {hasChildren && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-700">
+                      <p className="font-medium">
+                        این دسته‌بندی {deletingCategory.children!.length} زیردسته دارد.
+                      </p>
+                      <p className="mt-0.5">با حذف این دسته‌بندی، زیردسته‌ها تحت تأثیر قرار می‌گیرند.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Products warning */}
+              {deletingCategory.productCount > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-700">
+                      <p className="font-medium">
+                        {deletingCategory.productCount} محصول در این دسته‌بندی وجود دارد.
+                      </p>
+                      <p className="mt-0.5">قبل از حذف، محصولات را به دسته‌بندی دیگری منتقل کنید.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-red-600 font-semibold text-center">
+                این عملیات قابل بازگشت نیست!
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="flex-row-reverse sm:flex-row gap-2">
             <Button
               onClick={handleDelete}
               disabled={deleting || (deletingCategory?.productCount ?? 0) > 0}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10"
+              className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm h-9 sm:h-10 gap-1.5"
             >
               {deleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 ml-1.5 animate-spin" />
-                  در حال حذف
-                </>
+                <><Loader2 className="w-4 h-4 animate-spin" />در حال حذف</>
               ) : (
-                <>
-                  <Trash2 className="w-4 h-4 ml-1.5" />
-                  حذف
-                </>
+                <><Trash2 className="w-4 h-4" />حذف</>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              className="flex-1 sm:flex-none border-gray-300 text-xs sm:text-sm h-9 sm:h-10"
+            >
+              انصراف
             </Button>
           </DialogFooter>
         </DialogContent>

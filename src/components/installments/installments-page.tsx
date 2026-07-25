@@ -1,7 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CreditCard, Search, CheckCircle2, Clock, AlertTriangle, RefreshCw, Loader2, Banknote, Lock, Crown, Wallet, Calendar as CalendarIcon } from 'lucide-react'
+import { 
+  CreditCard, Search, CheckCircle2, Clock, AlertTriangle, RefreshCw, 
+  Loader2, Banknote, Lock, Crown, Wallet, Calendar as CalendarIcon, 
+  WifiOff, CloudOff, Upload, Eye, EyeOff, ArrowLeft,TrendingUp
+} from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,9 +37,19 @@ import {
 import { useStore } from '@/lib/store'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import { useToast } from '@/hooks/use-toast'
+import {
+  cacheInstallmentPlans,
+  cacheInstallmentSchedules,
+  cacheInstallmentSummary,
+  getCachedInstallmentPlans,
+  getCachedInstallmentSchedules,
+  getCachedInstallmentSummary,
+  setLastSyncTimestamp,
+  getLastSyncTimestamp,
+} from '@/lib/offline-db'
 
 // ═══════════════════════════════════════════════════════════════
-// ★★★ Types — سازگار با خروجی API واقعی ★★★
+// ★★★ Types ★★★
 // ═══════════════════════════════════════════════════════════════
 
 interface ScheduleItem {
@@ -107,7 +121,6 @@ function formatDate(dateStr: string | null | undefined): string {
   try {
     const date = new Date(dateStr)
     if (isNaN(date.getTime())) return '---'
-    // ★★★ v3.4: الگوریتم مستقیم شمسی (بدون وابستگی به locale)
     const [jy, jm, jd] = gregorianToJalali(date.getFullYear(), date.getMonth() + 1, date.getDate())
     return `${toFaNum(jd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}`
   } catch {
@@ -115,7 +128,6 @@ function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
-// ★★★ v3.4: تاریخ کوتاه شمسی (۱۴۰۵/۰۳/۳۱) ★★★
 function formatDateShort(dateStr: string | null | undefined): string {
   if (!dateStr) return '---'
   try {
@@ -139,7 +151,7 @@ function getPeriodLabel(period: string | null | undefined): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ★★★ v3.4: توابع شمسی + ShamsiDatePicker ★★★
+// ★★★ Jalali Date Functions ★★★
 // ═══════════════════════════════════════════════════════════════
 
 function div(a: number, b: number): number { return Math.floor(a / b) }
@@ -496,7 +508,6 @@ function getInstallmentStatusBadge(status: string) {
   const s = status?.toLowerCase()
   if (s === 'paid') return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">پرداخت شده</Badge>
   if (s === 'overdue') return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-[10px]">سررسید گذشته</Badge>
-  // ★ بررسی سررسید گذشته بر اساس تاریخ
   return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px]">در انتظار</Badge>
 }
 
@@ -507,6 +518,91 @@ function isOverdue(schedule: ScheduleItem): boolean {
   } catch {
     return false
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ Mobile Installment Card ★★★
+// ═══════════════════════════════════════════════════════════════
+
+interface MobileInstallmentCardProps {
+  plan: PlanItem
+  onSelectPlan: (plan: PlanItem) => void
+}
+
+function MobileInstallmentCard({ plan, onSelectPlan }: MobileInstallmentCardProps) {
+  const paidCount = plan.paidCount ?? plan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
+  const totalCount = plan.totalInstallments || plan.schedules.length
+  const progressPct = plan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
+  const planOverdueItems = plan.schedules.filter(s => isOverdue(s))
+
+  return (
+    <Card 
+      className="cursor-pointer hover:shadow-md transition-shadow active:bg-purple-50"
+      onClick={() => onSelectPlan(plan)}
+    >
+      <CardContent className="p-3">
+        {/* ردیف ۱: نام مشتری + آیکون وضعیت */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
+            <div className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
+              planOverdueItems.length > 0 ? 'bg-red-100' : plan.status === 'completed' ? 'bg-emerald-100' : 'bg-blue-100'
+            }`}>
+              {planOverdueItems.length > 0 ? (
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+              ) : plan.status === 'completed' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <Clock className="w-4 h-4 text-blue-500" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-gray-900 truncate">{plan.customerName}</p>
+              <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                فاکتور {plan.invoiceNumber}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ردیف ۲: شماره اقساط */}
+        <div className="text-xs text-gray-600 mb-2 bg-gray-50 rounded px-2 py-1">
+          {formatNumber(paidCount)}/{formatNumber(totalCount)} قسط
+        </div>
+
+        {/* ردیف ۳: مبلغ باقیمانده */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <span className="text-xs text-gray-500">مانده:</span>
+          <span className="text-sm font-bold text-gray-900">{formatCurrency(plan.remainingAmount || plan.totalAmount)}</span>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="bg-gray-100 rounded-full h-2 overflow-hidden mb-2">
+          <div
+            className={`h-full rounded-full transition-all ${
+              plan.status === 'completed' ? 'bg-emerald-500' : planOverdueItems.length > 0 ? 'bg-red-500' : 'bg-blue-500'
+            }`}
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+
+        {/* ردیف ۴: وضعیت + درصد */}
+        <div className="flex items-center justify-between">
+          {getStatusBadge(plan.status)}
+          <span className="text-[10px] text-gray-400">{progressPct}%</span>
+        </div>
+
+        {/* هشدار سررسید */}
+        {planOverdueItems.length > 0 && (
+          <div className="mt-2 flex items-center gap-1 px-2 py-1.5 bg-red-50 rounded-lg border border-red-100">
+            <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
+            <p className="text-[10px] text-red-700 font-medium">
+              {formatNumber(planOverdueItems.length)} قسط معوق
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -525,30 +621,67 @@ export default function InstallmentsPage() {
   const [payingSchedule, setPayingSchedule] = useState<ScheduleItem | null>(null)
   const [payNotes, setPayNotes] = useState('')
   const [payRef, setPayRef] = useState('')
-  // ★★★ v3.3: state جدید برای روش و مبلغ پرداخت ★★★
   const [payMethod, setPayMethod] = useState('cash')
   const [payAmount, setPayAmount] = useState('')
-  // ★★★ v3.4: تاریخ پرداخت (ISO yyyy-mm-dd) ★★★
   const [payDate, setPayDate] = useState('')
+  const [showOnlyOverdue, setShowOnlyOverdue] = useState(false)
+  const [isOnline, setIsOnline] = useState(true)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null)
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
   const { toast } = useToast()
   const tenantId = useStore((s) => s.tenantId)
-
-  // ═══════════════════════════════════════════════════════════════
-  // ★★★ Plan Feature Gating ★★★
-  // ═══════════════════════════════════════════════════════════════
-
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
   const setCurrentView = useStore((s) => s.setCurrentView)
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ بارگذاری داده‌ها از API ★★★
+  // ★★★ Online Status Detection ★★★
+  // ═══════════════════════════════════════════════════════════════
+
+  useEffect(() => {
+    const handleOnline = () => { setIsOnline(true) }
+    const handleOffline = () => { setIsOnline(false) }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    // بررسی وضعیت اولیه
+    setIsOnline(navigator.onLine)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★★★ بارگذاری داده‌ها ★★★
   // ═══════════════════════════════════════════════════════════════
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+
+    if (!isOnline) {
+      // بارگذاری از آفلاین
+      try {
+        const cachedPlans = await getCachedInstallmentPlans()
+        const cachedSummary = await getCachedInstallmentSummary()
+        setPlans(cachedPlans)
+        setSummary(cachedSummary)
+        
+        if (cachedPlans.length === 0) {
+          setError('هیچ طرح قسطی در حافظه محلی یافت نشد')
+        }
+      } catch (err) {
+        console.error('[InstallmentsPage] Offline load error:', err)
+        setError('خطا در بارگذاری داده‌های محلی')
+      }
+      setLoading(false)
+      return
+    }
 
     try {
       const res = await fetch('/api/installment-plans', {
@@ -564,49 +697,85 @@ export default function InstallmentsPage() {
       const result = await res.json()
 
       if (result.success) {
-        setPlans(result.data || [])
-        setSummary(result.summary || null)
+        const plansData = result.data || []
+        const summaryData = result.summary || null
+
+        // ذخیره در آفلاین
+        await cacheInstallmentPlans(plansData)
+        if (summaryData) {
+          await cacheInstallmentSummary(summaryData)
+        }
+
+        setPlans(plansData)
+        setSummary(summaryData)
+
+        // بروزرسانی زمان sync
+        const timestamp = Date.now()
+        await setLastSyncTimestamp(timestamp)
+        setLastSyncTime(timestamp)
+
+        setError(null)
       } else {
         throw new Error(result.error || 'خطای ناشناخته')
       }
     } catch (err: any) {
       console.error('[InstallmentsPage] Load error:', err)
-      setError(err.message || 'خطا در بارگذاری اطلاعات')
-      setPlans([])
+      
+      // تلاش برای بارگذاری از آفلاین
+      try {
+        const cachedPlans = await getCachedInstallmentPlans()
+        const cachedSummary = await getCachedInstallmentSummary()
+        setPlans(cachedPlans)
+        setSummary(cachedSummary)
+        setError('خطا در دریافت از سرور. داده‌های محلی نمایش داده می‌شوند.')
+      } catch {
+        setError(err.message || 'خطا در بارگذاری اطلاعات')
+        setPlans([])
+      }
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isOnline])
 
-  // ★ بارگذاری اولیه
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  // ★ بروزرسانی خودکار هر ۶۰ ثانیه
+  // بروزرسانی خودکار هر ۶۰ ثانیه
   useEffect(() => {
+    if (!isOnline) return
+    
     const interval = setInterval(() => {
       loadData()
     }, 60000)
     return () => clearInterval(interval)
-  }, [loadData])
+  }, [loadData, isOnline])
 
-  // ★★★ v3.39: state برای فیلتر فقط سررسید‌شده‌ها
-  const [showOnlyOverdue, setShowOnlyOverdue] = useState(false)
+  // بارگذاری آخرین زمان sync از آفلاین
+  useEffect(() => {
+    const loadLastSync = async () => {
+      const timestamp = await getLastSyncTimestamp()
+      if (timestamp) {
+        setLastSyncTime(timestamp)
+      }
+    }
+    loadLastSync()
+  }, [])
 
-  // ★ فیلتر بر اساس جستجو
+  // ═══════════════════════════════════════════════════════════════
+  // ★★★ Filtering ★★★
+  // ═══════════════════════════════════════════════════════════════
+
   let filteredPlans = plans.filter((plan) =>
     plan.customerName.includes(search) || plan.invoiceNumber.toLowerCase().includes(search.toLowerCase())
   )
 
-  // ★★★ v3.39: فیلتر فقط پلن‌هایی که حداقل یک قسط سررسید‌شده دارند
   if (showOnlyOverdue) {
     filteredPlans = filteredPlans.filter((plan) =>
       plan.schedules.some((s) => isOverdue(s))
     )
   }
 
-  // ★ بازنگری در وضعیت اقساط سررسید گذشته (محلی)
   const overdueCount = plans.reduce((sum, plan) => {
     return sum + plan.schedules.filter(s => isOverdue(s)).length
   }, 0)
@@ -614,7 +783,7 @@ export default function InstallmentsPage() {
   const totalRemaining = plans.reduce((sum, plan) => sum + (plan.remainingAmount || 0), 0)
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ پرداخت قسط ★★★
+  // ★★★ Pay Installment ★★★
   // ═══════════════════════════════════════════════════════════════
 
   const handlePayClick = (schedule: ScheduleItem) => {
@@ -623,9 +792,7 @@ export default function InstallmentsPage() {
     setPayNotes('')
     setPayRef('')
     setPayMethod('cash')
-    // ★★★ v3.3: مبلغ پیش‌فرض = مبلغ قسط
     setPayAmount(String(schedule.amount))
-    // ★★★ v3.4: پیش‌فرض تاریخ پرداخت = امروز
     setPayDate(new Date().toISOString().split('T')[0])
     setPayDialogOpen(true)
   }
@@ -633,12 +800,12 @@ export default function InstallmentsPage() {
   const handlePayConfirm = async () => {
     if (!payingSchedule) return
 
-    // ★★★ v3.3: اعتبارسنجی مبلغ
     const amount = Number(payAmount)
     if (!amount || amount <= 0) {
       toast({
         title: 'خطا',
         description: 'مبلغ پرداخت باید بزرگتر از صفر باشد',
+        variant: 'destructive',
       })
       return
     }
@@ -647,6 +814,16 @@ export default function InstallmentsPage() {
       toast({
         title: 'خطا',
         description: `مبلغ پرداخت نمی‌تواند بیش از مبلغ قسط (${formatCurrency(payingSchedule.amount)}) باشد`,
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!isOnline) {
+      toast({
+        title: 'خطا',
+        description: 'پرداخت قسط نیاز به اتصال اینترنت دارد',
+        variant: 'destructive',
       })
       return
     }
@@ -656,7 +833,6 @@ export default function InstallmentsPage() {
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      // ★★★ v3.39: استفاده از API جدید که سند حسابداری خودکار هم می‌سازد
       const res = await fetch(`/api/installment-schedules/${payingSchedule.id}/pay`, {
         method: 'POST',
         headers: {
@@ -668,7 +844,6 @@ export default function InstallmentsPage() {
           paymentType: payMethod,
           paymentRef: payRef || undefined,
           notes: payNotes || undefined,
-          // ★★★ v3.4: ارسال تاریخ پرداخت انتخاب‌شده
           paidAt: payDate || undefined,
         }),
       })
@@ -677,28 +852,29 @@ export default function InstallmentsPage() {
 
       if (result.success) {
         toast({
-          title: 'پرداخت موفق',
+          title: 'پرداخت موفق ✓',
           description: result.message || `قسط شماره ${formatNumber(payingSchedule.installmentNumber)} با مبلغ ${formatCurrency(amount)} پرداخت شد`,
         })
 
-        // ★ بروزرسانی لیست
         await loadData()
 
-        // ★ اگر در جزئیات طرح هستیم، بروزرسانی طرح انتخاب‌شده
         if (selectedPlan) {
-          const updatedPlan = await fetchPlanDetail(selectedPlan.id)
-          if (updatedPlan) setSelectedPlan(updatedPlan)
+          const res = await fetch(`/api/installment-plans?id=${selectedPlan.id}`)
+          const result = await res.json()
+          if (result.success && result.data) setSelectedPlan(result.data)
         }
       } else {
         toast({
           title: 'خطا در پرداخت',
           description: result.error || 'خطای ناشناخته',
+          variant: 'destructive',
         })
       }
     } catch (err: any) {
       toast({
         title: 'خطا',
         description: 'خطا در ارتباط با سرور',
+        variant: 'destructive',
       })
     } finally {
       setPayingScheduleId(null)
@@ -710,36 +886,25 @@ export default function InstallmentsPage() {
     }
   }
 
-  const fetchPlanDetail = async (planId: string): Promise<PlanItem | null> => {
-    try {
-      const res = await fetch(`/api/installment-plans?id=${planId}`)
-      const result = await res.json()
-      if (result.success) return result.data
-      return null
-    } catch {
-      return null
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ Feature Gate — نمایش صفحه قفل شده ★★★
+  // ★★★ Feature Gate ★★★
   // ═══════════════════════════════════════════════════════════════
 
   if (!planFeatures.canAccessInstallments) {
     return (
       <div dir="rtl" className="flex flex-col h-full bg-gray-50/80">
-        <div className="flex-1 flex items-center justify-center p-6">
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
           <Card className="w-full max-w-md border-0 shadow-lg">
-            <CardContent className="p-8 text-center">
-              <div className="flex items-center justify-center w-20 h-20 rounded-full bg-amber-50 mx-auto mb-6">
-                <Lock className="w-10 h-10 text-amber-500" />
+            <CardContent className="p-6 sm:p-8 text-center">
+              <div className="flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-amber-50 mx-auto mb-4 sm:mb-6">
+                <Lock className="w-8 h-8 sm:w-10 sm:h-10 text-amber-500" />
               </div>
-              <h2 className="text-xl font-bold text-gray-900 mb-3">دسترسی محدود</h2>
-              <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2 sm:mb-3">دسترسی محدود</h2>
+              <p className="text-xs sm:text-sm text-gray-500 mb-4 sm:mb-6 leading-relaxed">
                 مدیریت اقساط فقط در پلن حرفه‌ای و بالاتر در دسترس است
               </p>
               <Button
-                className="bg-emerald-600 hover:bg-emerald-700 gap-2"
+                className="bg-emerald-600 hover:bg-emerald-700 gap-2 w-full"
                 onClick={() => setCurrentView('upgrade-plan')}
               >
                 <Crown className="w-4 h-4" />
@@ -753,220 +918,308 @@ export default function InstallmentsPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ نمایش جزئیات طرح قسطی ★★★
+  // ★★★ Plan Details View ★★★
   // ═══════════════════════════════════════════════════════════════
 
   if (selectedPlan) {
     const installments = selectedPlan.schedules || []
     const paidCount = selectedPlan.paidCount ?? selectedPlan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
     const totalCount = selectedPlan.totalInstallments || installments.length
-    const progressPct = totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0
+    const progressPct = selectedPlan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
     const overdueItems = installments.filter(s => isOverdue(s))
 
     return (
       <div dir="rtl" className="flex flex-col h-full bg-gray-50/80">
-        <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 text-white">
+        <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0 sticky top-0 z-40">
+          <div className="flex items-center justify-between gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <button 
+                onClick={() => setSelectedPlan(null)}
+                className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-lg hover:bg-gray-100 text-gray-600 shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+              <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-600 shrink-0">
                 <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <h1 className="text-sm sm:text-lg font-bold text-gray-900">جزئیات اقساط</h1>
-                <p className="text-[10px] sm:text-xs text-gray-500">{selectedPlan.customerName} — فاکتور {selectedPlan.invoiceNumber}</p>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base font-bold text-gray-900 truncate">جزئیات اقساط</h1>
+                <p className="text-[10px] sm:text-xs text-gray-500 truncate">{selectedPlan.customerName}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
+              {!isOnline && (
+                <Badge variant="outline" className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50">
+                  <WifiOff className="w-3 h-3" />
+                  <span className="hidden sm:inline">آفلاین</span>
+                </Badge>
+              )}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={async () => {
-                  const updated = await fetchPlanDetail(selectedPlan.id)
-                  if (updated) {
-                    setSelectedPlan(updated)
-                    toast({ title: 'بروزرسانی', description: 'اطلاعات بروزرسانی شد' })
-                  }
+                  setIsSyncing(true)
+                  await loadData()
+                  setIsSyncing(false)
                 }}
+                disabled={isSyncing || !isOnline}
+                className="h-8 text-xs"
               >
-                <RefreshCw className="w-3 h-3 ml-1" />
-                بروزرسانی
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setSelectedPlan(null)}>
-                بازگشت
+                {isSyncing ? (
+                  <Loader2 className="w-3 h-3 ml-1 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3 h-3 ml-1" />
+                )}
+                <span className="hidden sm:inline">بروزرسانی</span>
               </Button>
             </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-4">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">مبلغ کل</p>
-                <p className="text-sm font-bold">{formatCurrency(selectedPlan.totalAmount)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">پرداخت شده</p>
-                <p className="text-sm font-bold text-emerald-600">{formatCurrency(selectedPlan.totalPaidAmount)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">باقیمانده</p>
-                <p className="text-sm font-bold text-amber-600">{formatCurrency(selectedPlan.remainingAmount)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">پیشرفت</p>
-                <p className="text-sm font-bold">{formatNumber(paidCount)}/{formatNumber(totalCount)} ({progressPct}%)</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Info Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">پیش‌پرداخت</p>
-                <p className="text-sm font-bold text-blue-600">{formatCurrency(selectedPlan.downPayment)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">سود</p>
-                <p className="text-sm font-bold">{formatNumber(selectedPlan.interestRate)}%</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">مبلغ کل با سود</p>
-                <p className="text-sm font-bold">{formatCurrency(selectedPlan.totalWithInterest)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3 text-center">
-                <p className="text-[10px] text-gray-500">دوره پرداخت</p>
-                <p className="text-sm font-bold">{getPeriodLabel(selectedPlan.installmentPeriod)}</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Installments Table */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-sm">لیست اقساط</CardTitle>
-                  <CardDescription className="text-xs">
-                    {formatNumber(selectedPlan.numberOfInstallments || totalCount)} قسطه — سررسید هر {getPeriodLabel(selectedPlan.installmentPeriod)}
-                  </CardDescription>
+        <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-3 sm:space-y-4">
+        
+                               {/* Summary Cards - موبایل - KpiCard Style */}
+          <div className="grid grid-cols-2 gap-2">
+            <div
+              className="bg-gradient-to-br from-blue-500 to-blue-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+              style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+            >
+              <div className="shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <CreditCard className="w-4 h-4 text-white" />
                 </div>
-                {overdueItems.length > 0 && (
-                  <Badge className="bg-red-100 text-red-700 text-[10px]">
-                    {formatNumber(overdueItems.length)} قسط معوق
-                  </Badge>
-                )}
               </div>
-            </CardHeader>
-            <CardContent className="p-0 pb-2">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-xs">شماره</TableHead>
-                    <TableHead className="text-xs text-right">مبلغ</TableHead>
-                    <TableHead className="text-xs">سررسید</TableHead>
-                    <TableHead className="text-xs">تاریخ پرداخت</TableHead>
-                    <TableHead className="text-xs">وضعیت</TableHead>
-                    <TableHead className="text-xs">عملیات</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {installments.map((ins) => {
-                    const overdue = isOverdue(ins)
-                    const isPaid = ins.status?.toLowerCase() === 'paid'
-                    const isPaying = payingScheduleId === ins.id
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-white/80 truncate">مبلغ کل</p>
+                <p className="text-base font-bold text-white truncate">{formatCurrency(selectedPlan.totalAmount)}</p>
+              </div>
+            </div>
 
-                    return (
-                      <TableRow key={ins.id} className={overdue ? 'bg-red-50/50' : ''}>
-                        <TableCell className="text-xs">{formatNumber(ins.installmentNumber)}</TableCell>
-                        <TableCell className="text-xs text-right font-mono">{formatCurrency(ins.amount)}</TableCell>
-                        <TableCell className="text-xs">{formatDate(ins.dueDate)}</TableCell>
-                        <TableCell className="text-xs">{formatDate(ins.paidAt)}</TableCell>
-                        <TableCell>
-                          {overdue && !isPaid
-                            ? <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-[10px]">سررسید گذشته</Badge>
-                            : getInstallmentStatusBadge(ins.status)
-                          }
-                        </TableCell>
-                        <TableCell>
-                          {isPaid ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          ) : isPaying ? (
-                            <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-[10px] gap-1"
-                              onClick={() => handlePayClick(ins)}
-                            >
-                              <Banknote className="w-3 h-3" />
-                              پرداخت
-                            </Button>
-                          )}
-                        </TableCell>
+            <div
+              className="bg-gradient-to-br from-emerald-500 to-emerald-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+              style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+            >
+              <div className="shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-white/80 truncate">پرداخت شده</p>
+                <p className="text-base font-bold text-white truncate">{formatCurrency(selectedPlan.totalPaidAmount)}</p>
+              </div>
+            </div>
+
+            <div
+              className="bg-gradient-to-br from-amber-500 to-amber-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+              style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+            >
+              <div className="shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <Wallet className="w-4 h-4 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-white/80 truncate">باقیمانده</p>
+                <p className="text-base font-bold text-white truncate">{formatCurrency(selectedPlan.remainingAmount)}</p>
+              </div>
+            </div>
+
+            <div
+              className="bg-gradient-to-br from-purple-500 to-purple-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+              style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+            >
+              <div className="shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-white/80 truncate">پیشرفت</p>
+                <p className="text-base font-bold text-white truncate">{progressPct}%</p>
+              </div>
+            </div>
+          </div>
+          {/* Installments List - موبایل */}
+          <div className="md:hidden space-y-2">
+            {installments.length === 0 ? (
+              <Card className="bg-white">
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs text-gray-400">هنوز قسط ثبت نشده است</p>
+                </CardContent>
+              </Card>
+            ) : (
+              installments.map((ins) => {
+                const overdue = isOverdue(ins)
+                const isPaid = ins.status?.toLowerCase() === 'paid'
+                const isPaying = payingScheduleId === ins.id
+
+                return (
+                  <Card key={ins.id} className={`bg-white ${overdue && !isPaid ? 'border-red-200' : ''}`}>
+                    <CardContent className="p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold">قسط {formatNumber(ins.installmentNumber)}</span>
+                        {overdue && !isPaid ? (
+                          <Badge className="bg-red-100 text-red-700 text-[9px]">سررسید گذشته</Badge>
+                        ) : (
+                          getInstallmentStatusBadge(ins.status)
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-[10px]">
+                        <div className="bg-gray-50 rounded p-1.5 text-center">
+                          <p className="text-gray-400">مبلغ</p>
+                          <p className="font-bold mt-0.5">{formatCurrency(ins.amount)}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded p-1.5 text-center">
+                          <p className="text-gray-400">سررسید</p>
+                          <p className="font-bold mt-0.5">{formatDateShort(ins.dueDate)}</p>
+                        </div>
+                        <div className="bg-emerald-50 rounded p-1.5 text-center">
+                          <p className="text-gray-400">پرداخت</p>
+                          <p className="font-bold mt-0.5 text-emerald-600">{formatDateShort(ins.paidAt)}</p>
+                        </div>
+                      </div>
+
+                      {isPaid ? (
+                        <div className="flex items-center justify-center gap-2 py-2 bg-emerald-50 rounded-lg border border-emerald-200">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span className="text-xs text-emerald-700 font-medium">پرداخت شده</span>
+                        </div>
+                      ) : isPaying ? (
+                        <Button disabled className="w-full h-8 text-xs">
+                          <Loader2 className="w-3 h-3 ml-1 animate-spin" />
+                          در حال ثبت...
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={() => handlePayClick(ins)}
+                          className="w-full h-8 text-xs bg-emerald-600 hover:bg-emerald-700 gap-1"
+                        >
+                          <Banknote className="w-3 h-3" />
+                          پرداخت کنید
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })
+            )}
+          </div>
+
+          {/* Installments Table - دسکتاپ */}
+          <div className="hidden md:block">
+            <Card className="bg-white">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm">لیست اقساط</CardTitle>
+                    <CardDescription className="text-xs">
+                      {formatNumber(selectedPlan.numberOfInstallments || totalCount)} قسطه — سررسید هر {getPeriodLabel(selectedPlan.installmentPeriod)}
+                    </CardDescription>
+                  </div>
+                  {overdueItems.length > 0 && (
+                    <Badge className="bg-red-100 text-red-700 text-[10px]">
+                      {formatNumber(overdueItems.length)} قسط معوق
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-xs">شماره</TableHead>
+                        <TableHead className="text-xs text-right">مبلغ</TableHead>
+                        <TableHead className="text-xs">سررسید</TableHead>
+                        <TableHead className="text-xs">تاریخ پرداخت</TableHead>
+                        <TableHead className="text-xs">وضعیت</TableHead>
+                        <TableHead className="text-xs">عملیات</TableHead>
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {installments.map((ins) => {
+                        const overdue = isOverdue(ins)
+                        const isPaid = ins.status?.toLowerCase() === 'paid'
+                        const isPaying = payingScheduleId === ins.id
+
+                        return (
+                          <TableRow key={ins.id} className={`hover:bg-purple-50/30 ${overdue ? 'bg-red-50/30' : ''}`}>
+                            <TableCell className="text-xs font-mono">{formatNumber(ins.installmentNumber)}</TableCell>
+                            <TableCell className="text-xs text-right font-mono">{formatCurrency(ins.amount)}</TableCell>
+                            <TableCell className="text-xs">{formatDateShort(ins.dueDate)}</TableCell>
+                            <TableCell className="text-xs">{formatDateShort(ins.paidAt)}</TableCell>
+                            <TableCell>
+                              {overdue && !isPaid
+                                ? <Badge className="bg-red-100 text-red-700 text-[10px]">سررسید گذشته</Badge>
+                                : getInstallmentStatusBadge(ins.status)
+                              }
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {isPaid ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
+                              ) : isPaying ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-blue-500 mx-auto" />
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-[10px] gap-1 bg-emerald-600 hover:bg-emerald-700"
+                                  onClick={() => handlePayClick(ins)}
+                                >
+                                  <Banknote className="w-3 h-3" />
+                                  پرداخت
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
-        {/* ★★★ v3.3: Pay Dialog — با فیلد مبلغ، روش پرداخت و شماره مرجع ★★★ */}
+        {/* Pay Dialog */}
         <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
-          <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogContent dir="rtl" className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-emerald-600" />
+              <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+                <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
                 پرداخت قسط
               </DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="text-xs sm:text-sm">
                 قسط شماره {formatNumber(payingSchedule?.installmentNumber)} از {formatNumber(selectedPlan?.numberOfInstallments)}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-3 py-2">
-              {/* ★ اطلاعات قسط */}
-              <Card className="bg-gray-50/50">
+              <Card className="bg-gray-50/50 border-0">
                 <CardContent className="p-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
-                      <p className="text-gray-500">سررسید</p>
+                      <p className="text-gray-500 text-[10px]">سررسید</p>
                       <p className="font-medium">{formatDate(payingSchedule?.dueDate)}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">مشتری</p>
+                      <p className="text-gray-500 text-[10px]">مشتری</p>
                       <p className="font-medium truncate">{selectedPlan?.customerName || '---'}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">فاکتور</p>
-                      <p className="font-mono">{selectedPlan?.invoiceNumber || '---'}</p>
+                      <p className="text-gray-500 text-[10px]">فاکتور</p>
+                      <p className="font-mono text-[10px]">{selectedPlan?.invoiceNumber || '---'}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">مبلغ قسط</p>
-                      <p className="font-bold text-amber-700">{formatCurrency(payingSchedule?.amount)}</p>
+                      <p className="text-gray-500 text-[10px]">مبلغ قسط</p>
+                      <p className="font-bold text-amber-700 text-xs">{formatCurrency(payingSchedule?.amount)}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* ★ مبلغ پرداخت */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">مبلغ پرداخت <span className="text-red-500">*</span></Label>
                 <Input
@@ -974,26 +1227,16 @@ export default function InstallmentsPage() {
                   value={payAmount}
                   onChange={(e) => setPayAmount(e.target.value)}
                   placeholder="مبلغ به تومان"
-                  className="text-left font-mono"
+                  className="text-left font-mono text-xs h-8"
                   max={payingSchedule?.amount}
                   min={1}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-6 text-[10px] w-full"
-                  onClick={() => setPayAmount(String(payingSchedule?.amount || 0))}
-                >
-                  پرداخت کامل قسط ({formatCurrency(payingSchedule?.amount)})
-                </Button>
               </div>
 
-              {/* ★ روش پرداخت */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">روش پرداخت <span className="text-red-500">*</span></Label>
                 <Select value={payMethod} onValueChange={setPayMethod}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="h-8 text-xs">
                     <SelectValue placeholder="انتخاب روش پرداخت" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1004,7 +1247,6 @@ export default function InstallmentsPage() {
                 </Select>
               </div>
 
-              {/* ★★★ v3.4: تاریخ پرداخت (تقویم شمسی) ★★★ */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">تاریخ پرداخت <span className="text-red-500">*</span></Label>
                 <ShamsiDatePicker
@@ -1014,19 +1256,17 @@ export default function InstallmentsPage() {
                 />
               </div>
 
-              {/* ★ شماره مرجع */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">شماره مرجع (اختیاری)</Label>
                 <Input
                   type="text"
                   value={payRef}
                   onChange={(e) => setPayRef(e.target.value)}
-                  placeholder="شماره فیش / تراکنش / چک"
-                  className="text-left font-mono"
+                  placeholder="شماره فیش / تراکنش"
+                  className="text-left font-mono text-xs h-8"
                 />
               </div>
 
-              {/* ★ یادداشت */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">یادداشت (اختیاری)</Label>
                 <Input
@@ -1034,32 +1274,27 @@ export default function InstallmentsPage() {
                   value={payNotes}
                   onChange={(e) => setPayNotes(e.target.value)}
                   placeholder="توضیحات پرداخت..."
+                  className="text-xs h-8"
                 />
               </div>
 
-              {/* ★ هشدار accounting */}
-              <div className="flex items-start gap-2 p-2.5 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-700">
-                <CreditCard className="w-4 h-4 shrink-0 mt-0.5" />
-                <p>
-                  با ثبت پرداخت، سند حسابداری خودکار (بدهکار صندوق/بانک، بستانکار حساب‌های دریافتنی) ایجاد می‌شود و بدهی مشتری کاهش می‌یابد.
-                </p>
+              <div className="flex items-start gap-2 p-2 bg-blue-50 rounded-lg border border-blue-100 text-[10px] text-blue-700">
+                <CreditCard className="w-3 h-3 shrink-0 mt-0.5" />
+                <p>با ثبت پرداخت، سند حسابداری و بدهی مشتری بروزرسانی می‌شوند.</p>
               </div>
             </div>
 
-            <DialogFooter className="gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setPayDialogOpen(false)}
-              >
+            <DialogFooter className="gap-2 flex-row">
+              <Button variant="outline" onClick={() => setPayDialogOpen(false)} className="h-8 text-xs flex-1">
                 انصراف
               </Button>
               <Button
-                className="bg-emerald-600 hover:bg-emerald-700 gap-1.5"
+                className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs flex-1 gap-1"
                 onClick={handlePayConfirm}
                 disabled={!payAmount || Number(payAmount) <= 0 || !payDate}
               >
-                <Wallet className="w-4 h-4" />
-                تأیید پرداخت
+                <Wallet className="w-3 h-3" />
+                تأیید
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1069,44 +1304,73 @@ export default function InstallmentsPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ لیست طرح‌های قسطی ★★★
+  // ★★★ Plans List View ★★★
   // ═══════════════════════════════════════════════════════════════
 
   return (
     <div dir="rtl" className="flex flex-col h-full bg-gray-50/80">
-      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0">
-        <div className="flex items-center justify-between">
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0 sticky top-0 z-40">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 text-white">
+            <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 text-white">
               <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <h1 className="text-sm sm:text-lg font-bold text-gray-900">اقساط</h1>
+              <h1 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900">اقساط</h1>
               <p className="text-[10px] sm:text-xs text-gray-500">مدیریت اقساط مشتریان</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadData}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="w-3 h-3 ml-1 animate-spin" />
-            ) : (
-              <RefreshCw className="w-3 h-3 ml-1" />
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {!isOnline && (
+              <Badge variant="outline" className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5">
+                <WifiOff className="w-2.5 h-2.5" />
+                <span className="hidden sm:inline">آفلاین</span>
+              </Badge>
             )}
-            بروزرسانی
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                setIsSyncing(true)
+                await loadData()
+                setIsSyncing(false)
+              }}
+              disabled={isSyncing || !isOnline}
+              className="h-8 text-xs"
+            >
+              {isSyncing ? (
+                <Loader2 className="w-3 h-3 ml-1 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3 h-3 ml-1" />
+              )}
+              <span className="hidden sm:inline">بروزرسانی</span>
+            </Button>
+          </div>
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-3 sm:p-6">
+      {/* آفلاین Badge */}
+      {!isOnline && (
+        <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-3 sm:px-6 py-2 shrink-0">
+          <CloudOff className="w-4 h-4 text-amber-600 shrink-0" />
+          <div className="flex-1 text-xs text-amber-700">
+            <span className="font-bold">حالت آفلاین: </span>
+            <span>داده‌های محلی نمایش داده می‌شوند. پس از اتصال بروزرسانی شود.</span>
+          </div>
+          {lastSyncTime && (
+            <span className="text-[10px] text-amber-600 shrink-0 whitespace-nowrap">
+              sync: {new Date(lastSyncTime).toLocaleDateString('fa-IR')}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-4">
         {/* Loading State */}
         {loading && plans.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
-            <p className="text-sm text-gray-500">در حال بارگذاری...</p>
+            <p className="text-sm text-gray-500">درحال بارگذاری...</p>
           </div>
         )}
 
@@ -1115,66 +1379,125 @@ export default function InstallmentsPage() {
           <div className="flex flex-col items-center justify-center py-16">
             <AlertTriangle className="w-8 h-8 text-red-500 mb-3" />
             <p className="text-sm text-red-600 mb-2">{error}</p>
-            <Button variant="outline" size="sm" onClick={loadData}>
-              تلاش مجدد
-            </Button>
+            {isOnline && (
+              <Button variant="outline" size="sm" onClick={loadData}>
+                تلاش مجدد
+              </Button>
+            )}
           </div>
         )}
 
         {/* Content */}
         {!loading || plans.length > 0 ? (
           <>
-            {/* Summary */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              <Card>
-                <CardContent className="p-3 text-center">
-                  <p className="text-[10px] text-gray-500">اقساط فعال</p>
-                  <p className="text-sm font-bold text-blue-600">
+          
+                                          {/* Summary Cards - Main List - KpiCard Style */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              <div
+                className="bg-gradient-to-br from-blue-500 to-blue-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+              >
+                <div className="shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-white" />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-white/80 truncate">اقساط فعال</p>
+                  <p className="text-base font-bold text-white truncate">
                     {formatNumber(summary?.activePlans ?? plans.filter(p => p.status?.toLowerCase() === 'active').length)}
                   </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-3 text-center">
-                  <p className="text-[10px] text-gray-500">اقساط معوق</p>
-                  <p className="text-sm font-bold text-red-600">
+                </div>
+              </div>
+
+              <div
+                className="bg-gradient-to-br from-red-500 to-red-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+              >
+                <div className="shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <AlertTriangle className="w-4 h-4 text-white" />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-white/80 truncate">اقساط معوق</p>
+                  <p className="text-base font-bold text-white truncate">
                     {formatNumber(summary?.totalOverdueInstallments ?? overdueCount)}
                   </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-3 text-center">
-                  <p className="text-[10px] text-gray-500">مانده کل</p>
-                  <p className="text-sm font-bold">{formatCurrency(summary?.totalRemaining ?? totalRemaining)}</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Search + Filter */}
-            <div className="flex items-center gap-2 mb-4">
-              <div className="relative flex-1">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="جستجوی مشتری یا شماره فاکتور..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pr-10 pe-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
-                />
+                </div>
               </div>
-              {/* ★★★ v3.39: دکمه فیلتر فقط سررسید‌شده‌ها */}
+
+              <div
+                className="bg-gradient-to-br from-amber-500 to-amber-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+              >
+                <div className="shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <Wallet className="w-4 h-4 text-white" />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-white/80 truncate">مانده کل</p>
+                  <p className="text-base font-bold text-white truncate">{formatCurrency(summary?.totalRemaining ?? totalRemaining)}</p>
+                </div>
+              </div>
+
+              <div
+                className="bg-gradient-to-br from-purple-500 to-purple-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl hidden lg:flex"
+                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
+              >
+                <div className="shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <CreditCard className="w-4 h-4 text-white" />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-white/80 truncate">تمام اقساط</p>
+                  <p className="text-base font-bold text-white truncate">{formatNumber(summary?.totalPlans || 0)}</p>
+                </div>
+              </div>
+            </div>
+            {/* Search + Filter */}
+            <div className="flex flex-col sm:flex-row items-center gap-2">
+              <div className="relative flex-1 w-full">
+                {mobileSearchOpen || window.innerWidth >= 640 ? (
+                  <>
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <input
+                      autoFocus={mobileSearchOpen}
+                      type="text"
+                      placeholder="جستجو مشتری یا شماره فاکتور..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onBlur={() => { if (!search) setMobileSearchOpen(false) }}
+                      className="w-full pr-9 pl-3 py-2 sm:py-2.5 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+                    />
+                  </>
+                ) : (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setMobileSearchOpen(true)}
+                    className="h-9 w-full sm:hidden"
+                  >
+                    <Search className="w-4 h-4 ml-2" />
+                    جستجو
+                  </Button>
+                )}
+              </div>
+
               <button
                 onClick={() => setShowOnlyOverdue(!showOnlyOverdue)}
-                className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${
+                className={`flex items-center gap-1.5 px-2 sm:px-3 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-all whitespace-nowrap h-9 sm:h-auto ${
                   showOnlyOverdue
                     ? 'bg-red-100 text-red-700 border-2 border-red-300'
                     : 'bg-white text-gray-500 border-2 border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <AlertTriangle className="w-3.5 h-3.5" />
-                فقط سررسید‌شده
+                <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                معوق
                 {overdueCount > 0 && (
-                  <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${
+                  <span className={`text-[9px] rounded-full px-1 py-0 ${
                     showOnlyOverdue ? 'bg-red-500 text-white' : 'bg-red-100 text-red-600'
                   }`}>
                     {formatNumber(overdueCount)}
@@ -1183,76 +1506,102 @@ export default function InstallmentsPage() {
               </button>
             </div>
 
-            {/* Installment Plans List */}
-            <div className="space-y-3">
+            {/* Plans List - Mobile Card View */}
+            <div className="md:hidden space-y-2">
               {filteredPlans.length === 0 ? (
-                <div className="py-12 text-center text-sm text-gray-400">
-                  {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
-                </div>
+                <Card className="bg-white">
+                  <CardContent className="p-6 text-center">
+                    <p className="text-xs text-gray-400">
+                      {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
+                    </p>
+                  </CardContent>
+                </Card>
               ) : (
-                filteredPlans.map((plan) => {
-                  const paidCount = plan.paidCount ?? plan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
-                  const totalCount = plan.totalInstallments || plan.schedules.length
-                  const progressPct = plan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
-                  const planOverdueItems = plan.schedules.filter(s => isOverdue(s))
-
-                  return (
-                    <Card
-                      key={plan.id}
-                      className="cursor-pointer hover:border-emerald-300 transition-colors"
-                      onClick={() => setSelectedPlan(plan)}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-3 min-w-0">
-                            <div className={`flex items-center justify-center w-10 h-10 rounded-xl shrink-0 ${
-                              planOverdueItems.length > 0 ? 'bg-red-100' : plan.status === 'completed' ? 'bg-emerald-100' : 'bg-blue-100'
-                            }`}>
-                              {planOverdueItems.length > 0 ? (
-                                <AlertTriangle className="w-5 h-5 text-red-500" />
-                              ) : plan.status === 'completed' ? (
-                                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                              ) : (
-                                <Clock className="w-5 h-5 text-blue-500" />
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 truncate">{plan.customerName}</p>
-                              <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5 truncate">
-                                فاکتور {plan.invoiceNumber} • {formatNumber(plan.numberOfInstallments || totalCount)} قسطه • سررسید هر {getPeriodLabel(plan.installmentPeriod)}
-                              </p>
-                              {planOverdueItems.length > 0 && (
-                                <p className="text-[10px] text-red-600 mt-0.5">
-                                  {formatNumber(planOverdueItems.length)} قسط معوق
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-xs font-bold text-gray-900">{formatCurrency(plan.remainingAmount || plan.totalAmount)}</p>
-                            <p className="text-[10px] text-gray-400">{progressPct}% پرداخت</p>
-                          </div>
-                        </div>
-                        {/* Progress bar */}
-                        <div className="mt-3 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              plan.status === 'completed' ? 'bg-emerald-500' : planOverdueItems.length > 0 ? 'bg-red-500' : 'bg-blue-500'
-                            }`}
-                            style={{ width: `${progressPct}%` }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between mt-2">
-                          {getStatusBadge(plan.status)}
-                          <span className="text-[10px] text-gray-400">
-                            {formatNumber(paidCount)}/{formatNumber(totalCount)} قسط
-                          </span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })
+                filteredPlans.map((plan) => (
+                  <MobileInstallmentCard
+                    key={plan.id}
+                    plan={plan}
+                    onSelectPlan={setSelectedPlan}
+                  />
+                ))
               )}
+            </div>
+
+            {/* Plans Table - Desktop */}
+            <div className="hidden md:block">
+              <Card className="bg-white">
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    {filteredPlans.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-gray-400">
+                        {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50/80">
+                            <TableHead className="text-xs">مشتری</TableHead>
+                            <TableHead className="text-xs">فاکتور</TableHead>
+                            <TableHead className="text-xs text-right">مبلغ کل</TableHead>
+                            <TableHead className="text-xs text-right">باقیمانده</TableHead>
+                            <TableHead className="text-xs">اقساط</TableHead>
+                            <TableHead className="text-xs">وضعیت</TableHead>
+                            <TableHead className="text-xs">پیشرفت</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredPlans.map((plan) => {
+                            const paidCount = plan.paidCount ?? plan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
+                            const totalCount = plan.totalInstallments || plan.schedules.length
+                            const progressPct = plan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
+                            const planOverdueItems = plan.schedules.filter(s => isOverdue(s))
+
+                            return (
+                              <TableRow
+                                key={plan.id}
+                                className="hover:bg-purple-50/30 cursor-pointer transition-colors"
+                                onClick={() => setSelectedPlan(plan)}
+                              >
+                                <TableCell className="text-xs font-medium">{plan.customerName}</TableCell>
+                                <TableCell className="text-xs font-mono">{plan.invoiceNumber}</TableCell>
+                                <TableCell className="text-xs text-right">{formatCurrency(plan.totalAmount)}</TableCell>
+                                <TableCell className="text-xs text-right font-bold text-amber-600">{formatCurrency(plan.remainingAmount)}</TableCell>
+                                <TableCell className="text-xs">
+                                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-[10px]">
+                                    {formatNumber(paidCount)}/{formatNumber(totalCount)}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  {planOverdueItems.length > 0 ? (
+                                    <Badge className="bg-red-100 text-red-700 text-[10px]">
+                                      {formatNumber(planOverdueItems.length)} معوق
+                                    </Badge>
+                                  ) : (
+                                    getStatusBadge(plan.status)
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${
+                                          plan.status === 'completed' ? 'bg-emerald-500' : planOverdueItems.length > 0 ? 'bg-red-500' : 'bg-blue-500'
+                                        }`}
+                                        style={{ width: `${progressPct}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[10px] text-gray-400 min-w-[30px]">{progressPct}%</span>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </>
         ) : null}
@@ -1260,3 +1609,4 @@ export default function InstallmentsPage() {
     </div>
   )
 }
+
