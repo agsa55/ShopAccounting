@@ -1,17 +1,17 @@
 'use client'
 
 // ============================================================================
-// src/app/demo/otp/page.tsx — Demo Trial: OTP Verification (v9.1 ★★★)
+// src/app/demo/otp/page.tsx — Demo Trial: OTP Verification (v9.1 ⚡⚡⚡)
 // ShopAccounting — Second step of 3-day demo trial
 // ----------------------------------------------------------------------------
-// این صفحه:
-//   ۱. کد OTP ۶ رقمی را از کاربر دریافت می‌کند
+// شرح صفحه:
+//   ۱. بعد OTP از کاربر را از کاربر دریافت می‌کند
 //   ۲. آن را به /api/demo/verify-otp ارسال می‌کند
-//   ۳. در صورت موفقیت → ذخیره توکن‌ها + هدایت به /demo/success
+//   ۳. در صورت موفقیت → ذخیره جوکن‌ها + هدایت به /demo/success
 //   ۴. در صورت خطا → نمایش پیام + امکان درخواست مجدد کد
 // ============================================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,13 +22,16 @@ import {
 } from 'lucide-react'
 import { setAccessToken, setRefreshToken, setStoredUser } from '@/lib/auth-client'
 
-export default function DemoOtpPage() {
+// ═══════════════════════════════════════════════════════════════════════════
+// کامپوننت اصلی با useSearchParams
+// ═══════════════════════════════════════════════════════════════════════════
+function OtpContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
   const mobile = searchParams.get('mobile') || ''
   const sessionId = searchParams.get('sessionId') || ''
-  const devCode = searchParams.get('devCode') // ★ فقط در محیط development
+  const devCode = searchParams.get('devCode') // ⚡ فقط در محیط development
 
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
@@ -37,7 +40,7 @@ export default function DemoOtpPage() {
   const [resending, setResending] = useState(false)
   const [mockCode, setMockCode] = useState<string | null>(devCode)
 
-  // ─── بررسی پارامترهای URL ───────────────────────────────────────
+  // ─── بررسی پارامترهای URL ───────────────────────────────────────────────
   useEffect(() => {
     if (!mobile || !sessionId) {
       console.error('[Demo OTP] Missing mobile or sessionId')
@@ -46,7 +49,7 @@ export default function DemoOtpPage() {
     }
   }, [mobile, sessionId, router])
 
-  // ─── Countdown برای resend ──────────────────────────────────────
+  // ─── Countdown برای resend ───────────────────────────────────────────────
   useEffect(() => {
     if (cooldown <= 0) return
     const timer = setInterval(() => {
@@ -55,7 +58,7 @@ export default function DemoOtpPage() {
     return () => clearInterval(timer)
   }, [cooldown])
 
-  // ─── تأیید OTP ──────────────────────────────────────────────────
+  // ─── تایید OTP ───────────────────────────────────────────────────────────
   const handleVerify = async () => {
     setError('')
 
@@ -65,7 +68,7 @@ export default function DemoOtpPage() {
     }
 
     if (!mobile || !sessionId) {
-      setError('اطلاعات نشوز ناقص است. لطفاً دوباره شروع کنید.')
+      setError('اطلاعات موبایل ناقص است. لطفاً دوباره شروع کنید.')
       return
     }
 
@@ -84,13 +87,13 @@ export default function DemoOtpPage() {
       const data = await res.json()
 
       if (data.success) {
-        // ★ ذخیره توکن‌ها در localStorage
+        // ⚡ ذخیره جوکن‌ها در localStorage
         if (typeof window !== 'undefined') {
           setAccessToken(data.data.accessToken)
           if (data.data.refreshToken) setRefreshToken(data.data.refreshToken)
           if (data.data.user) setStoredUser(data.data.user)
 
-          // ★ ذخیره اطلاعات دمو برای نمایش در صفحه success
+          // ⚡ ذخیره اطلاعات دمو برای نمایش در صفحه success
           sessionStorage.setItem('demo_success_data', JSON.stringify({
             username: data.data.user.username,
             password: data.data.user.demoPassword,
@@ -101,12 +104,12 @@ export default function DemoOtpPage() {
           }))
         }
 
-        // ★ هدایت به صفحه success
+        // ⚡ هدایت به صفحه success
         router.push('/demo/success')
       } else {
         setError(data.error || 'کد نامعتبر است')
 
-        // ★ اگر نشوز منقضی شده → بازگشت به صفحه phone
+        // ⚡ اگر موبایل منقضی شده → بازگشت به صفحه phone
         if (res.status === 410) {
           setTimeout(() => router.push('/demo/phone'), 2000)
         }
@@ -119,7 +122,7 @@ export default function DemoOtpPage() {
     }
   }
 
-  // ─── ارسال مجدد کد ──────────────────────────────────────────────
+  // ─── ارسال مجدد کد ───────────────────────────────────────────────────────
   const handleResend = async () => {
     if (cooldown > 0) return
 
@@ -141,7 +144,7 @@ export default function DemoOtpPage() {
         setCooldown(60)
         setMockCode(data.data.devCode || null)
         setOtpCode('')
-        // ★ نمایش پیام موفقیت کوتاه
+        // ⚡ نمایش پیام موفقیت کوتاه
         setError('')
       } else {
         setError(data.error || 'خطا در ارسال مجدد کد')
@@ -157,11 +160,11 @@ export default function DemoOtpPage() {
     }
   }
 
-  // ─── Enter key ──────────────────────────────────────────────────
+  // ─── Enter key ───────────────────────────────────────────────────────────
   const handleOtpComplete = (value: string) => {
     setOtpCode(value)
     if (error) setError('')
-    // ★ اگر ۶ رقم وارد شد، خودکار verify کن
+    // ⚡ اگر ۶ رقم وارد شد، خودکار verify کن
     if (value.length === 6) {
       setTimeout(() => handleVerify(), 200)
     }
@@ -178,7 +181,7 @@ export default function DemoOtpPage() {
             </div>
             <span className="text-xl font-bold text-gray-900">ShopAccounting</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">تأیید شماره موبایل</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">تایید شماره موبایل</h1>
           <p className="text-sm text-gray-600">
             کد ۶ رقمی ارسال شده به شماره زیر را وارد کنید
           </p>
@@ -211,7 +214,7 @@ export default function DemoOtpPage() {
                 <div className="flex-1">
                   <p className="text-xs font-medium text-amber-900">حالت تست (Development)</p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    کد تأیید شما: <span className="font-bold tracking-wider" dir="ltr">{mockCode}</span>
+                    کد تایید شما: <span className="font-bold tracking-wider" dir="ltr">{mockCode}</span>
                   </p>
                 </div>
               </div>
@@ -224,7 +227,7 @@ export default function DemoOtpPage() {
           <CardContent className="pt-6">
             <div className="space-y-5">
               <div className="text-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">کد تأیید را وارد کنید</h2>
+                <h2 className="text-lg font-semibold text-gray-900">کد تایید را وارد کنید</h2>
                 <p className="text-sm text-gray-500 mt-1">۶ رقم</p>
               </div>
 
@@ -263,12 +266,12 @@ export default function DemoOtpPage() {
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 ml-2 animate-spin" />
-                    در حال تأیید...
+                    در حال تایید...
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4 ml-2" />
-                    تأیید و شروع تست دمو
+                    تایید و شروع تست دمو
                   </>
                 )}
               </Button>
@@ -321,10 +324,30 @@ export default function DemoOtpPage() {
         <div className="mt-6 text-center">
           <div className="inline-flex items-center gap-2 text-xs text-gray-500 bg-white border border-gray-200 rounded-full px-3 py-1.5">
             <Clock className="w-3 h-3 text-emerald-500" />
-            <span>پس از تأیید، ۳ روز دسترسی کامل خواهید داشت</span>
+            <span>پس از تایید، ۳ روز دسترسی کامل خواهید داشت</span>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wrapper با Suspense (برای رفع خطای useSearchParams)
+// ═══════════════════════════════════════════════════════════════════════════
+export default function DemoOtpPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-emerald-50 via-white to-teal-50">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg mx-auto mb-3">
+            <Loader2 className="w-7 h-7 text-white animate-spin" />
+          </div>
+          <p className="text-sm text-gray-600">در حال بارگذاری...</p>
+        </div>
+      </div>
+    }>
+      <OtpContent />
+    </Suspense>
   )
 }

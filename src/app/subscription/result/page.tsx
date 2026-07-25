@@ -1,11 +1,11 @@
 'use client'
 
 // ============================================================================
-// src/app/subscription/result/page.tsx (v9.4.0 ★★★)
+// src/app/subscription/result/page.tsx (v9.4.0 ⚡⚡⚡)
 // ShopAccounting — Subscription Payment Result Page
 // ----------------------------------------------------------------------------
-// ★ این صفحه پس از بازگشت از درگاه زرین‌پال نمایش داده می‌شود.
-// ★ پارامترهای query:
+// ⚡ این صفحه پس از بازگشت از درگاه زرین‌پال نمایش داده می‌شود.
+// ⚡ پارامترهای query:
 //   - status: success | cancelled | failed | error | apply_failed | already_paid
 //   - refId: شناسه پرداخت (در صورت موفقیت)
 //   - tenantId: شناسه tenant (در صورت موفقیت)
@@ -15,7 +15,7 @@
 //   - expiresAt: تاریخ انقضا (در صورت موفقیت)
 // ============================================================================
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,7 +26,10 @@ import {
 
 type ResultStatus = 'success' | 'cancelled' | 'failed' | 'error' | 'apply_failed' | 'already_paid' | 'loading'
 
-export default function SubscriptionResultPage() {
+// ═══════════════════════════════════════════════════════════════════════════
+// کامپوننت اصلی با useSearchParams
+// ═══════════════════════════════════════════════════════════════════════════
+function ResultContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -47,7 +50,7 @@ export default function SubscriptionResultPage() {
     })
   }, [searchParams])
 
-  // ─── اگر در حال بارگذاری ──────────────────────────────────────
+  // ─── اگر در حال بارگذاری ─────────────────────────────────────────────────
   if (status === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50" dir="rtl">
@@ -59,7 +62,7 @@ export default function SubscriptionResultPage() {
     )
   }
 
-  // ─── پیکربندی بر اساس status ──────────────────────────────────
+  // ─── پیکربندی بر اساس status ─────────────────────────────────────────────
   const config = {
     success: {
       icon: CheckCircle2,
@@ -114,7 +117,7 @@ export default function SubscriptionResultPage() {
   const c = config[status] || config.error
   const Icon = c.icon
 
-  // ─── نام پلن فارسی ─────────────────────────────────────────────
+  // ─── نام پلن فارسی ─────────────────────────────────────────────────────────
   const tierNameFa = (() => {
     const t = (data.tierName || '').toLowerCase()
     if (t.includes('professional') || t.includes('پیشرفته')) return 'پیشرفته'
@@ -206,9 +209,9 @@ export default function SubscriptionResultPage() {
               {status === 'success' || status === 'already_paid' ? (
                 <Button
                   onClick={() => {
-                    // ★ هدایت به داشبورد
+                    // ⚡ هدایت به داشبورد
                     if (data.tenantId) {
-                      // ★ در محیط localhost
+                      // ⚡ در محیط localhost
                       window.location.href = `/?demo_purchased=1`
                     } else {
                       window.location.href = '/'
@@ -245,5 +248,23 @@ export default function SubscriptionResultPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wrapper با Suspense (برای رفع خطای useSearchParams)
+// ═══════════════════════════════════════════════════════════════════════════
+export default function SubscriptionResultPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">در حال بارگذاری...</p>
+        </div>
+      </div>
+    }>
+      <ResultContent />
+    </Suspense>
   )
 }
