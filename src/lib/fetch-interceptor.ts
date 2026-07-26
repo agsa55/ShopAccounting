@@ -92,7 +92,10 @@ export function setupFetchInterceptor() {
         }
       }
 
-      // تمدید هم نشد → پاکسازی و ریلود
+      // ★ فیکس: به‌جای window.location.reload() که حلقه ایجاد می‌کنه،
+      // فقط پاکسازی می‌کنیم و redirect می‌دهیم
+      // reload() در صورت 401 باعث می‌شد صفحه مدام رفرش بشه
+      // چون هر بار reload → fetch → 401 → reload → ...
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       localStorage.removeItem('refreshToken')
@@ -101,9 +104,12 @@ export function setupFetchInterceptor() {
       localStorage.removeItem('planName')
       document.cookie = 'token=; path=/; max-age=0'
 
-      // فقط اگه در صفحه لاگین نیستیم، ریلود کن
+      // ★ فیکس: فقط اگه در صفحه لاگین نیستیم، redirect کن (نه reload)
+      // redirect به جای reload چون reload حلقه ایجاد می‌کنه
       if (!window.location.pathname.startsWith('/auth/')) {
-        window.location.reload()
+        // ★ از href استفاده می‌کنیم نه reload — این یه navigation کامل انجام میده
+        // و حلقه‌ای ایجاد نمی‌کنه چون توکن پاک شده و دیگه API call نمی‌شه
+        window.location.href = `/?logout=1&t=${Date.now()}`
       }
     }
 

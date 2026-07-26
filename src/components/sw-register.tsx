@@ -3,6 +3,7 @@
 // ============================================================================
 // src/components/sw-register.tsx — Service Worker Registration
 // ثبت و مدیریت Service Worker برای قابلیت آفلاین
+// ★ فیکس: فقط در production ثبت می‌شود (جلوگیری از حلقه رفرش در dev)
 // ============================================================================
 
 import { useEffect } from 'react'
@@ -17,6 +18,27 @@ export function ServiceWorkerRegister() {
       return
     }
 
+    // ★ فیکس: در محیط development اصلاً ثبت نمی‌کنیم
+    // چون Turbopack مدام فایل‌ها رو rebuild می‌کنه و SW آپدیت میشه
+    // → controllerchange → reload حلقه بی‌نهایت
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[SW] ⏭️ Development mode — Service Worker ثبت نمی‌شود')
+
+      // در dev فقط SW های قبلی رو unregister کن تا مشکلی نباشه
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => {
+          registration.unregister().then((success) => {
+            if (success) {
+              console.log('[SW] 🧹 SW قبلی unregister شد (dev mode)')
+            }
+          })
+        })
+      })
+
+      return
+    }
+
+    // ★ فقط در production ثبت می‌کنیم
     // ثبت Service Worker
     navigator.serviceWorker
       .register('/sw.js')

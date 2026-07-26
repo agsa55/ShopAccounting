@@ -1058,7 +1058,7 @@ export default function AppShell() {
       })
     }
 
-    // ★ ثبت Service Worker — از pwa-register.tsx مجزا است
+       // ★ ثبت Service Worker — از pwa-register.tsx مجزا است
     // ★ این فقط برای sync پیام‌رسانی است، ثبت اصلی در PWARegister انجام می‌شود
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
@@ -1074,16 +1074,18 @@ export default function AppShell() {
           }
         })
 
-        // ★ Handle controller change (new SW activated)
+        // ★ فیکس: controllerchange دیگر reload نمی‌کند
+        // در dev این رویداد مدام فایر می‌شد (چون Turbopack فایل‌ها رو rebuild می‌کنه)
+        // و اگر reload() اینجا بود → حلقه بی‌نهایت
+        // الان فقط log می‌کنیم — reload فقط در production و با تأیید کاربر انجام میشه
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('[AppShell] SW controller changed (new version active)')
+          console.log('[AppShell] SW controller changed (new version active) — no auto-reload in dev')
         })
 
       } catch (err) {
         console.warn('[AppShell] SW listener error:', err)
       }
     }
-
     const initialOnline = navigator.onLine
     useStore.getState().setOnline(initialOnline)
 

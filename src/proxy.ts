@@ -1,6 +1,7 @@
 // ============================================================================
 // src/proxy.ts — Proxy (Middleware) — ShopAccounting v23.8
 // ★ v23.8: اضافه کردن config.matcher + bypass فایل‌های استاتیک PWA
+// ★ v23.8.1: فیکس باگ حلقه رفرش ناشی از /.well-known/appspecific/com.chrome.devtools.json
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -51,6 +52,7 @@ const STATIC_BYPASS_PREFIXES = [
   '/fonts/',
   '/images/',
   '/_next/',
+  '/.well-known/', // ★ فیکس: bypass مسیرهای well-known (مثل درخواست خودکار Chrome DevTools)
 ];
 
 const RESERVED_PATHS = new Set([
@@ -62,6 +64,9 @@ const RESERVED_PATHS = new Set([
   'demo',
 ]);
 
+// ★ فیکس: الگوی معتبر برای tenant slug (فقط حروف، عدد و خط تیره — بدون نقطه یا کاراکترهای خاص)
+const VALID_SLUG_REGEX = /^[a-z0-9][a-z0-9-]*$/i;
+
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
 
 // ─── Helper: آیا مسیر باید bypass شود؟ ──────────────────────────────────────
@@ -72,6 +77,9 @@ function shouldBypassStatic(pathname: string): boolean {
   // پیشوندهای استاتیک
   if (STATIC_BYPASS_PREFIXES.some(prefix => pathname.startsWith(prefix))) return true;
 
+  // ★ فیکس: هر مسیری که با نقطه شروع بشه (dot-file/dot-folder مثل .well-known)
+  if (pathname.startsWith('/.')) return true;
+
   // فایل‌های با پسوند استاتیک
   const staticExtensions = [
     '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',
@@ -80,6 +88,7 @@ function shouldBypassStatic(pathname: string): boolean {
     '.webp', '.avif',
     '.mp4', '.webm',
     '.pdf', '.zip',
+    '.json', // ★ فیکس: json های استاتیک مثل com.chrome.devtools.json
   ];
   if (staticExtensions.some(ext => pathname.endsWith(ext))) return true;
 
@@ -159,7 +168,7 @@ export default function proxy(request: NextRequest) {
   const url = request.nextUrl;
 
   // ── ★ ۱. Bypass فایل‌های استاتیک PWA (مهم‌ترین بخش) ──────────────────────
-  // sw.js، manifest.json، آیکون‌ها، فونت‌ها باید سریع و بدون پردازش سرو شوند
+  // sw.js، manifest.json، آیکون‌ها، فونت‌ها و .well-known باید سریع و بدون پردازش سرو شوند
   if (shouldBypassStatic(pathname)) {
     return NextResponse.next();
   }
@@ -211,6 +220,7 @@ export default function proxy(request: NextRequest) {
 
     if (
       firstSegment &&
+      VALID_SLUG_REGEX.test(firstSegment) && // ★ فیکس: فقط الگوی معتبر slug قبول میشه (مسیرهایی مثل .well-known رد میشن)
       !RESERVED_PATHS.has(firstSegment) &&
       !firstSegment.startsWith('api')
     ) {
@@ -324,10 +334,11 @@ export const config = {
      * - _next/image   (بهینه‌سازی تصاویر Next.js)
      * - _next/webpack-hmr (Hot Module Replacement)
      * - فایل‌های با پسوند استاتیک (تصاویر، فونت‌ها، ...)
+     * - .well-known (درخواست‌های خودکار مرورگر مثل Chrome DevTools)
      *
      * ★ sw.js و manifest.json باید اینجا exclude شوند
      * تا مستقیم از public/ سرو شوند (بدون middleware)
      */
-    '/((?!_next/static|_next/image|_next/webpack-hmr|sw\\.js|manifest\\.json|favicon\\.ico|robots\\.txt|sitemap\\.xml|icons/|fonts/|images/).*)',
+    '/((?!_next/static|_next/image|_next/webpack-hmr|sw\\.js|manifest\\.json|favicon\\.ico|robots\\.txt|sitemap\\.xml|\\.well-known|icons/|fonts/|images/).*)',
   ],
 };

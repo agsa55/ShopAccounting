@@ -89,16 +89,34 @@ export function PWARegister() {
       return;
     }
 
+    // ★ فیکس: در محیط development اصلاً SW ثبت نمی‌کنیم
+    // Turbopack مدام فایل‌ها rebuild می‌کنه → SW آپدیت میشه
+    // → controllerchange → reload → حلقه بی‌نهایت
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[PWA] ⏭️ Development mode — PWARegister غیرفعال است');
+
+      // SW های قبلی رو هم پاک می‌کنیم تا مشکل cache نداشته باشیم
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((reg) => {
+          reg.unregister().then((success) => {
+            if (success) {
+              console.log('[PWA] 🧹 SW قبلی unregister شد (dev mode)');
+            }
+          });
+        });
+      });
+
+      return;
+    }
+
+    // ★ فقط در production اجرا می‌شود
     const registerSW = async () => {
       try {
         const registration = await navigator.serviceWorker.register(
           '/sw.js',
           {
             scope: '/',
-            // updateViaCache: 'none' برای development
-            updateViaCache: process.env.NODE_ENV === 'development' 
-              ? 'none' 
-              : 'imports',
+            updateViaCache: 'imports',
           }
         );
 
@@ -119,11 +137,6 @@ export function PWARegister() {
             }
           });
         });
-
-        // در development: هر بار آپدیت کن
-        if (process.env.NODE_ENV === 'development') {
-          registration.update();
-        }
 
       } catch (error) {
         console.error('[PWA] Service Worker registration failed:', error);
