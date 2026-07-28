@@ -1,0 +1,1519 @@
+// prisma/schema.prisma — Unified Database Schema (v9.0)
+// ShopAccounting — Single Shared Database Architecture
+// ============================================================================
+// ★ v3.31: فیلدهای ابطال سند
+// ★ v6.0: MoidianSettings + فیلدهای مودیان
+// ★ v6.1: انبارداری + فاکتور خرید + تامین‌کنندگان
+// ★ v9.0:  تغییر ساختار پلن‌ها
+//          - حذف پلن ماهانه
+//          - دوره‌ها: annual (۳۶۵ روز) + lifetime (مادام‌العمر، durationDays = 0)
+//          - تغییر نام پلن‌ها: ساده→پایه، حرفه‌ای→پیشرفته، سازمانی→حرفه‌ای
+//          - default billingCycle در Tenant از 'monthly' به 'annual' تغییر کرد
+// ============================================================================
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../src/generated/client"
+  binaryTargets = ["native"]
+}
+
+model Tenant {
+  id                 String   @id @db.NVarChar(1000)
+  subDomain          String   @unique
+  companyName        String
+  planName           String   @default("simple")
+  status             String   @default("active")
+  ownerName          String?
+  ownerMobile        String?
+  ownerEmail         String?
+  address            String?
+  registrationNumber String?
+  logoUrl            String?
+
+  planTierId         Int?
+  // ★★★ v9.0: دوره اشتراک — فقط 'annual' (سالانه، ۳۶۵ روز) یا 'lifetime' (مادام‌العمر)
+  //   - مقدار 'monthly' قدیمی است و در seed-plans.ts به 'annual' مهاجرت می‌شود.
+  //   - 'lifetime' یعنی بدون تاریخ انقضا (expiresAt = null).
+  billingCycle       String   @default("annual")
+  // ★★★ v9.0: اگر billingCycle = 'lifetime' باشد، expiresAt باید null باشد.
+  expiresAt          DateTime?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  soldAt             DateTime?
+  soldTo             String?
+  soldToContact      String?
+
+  planTier             PlanTier?              @relation(fields: [planTierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  AuditLogs            AuditLogs[]
+  OtpCodes             OtpCode[]
+  PortalUsers          PortalUsers[]
+  SubscriptionPayments SubscriptionPayments[]
+  Subscriptions        Subscriptions[]
+  UserLookups          UserLookups[]
+
+  StoreUsers        StoreUser[]
+  Products          Product[]
+  Categories        Category[]
+  Units             Unit[]
+  Customers         Customer[]
+  Accounts          Account[]
+  Invoices          Invoice[]
+  InvoicePayments   InvoicePayment[]
+  InstallmentPlans  InstallmentPlan[]
+  InstallmentSchedules InstallmentSchedule[]
+  JournalEntries    JournalEntry[]
+  StoreSettings     StoreSetting[]
+  PaymentGateways   PaymentGateway[]
+  PosDevices        PosDevice[]
+  Backups           Backup[]
+  Checks            Check[]
+  FiscalYears       FiscalYear[]
+  OnlinePayments    OnlinePayment[]
+  SmsSettings       SmsSettings?
+  SmsLogs           SmsLog[]
+  RecurringJournals RecurringJournal[]
+
+  // ★★★ v6.0: مودیان
+  MoidianSettings   MoidianSettings?
+
+  // ★★★ v6.1: انبارداری + خرید
+  Warehouses         Warehouse[]
+  StockLevels        StockLevel[]
+  StockMovements     StockMovement[]
+  Suppliers          Supplier[]
+  PurchaseInvoices   PurchaseInvoice[]
+
+  // ★★★ v6.5: انبار گردانی
+  StockCounts        StockCount[]
+
+  // ★★★ v7.1: شعب
+  Branches           Branch[]
+
+  // ★★★ v8.0: پرداخت‌های کارتی
+  CardPayments       CardPayment[]
+
+  // ★★★ v8.6: تیکت پشتیبانی
+  Tickets            Ticket[]
+
+  // ★★★ v8.8: راه‌اندازی اولیه فروشگاه
+  InitialBalances    InitialBalance[]
+  FixedAssets        FixedAsset[]
+
+  @@index([createdAt])
+  @@index([planName])
+  @@index([status])
+  @@index([planTierId])
+  @@map("Tenants")
+}
+
+model OtpCode {
+  id           String    @id @db.NVarChar(450)
+  tenantId     String   @db.NVarChar(1000)
+  mobile       String
+  code         String
+  codeHash     String    @default("")
+  purpose      String    @default("login")
+  isUsed       Boolean   @default(false)
+  attemptCount Int       @default(0)
+  ip           String?
+  expiresAt    DateTime
+  verifiedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  Tenant       Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([expiresAt])
+  @@index([mobile, purpose, isUsed, expiresAt])
+  @@index([tenantId])
+  @@map("OtpCodes")
+}
+
+model AuditLogs {
+  id         String   @id @db.NVarChar(450)
+  tenantId   String   @db.NVarChar(1000)
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  details    String?
+  at         DateTime @default(now())
+  Tenant     Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([at])
+  @@index([entityType, entityId])
+  @@index([tenantId, action])
+  @@index([userId])
+  @@map("AuditLogs")
+}
+
+model Plans {
+  id                 String          @id @db.NVarChar(450)
+  name               String          @unique
+  nameFa             String
+  price              Float
+  // ★★★ v9.0: durationDays = 0 یعنی «مادام‌العمر / بدون انقضا»
+  durationDays       Int
+  maxUsers           Int             @default(2)
+  maxProducts        Int             @default(100)
+  features           String?
+  isActive           Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  isTrial            Boolean         @default(false)
+  trialDays          Int             @default(0)
+  requiresIsolatedDb Boolean         @default(false)
+  dbType             String          @default("shared")
+  autoDeleteOnExpiry Boolean         @default(false)
+  tier               String          @default("basic")
+  maxInvoices        Int             @default(100)
+  Subscriptions      Subscriptions[]
+
+  @@index([dbType])
+  @@index([isActive])
+  @@index([isTrial])
+  @@index([tier])
+  @@map("Plans")
+}
+
+model PortalUsers {
+  id          String    @id @db.NVarChar(450)
+  tenantId    String   @db.NVarChar(1000)
+  username    String
+  password    String
+  mobile      String?
+  role        String    @default("Manager")
+  permissions String?
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  Tenant      Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@unique([tenantId, username])
+  @@index([mobile])
+  @@index([tenantId])
+  @@map("PortalUsers")
+}
+
+model SubscriptionPayments {
+  id             String        @id @db.NVarChar(450)
+  subscriptionId String   @db.NVarChar(450)
+  tenantId       String   @db.NVarChar(1000)
+  amount         Float
+  paymentMethod  String?
+  paymentRef     String?
+  isPaid         Boolean       @default(false)
+  status         String        @default("pending")
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+  Subscriptions  Subscriptions @relation(fields: [subscriptionId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Tenant         Tenant        @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([paidAt])
+  @@index([tenantId, isPaid])
+  @@map("SubscriptionPayments")
+}
+
+model Subscriptions {
+  id                   String                 @id @db.NVarChar(450)
+  tenantId             String   @db.NVarChar(1000)
+  planId               String   @db.NVarChar(450)
+  startDate            DateTime
+  endDate              DateTime
+  status               String                 @default("active")
+  autoRenew            Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  SubscriptionPayments SubscriptionPayments[]
+  Plans                Plans                  @relation(fields: [planId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Tenant               Tenant                 @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([endDate])
+  @@index([status, endDate])
+  @@index([status])
+  @@index([tenantId, status])
+  @@map("Subscriptions")
+}
+
+model UserLookups {
+  id        String   @id @db.NVarChar(450)
+  username  String   @unique
+  tenantId  String  @db.NVarChar(1000)
+  userType  String   @default("storeUser")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  Tenant    Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([isActive])
+  @@index([tenantId])
+  @@index([username])
+  @@map("UserLookups")
+}
+
+model PlanTier {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  nameFa        String
+  description   String?
+  maxUsers      Int      @default(2)
+  maxProducts   Int      @default(200)
+  maxInvoices   Int      @default(500)
+  isTrial       Boolean  @default(false)
+  trialDays     Int      @default(0)
+  dbType        String   @default("shared")
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  prices        PlanPrice[]
+  tenants       Tenant[]
+
+  @@map("PlanTiers")
+}
+
+model PlanPrice {
+  id              Int      @id @default(autoincrement())
+  planTierId      Int
+  // ★★★ v9.0: مقادیر مجاز:
+  //   - 'annual'    : سالانه (۳۶۵ روز)
+  //   - 'lifetime'  : مادام‌العمر (durationDays = 0، یعنی بدون انقضا)
+  //   - 'monthly'   : قدیمی — در seed-plans.ts غیرفعال می‌شود
+  billingCycle    String
+  // ★★★ v9.0: durationDays = 0 یعنی «نامحدود / مادام‌العمر»
+  durationDays    Int
+  price           Int
+  discountPercent Int      @default(0)
+  isActive        Boolean  @default(true)
+  isPopular       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  planTier        PlanTier @relation(fields: [planTierId], references: [id], onDelete: Cascade)
+
+  @@unique([planTierId, billingCycle])
+  @@map("PlanPrices")
+}
+
+model StoreUser {
+  id              String    @id @default(uuid()) @db.NVarChar(450)
+  username        String
+  password        String
+  mobile          String?
+  role            String    @default("Cashier")
+  permissions     String?
+  tenantId        String  @db.NVarChar(1000)
+  storeId         String?   @db.NVarChar(1000)
+  storeName       String?
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  failedAttempts  Int       @default(0)
+  lockoutEnd      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  Tenant    Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  invoices  Invoice[]
+  // ★★★ v8.6: تیکت‌هایی که این کاربر ایجاد کرده
+  Tickets   Ticket[]
+  TicketMessages TicketMessage[]
+
+  @@unique([username, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([mobile])
+  @@map("StoreUsers")
+}
+
+model Product {
+  id            String   @id @default(uuid()) @db.NVarChar(450)
+  code          String
+  barcode       String?  @db.NVarChar(50)
+  name          String   @db.NVarChar(500)
+  categoryId    String?  @db.NVarChar(450)
+  unitId        String?  @db.NVarChar(450)
+  
+  // ★★★ v8.8.7: واحد محصول پیش‌فرض (عدد، کیلوگرم، متر، لیتر، ...)
+  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  
+  purchasePrice Float    @default(0)
+  salePrice     Float    @default(0)
+  taxRate       Float    @default(0)
+  currentStock  Float    @default(0)          // ★ تغییر: از Int به Float
+  minStock      Float    @default(0)
+  isActive      Boolean  @default(true)
+  tenantId      String   @db.NVarChar(1000)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  category Category? @relation(fields: [categoryId], references: [id])
+  unit     Unit?     @relation(fields: [unitId], references: [id])
+
+  StockLevels          StockLevel[]
+  StockMovements       StockMovement[]
+  PurchaseInvoiceItems PurchaseInvoiceItem[]
+  StockCountItems      StockCountItem[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([tenantId, name])
+  @@index([barcode])
+  @@index([categoryId])
+  InitialBalances InitialBalance[] @relation("InitialBalanceProduct")
+  @@map("Products")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.NVarChar(450)
+  name      String
+  parentId  String?  @db.NVarChar(450)
+  isActive  Boolean  @default(true)
+  tenantId  String   @db.NVarChar(1000)
+  createdAt DateTime @default(now())
+
+  Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  products Product[]
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([parentId])
+  @@map("ProductCategories")
+}
+
+model Unit {
+  id        String   @id @default(uuid()) @db.NVarChar(450)
+  name      String
+  nameFa    String
+  symbol    String?
+  isDefault Boolean  @default(false)
+  tenantId  String   @db.NVarChar(1000)
+  createdAt DateTime @default(now())
+
+  Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  products Product[]
+
+  @@index([tenantId])
+  @@map("Units")
+}
+
+model Customer {
+  id              String    @id @default(uuid()) @db.NVarChar(450)
+  code            String
+  firstName       String
+  lastName        String
+  mobile          String?
+  nationalCode    String?
+  address         String?
+  creditLimit     Float     @default(0)
+  currentBalance  Float     @default(0)
+  isBlacklisted   Boolean   @default(false)
+  tenantId        String    @db.NVarChar(1000)
+  createdAt       DateTime  @default(now())
+  lastPurchaseAt  DateTime?
+  portalToken     String?   @unique
+  // ★★★ v7.4: طرف حساب — شخص حقوقی
+  personType      String    @default("person") @db.NVarChar(10) // person | legal
+  economicCode    String?   @db.NVarChar(20)
+  companyName     String?   @db.NVarChar(200)
+  legalForm       String?   @db.NVarChar(100)
+
+  Tenant   Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  invoices Invoice[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, mobile])
+  @@index([tenantId, lastName])
+  @@map("Customers")
+}
+
+model Account {
+  id        String   @id @default(uuid()) @db.NVarChar(450)
+  code      String
+  name      String
+  type      String   @default("cash")
+  level     Int      @default(1)
+  parentId  String?  @db.NVarChar(450)
+  isActive  Boolean  @default(true)
+  tenantId  String   @db.NVarChar(1000)
+  createdAt DateTime @default(now())
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  InitialBalances InitialBalance[] @relation("InitialBalanceAccount")
+  FixedAssets FixedAsset[] @relation("FixedAssetAccount")
+  FixedAssetsAccumDep FixedAsset[] @relation("FixedAssetAccumDepAccount")
+  FixedAssetsDepExpense FixedAsset[] @relation("FixedAssetDepExpenseAccount")
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([parentId])
+  @@map("Accounts")
+}
+
+// ★★★ v8.8: relation برای موجودی اولیه
+// (اضافه شده به انتهای مدل Account بالا)
+
+model Invoice {
+  id              String    @id @default(uuid()) @db.NVarChar(450)
+  number          String
+  customerId      String?   @db.NVarChar(450)
+  invoiceDate     DateTime  @default(now())
+  dueDate         DateTime?
+  status          String    @default("draft")
+  paymentType     String    @default("cash")
+  subTotal        Float     @default(0)
+  discountAmount  Float     @default(0)
+  taxAmount       Float     @default(0)
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+  remainingAmount Float     @default(0)
+  // ★★★ v8.1.1: بهای تمام‌شده کالای فروش‌رفته (COGS)
+  //   برای محاسبه سود ناخالص در گزارش‌ها
+  cogsAmount      Float     @default(0)
+  cashierId       String?   @db.NVarChar(450)
+  description     String?
+  tenantId        String    @db.NVarChar(1000)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // ★★★ v8.7: نوع فاکتور — sale | sale_return | service
+  //   sale (پیش‌فرض): فاکتور فروش عادی
+  //   sale_return: فاکتور برگشتی فروش (مرجوع از مشتری)
+  //   service: فاکتور تعمیرات و خدمات (بدون محصول، فقط آیتم‌های خدماتی)
+  invoiceType     String    @default("sale") @db.NVarChar(30)
+
+  // ★★★ v8.7: در صورت برگشتی، آی‌دی فاکتور اصلی که از آن برگشته
+  originalInvoiceId String? @db.NVarChar(450)
+
+  // ★★★ v8.7: در صورت فاکتور خدماتی، نام/کد دستگاه یا وسیله تعمیر شده (اختیاری)
+  serviceDevice   String?   @db.NVarChar(500)
+  serviceWarranty Boolean   @default(false)
+
+  // ★★★ v6.0: فیلدهای مودیان
+  moidianReferenceId   String?   @db.NVarChar(100)
+  moidianStatus        String?   @db.NVarChar(50)
+  moidianSubmittedAt   DateTime?
+  moidianAcceptedAt    DateTime?
+  moidianError         String?   @db.NVarChar(500)
+  moidianRetryCount    Int       @default(0)
+
+  // ★★★ v6.1: انبار
+  warehouseId        String?   @db.NVarChar(450)
+
+  Tenant   Tenant           @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  customer Customer?        @relation(fields: [customerId], references: [id])
+  cashier  StoreUser?       @relation(fields: [cashierId], references: [id])
+  items    InvoiceItem[]
+  payments InvoicePayment[]
+  installmentPlan InstallmentPlan?
+  onlinePayments OnlinePayment[]
+  // ★★★ v6.1: relation به انبار
+  warehouse Warehouse?      @relation(fields: [warehouseId], references: [id])
+  // ★★★ v8.0: relation به پرداخت‌های کارتی
+  cardPayments   CardPayment[] @relation("CardPaymentInvoice")
+
+  @@unique([number, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, invoiceDate])
+  @@index([tenantId, paymentType])
+  @@index([tenantId, invoiceType])
+  @@index([customerId])
+  @@index([cashierId])
+  @@index([tenantId, moidianStatus])
+  @@index([moidianReferenceId])
+  @@index([originalInvoiceId])
+  @@map("Invoices")
+}
+
+model InvoiceItem {
+  id             String   @id @default(uuid()) @db.NVarChar(450)
+  invoiceId      String   @db.NVarChar(450)
+  productId      String?  @db.NVarChar(450)
+  productName    String   @db.NVarChar(500)
+  
+  // ★★★ v8.8.7: واحد محصول / خدمت
+  unitLabel      String   @default("عدد") @db.NVarChar(50)
+  
+  quantity       Float    @default(1)          // ★ تغییر: از Int به Float
+  unitPrice      Float    @default(0)
+  discountAmount Float    @default(0)
+  taxAmount      Float    @default(0)
+  lineTotal      Float    @default(0)
+
+  // ★★★ v8.7: فیلدهای اضافی برای آیتم‌های خدماتی
+  // برای فاکتورهای service: توضیحات کامل خدمت (مثلاً «تعمیر موتور یخچال»)
+  // برای فاکتورهای sale_return: دلیل برگشت (اختیاری)
+  description    String?  @db.NVarChar(500)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@map("InvoiceItems")
+}
+model InvoicePayment {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  invoiceId   String   @db.NVarChar(450)
+  amount      Float
+  paymentType String   @default("cash")
+  paymentRef  String?
+  paidAt      DateTime @default(now())
+  tenantId    String   @db.NVarChar(1000)
+
+  Tenant  Tenant  @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@index([tenantId, paidAt])
+  @@map("InvoicePayments")
+}
+
+model InstallmentPlan {
+  id                    String    @id @default(uuid()) @db.NVarChar(450)
+  invoiceId             String    @unique @db.NVarChar(450)
+  customerId            String?
+  totalAmount           Float     @default(0)
+  downPayment           Float     @default(0)
+  remainingAmount       Float     @default(0)
+  interestRate          Float     @default(0)
+  totalWithInterest     Float     @default(0)
+  numberOfInstallments  Int       @default(1)
+  installmentAmount     Float     @default(0)
+  installmentPeriod     String    @default("monthly")
+  status                String    @default("active")
+  paidInstallments      Int       @default(0)
+  totalPaidAmount       Float     @default(0)
+  nextDueDate           DateTime?
+  description           String?
+  tenantId              String  @db.NVarChar(1000)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  Tenant    Tenant                @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  invoice   Invoice               @relation(fields: [invoiceId], references: [id])
+  schedules InstallmentSchedule[]
+
+  @@index([tenantId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@index([tenantId, nextDueDate])
+  @@map("InstallmentPlans")
+}
+
+model InstallmentSchedule {
+  id                 String    @id @default(uuid()) @db.NVarChar(450)
+  planId             String   @db.NVarChar(450)
+  installmentNumber  Int
+  amount             Float     @default(0)
+  dueDate            DateTime
+  status             String    @default("pending")
+  paidAmount         Float     @default(0)
+  paidAt             DateTime?
+  paymentRef         String?
+  paymentType        String?
+  notes              String?
+  tenantId           String  @db.NVarChar(1000)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  Tenant Tenant          @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  plan   InstallmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, installmentNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, dueDate])
+  @@map("InstallmentSchedules")
+}
+
+model JournalEntry {
+  id           String    @id @default(uuid()) @db.NVarChar(450)
+  number       String    @default("JE-000000")
+  fiscalYearId String?   @db.NVarChar(450)
+  date         DateTime  @default(now())
+  description  String?
+  status       String    @default("draft")
+  sourceType   String?
+  sourceId     String?   @db.NVarChar(450)
+  totalDebit   Float     @default(0)
+  totalCredit  Float     @default(0)
+  createdBy    String?   @db.NVarChar(450)
+  tenantId     String    @db.NVarChar(1000)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  isCancelled  Boolean   @default(false)
+  cancelledAt  DateTime?
+  cancelledBy  String?
+  cancelReason String?
+
+  Tenant      Tenant             @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  fiscalYear  FiscalYear?        @relation("FiscalYearJournalEntries", fields: [fiscalYearId], references: [id], onDelete: SetNull)
+  lines       JournalEntryLine[]
+
+  // ★★★ v6.1: relation به فاکتور خرید
+  PurchaseInvoices PurchaseInvoice[] @relation("PurchaseInvoiceJournalEntry")
+
+  @@unique([number, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, date])
+  @@index([sourceType, sourceId])
+  @@index([fiscalYearId])
+  @@index([tenantId, isCancelled])
+  InitialBalances InitialBalance[] @relation("InitialBalanceJournalEntry")
+  FixedAssets FixedAsset[] @relation("FixedAssetJournalEntry")
+  @@map("JournalEntries")
+}
+
+model JournalEntryLine {
+  id             String    @id @default(uuid()) @db.NVarChar(450)
+  journalEntryId String    @db.NVarChar(450)
+  accountId      String?   @db.NVarChar(450)
+  description    String?
+  debit          Float     @default(0)
+  credit         Float     @default(0)
+  createdAt      DateTime? @default(now())
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("JournalEntryLines")
+}
+
+model StoreSetting {
+  id                 String   @id @default(uuid()) @db.NVarChar(450)
+  storeName          String?
+  address            String?
+  phone              String?
+  registrationNumber String?
+  defaultTaxRate     Float    @default(9)
+  logoUrl            String?
+  tenantId           String  @db.NVarChar(1000)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  bankIban           String?
+  bankName           String?
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@map("StoreSettings")
+}
+
+model PaymentGateway {
+  id         String   @id @default(uuid()) @db.NVarChar(450)
+  name       String
+  // ★★★ v8.7: نوع درگاه — zarinpal | idpay (هر فروشگاه درگاه اختصاصی خودش)
+  type       String   @default("zarinpal") @db.NVarChar(30)
+  // ★★★ v8.7: کد مرچنت (merchantId) — از پنل زرین‌پال یا ای‌دی‌پی دریافت می‌شود
+  merchantId String?  @db.NVarChar(200)
+  // ★★★ v8.7: کلید API (برای ای‌دی‌پی و زرین‌پال جدید)
+  apiKey     String?  @db.NVarChar(500)
+  // ★★★ v8.7: توکن/کد اضافی (برای ای‌دی‌پی: x-api-key ممکنه با merchantId متفاوت باشه)
+  terminalCode String? @db.NVarChar(200)
+  // ★★★ v8.7: آدرس callback (به‌صورت پیش‌فرض /api/payments/online/verify)
+  callbackUrl String? @db.NVarChar(500)
+  // ★★★ v8.7: شماره شبا برای تسویه (برای نمایش به کاربر)
+  bankIban    String? @db.NVarChar(50)
+  bankName    String? @db.NVarChar(200)
+  // ★★★ v8.7: sandbox یا production
+  isActive   Boolean  @default(false)
+  sandbox    Boolean  @default(false)
+  tenantId   String  @db.NVarChar(1000)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, type, isActive])
+  @@map("PaymentGateways")
+}
+
+model PosDevice {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  name            String
+  terminalId      String?  @db.NVarChar(100)
+  isActive        Boolean  @default(true)
+
+  // ★★★ v8.0: Universal POS Adapter fields ★★★
+  // نوع ترمینال: manual | keyboard-hid | web-serial | network-tcp | network-http
+  terminalType    String   @default("manual") @db.NVarChar(50)
+
+  // نوع کارتخوان (برند): verifone | ingenico | pax | fannipars | kavosh | palch | generic
+  brand           String?  @db.NVarChar(50)
+
+  // اطلاعات بانکی
+  bankName        String?  @db.NVarChar(100)
+  merchantId      String?  @db.NVarChar(50)
+  acceptorCode    String?  @db.NVarChar(50)
+  terminalSerial  String?  @db.NVarChar(100)
+
+  // تنظیمات اتصال بر اساس terminalType
+  // web-serial: serialPort, baudRate
+  // network-tcp: ipAddress, port
+  // network-http: apiBaseUrl, apiKey
+  ipAddress       String?  @db.NVarChar(50)
+  port            Int?
+  serialPort      String?  @db.NVarChar(100)
+  baudRate        Int      @default(115200)
+  apiBaseUrl      String?  @db.NVarChar(500)
+  apiKey          String?  @db.NVarChar(500)
+
+  // تنظیمات پیشرفته (JSON string)
+  // - autoReconnect, timeoutMs, retryCount
+  // - shaparakVerify (boolean), shaparakMerchantCode
+  // - receiptPrinterWidth, receiptFooter
+  config          String?  @db.NVarChar(max)
+
+  // وضعیت اتصال
+  isOnline        Boolean  @default(false)
+  lastConnectedAt DateTime?
+  lastError       String?  @db.NVarChar(500)
+
+  tenantId        String   @db.NVarChar(1000)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // ★★★ v8.0: ارتباط با پرداخت‌های کارتی
+  cardPayments    CardPayment[]
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([terminalType])
+  @@map("PosDevices")
+}
+
+// ★★★ v8.0: ثبت پرداخت‌های کارتی ★★★
+// هر بار که مشتری با کارتخوان پرداخت می‌کنه، یک رکورد اینجا ذخیره می‌شه
+// شامل شماره پیرو، ۴ رقم آخر کارت، مبلغ، وضعیت تأیید
+model CardPayment {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  invoiceId       String?  @db.NVarChar(450)
+
+  // اطلاعات تراکنش
+  amount          Float
+  referenceNumber String?  @db.NVarChar(50)   // شماره پیرو (RRN) یا هر کد مرجع دیگه
+  referenceType   String?  @db.NVarChar(20)   // ★★★ v8.1: نوع کد مرجع (rrn | unique_code | trace | terminal | auth_code | stan | other)
+  traceNumber     String?  @db.NVarChar(50)   // شماره پیگیری
+  cardNumber      String?  @db.NVarChar(4)    // ۴ رقم آخر کارت
+  cardType        String?  @db.NVarChar(20)   // bankaii | melli | saderat | ... | unknown
+
+  // وضعیت
+  status          String   @default("pending") @db.NVarChar(20)  // pending | successful | failed | reversed
+
+  // ارتباط با کارتخوان
+  posDeviceId     String?  @db.NVarChar(450)
+
+  // تأیید شاپرک
+  shaparakVerified Boolean @default(false)
+  shaparakVerifyError String? @db.NVarChar(500)
+
+  // متادیتا
+  paidAt          DateTime @default(now())
+  description     String?
+  tenantId        String   @db.NVarChar(1000)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // ★★★ v8.0: relations
+  posDevice PosDevice? @relation(fields: [posDeviceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  invoice   Invoice?   @relation("CardPaymentInvoice", fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, paidAt])
+  @@index([posDeviceId])
+  @@index([invoiceId])
+  @@index([referenceNumber])
+  @@map("CardPayments")
+}
+
+model Backup {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  fileName    String
+  fileSize    Int
+  recordCount Int?
+  data        String?  @db.NVarChar(max)
+  createdAt   DateTime @default(now())
+  tenantId    String   @db.NVarChar(1000)
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("Backups")
+}
+
+model Check {
+  id            String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId      String   @db.NVarChar(1000)
+  type          String   @default("receivable")
+  checkNumber   String
+  bankName      String
+  branchName    String?
+  amount        Float
+  issueDate     DateTime
+  dueDate       DateTime
+  status        String   @default("pending")
+  customerId    String?  @db.NVarChar(450)
+  payeeName     String?
+  description   String?
+  journalEntryId String? @db.NVarChar(450)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+  @@index([tenantId, dueDate])
+  @@map("Checks")
+}
+
+model FiscalYear {
+  id          String    @id @default(uuid()) @db.NVarChar(450)
+  tenantId    String    @db.NVarChar(1000)
+
+  name        String
+
+  startDate   DateTime
+  endDate     DateTime
+
+  isActive    Boolean   @default(false)
+  isClosed    Boolean   @default(false)
+  closedAt    DateTime?
+  closedBy    String?
+
+  notes       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  Tenant         Tenant          @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  JournalEntries JournalEntry[]  @relation("FiscalYearJournalEntries")
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([tenantId, isClosed])
+  @@index([tenantId, startDate])
+  @@index([tenantId, name])
+  @@map("FiscalYears")
+}
+
+model OnlinePayment {
+  id            String    @id @default(uuid()) @db.NVarChar(450)
+  tenantId      String  @db.NVarChar(1000)
+  invoiceId     String   @db.NVarChar(450)
+  customerId    String?
+  amount        Float
+  authority     String?
+  refId         String?
+  status        String    @default("pending")
+  gatewayType   String    @default("zarinpal") @db.NVarChar(30)
+  // ★★★ v8.7: آی‌دی درگاه اختصاصی فروشگاه (PaymentGateway.id)
+  gatewayId     String?   @db.NVarChar(450)
+  gatewayUrl    String?
+  description   String?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  installmentId String?
+
+  Tenant   Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([invoiceId])
+  @@index([authority])
+  @@index([installmentId])
+  @@index([gatewayId])
+  @@map("OnlinePayments")
+}
+
+model SmsSettings {
+  id                    String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId              String   @unique @db.NVarChar(1000)
+  isEnabled             Boolean  @default(true)
+  daysBeforeDue         Int      @default(1)
+  sendOnDueDate         Boolean  @default(true)
+  daysAfterDue          Int      @default(3)
+  sendHour              Int      @default(9)
+  sendMinute            Int      @default(30)
+  customMessageTemplate String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@map("SmsSettings")
+}
+
+model SmsLog {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String   @db.NVarChar(1000)
+  type            String
+  recipient       String
+  message         String
+  referenceType   String?
+  referenceId     String?
+  status          String   @default("pending")
+  messageId       String?
+  errorMessage    String?
+  mockMode        Boolean  @default(false)
+  sentAt          DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([tenantId, status])
+  @@index([referenceType, referenceId])
+  @@index([sentAt])
+  @@map("SmsLogs")
+}
+
+model RecurringJournal {
+  id                String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId          String   @db.NVarChar(1000)
+
+  title             String
+  description       String?
+
+  frequency         String
+  dayOfMonth        Int?
+  dayOfWeek         Int?
+  monthOfYear       Int?
+  startDate         DateTime
+  endDate           DateTime?
+
+  nextExecutionDate DateTime
+  lastExecutedAt    DateTime?
+
+  journalLines      String
+
+  isActive          Boolean  @default(true)
+  autoPost          Boolean  @default(true)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@index([nextExecutionDate])
+  @@index([tenantId, frequency])
+  @@map("RecurringJournals")
+}
+
+model MoidianSettings {
+  id                  String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId            String   @unique @db.NVarChar(1000)
+
+  fiscalId            String?  @db.NVarChar(50)
+  economicCode        String?  @db.NVarChar(50)
+
+  clientId            String?  @db.NVarChar(200)
+  clientSecretEnc     String?  @db.NVarChar(1000)
+  privateKeyEnc       String?  @db.NVarChar(4000)
+
+  accessTokenEnc      String?  @db.NVarChar(2000)
+  refreshTokenEnc     String?  @db.NVarChar(2000)
+  tokenExpiresAt      DateTime?
+
+  environment         String   @default("sandbox") @db.NVarChar(20)
+  isInitialized       Boolean  @default(false)
+  autoSubmit          Boolean  @default(true)
+  lastSyncAt          DateTime?
+
+  totalSubmitted      Int      @default(0)
+  totalAccepted       Int      @default(0)
+  totalRejected       Int      @default(0)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  Tenant              Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([fiscalId])
+  @@map("MoidianSettings")
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★★★ v6.1: مدل‌های انبارداری + فاکتور خرید + تامین‌کنندگان
+// ═══════════════════════════════════════════════════════════════
+
+model Warehouse {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId    String   @db.NVarChar(1000)
+  name        String
+  code        String
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  branchId    String?  @db.NVarChar(450)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  Tenant         Tenant           @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  StockLevels    StockLevel[]
+  PurchaseInvoices PurchaseInvoice[]
+  Invoices       Invoice[]
+
+  // ★★★ v6.5: انبار گردانی
+  StockCounts    StockCount[]
+
+  // ★★★ v7.1: relation به شعبه (CASCADE → NO ACTION برای جلوگیری از circular cascade)
+  branch      Branch?  @relation(fields: [branchId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("Warehouses")
+}
+
+model StockLevel {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId    String   @db.NVarChar(1000)
+  warehouseId String   @db.NVarChar(450)
+  productId   String   @db.NVarChar(450)
+  
+  quantity    Float    @default(0)            // ★ تغییر: از Int به Float
+  // ★★★ v8.8.7: واحد محصول (برای محاسبه صحیح)
+  unitLabel   String   @default("عدد") @db.NVarChar(50)
+  
+  averageCost Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  Tenant    Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Warehouse Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Product   Product   @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@unique([warehouseId, productId])
+  @@index([tenantId])
+  @@index([productId])
+  @@map("StockLevels")
+}
+
+model StockMovement {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String   @db.NVarChar(1000)
+  productId       String   @db.NVarChar(450)
+  fromWarehouseId String?  @db.NVarChar(450)
+  toWarehouseId   String?  @db.NVarChar(450)
+  quantity        Float                        // ★ تغییر: از Int به Float
+  
+  // ★★★ v8.8.7: واحد محصول در حرکت
+  unitLabel       String   @default("عدد") @db.NVarChar(50)
+  
+  unitCost        Float    @default(0)
+  movementType    String   @db.NVarChar(50)  // purchase_in | sale_out | transfer | adjustment
+  referenceType   String?  @db.NVarChar(50)  // purchase_invoice | sale_invoice | stock_count | transfer
+  referenceId     String?  @db.NVarChar(450)
+  description     String?  @db.NVarChar(500)
+  createdAt       DateTime @default(now())
+
+  Tenant        Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Product       Product    @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([referenceType, referenceId])
+  @@index([movementType])
+  @@map("StockMovements")
+}
+
+model Supplier {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String   @db.NVarChar(1000)
+  code            String
+  name            String
+  mobile          String?  @db.NVarChar(20)
+  nationalCode    String?  @db.NVarChar(20)
+  address         String?  @db.NVarChar(500)
+  creditLimit     Float    @default(0)
+  currentBalance  Float    @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  // ★★★ v7.4: طرف حساب — شخص حقوقی
+  personType      String   @default("person") @db.NVarChar(10) // person | legal
+  economicCode    String?  @db.NVarChar(20)
+  companyName     String?  @db.NVarChar(200)
+  legalForm       String?  @db.NVarChar(100)
+
+  Tenant          Tenant            @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  PurchaseInvoices PurchaseInvoice[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("Suppliers")
+}
+
+model PurchaseInvoice {
+  id              String    @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String    @db.NVarChar(1000)
+  supplierId      String?   @db.NVarChar(450)
+  number          String
+  invoiceDate     DateTime  @default(now())
+  dueDate         DateTime?
+  status          String    @default("draft")
+  paymentType     String    @default("cash")
+  subTotal        Float     @default(0)
+  discountAmount  Float     @default(0)
+  taxAmount       Float     @default(0)
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+  remainingAmount Float     @default(0)
+  warehouseId     String    @db.NVarChar(450)
+  journalEntryId  String?   @db.NVarChar(450)
+  description     String?   @db.NVarChar(500)
+  cashierId       String?   @db.NVarChar(450)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // ★★★ v8.7: نوع فاکتور خرید — purchase | purchase_return
+  //   purchase (پیش‌فرض): فاکتور خرید عادی
+  //   purchase_return: فاکتور برگشتی خرید (مرجوع به تامین‌کننده)
+  invoiceType     String    @default("purchase") @db.NVarChar(30)
+  //   در صورت برگشتی، آی‌دی فاکتور اصلی که از آن برگشته
+  originalPurchaseInvoiceId String? @db.NVarChar(450)
+
+  Tenant        Tenant              @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Supplier      Supplier?           @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Warehouse     Warehouse           @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  journalEntry  JournalEntry?       @relation("PurchaseInvoiceJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  items         PurchaseInvoiceItem[]
+
+  @@unique([number, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, invoiceType])
+  @@index([supplierId])
+  @@index([warehouseId])
+  @@index([originalPurchaseInvoiceId])
+  @@map("PurchaseInvoices")
+}
+
+model PurchaseInvoiceItem {
+  id                String   @id @default(uuid()) @db.NVarChar(450)
+  purchaseInvoiceId String   @db.NVarChar(450)
+  productId         String?  @db.NVarChar(450)
+  productName       String   @db.NVarChar(500)
+  productCode       String?  @db.NVarChar(50)     // ★ اضافه: کد محصول
+  
+  // ★★★ v8.8.7: واحد محصول (عدد، کیلوگرم، متر، ...)
+  unitLabel         String   @default("عدد") @db.NVarChar(50)
+  
+  quantity          Float    @default(1)          // ★ تغییر: از Int به Float (برای اعشاری)
+  unitPrice         Float    @default(0)
+  discountAmount    Float    @default(0)
+  taxAmount         Float    @default(0)
+  lineTotal         Float    @default(0)
+  
+  // ★★★ v8.7: دلیل برگشت (فقط برای فاکتورهای برگشتی خرید، اختیاری)
+  returnReason      String?  @db.NVarChar(500)
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  Product         Product?        @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([purchaseInvoiceId])
+  @@index([productId])
+  @@map("PurchaseInvoiceItems")
+}
+// ═══════════════════════════════════════════════════════════════
+//  ★★★ v6.5: مدل‌های انبار گردانی (Stock Count / Inventory Audit)
+// ═══════════════════════════════════════════════════════════════
+
+model StockCount {
+  id           String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId     String   @db.NVarChar(1000)
+  number       String   // SC-0001
+  warehouseId  String   @db.NVarChar(450)
+  countDate    DateTime @default(now())
+  status       String   @default("draft") // draft / in_progress / completed / cancelled
+  countedBy    String?  @db.NVarChar(450)
+  approvedBy   String?  @db.NVarChar(450)
+  approvedAt   DateTime?
+  notes        String?  @db.NVarChar(500)
+  journalEntryId String? @db.NVarChar(450) // سند حسابداری خودکار (FK ساده، بدون relation)
+  totalDifference Float @default(0) // جمع مالی اختلاف
+  totalItems   Int      @default(0) // تعداد آیتم‌های شمارش
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  Tenant      Tenant      @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Warehouse   Warehouse   @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  items       StockCountItem[]
+
+  @@unique([number, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, countDate])
+  @@index([warehouseId])
+  @@index([countedBy])
+  @@index([journalEntryId])
+  @@map("StockCounts")
+}
+
+model StockCountItem {
+  id            String   @id @default(uuid()) @db.NVarChar(450)
+  stockCountId  String   @db.NVarChar(450)
+  productId     String   @db.NVarChar(450)
+  
+  // ★★★ v8.8.7: واحد محصول
+  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  
+  systemQty     Float    @default(0)           // ★ تغییر: از Int به Float
+  countedQty    Float    @default(0)
+  difference    Float    @default(0)
+  unitCost      Float    @default(0)
+  differenceAmount Float @default(0)
+  reason        String?  @db.NVarChar(500)
+  countedAt     DateTime @default(now())
+
+  stockCount StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  Product    Product    @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([stockCountId])
+  @@index([productId])
+  @@index([stockCountId, productId])
+  @@map("StockCountItems")
+}
+model Branch {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId    String   @db.NVarChar(1000)
+  name        String
+  code        String
+  address     String?  @db.NVarChar(500)
+  phone       String?  @db.NVarChar(20)
+  manager     String?  @db.NVarChar(200)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  Tenant      Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Warehouses  Warehouse[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("Branches")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ v8.6: سیستم تیکت پشتیبانی
+// هر تیکت مال یک Tenant (فروشگاه) خاص است و کاملاً ایزوله است.
+// هر سه پلن (ساده/حرفه‌ای/سازمانی) به یک اندازه دسترسی دارند.
+// ═══════════════════════════════════════════════════════════════
+
+model Ticket {
+  id           String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId     String   @db.NVarChar(1000)
+  ticketNumber String   @unique                  // مثلاً TKT-14030624-0001
+  subject      String   @db.NVarChar(500)
+  description  String   @db.NVarChar(Max)        // متن اولیه تیکت
+  category     String   @default("general")      // general | bug | feature | billing | account | accounting | pos
+  priority     String   @default("normal")       // low | normal | high | urgent
+  status       String   @default("open")         // open | pending | answered | resolved | closed
+  // ★ کاربری که تیکت را باز کرده (از فروشگاه)
+  createdById  String   @db.NVarChar(450)
+  // ★ ادمینی که تیکت به او اختصاص داده شده (null = تخصیص داده نشده)
+  assignedTo   String?  @db.NVarChar(450)
+  // ★ رتبه پلن فعلی فروشگاه در زمان ثبت تیکت (برای گزارش‌گیری)
+  planTierAtCreate String?  @db.NVarChar(50)
+  // ★ فایل‌های پیوست (JSON آرایه‌ای از آدرس‌ها)
+  attachments  String?  @db.NVarChar(Max)
+  // ★ امتیاز رضایت کاربر (۱ تا ۵) — فقط بعد از بسته شدن
+  rating       Int?
+  ratingComment String? @db.NVarChar(500)
+  ratedAt      DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  firstResponseAt DateTime?    // زمان اولین پاسخ ادمین
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+
+  Tenant       Tenant       @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  CreatedBy    StoreUser    @relation(fields: [createdById], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Messages     TicketMessage[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([priority])
+  @@index([category])
+  @@map("Tickets")
+}
+
+model TicketMessage {
+  id          String   @id @default(uuid()) @db.NVarChar(450)
+  ticketId    String   @db.NVarChar(450)
+  // ★ senderType: "customer" (از فروشگاه) | "admin" (از پشتیبان)
+  senderType  String   @default("customer")
+  senderId    String   @db.NVarChar(450)
+  senderName  String   @db.NVarChar(200)        // کش شده برای نمایش سریع
+  message     String   @db.NVarChar(Max)
+  attachments String?  @db.NVarChar(Max)         // JSON آرایه آدرس فایل‌ها
+  isInternal  Boolean  @default(false)           // یادداشت داخلی پشتیبان (کاربر نمی‌بیند)
+  isRead      Boolean  @default(false)           // آیا گیرنده آن را خوانده
+  createdAt   DateTime @default(now())
+
+  Ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  Sender      StoreUser @relation(fields: [senderId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt])
+  @@index([senderId])
+  @@index([senderType])
+  @@map("TicketMessages")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ v8.8: راه‌اندازی اولیه فروشگاه (Initial Balance Setup)
+// ----------------------------------------------------------------------------
+// این مدل موجودی‌های اولیه فروشگاه رو ذخیره می‌کنه:
+//   - موجودی نقد (صندوق و بانک)
+//   - موجودی کالا
+//   - دارایی‌های ثابت (تجهیزات)
+//   - بدهی‌های اولیه
+//   - سرمایه مالک
+// و سند افتتاحیه خودکار صادر می‌کنه.
+// ═══════════════════════════════════════════════════════════════
+
+model InitialBalance {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String   @db.NVarChar(1000)
+  
+  // ★ نوع موجودی اولیه
+  // cash: موجودی نقد (صندوق)
+  // bank: موجودی بانکی
+  // inventory: موجودی کالا
+  // fixed_asset: دارایی ثابت (تجهیزات)
+  // liability: بدهی اولیه (وام)
+  // equity: سرمایه مالک
+  type            String   @db.NVarChar(30)
+  
+  // ★ عنوان (مثلاً: "صندوق فروشگاه"، "یخچال"، "وام بانک ملی")
+  title           String   @db.NVarChar(200)
+  
+  // ★ مبلغ (ریال)
+  amount          Float    @default(0)
+  
+  // ★ آی‌دی حساب مربوطه (از جدول Account)
+  accountId       String?  @db.NVarChar(450)
+  
+  // ★ برای موجودی کالا: آی‌دی محصول
+  productId       String?  @db.NVarChar(450)
+  quantity        Float?   // تعداد/مقدار
+  
+  // ★ توضیحات
+  description     String?  @db.NVarChar(500)
+  
+  // ★ آی‌دی سند افتتاحیه (JournalEntry)
+  journalEntryId  String?  @db.NVarChar(450)
+  
+  // ★ آیا این رکورد در سند افتتاحیه ثبت شده؟
+  isPosted        Boolean  @default(false)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Tenant          Tenant          @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Account         Account?        @relation("InitialBalanceAccount", fields: [accountId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  Product         Product?        @relation("InitialBalanceProduct", fields: [productId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  JournalEntry    JournalEntry?  @relation("InitialBalanceJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  
+  @@index([tenantId])
+  @@index([tenantId, type])
+  @@index([accountId])
+  @@index([productId])
+  @@index([journalEntryId])
+  @@map("InitialBalances")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ v8.8: دارایی‌های ثابت + استهلاک
+// ----------------------------------------------------------------------------
+// این مدل دارایی‌های ثابت فروشگاه (تجهیزات، ماشین‌آلات، مبلمان و...)
+// را ذخیره می‌کند و استهلاک ماهانه خودکار را محاسبه می‌کند.
+// ═══════════════════════════════════════════════════════════════
+
+model FixedAsset {
+  id              String   @id @default(uuid()) @db.NVarChar(450)
+  tenantId        String   @db.NVarChar(1000)
+  
+  // ★ اطلاعات دارایی
+  name            String   @db.NVarChar(200)
+  code            String   @db.NVarChar(50)    // کد دارایی
+  category        String   @db.NVarChar(100)   // تجهیزات، ماشین‌آلات، مبلمان، ساختمان
+  
+  // ★ مبالغ
+  purchasePrice   Float    @default(0)         // بهای خرید
+  salvageValue    Float    @default(0)         // ارزش اسقاط (پس از عمر مفید)
+  usefulLife      Int      @default(60)         // عمر مفید (ماه)
+  depreciationRate Float   @default(0)         // نرخ استهلاک ماهانه (محاسبه خودکار)
+  
+  // ★ accumulated depreciation
+  accumulatedDepreciation Float @default(0)    // استهلاک انباشته
+  bookValue       Float    @default(0)         // ارزش دفتری (purchasePrice - accumulatedDepreciation)
+  
+  // ★ dates
+  purchaseDate    DateTime @default(now())
+  depreciationStartDate DateTime @default(now()) // شروع استهلاک
+  lastDepreciationDate DateTime?                 // آخرین استهلاک
+  
+  // ★ method
+  depreciationMethod String @default("straight_line") // straight_line | declining_balance
+  
+  // ★ status
+  status          String   @default("active")  // active | sold | disposed | fully_depreciated
+  
+  // ★ relations
+  accountId       String?  @db.NVarChar(450)   // حساب دارایی (1400)
+  accumDepAccountId String? @db.NVarChar(450)  // حساب استهلاک انباشته
+  depExpenseAccountId String? @db.NVarChar(450) // حساب هزینه استهلاک
+  
+  journalEntryId  String?  @db.NVarChar(450)   // سند خرید دارایی
+  description     String?  @db.NVarChar(500)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Tenant          Tenant          @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Account         Account?        @relation("FixedAssetAccount", fields: [accountId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  AccumDepAccount Account?        @relation("FixedAssetAccumDepAccount", fields: [accumDepAccountId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  DepExpenseAccount Account?      @relation("FixedAssetDepExpenseAccount", fields: [depExpenseAccountId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  JournalEntry    JournalEntry?  @relation("FixedAssetJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, category])
+  @@index([accountId])
+  @@index([journalEntryId])
+  @@map("FixedAssets")
+}

@@ -1,0 +1,174 @@
+// ============================================================================
+// prisma/schema-additions-v6.1-fixed.prisma
+// ============================================================================
+// ★★★ این نسخه تمام relation‌های دوطرفه را دارد + رفع circular cascade
+// ============================================================================
+
+// ─── ۱. افزودن به مدل Tenant (این خطوط را اضافه کنید) ──────────
+// در مدل Tenant، کنار سایر relation‌ها اضافه کنید:
+//   Warehouses         Warehouse[]
+//   StockLevels        StockLevel[]
+//   StockMovements     StockMovement[]
+//   Suppliers          Supplier[]
+//   PurchaseInvoices   PurchaseInvoice[]
+
+// ─── ۲. افزودن به مدل Invoice ──────────────────────────────────
+// در مدل Invoice، اضافه کنید:
+//   warehouseId        String?   @db.NVarChar(450)
+//   warehouse          Warehouse? @relation(fields: [warehouseId], references: [id])
+
+// ─── ۳. افزودن به مدل Product ──────────────────────────────────
+// در مدل Product، اضافه کنید:
+//   StockLevels        StockLevel[]
+//   StockMovements     StockMovement[]
+//   PurchaseInvoiceItems PurchaseInvoiceItem[]
+
+// ─── ۴. افزودن به مدل JournalEntry ─────────────────────────────
+// در مدل JournalEntry، اضافه کنید:
+//   PurchaseInvoices   PurchaseInvoice[] @relation("PurchaseInvoiceJournalEntry")
+
+// ─── ۵. مدل‌های جدید ───────────────────────────────────────────
+
+model Warehouse {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  code        String
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  branchId    String?  @db.NVarChar(450)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  Tenant         Tenant           @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  StockLevels    StockLevel[]
+  PurchaseInvoices PurchaseInvoice[]
+  Invoices       Invoice[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("Warehouses")
+}
+
+model StockLevel {
+  id          String   @id @default(uuid())
+  tenantId    String
+  warehouseId String
+  productId   String
+  quantity    Float    @default(0)
+  averageCost Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  Tenant    Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Warehouse Warehouse @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Product   Product   @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@unique([warehouseId, productId])
+  @@index([tenantId])
+  @@index([productId])
+  @@map("StockLevels")
+}
+
+model StockMovement {
+  id              String   @id @default(uuid())
+  tenantId        String
+  productId       String
+  fromWarehouseId String?  @db.NVarChar(450)
+  toWarehouseId   String?  @db.NVarChar(450)
+  quantity        Float
+  unitCost        Float    @default(0)
+  movementType    String
+  referenceType   String?
+  referenceId     String?  @db.NVarChar(450)
+  description     String?  @db.NVarChar(500)
+  createdAt       DateTime @default(now())
+
+  Tenant        Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Product       Product    @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  // ★ بدون relation به Warehouse برای جلوگیری از circular cascade
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([referenceType, referenceId])
+  @@map("StockMovements")
+}
+
+model Supplier {
+  id              String   @id @default(uuid())
+  tenantId        String
+  code            String
+  name            String
+  mobile          String?  @db.NVarChar(20)
+  nationalCode    String?  @db.NVarChar(20)
+  address         String?  @db.NVarChar(500)
+  creditLimit     Float    @default(0)
+  currentBalance  Float    @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  Tenant          Tenant            @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  PurchaseInvoices PurchaseInvoice[]
+
+  @@unique([code, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("Suppliers")
+}
+
+model PurchaseInvoice {
+  id              String    @id @default(uuid())
+  tenantId        String
+  supplierId      String?
+  number          String
+  invoiceDate     DateTime  @default(now())
+  dueDate         DateTime?
+  status          String    @default("draft")
+  paymentType     String    @default("cash")
+  subTotal        Float     @default(0)
+  discountAmount  Float     @default(0)
+  taxAmount       Float     @default(0)
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+  remainingAmount Float     @default(0)
+  warehouseId     String
+  journalEntryId  String?   @db.NVarChar(450)
+  description     String?   @db.NVarChar(500)
+  cashierId       String?   @db.NVarChar(450)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  Tenant        Tenant              @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+  Supplier      Supplier?           @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Warehouse     Warehouse           @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  journalEntry  JournalEntry?       @relation("PurchaseInvoiceJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  items         PurchaseInvoiceItem[]
+
+  @@unique([number, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([supplierId])
+  @@index([warehouseId])
+  @@map("PurchaseInvoices")
+}
+
+model PurchaseInvoiceItem {
+  id                String   @id @default(uuid())
+  purchaseInvoiceId String
+  productId         String?
+  productName       String
+  quantity          Float    @default(1)
+  unitPrice         Float    @default(0)
+  discountAmount    Float    @default(0)
+  taxAmount         Float    @default(0)
+  lineTotal         Float    @default(0)
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  Product         Product?        @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+
+  @@index([purchaseInvoiceId])
+  @@index([productId])
+  @@map("PurchaseInvoiceItems")
+}

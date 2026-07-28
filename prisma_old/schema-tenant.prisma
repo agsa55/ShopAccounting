@@ -1,0 +1,469 @@
+// ──────────────────────────────────────────────────────────────
+// ShopAccounting v4.3 — Tenant Database Schema
+// ──────────────────────────────────────────────────────────────
+// این schema فقط جداول هر فروشگاه را شامل می‌شود
+// و روی دیتابیس اختصاصی هر فروشگاه اجرا می‌شود
+//
+// نحوه استفاده (برای یک فروشگاه خاص):
+//   npx prisma migrate dev --schema=prisma/schema-tenant.prisma
+//   npx prisma generate   --schema=prisma/schema-tenant.prisma
+//
+// ⚠️ مهم: این schema باید دقیقاً با مدل‌های tenant در schema.prisma
+//    (combined) همخوانی داشته باشه — فقط بدون مدل‌های master
+// ──────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/tenant"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("TENANT_DATABASE_URL") // در زمان provisioning تنظیم می‌شه
+}
+
+// ─── کاربر فروشگاه ──────────────────────────────────────────
+
+model StoreUser {
+  id              String   @id @default(uuid())
+  username        String
+  password        String
+  mobile          String?
+  role            String   @default("Cashier") // Manager, Cashier
+  permissions     String?  // JSON array
+  tenantId        String   @default("default")
+  storeId         String?
+  storeName       String?
+  isActive        Boolean  @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invoices        Invoice[]
+
+  @@unique([tenantId, username])
+  @@index([tenantId, isActive])
+  @@index([tenantId, role])
+  @@index([mobile, tenantId])
+  @@map("StoreUsers")
+}
+
+// ─── دسته‌بندی محصول ────────────────────────────────────────
+
+model ProductCategory {
+  id              String   @id @default(uuid())
+  name            String
+  parentId        String?
+  isActive        Boolean  @default(true)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  products        Product[]
+  parent          ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children        ProductCategory[] @relation("CategoryHierarchy")
+
+  @@index([tenantId, isActive])
+  @@index([parentId])
+  @@map("ProductCategories")
+}
+
+// ─── واحد اندازه‌گیری ────────────────────────────────────────
+
+model Unit {
+  id              String   @id @default(uuid())
+  name            String
+  symbol          String?
+  isActive        Boolean  @default(true)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  products        Product[]
+
+  @@index([tenantId])
+  @@map("Units")
+}
+
+// ─── محصول ──────────────────────────────────────────────────
+
+model Product {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  barcode         String?
+  name            String
+  categoryId      String?
+  unitId          String?
+  purchasePrice   Float    @default(0)
+  salePrice       Float    @default(0)
+  taxRate         Float    @default(0)
+  currentStock    Float    @default(0)
+  minStock        Float    @default(0)
+  isActive        Boolean  @default(true)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  category        ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  unit            Unit?            @relation(fields: [unitId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invoiceItems    InvoiceItem[]
+  stockMovements  StockMovement[]
+
+  @@index([tenantId, isActive])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, isActive, name])
+  @@index([name, tenantId])
+  @@index([barcode, tenantId])
+  @@index([tenantId, currentStock])
+  @@map("Products")
+}
+
+// ─── مشتری ──────────────────────────────────────────────────
+
+model Customer {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  firstName       String
+  lastName        String   @default("")
+  mobile          String?
+  nationalCode    String?
+  address         String?
+  creditLimit     Float    @default(0)
+  currentBalance  Float    @default(0)
+  isBlacklisted   Boolean  @default(false)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  lastPurchaseAt  DateTime?
+
+  invoices        Invoice[]
+  installmentPlans InstallmentPlan[]
+
+  @@index([tenantId])
+  @@index([tenantId, mobile])
+  @@index([tenantId, isBlacklisted])
+  @@index([tenantId, firstName, lastName])
+  @@map("Customers")
+}
+
+// ─── فاکتور ──────────────────────────────────────────────────
+
+model Invoice {
+  id              String   @id @default(uuid())
+  number          String   @unique
+  customerId      String?
+  invoiceDate     DateTime @default(now())
+  dueDate         DateTime?
+  status          String   @default("draft") // draft, issued, paid, cancelled, overdue
+  paymentType     String   @default("cash") // cash, credit, installment
+  subTotal        Float    @default(0)
+  discountAmount  Float    @default(0)
+  taxAmount       Float    @default(0)
+  totalAmount     Float    @default(0)
+  paidAmount      Float    @default(0)
+  remainingAmount Float    @default(0)
+  cashierId       String?
+  description     String?
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer?       @relation(fields: [customerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cashier         StoreUser?      @relation(fields: [cashierId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  items           InvoiceItem[]
+  payments        InvoicePayment[]
+  installmentPlan InstallmentPlan?
+
+  @@index([tenantId, status])
+  @@index([tenantId, invoiceDate])
+  @@index([tenantId, customerId])
+  @@index([tenantId, cashierId])
+  @@index([tenantId, paymentType])
+  @@index([tenantId, status, invoiceDate])
+  @@index([dueDate, status, tenantId])
+  @@map("Invoices")
+}
+
+// ─── آیتم فاکتور ────────────────────────────────────────────
+
+model InvoiceItem {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  productId       String?
+  productName     String
+  quantity        Float    @default(1)
+  unitPrice       Float    @default(0)
+  discountAmount  Float    @default(0)
+  taxAmount       Float    @default(0)
+  lineTotal       Float    @default(0)
+
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product         Product? @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@map("InvoiceItems")
+}
+
+// ─── پرداخت فاکتور ──────────────────────────────────────────
+
+model InvoicePayment {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  amount          Float
+  paymentType     String   @default("cash") // cash, card, transfer
+  paymentRef      String?
+  paidAt          DateTime @default(now())
+
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([paidAt])
+  @@map("InvoicePayments")
+}
+
+// ─── طرح قسط ────────────────────────────────────────────────
+
+model InstallmentPlan {
+  id              String   @id @default(uuid())
+  invoiceId       String   @unique
+  customerId      String?
+  totalAmount     Float
+  totalInstallments Int
+  paidInstallments Int    @default(0)
+  paidAmount      Float    @default(0)
+  remainingAmount Float
+  monthlyAmount   Float
+  startDate       DateTime
+  endDate         DateTime?
+  status          String   @default("active") // active, completed, defaulted
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  invoice         Invoice      @relation(fields: [invoiceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customer        Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  installments    Installment[]
+
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@map("InstallmentPlans")
+}
+
+// ─── قسط ────────────────────────────────────────────────────
+
+model Installment {
+  id              String   @id @default(uuid())
+  planId          String
+  installmentNumber Int
+  amount          Float
+  dueDate         DateTime
+  paidAt          DateTime?
+  status          String   @default("pending") // pending, paid, overdue
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  plan            InstallmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@index([planId, status])
+  @@index([dueDate, status])
+  @@map("Installments")
+}
+
+// ─── حرکت موجودی ────────────────────────────────────────────
+
+model StockMovement {
+  id              String   @id @default(uuid())
+  productId       String?
+  movementType    String
+  quantity        Float
+  previousStock   Float    @default(0)
+  newStock        Float    @default(0)
+  reason          String?
+  reference       String?
+  userId          String?
+  at              DateTime @default(now())
+  tenantId        String   @default("default")
+
+  product         Product? @relation(fields: [productId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenantId, at])
+  @@index([productId, at])
+  @@index([movementType])
+  @@index([reference])
+  @@map("StockMovements")
+}
+
+// ─── حساب حسابداری ──────────────────────────────────────────
+
+model Account {
+  id              String   @id @default(uuid())
+  code            String
+  name            String
+  type            String   // asset, liability, equity, income, expense
+  level           Int      @default(1)
+  parentId        String?
+  isActive        Boolean  @default(true)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  journalEntryLines JournalEntryLine[]
+  parent          Account?  @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children        Account[] @relation("AccountHierarchy")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+  @@index([tenantId, level])
+  @@index([parentId])
+  @@map("Accounts")
+}
+
+// ─── سال مالی ──────────────────────────────────────────────
+
+model FiscalYear {
+  id              String   @id @default(uuid())
+  name            String
+  startDate       DateTime
+  endDate         DateTime
+  status          String   @default("active")
+  isClosed        Boolean  @default(false)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  journalEntries  JournalEntry[]
+
+  @@index([tenantId, status])
+  @@map("FiscalYears")
+}
+
+// ─── سند حسابداری ──────────────────────────────────────────
+
+model JournalEntry {
+  id              String   @id @default(uuid())
+  number          String
+  fiscalYearId    String?
+  entryDate       DateTime
+  entryType       String   @default("manual")
+  referenceType   String?
+  referenceId     String?
+  description     String?
+  totalDebit      Float    @default(0)
+  totalCredit     Float    @default(0)
+  status          String   @default("draft") // draft, posted, cancelled
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  fiscalYear      FiscalYear?     @relation(fields: [fiscalYearId], references: [id])
+  lines           JournalEntryLine[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, entryDate])
+  @@index([tenantId, entryType])
+  @@index([referenceType, referenceId])
+  @@map("JournalEntries")
+}
+
+// ─── سطر سند حسابداری ──────────────────────────────────────
+
+model JournalEntryLine {
+  id              String   @id @default(uuid())
+  journalEntryId  String
+  accountId       String?
+  debit           Float    @default(0)
+  credit          Float    @default(0)
+  description     String?
+
+  journalEntry    JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account         Account?     @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@index([accountId, journalEntryId])
+  @@map("JournalEntryLines")
+}
+
+// ─── تنظیمات درگاه پرداخت ──────────────────────────────────
+
+model PaymentGatewaySetting {
+  id              String   @id @default(uuid())
+  gatewayType     String   @default("zarinpal") // zarinpal, payir, etc.
+  merchantId      String?
+  apiKey          String?
+  isSandbox       Boolean  @default(true)
+  isActive        Boolean  @default(false)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, isActive])
+  @@map("PaymentGatewaySettings")
+}
+
+// ─── تنظیمات کارتخوان ──────────────────────────────────────
+
+model PosSetting {
+  id              String   @id @default(uuid())
+  connectionType  String   @default("simulator") // simulator, serial, network
+  terminalId      String?
+  merchantCode    String?
+  isActive        Boolean  @default(false)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("PosSettings")
+}
+
+// ─── تنظیمات فروشگاه ──────────────────────────────────────
+
+model StoreSetting {
+  id              String   @id @default(uuid())
+  storeName       String?
+  address         String?
+  phone           String?
+  registrationNumber String?
+  defaultTaxRate  Float    @default(9)
+  logoUrl         String?
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("StoreSettings")
+}
+
+// ─── قالب فاکتور ────────────────────────────────────────────
+
+model InvoiceTemplate {
+  id              String   @id @default(uuid())
+  headerText      String   @default("فاکتور فروش")
+  footerText      String   @default("با تشکر از خرید شما")
+  bankAccounts    String?
+  contactInfo     String?
+  primaryColor    String   @default("#059669")
+  showTax         Boolean  @default(true)
+  showDiscount    Boolean  @default(true)
+  logoUrl         String?
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("InvoiceTemplates")
+}
+
+// ─── اعلان ──────────────────────────────────────────────────
+
+model Notification {
+  id              String   @id @default(uuid())
+  userId          String?
+  title           String
+  message         String
+  type            String   @default("info") // info, warning, error, success
+  isRead          Boolean  @default(false)
+  tenantId        String   @default("default")
+  createdAt       DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([type, tenantId])
+  @@index([tenantId, createdAt])
+  @@map("Notifications")
+}

@@ -1,0 +1,21 @@
+// ============================================================================
+// src/lib/store.ts — بخش تغییر یافته (افزودن AppView های جدید)
+// ============================================================================
+// ★★★ این فقط بخش تغییر یافته است — در فایل اصلی store.ts، فقط type AppView
+//   را با این نسخه جایگزین کنید. بقیه فایل دست‌نخورده می‌ماند.
+// ============================================================================
+
+export type AppView =
+  | 'landing' | 'login' | 'register'
+  | 'dashboard' | 'pos' | 'products' | 'categories'
+  | 'customers' | 'invoices' | 'invoice-detail'
+  | 'installments' | 'accounting' | 'journal-entry-detail'
+  | 'settings' | 'settings-store' | 'settings-gateway'
+  | 'settings-pos' | 'settings-invoice' | 'settings-backup'
+  | 'settings-subscription' | 'settings-employees'
+  | 'reports' | 'upgrade-plan'
+  // ★★★ v6.1: AppView های جدید انبارداری و خرید
+  | 'suppliers'          // مدیریت تامین‌کنندگان
+  | 'purchase-invoices'  // فاکتورهای خرید
+  | 'warehouses'         // مدیریت انبارها
+  | 'stock-movements'    // حرکت‌های کالا (انتقال بین انبار)

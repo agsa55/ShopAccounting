@@ -1,0 +1,379 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════
+   ShopAccounting v8.8 — Global Styles (Theme: Purple-Blue Soft)
+   فونت اصلی: Peyda (اولویت ۱) → Vazirmatn (fallback)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── فونت Peyda از پوشه محلی ─────────────────────────────── */
+@font-face {
+  font-family: 'Peyda';
+  src: url('/fonts/PeydaWeb-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Peyda';
+  src: url('/fonts/PeydaWeb-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Peyda';
+  src: url('/fonts/PeydaWeb-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Peyda';
+  src: url('/fonts/PeydaWeb-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ─── فونت Vazirmatn از پوشه محلی (fallback) ──────────────── */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   متغیرهای رنگ — تم بنفش-آبی ملایم
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  --background: 240 20% 99%;
+  --foreground: 240 10% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 12%;
+  --primary: 245 75% 70%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 250 95% 76%;
+  --secondary-foreground: 240 10% 12%;
+  --muted: 240 10% 96%;
+  --muted-foreground: 240 5% 45%;
+  --accent: 245 75% 96%;
+  --accent-foreground: 245 75% 45%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --success: 160 84% 39%;
+  --success-foreground: 0 0% 98%;
+  --warning: 35 92% 50%;
+  --warning-foreground: 0 0% 98%;
+  --info: 210 90% 50%;
+  --info-foreground: 0 0% 98%;
+  --border: 240 10% 90%;
+  --input: 240 10% 90%;
+  --ring: 245 75% 70%;
+  --radius: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-lg: 1rem;
+  --font-sans: 'Peyda', 'Vazirmatn', system-ui, -apple-system, sans-serif;
+}
+
+.dark {
+  --background: 240 10% 8%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 12%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 12%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 245 75% 70%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 10% 18%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 10% 18%;
+  --muted-foreground: 240 5% 65%;
+  --accent: 240 10% 20%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62% 40%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 10% 22%;
+  --input: 240 10% 22%;
+  --ring: 245 75% 70%;
+}
+
+/* ─── استایل‌های پایه ─────────────────────────────────────── */
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  direction: rtl;
+  text-align: right;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  font-family: 'Peyda', 'Vazirmatn', system-ui, -apple-system, sans-serif !important;
+}
+
+input[type="number"],
+.num-fa {
+  font-feature-settings: "ss02";
+}
+
+/* ─── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* ─── انیمیشن‌ها ───────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-primary {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 123, 235, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(124, 123, 235, 0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.3s ease-out;
+}
+
+.animate-pulse-primary {
+  animation: pulse-primary 2s infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   تغییرات تم بنفش-آبی — فقط تغییرات ضروری
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── هدر جداول — بنفش ملایم ───────────────────────────────── */
+thead {
+  background: hsl(245 75% 96%) !important;
+}
+
+th {
+  background: hsl(245 75% 96%) !important;
+  color: hsl(245 75% 35%) !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid hsl(245 75% 85%) !important;
+}
+
+table thead tr {
+  background: hsl(245 75% 96%) !important;
+}
+
+table thead tr th {
+  background: hsl(245 75% 96%) !important;
+  color: hsl(245 75% 35%) !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid hsl(245 75% 85%) !important;
+}
+
+/* ردیف‌های داده — سفید */
+table tbody tr {
+  background: hsl(0 0% 100%) !important;
+}
+
+table tbody tr:hover {
+  background: hsl(245 75% 97%) !important;
+}
+
+/* ─── دکمه‌های اصلی — بنفش یکدست ────────────────────────────── */
+button[class*="bg-emerald-600"],
+button[class*="bg-emerald-500"],
+button[class*="bg-blue-600"],
+button[class*="bg-blue-500"],
+button[class*="bg-purple-600"],
+button[class*="bg-purple-500"],
+button[class*="bg-indigo-600"],
+button[class*="bg-indigo-500"],
+button[class*="bg-violet-600"],
+button[class*="bg-violet-500"],
+button[class*="bg-sky-600"],
+button[class*="bg-sky-500"],
+button[class*="bg-teal-600"],
+button[class*="bg-teal-500"],
+button[class*="bg-cyan-600"],
+button[class*="bg-cyan-500"],
+button[class*="bg-rose-600"],
+button[class*="bg-rose-500"],
+button[class*="bg-pink-600"],
+button[class*="bg-pink-500"],
+button[class*="bg-green-600"],
+button[class*="bg-green-500"],
+button[class*="bg-amber-600"],
+button[class*="bg-amber-500"],
+button[class*="bg-orange-600"],
+button[class*="bg-orange-500"] {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
+button[class*="bg-emerald-600"] *,
+button[class*="bg-emerald-500"] *,
+button[class*="bg-blue-600"] *,
+button[class*="bg-blue-500"] *,
+button[class*="bg-purple-600"] *,
+button[class*="bg-purple-500"] *,
+button[class*="bg-indigo-600"] *,
+button[class*="bg-indigo-500"] *,
+button[class*="bg-violet-600"] *,
+button[class*="bg-violet-500"] *,
+button[class*="bg-sky-600"] *,
+button[class*="bg-sky-500"] *,
+button[class*="bg-teal-600"] *,
+button[class*="bg-teal-500"] *,
+button[class*="bg-cyan-600"] *,
+button[class*="bg-cyan-500"] *,
+button[class*="bg-rose-600"] *,
+button[class*="bg-rose-500"] *,
+button[class*="bg-pink-600"] *,
+button[class*="bg-pink-500"] *,
+button[class*="bg-green-600"] *,
+button[class*="bg-green-500"] *,
+button[class*="bg-amber-600"] *,
+button[class*="bg-amber-500"] *,
+button[class*="bg-orange-600"] *,
+button[class*="bg-orange-500"] * {
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+/* hover دکمه‌های اصلی */
+button[class*="bg-emerald-600"]:hover,
+button[class*="bg-emerald-500"]:hover,
+button[class*="bg-blue-600"]:hover,
+button[class*="bg-blue-500"]:hover,
+button[class*="bg-purple-600"]:hover,
+button[class*="bg-purple-500"]:hover,
+button[class*="bg-indigo-600"]:hover,
+button[class*="bg-indigo-500"]:hover,
+button[class*="bg-violet-600"]:hover,
+button[class*="bg-violet-500"]:hover,
+button[class*="bg-sky-600"]:hover,
+button[class*="bg-sky-500"]:hover,
+button[class*="bg-teal-600"]:hover,
+button[class*="bg-teal-500"]:hover,
+button[class*="bg-cyan-600"]:hover,
+button[class*="bg-cyan-500"]:hover,
+button[class*="bg-rose-600"]:hover,
+button[class*="bg-rose-500"]:hover,
+button[class*="bg-pink-600"]:hover,
+button[class*="bg-pink-500"]:hover,
+button[class*="bg-green-600"]:hover,
+button[class*="bg-green-500"]:hover,
+button[class*="bg-amber-600"]:hover,
+button[class*="bg-amber-500"]:hover,
+button[class*="bg-orange-600"]:hover,
+button[class*="bg-orange-500"]:hover,
+button[class*="hover:bg-emerald-600"]:hover,
+button[class*="hover:bg-emerald-700"]:hover,
+button[class*="hover:bg-blue-600"]:hover,
+button[class*="hover:bg-blue-700"]:hover,
+button[class*="hover:bg-purple-600"]:hover,
+button[class*="hover:bg-purple-700"]:hover,
+button[class*="hover:bg-indigo-600"]:hover,
+button[class*="hover:bg-indigo-700"]:hover,
+button[class*="hover:bg-violet-600"]:hover,
+button[class*="hover:bg-violet-700"]:hover,
+button[class*="hover:bg-sky-600"]:hover,
+button[class*="hover:bg-sky-700"]:hover,
+button[class*="hover:bg-teal-600"]:hover,
+button[class*="hover:bg-teal-700"]:hover,
+button[class*="hover:bg-cyan-600"]:hover,
+button[class*="hover:bg-cyan-700"]:hover,
+button[class*="hover:bg-rose-600"]:hover,
+button[class*="hover:bg-rose-700"]:hover,
+button[class*="hover:bg-pink-600"]:hover,
+button[class*="hover:bg-pink-700"]:hover,
+button[class*="hover:bg-green-600"]:hover,
+button[class*="hover:bg-green-700"]:hover,
+button[class*="hover:bg-amber-600"]:hover,
+button[class*="hover:bg-amber-700"]:hover,
+button[class*="hover:bg-orange-600"]:hover,
+button[class*="hover:bg-orange-700"]:hover {
+  background-color: hsl(245 75% 64%) !important;
+  border-color: hsl(245 75% 64%) !important;
+}
+
+/* ─── تصحیح رنگ‌های emerald سبز قدیمی به primary بنفش ───────── */
+.bg-emerald-50 { background-color: hsl(var(--accent)) !important; }
+.bg-emerald-100 { background-color: hsl(245 75% 92%) !important; }
+.bg-emerald-500 { background-color: hsl(var(--primary)) !important; }
+.bg-emerald-600 { background-color: hsl(var(--primary)) !important; }
+.bg-emerald-700 { background-color: hsl(245 75% 58%) !important; }
+
+.text-emerald-600 { color: hsl(var(--primary)) !important; }
+.text-emerald-700 { color: hsl(245 75% 58%) !important; }
+
+.border-emerald-200 { border-color: hsl(245 75% 88%) !important; }
+.border-emerald-300 { border-color: hsl(245 75% 80%) !important; }
+.border-emerald-400 { border-color: hsl(var(--primary)) !important; }
+
+.ring-emerald-200 { --tw-ring-color: hsl(245 75% 88%) !important; }
+.ring-emerald-400 { --tw-ring-color: hsl(var(--primary)) !important; }
+
+.hover\:bg-emerald-50:hover { background-color: hsl(var(--accent)) !important; }
+.hover\:bg-emerald-100:hover { background-color: hsl(245 75% 92%) !important; }
+.hover\:bg-emerald-600:hover { background-color: hsl(245 75% 64%) !important; }
+.hover\:bg-emerald-700:hover { background-color: hsl(245 75% 58%) !important; }
+
+.hover\:text-emerald-600:hover { color: hsl(var(--primary)) !important; }
+.hover\:text-emerald-700:hover { color: hsl(245 75% 58%) !important; }

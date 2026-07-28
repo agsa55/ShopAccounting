@@ -1,0 +1,82 @@
+// ============================================================================
+// src/app/api/invoices/route.ts — بخش هوک ارسال خودکار به مودیان
+// ============================================================================
+// ★ این فایل فقط «بخش تغییر یافته» از فایل اصلی را نشان می‌دهد.
+//   در فایل اصلی /api/invoices/route.ts، این بلوک را در پایان تابع POST
+//   (بعد از createAutoJournalEntry و قبل از return NextResponse.json) اضافه کنید.
+// ============================================================================
+
+// ★★★ در ابتدای فایل (کنار سایر imports) اضافه کنید:
+//
+// import { autoSubmitInvoiceIfNeeded } from '@/lib/moidian'
+
+// ★★★ در تابع POST، بعد از بلوک createAutoJournalEntry، این کد را اضافه کنید:
+
+/*
+
+    // ─── ★★★ v6.0: ارسال خودکار فاکتور به سامانه مودیان ─────────────────
+    // اگر tenant تنظیمات مودیان را پیکربندی کرده و autoSubmit فعال باشد،
+    // فاکتور خودکار به سامانه مودیان ارسال می‌شود.
+    // این عملیات non-blocking است — در صورت خطا، فاکتور همچنان ایجاد می‌شود.
+    try {
+      await autoSubmitInvoiceIfNeeded(tenantId, invoice.id)
+    } catch (moidianErr: any) {
+      console.warn('[Invoices] Auto Moidian submission failed (non-blocking):', moidianErr?.message)
+    }
+
+*/
+
+// ============================================================================
+//  نمونه کد کامل تابع POST با تغییرات (نمایش موقعیت دقیق)
+// ============================================================================
+
+/*
+
+export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
+  try {
+    const limitCheck = await requireSubscriptionAndLimit(tenant.tenantId, 'invoices')
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { success: false, error: limitCheck.message, code: 'PLAN_LIMIT_INVOICES' },
+        { status: 403 }
+      )
+    }
+
+    // ... (همان کدهای قبلی برای ایجاد فاکتور) ...
+
+    let createdInstallmentPlan: any = null
+    if (invoiceData.paymentType === 'installment' && installmentPlanData) {
+      createdInstallmentPlan = await createInstallmentPlan(tenantId, invoice, installmentPlanData)
+    }
+
+    try {
+      const planInfo = await getTenantPlanInfo(tenantId)
+      const planTier = resolvePlanTier(planInfo.tierName)
+      await createAutoJournalEntry(tenantId, invoice, invoiceItems, invoiceData.paymentType || 'cash', planTier)
+    } catch (jeErr: any) {
+      console.warn('[Invoices] Auto journal entry failed (non-blocking):', jeErr?.message)
+    }
+
+    // ★★★ v6.0: ارسال خودکار فاکتور به سامانه مودیان (non-blocking)
+    try {
+      await autoSubmitInvoiceIfNeeded(tenantId, invoice.id)
+    } catch (moidianErr: any) {
+      console.warn('[Invoices] Auto Moidian submission failed (non-blocking):', moidianErr?.message)
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...invoice,
+        portalUrl,
+        portalToken,
+        installmentPlan: createdInstallmentPlan ? { ... } : null,
+      },
+    }, { status: 201 })
+  } catch (error: any) {
+    console.error('[Invoices] POST error:', error?.message || error)
+    return NextResponse.json({ success: false, error: error?.message || 'خطا در ایجاد فاکتور' }, { status: 500 })
+  }
+})
+
+*/

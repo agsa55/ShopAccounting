@@ -1,0 +1,58 @@
+{
+  "name": "ShopAccounting — حسابداری فروشگاهی",
+  "short_name": "حسابداری",
+  "description": "پلتفرم حسابداری و مدیریت فروشگاه",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAFAFC",
+  "theme_color": "#7C7BEB",
+  "orientation": "portrait-primary",
+  "lang": "fa",
+  "dir": "rtl",
+  "scope": "/",
+  "id": "/",
+  "icons": [
+   
+   
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "business", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "داشبورد",
+      "short_name": "داشبورد",
+      "description": "رفتن به داشبورد",
+      "url": "/?section=dashboard",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "فاکتور جدید",
+      "short_name": "فاکتور",
+      "description": "صدور فاکتور فروش",
+      "url": "/?section=invoices",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+// ============================================================================
+// prisma/schema.prisma — بخش‌های اضافه‌شده برای اتصال سامانه مودیان (v6.0)
+// ============================================================================
+
+// ─── ۱. افزودن relation به مدل Tenant ──────────────────────────────
+// (این خط را به مدل Tenant اضافه کنید — در بخش relations)
+//   MoidianSettings  MoidianSettings?
+
+// ─── ۲. افزودن فیلدهای مودیان به مدل Invoice ──────────────────────
+// (این فیلدها را به مدل Invoice اضافه کنید)
+
+model Invoice {
+  // ... فیلدهای موجود ...
+
+  // ★★★ v6.0: فیلدهای اتصال سامانه مودیان مالیاتی
+  moidianReferenceId   String?   @db.NVarChar(100)  // شماره مرجع مودیان (UUID)
+  moidianStatus        String?   @db.NVarChar(50)   // PENDING | SUBMITTED | ACCEPTED | REJECTED | CANCELLED | FAILED
+  moidianSubmittedAt   DateTime?                    // زمان ارسال به مودیان
+  moidianAcceptedAt    DateTime?                    // زمان پذیرش توسط مودیان
+  moidianError         String?   @db.NVarChar(500)  // پیام خطای مودیان (در صورت رد شدن)
+  moidianRetryCount    Int       @default(0)        // تعداد تلاش‌های مجدد
+
+  // ... relation‌های موجود ...
+}
+
+// ─── ۳. مدل جدید MoidianSettings ───────────────────────────────────
+// (این مدل را به انتهای schema.prisma اضافه کنید)
+
+model MoidianSettings {
+  id                  String   @id @default(uuid())
+  tenantId            String   @unique
+
+  // ★ اطلاعات کسب‌وکار (دریافت‌شده از سامانه مودیان)
+  fiscalId            String?  @db.NVarChar(50)    // شناسه مالیاتی (مثلاً 14001234567)
+  economicCode        String?  @db.NVarChar(50)    // کد اقتصادی
+
+  // ★ credentials (دریافت‌شده از پنل مودیان)
+  clientId            String?  @db.NVarChar(200)   // Client ID برای احراز هویت OAuth2
+  clientSecretEnc     String?  @db.NVarChar(1000)  // Client Secret (رمزنگاری‌شده با AES-256)
+  privateKeyEnc       String?  @db.NVarChar(4000)  // Private Key RSA (رمزنگاری‌شده با AES-256)
+
+  // ★ توکن‌های احراز هویت (کش می‌شوند)
+  accessTokenEnc      String?  @db.NVarChar(2000)  // access token (رمزنگاری‌شده)
+  refreshTokenEnc     String?  @db.NVarChar(2000)  // refresh token (رمزنگاری‌شده)
+  tokenExpiresAt      DateTime?                    // زمان انقضای access token
+
+  // ★ پیکربندی
+  environment         String   @default("sandbox") @db.NVarChar(20)  // sandbox | production
+  isInitialized       Boolean  @default(false)     // آیا credentials تنظیم شده؟
+  autoSubmit          Boolean  @default(true)      // ارسال خودکار فاکتورهای جدید به مودیان
+  lastSyncAt          DateTime?                    // آخرین همگام‌سازی موفق
+
+  // ★ آمار
+  totalSubmitted      Int      @default(0)
+  totalAccepted       Int      @default(0)
+  totalRejected       Int      @default(0)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  Tenant              Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([fiscalId])
+  @@map("MoidianSettings")
+}
+
+// ★★★ همچنین باید به مدل Tenant این relation اضافه شود:
+// model Tenant {
+//   ...
+//   MoidianSettings   MoidianSettings?
+//   ...
+// }
