@@ -21,7 +21,7 @@ export interface DecodedToken {
   username: string;
   role: string;
   tenantId: string;
-  userType: 'storeUser' | 'portalUser';
+   userType: 'storeUser' | 'portalUser' | 'admin';
   permissions: string[];
   storeId?: string;
   storeName?: string;

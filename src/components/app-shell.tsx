@@ -729,6 +729,52 @@ function PWAInstallButton() {
   )
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی (متصل به sync-engine)
+   ═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
+   ═══════════════════════════════════════════════════════════════ */
+function SyncIndicator() {
+  const pendingCount = useStore((s) => s.pendingSyncCount)
+  const isOnline = useStore((s) => s.isOnline)
+
+  if (pendingCount === 0 || !isOnline) return null
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-300 text-amber-700 hover:bg-amber-50 transition-all"
+      onClick={async () => {
+        const { syncEngine } = await import('@/lib/sync-engine')
+        const result = await syncEngine.sync()
+        
+        if (result.succeeded > 0) {
+          useStore.getState().addNotification({
+            title: '✅ همگام‌سازی موفق',
+            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
+            type: 'success',
+          })
+        }
+        if (result.failed > 0) {
+          useStore.getState().addNotification({
+            title: '⚠️ خطا در همگام‌سازی',
+            message: `${result.failed} تغییر همگام‌سازی نشد`,
+            type: 'warning',
+          })
+        }
+      }}
+    >
+      <RefreshCw className="h-3 w-3 animate-spin" />
+      <span className="hidden sm:inline">همگام‌سازی</span>
+      <span className="bg-amber-600 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+        {pendingCount}
+      </span>
+    </Button>
+  )
+}
 /* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
@@ -851,6 +897,7 @@ function AppHeader() {
 
         {/* ★ دکمه نصب PWA */}
         <PWAInstallButton />
+         <SyncIndicator />
 
         <OfflineModal />
 
@@ -993,117 +1040,39 @@ export default function AppShell() {
   }, [user, currentView, setCurrentView, planFeatures])
 
   // ★ Service Worker + Online/Offline + Sync
-  useEffect(() => {
+   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    let syncInterval: NodeJS.Timeout | null = null
+    // ★ فعال‌سازی موتور همگام‌سازی موجود شما
+    import('@/lib/sync-engine').then(({ syncEngine }) => {
+      syncEngine.init()
+    })
+
     let domContentLoadedListener: (() => void) | null = null
 
-    const triggerSync = async () => {
-      try {
-        const { syncEngine } = await import('@/lib/sync-engine')
-        const result = await syncEngine.sync()
-
-        if (result.succeeded > 0) {
-          useStore.getState().addNotification({
-            title: '✅ همگام‌سازی موفق',
-            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
-            type: 'success',
-          })
-        }
-
-        if (result.failed > 0) {
-          useStore.getState().addNotification({
-            title: '⚠️ خطا در همگام‌سازی',
-            message: `${result.failed} تغییر همگام‌سازی نشد — مجدداً تلاش می‌شود`,
-            type: 'warning',
-          })
-        }
-
-        const { getSyncQueueCount } = await import('@/lib/offline-db')
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
-      } catch (err) {
-        console.error('[AppShell] triggerSync error:', err)
-      }
-    }
-
-    const handleOnline = () => {
-      useStore.getState().setOnline(true)
-      useStore.getState().addNotification({
-        title: '🌐 اتصال برقرار شد',
-        message: 'در حال همگام‌سازی تغییرات...',
-        type: 'info',
-      })
-      triggerSync()
-
-      if (syncInterval) clearInterval(syncInterval)
-      syncInterval = setInterval(async () => {
-        const count = useStore.getState().pendingSyncCount
-        if (count > 0) {
-          await triggerSync()
-        } else {
-          if (syncInterval) clearInterval(syncInterval)
-        }
-      }, 30000)
-    }
-
-    const handleOffline = () => {
-      useStore.getState().setOnline(false)
-      if (syncInterval) clearInterval(syncInterval)
-      useStore.getState().addNotification({
-        title: '📡 اتصال قطع شد',
-        message: 'تغییرات شما ذخیره و پس از اتصال همگام‌سازی می‌شوند',
-        type: 'warning',
-      })
-    }
-
-       // ★ ثبت Service Worker — از pwa-register.tsx مجزا است
-    // ★ این فقط برای sync پیام‌رسانی است، ثبت اصلی در PWARegister انجام می‌شود
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
       try {
-        // ★ فقط listen می‌کنیم، ثبت نمی‌کنیم (PWARegister انجام می‌دهد)
         navigator.serviceWorker.addEventListener('message', (event) => {
           if (event.data?.type === 'TRIGGER_SYNC') {
-            console.log('[AppShell] TRIGGER_SYNC from SW')
-            triggerSync()
-          }
-          if (event.data?.type === 'SW_UPDATED') {
-            console.log('[AppShell] SW updated, new version available')
+            import('@/lib/sync-engine').then(({ syncEngine }) => syncEngine.sync())
           }
         })
-
-        // ★ فیکس: controllerchange دیگر reload نمی‌کند
-        // در dev این رویداد مدام فایر می‌شد (چون Turbopack فایل‌ها رو rebuild می‌کنه)
-        // و اگر reload() اینجا بود → حلقه بی‌نهایت
-        // الان فقط log می‌کنیم — reload فقط در production و با تأیید کاربر انجام میشه
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('[AppShell] SW controller changed (new version active) — no auto-reload in dev')
+          console.log('[AppShell] SW controller changed')
         })
-
       } catch (err) {
         console.warn('[AppShell] SW listener error:', err)
       }
     }
+
     const initialOnline = navigator.onLine
     useStore.getState().setOnline(initialOnline)
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', () => useStore.getState().setOnline(true))
+    window.addEventListener('offline', () => useStore.getState().setOnline(false))
 
     listenToSW()
-
-    const updatePendingCount = async () => {
-      try {
-        const { getSyncQueueCount } = await import('@/lib/offline-db')
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
-      } catch { /* ignore */ }
-    }
-
-    updatePendingCount()
-    const countInterval = setInterval(updatePendingCount, 10000)
 
     let preloadTimer: NodeJS.Timeout | null = null
     if (initialOnline) {
@@ -1111,7 +1080,7 @@ export default function AppShell() {
         try {
           const { syncEngine } = await import('@/lib/sync-engine')
           await syncEngine.preloadData()
-          console.log('[AppShell] ✅ Preload data completed')
+          console.log('[AppShell] ✅ Preload data completed via sync-engine')
         } catch (err) {
           console.warn('[AppShell] ⚠️ Preload failed:', err)
         }
@@ -1119,17 +1088,14 @@ export default function AppShell() {
     }
 
     return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-      clearInterval(countInterval)
-      if (syncInterval) clearInterval(syncInterval)
+      window.removeEventListener('online', () => useStore.getState().setOnline(true))
+      window.removeEventListener('offline', () => useStore.getState().setOnline(false))
       if (preloadTimer) clearTimeout(preloadTimer)
       if (domContentLoadedListener) {
         document.removeEventListener('DOMContentLoaded', domContentLoadedListener)
       }
     }
   }, [])
-
   const canViewCurrentPage = checkAccess(
     currentView,
     user?.role,

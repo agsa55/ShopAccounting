@@ -1,9 +1,10 @@
 'use client'
 
 // ============================================================================
-// src/components/tickets/ticket-detail.tsx — v8.6
+// src/components/tickets/ticket-detail.tsx — v8.6 + v6.4 (آفلاین کامل)
 // ----------------------------------------------------------------------------
 // صفحه جزئیات تیکت — مشاهده کامل + پاسخ + بستن/باز کردن مجدد + امتیازدهی
+// ★ v6.4: پشتیبانی کامل آفلاین با sessionStorage و IndexedDB
 // ============================================================================
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore, type AppView } from '@/lib/store'
@@ -17,8 +18,15 @@ import {
 import {
   ArrowRight, Loader2, Send, CheckCircle2, Clock, AlertCircle, XCircle,
   Ticket as TicketIcon, Star, RotateCcw, MessageCircle, Headphones,
+  WifiOff, CloudOff
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { 
+  cacheTicketMessages, 
+  getCachedTicketMessages,
+  getCachedTickets // ★ v6.4: اضافه شد
+} from '@/lib/offline-db'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // ─── تایپ‌ها ────────────────────────────────────────────────────
 interface Message {
@@ -29,6 +37,7 @@ interface Message {
   attachments: string[]
   createdAt: string
   isRead: boolean
+  _isOffline?: boolean // ★ v6.4
 }
 
 interface TicketDetail {
@@ -51,6 +60,7 @@ interface TicketDetail {
   firstResponseAt: string | null
   closedAt: string | null
   messages: Message[]
+  _isOffline?: boolean // ★ v6.4
 }
 
 // ─── کمک‌تابع‌ها ────────────────────────────────────────────────
@@ -118,103 +128,248 @@ export function TicketDetail() {
   const [rating, setRating] = useState(0)
   const [ratingComment, setRatingComment] = useState('')
   const [hoverRating, setHoverRating] = useState(0)
+  
+  // ★ v6.4: وضعیت آفلاین
+  const [isOnline, setIsOnline] = useState(true)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
-  // ─── دریافت آی‌دی تیکت ──────────────────────────────────────
+  // ─── دریافت آی‌دی تیکت و داده‌های کش‌شده ──────────────────────
   const ticketId = typeof window !== 'undefined' ? sessionStorage.getItem('currentTicketId') : null
+  // ★ v6.4: خواندن داده‌های ذخیره‌شده در لحظه کلیک
+  const cachedTicketDataStr = typeof window !== 'undefined' ? sessionStorage.getItem('currentTicketData') : null
+  const cachedTicketData = cachedTicketDataStr ? (() => {
+    try {
+      return JSON.parse(cachedTicketDataStr)
+    } catch {
+      return null
+    }
+  })() : null
 
-  // ─── بارگذاری تیکت ──────────────────────────────────────────
+  // ─── تشخیص وضعیت آنلاین/آفلاین ──────────────────────────────
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    setIsOnline(navigator.onLine)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  // ─── بارگذاری تیکت (نسخه نهایی ضدگلوله) ─────────────────────
   const loadTicket = useCallback(async () => {
     if (!ticketId) {
-      toast({ title: 'خطا', description: 'تیکتی انتخاب نشده است', variant: 'destructive' })
+      toast({ title: 'خطا', description: 'شناسه تیکت نامعتبر است', variant: 'destructive' })
       setCurrentView('tickets' as AppView)
       return
     }
 
     setLoading(true)
-    try {
-      const res = await fetch(`/api/tickets/${ticketId}`, {
-        headers: getAuthHeaders(),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setTicket(data.data)
-        // اسکرول به آخرین پیام
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const trulyOnline = isOnline && navigator.onLine
+
+    // ★ اولویت ۱: اگر آفلاین هستیم و داده در sessionStorage موجود است، بلافاصله نمایش بده
+    if (!trulyOnline && cachedTicketData) {
+      try {
+        const cachedMsgs = await getCachedTicketMessages(ticketId).catch(() => [])
+        
+        const reconstructedTicket: TicketDetail = {
+          ...cachedTicketData,
+          messages: cachedMsgs.length > 0 ? cachedMsgs : [{
+            id: 'temp-msg',
+            senderType: 'customer',
+            senderName: 'شما',
+            message: cachedTicketData.lastMessage?.message || cachedTicketData.subject || 'پیام اولیه',
+            attachments: [],
+            createdAt: cachedTicketData.createdAt,
+            isRead: true,
+            _isOffline: true
+          }],
+          description: cachedTicketData.description || cachedTicketData.lastMessage?.message || '',
+          attachments: [],
+          rating: cachedTicketData.rating || null,
+          ratingComment: null,
+          ratedAt: null,
+          statusLabel: STATUS_CONFIG[cachedTicketData.status]?.label || cachedTicketData.status,
+          priorityLabel: PRIORITY_CONFIG[cachedTicketData.priority]?.label || cachedTicketData.priority,
+          categoryLabel: cachedTicketData.categoryLabel || cachedTicketData.category,
+          _isOffline: true
+        }
+        
+        setTicket(reconstructedTicket)
+        setLoading(false)
+        setTimeout(() => { 
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) 
         }, 100)
-      } else {
-        toast({
-          title: 'خطا',
-          description: data.error || 'تیکت یافت نشد',
-          variant: 'destructive',
+        return // موفقیت‌آمیز بود، خارج شو
+      } catch (err) {
+        console.error('[TicketDetail] Error using sessionStorage data:', err)
+      }
+    }
+
+    // ★ اولویت ۲: تلاش برای دریافت از شبکه (فقط اگر آنلاین هستیم)
+    if (trulyOnline) {
+      try {
+        console.log(`[TicketDetail] Fetching ticket: /api/tickets/${ticketId}`)
+        const res = await fetch(`/api/tickets/${ticketId}`, { 
+          headers: getAuthHeaders(),
+          cache: 'no-store'
         })
-        setCurrentView('tickets' as AppView)
+        
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+        
+        const data = await res.json()
+        if (data.success && data.data) {
+          setTicket(data.data)
+          await cacheTicketMessages(ticketId, data.data.messages)
+          // به‌روزرسانی sessionStorage برای بازدیدهای بعدی
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('currentTicketData', JSON.stringify(data.data))
+          }
+          setLoading(false)
+          setTimeout(() => { 
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) 
+          }, 100)
+          return
+        } else {
+          throw new Error(data.error || 'تیکت یافت نشد')
+        }
+      } catch (err: any) {
+        console.warn('[TicketDetail] Network fetch failed:', err.message)
+      }
+    }
+
+    // ★ اولویت ۳: بازگشت به کش IndexedDB
+    try {
+      const cachedMsgs = await getCachedTicketMessages(ticketId)
+      const allCachedTickets = await getCachedTickets()
+      const foundTicket = allCachedTickets.find((t: any) => t.id === ticketId) || cachedTicketData
+
+      if (foundTicket) {
+        const reconstructedTicket: TicketDetail = {
+          ...foundTicket,
+          messages: cachedMsgs.length > 0 ? cachedMsgs : [{
+            id: 'temp-msg',
+            senderType: 'customer',
+            senderName: 'شما',
+            message: foundTicket.lastMessage?.message || 'پیام اولیه',
+            attachments: [],
+            createdAt: foundTicket.createdAt,
+            isRead: true,
+            _isOffline: true
+          }],
+          description: foundTicket.description || foundTicket.lastMessage?.message || '',
+          attachments: [],
+          rating: foundTicket.rating || null,
+          ratingComment: null,
+          ratedAt: null,
+          statusLabel: STATUS_CONFIG[foundTicket.status]?.label || foundTicket.status,
+          priorityLabel: PRIORITY_CONFIG[foundTicket.priority]?.label || foundTicket.priority,
+          categoryLabel: foundTicket.categoryLabel || foundTicket.category,
+          _isOffline: true
+        }
+        
+        setTicket(reconstructedTicket)
+        if (!trulyOnline) {
+          toast({ title: 'حالت آفلاین', description: 'نمایش داده‌های ذخیره‌شده محلی', variant: 'default' })
+        }
+        setLoading(false)
+        setTimeout(() => { 
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) 
+        }, 100)
+        return
       }
     } catch (err) {
-      console.error('[TicketDetail] load error:', err)
-      toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
-    } finally {
-      setLoading(false)
+      console.error('[TicketDetail] Cache fallback failed:', err)
     }
-  }, [ticketId, setCurrentView, toast])
+
+    // ★ شکست کامل
+    console.error('[TicketDetail] All loading methods failed')
+    toast({ 
+      title: 'خطا در بارگذاری', 
+      description: 'اطلاعات تیکت در دسترس نیست.', 
+      variant: 'destructive' 
+    })
+    setLoading(false)
+    // به جای برگشت به لیست، یک state خالی نمایش می‌دهیم
+    setTicket(null)
+  }, [ticketId, cachedTicketData, setCurrentView, toast, isOnline])
 
   useEffect(() => {
     loadTicket()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId])
 
-  // ─── ارسال پاسخ ─────────────────────────────────────────────
+  // ─── ارسال پاسخ (با پشتیبانی آفلاین) ────────────────────────
   const handleSendReply = async () => {
     if (!ticket || reply.trim().length < 2) return
 
     setSubmitting(true)
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      // ★ v6.4: پاسخ آفلاین
+      const newMessage: Message = {
+        id: `msg_offline_${Date.now()}`,
+        senderType: 'customer',
+        senderName: 'شما',
+        message: reply.trim(),
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        isRead: false,
+        _isOffline: true
+      }
+
+      const updatedTicket = {
+        ...ticket,
+        status: 'pending',
+        updatedAt: new Date().toISOString(),
+        messages: [...ticket.messages, newMessage],
+        _isOffline: true
+      }
+
+      setTicket(updatedTicket)
+      setReply('')
+      await cacheTicketMessages(ticket.id, updatedTicket.messages)
+      
+      toast({ title: 'ذخیره شد ✓', description: 'پاسخ شما ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.' })
+      setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, 50)
+      setSubmitting(false)
+      return
+    }
+
+    // پاسخ آنلاین
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          action: 'reply',
-          message: reply.trim(),
-        }),
+        body: JSON.stringify({ action: 'reply', message: reply.trim() }),
       })
       const data = await res.json()
       if (data.success) {
-        // اضافه کردن پاسخ به لیست پیام‌ها به‌صورت بهینه
         setTicket((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: 'pending',
-                updatedAt: new Date().toISOString(),
-                messages: [
-                  ...prev.messages,
-                  {
-                    id: data.data.id,
-                    senderType: 'customer',
-                    senderName: data.data.senderName,
-                    message: data.data.message,
-                    attachments: [],
-                    createdAt: data.data.createdAt,
-                    isRead: false,
-                  },
-                ],
-              }
-            : prev
+          prev ? {
+            ...prev, status: 'pending', updatedAt: new Date().toISOString(),
+            messages: [...prev.messages, {
+              id: data.data.id, senderType: 'customer', senderName: data.data.senderName,
+              message: data.data.message, attachments: [], createdAt: data.data.createdAt, isRead: false
+            }],
+          } : prev
         )
         setReply('')
         toast({ title: 'ارسال شد ✓', description: 'پاسخ شما ارسال شد' })
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-        }, 50)
+        await cacheTicketMessages(ticket.id, [...ticket.messages, { 
+          id: data.data.id, senderType: 'customer', senderName: data.data.senderName, 
+          message: data.data.message, attachments: [], createdAt: data.data.createdAt, isRead: false 
+        }])
+        setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, 50)
       } else {
-        toast({
-          title: 'خطا',
-          description: data.error || 'ارسال پاسخ ناموفق بود',
-          variant: 'destructive',
-        })
+        toast({ title: 'خطا', description: data.error || 'ارسال پاسخ ناموفق بود', variant: 'destructive' })
       }
     } catch (err) {
       console.error('[TicketDetail] reply error:', err)
@@ -227,6 +382,17 @@ export function TicketDetail() {
   // ─── بستن تیکت ──────────────────────────────────────────────
   const handleClose = async () => {
     if (!ticket) return
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      const updated = { ...ticket, status: 'closed', statusLabel: 'بسته شده', closedAt: new Date().toISOString(), _isOffline: true }
+      setTicket(updated)
+      setCloseDialogOpen(false)
+      toast({ title: 'بسته شد ✓', description: 'تیکت به صورت محلی بسته شد و پس از اتصال همگام‌سازی می‌شود.' })
+      setTimeout(() => setRatingDialogOpen(true), 500)
+      return
+    }
+
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: 'POST',
@@ -235,12 +401,9 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
-        setTicket((prev) =>
-          prev ? { ...prev, status: 'closed', statusLabel: 'بسته شده', closedAt: new Date().toISOString() } : prev
-        )
+        setTicket((prev) => prev ? { ...prev, status: 'closed', statusLabel: 'بسته شده', closedAt: new Date().toISOString() } : prev)
         setCloseDialogOpen(false)
         toast({ title: 'بسته شد ✓', description: 'تیکت بسته شد' })
-        // نمایش دیالوگ امتیازدهی
         setTimeout(() => setRatingDialogOpen(true), 500)
       } else {
         toast({ title: 'خطا', description: data.error || 'عملیات ناموفق بود', variant: 'destructive' })
@@ -253,6 +416,15 @@ export function TicketDetail() {
   // ─── باز کردن مجدد ──────────────────────────────────────────
   const handleReopen = async () => {
     if (!ticket) return
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      const updated = { ...ticket, status: 'open', statusLabel: 'باز', closedAt: null, _isOffline: true }
+      setTicket(updated)
+      toast({ title: 'باز شد ✓', description: 'تیکت به صورت محلی مجدداً باز شد.' })
+      return
+    }
+
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: 'POST',
@@ -261,9 +433,7 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
-        setTicket((prev) =>
-          prev ? { ...prev, status: 'open', statusLabel: 'باز', closedAt: null } : prev
-        )
+        setTicket((prev) => prev ? { ...prev, status: 'open', statusLabel: 'باز', closedAt: null } : prev)
         toast({ title: 'باز شد ✓', description: 'تیکت مجدداً باز شد' })
       } else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
@@ -276,28 +446,27 @@ export function TicketDetail() {
   // ─── ثبت امتیاز ─────────────────────────────────────────────
   const handleSubmitRating = async () => {
     if (!ticket || rating < 1 || rating > 5) return
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      const updated = { ...ticket, rating, ratingComment: ratingComment.trim() || null, ratedAt: new Date().toISOString(), _isOffline: true }
+      setTicket(updated)
+      setRatingDialogOpen(false)
+      setRating(0)
+      setRatingComment('')
+      toast({ title: 'ثبت شد ✓', description: 'امتیاز شما ذخیره شد و پس از اتصال ارسال می‌شود.' })
+      return
+    }
+
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          action: 'rate',
-          rating,
-          ratingComment: ratingComment.trim(),
-        }),
+        body: JSON.stringify({ action: 'rate', rating, ratingComment: ratingComment.trim() }),
       })
       const data = await res.json()
       if (data.success) {
-        setTicket((prev) =>
-          prev
-            ? {
-                ...prev,
-                rating,
-                ratingComment: ratingComment.trim() || null,
-                ratedAt: new Date().toISOString(),
-              }
-            : prev
-        )
+        setTicket((prev) => prev ? { ...prev, rating, ratingComment: ratingComment.trim() || null, ratedAt: new Date().toISOString() } : prev)
         setRatingDialogOpen(false)
         setRating(0)
         setRatingComment('')
@@ -310,29 +479,54 @@ export function TicketDetail() {
     }
   }
 
-  // ─── کلید Enter برای ارسال (بدون Shift) ────────────────────
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (reply.trim().length >= 2 && !submitting) {
-        handleSendReply()
-      }
+      if (reply.trim().length >= 2 && !submitting) handleSendReply()
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  if (loading) {
+   if (loading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+      <div className="p-3 sm:p-4 lg:p-6 space-y-4 font-fa max-w-4xl mx-auto" dir="rtl">
+        {/* Skeleton Header */}
+        <div className="flex items-start gap-3">
+          <Skeleton className="h-8 w-8 rounded-md" />
+          <div className="flex-1 space-y-2">
+            <div className="flex gap-2">
+              <Skeleton className="h-5 w-20" />
+              <Skeleton className="h-5 w-16" />
+            </div>
+            <Skeleton className="h-7 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        </div>
+        {/* Skeleton Messages */}
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex gap-2 flex-row-reverse">
+              <Skeleton className="h-8 w-8 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-16 w-full rounded-xl" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-8 w-8 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-3 w-32" />
+                <Skeleton className="h-20 w-3/4 rounded-xl" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     )
   }
-
   if (!ticket) {
     return (
       <div className="p-6 text-center font-fa">
-        <p className="text-sm text-gray-500">تیکت یافت نشد</p>
+        <p className="text-sm text-gray-500">تیکت یافت نشد یا اطلاعات آن در دسترس نیست</p>
         <Button className="mt-3" variant="outline" onClick={() => setCurrentView('tickets' as AppView)}>
           بازگشت به لیست
         </Button>
@@ -371,6 +565,11 @@ export function TicketDetail() {
             <Badge variant="outline" className="text-[10px] text-gray-500">
               {ticket.categoryLabel}
             </Badge>
+            {ticket._isOffline && (
+              <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50">
+                <CloudOff className="w-3 h-3 ml-1" /> آفلاین
+              </Badge>
+            )}
           </div>
           <h1 className="text-base sm:text-lg font-bold text-gray-900 break-words">{ticket.subject}</h1>
           <p className="text-[11px] text-gray-400 mt-0.5">
@@ -426,6 +625,7 @@ export function TicketDetail() {
                           <Badge className="text-[9px] bg-blue-100 text-blue-700 px-1 py-0">پشتیبانی</Badge>
                         )}
                         <span className="text-[9px] text-gray-400">{formatTime(m.createdAt)}</span>
+                        {m._isOffline && <CloudOff className="w-3 h-3 text-amber-500" />}
                       </div>
                       <div
                         className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
@@ -471,6 +671,12 @@ export function TicketDetail() {
       {!isClosed ? (
         <Card>
           <CardContent className="p-3">
+            {!isOnline && (
+              <div className="flex items-center gap-2 mb-2 p-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800">
+                <WifiOff className="w-3.5 h-3.5 shrink-0" />
+                <span>حالت آفلاین: پیام شما ذخیره محلی شده و پس از اتصال ارسال می‌شود.</span>
+              </div>
+            )}
             <div className="flex gap-2 items-end">
               <Textarea
                 value={reply}

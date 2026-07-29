@@ -1,13 +1,21 @@
-// src/app/api/invoices/[id]/return/route.ts — v9.8 ★★★ COGS FIX
+// src/app/api/invoices/[id]/return/route.ts — v9.9 ★★★ ACCOUNT FIX
 // ============================================================================
-// ★★★ v9.8 تغییرات:
+// ★★★ v9.9 تغییرات:
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای manual lookup
+//   ★ استفاده از VAT (2160) برای مالیات بر ارزش افزوده (نه 190 قدیمی)
+//   ★ استفاده از bankAccountId (1100) به‌عنوان fallback صندوق
+//   ★ حذف حلقه manual account lookup
+//   ★ اصلاح buyer/seller account selection برای نسیه (1310 بدهکاران تجاری)
+//
+// ★★★ v9.8 (حفظ شد):
 //   ★ محاسبه و ذخیره cogsAmount در فاکتور برگشتی
-//   ★ استفاده از همان منطق fallback چندمرحله‌ای COGS
-//   ★ لاگ دقیق برای debug
+//   ★ منطق fallback چندمرحله‌ای COGS
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
+import { db } from '@/lib/db'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 export const POST = withTenantAndPermission('pos')(async (
   req: NextRequest,
@@ -171,6 +179,10 @@ export const POST = withTenantAndPermission('pos')(async (
       }
     }
 
+    // ★★★ v9.9: گرفتن حساب‌های استاندارد قبل از transaction (با auto-seed)
+    await getStandardAccountIds(tenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(tenantId)
+
     const result = await tenantDb.$transaction(async (tx: any) => {
       const returnInvoice = await tx.invoice.create({
         data: {
@@ -240,7 +252,6 @@ export const POST = withTenantAndPermission('pos')(async (
             stockLevel = null
           }
 
-          // ★★★ محاسبه COGS با fallback چندمرحله‌ای
           if (stockLevel) {
             const avgCost = Number(stockLevel.averageCost) || 0
             if (avgCost > 0) {
@@ -358,43 +369,16 @@ export const POST = withTenantAndPermission('pos')(async (
         console.warn('[Sale Return] cogsAmount field not found:', err?.message)
       }
 
-      // ★ سند حسابداری برگشتی
+      // ★★★ v9.9: سند حسابداری برگشتی — استفاده از getStandardAccountIds
       try {
-        const accounts = await tx.account.findMany({ where: { tenantId } })
-        let cashAccountId: string | null = null
-        let salesAccountId: string | null = null
-        let receivablesAccountId: string | null = null
-        let taxAccountId: string | null = null
-        let cogsAccountId: string | null = null
-        let inventoryAccountId: string | null = null
-
-        for (const acc of accounts) {
-          const code = (acc.code || '').toLowerCase()
-          const type = (acc.type || '').toLowerCase()
-          const name = (acc.name || '').toLowerCase()
-
-          if (!cashAccountId && (type === 'cash' || code.startsWith('1010') || name.includes('صندوق'))) {
-            cashAccountId = acc.id
-          }
-          if (!cashAccountId && code.startsWith('1100')) {
-            cashAccountId = acc.id
-          }
-          if (!salesAccountId && (type === 'revenue' || code.startsWith('410') || name.includes('فروش کالا'))) {
-            salesAccountId = acc.id
-          }
-          if (!receivablesAccountId && (type === 'receivable' || code.startsWith('1300'))) {
-            receivablesAccountId = acc.id
-          }
-          if (!taxAccountId && (type === 'tax' || code.startsWith('190'))) {
-            taxAccountId = acc.id
-          }
-          if (!cogsAccountId && (type === 'cogs' || code.startsWith('5000') || name.includes('بهای تمام'))) {
-            cogsAccountId = acc.id
-          }
-          if (!inventoryAccountId && (type === 'inventory' || code.startsWith('1200'))) {
-            inventoryAccountId = acc.id
-          }
-        }
+        const salesAccountId = accIds.salesAccountId
+        const cogsAccountId = accIds.cogsAccountId
+        const inventoryAccountId = accIds.inventoryAccountId
+        // ★★★ v9.9: VAT (2160) برای مالیات بر ارزش افزوده
+        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
+        const cashAccountId = accIds.cashAccountId || accIds.bankAccountId
+        // ★★★ v9.9: برای نسیه از tradeReceivableId (1310) استفاده کنیم
+        const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
 
         if (salesAccountId) {
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
@@ -405,6 +389,7 @@ export const POST = withTenantAndPermission('pos')(async (
 
           const lines: any[] = []
 
+          // ★ بدهکار: برگشت فروش (کاهش درآمد)
           lines.push({
             accountId: salesAccountId,
             debit: netSales,
@@ -412,26 +397,30 @@ export const POST = withTenantAndPermission('pos')(async (
             description: `بدهکار: برگشت فروش — ${returnNumber}`,
           })
 
-          if (returnTax > 0 && taxAccountId) {
+          // ★ بدهکار: مالیات بر ارزش افزوده (با کاهش)
+          if (returnTax > 0 && vatAccountId) {
             lines.push({
-              accountId: taxAccountId,
+              accountId: vatAccountId,
               debit: returnTax,
               credit: 0,
-              description: `بدهکار: مالیات برگشت فروش — ${returnNumber}`,
+              description: `بدهکار: مالیات بر ارزش افزوده برگشت فروش — ${returnNumber}`,
             })
           }
 
-          const creditAccountId = isCredit ? receivablesAccountId || cashAccountId : cashAccountId
+          // ★ بستانکار: صندوق (نقدی) یا بدهکاران تجاری (نسیه)
+          const creditAccountId = isCredit
+            ? (receivablesAccountId || cashAccountId)
+            : cashAccountId
           if (creditAccountId) {
             lines.push({
               accountId: creditAccountId,
               debit: 0,
               credit: returnTotal,
-              description: `بستانکار: ${isCredit ? 'بدهکاران (کاهش طلب)' : 'صندوق'} — ${returnNumber}`,
+              description: `بستانکار: ${isCredit ? 'بدهکاران تجاری (کاهش طلب)' : 'صندوق'} — ${returnNumber}`,
             })
           }
 
-          // ★★★ سند COGS برگشتی
+          // ★★★ سند COGS برگشتی (معکوس)
           if (totalReturnCogs > 0 && cogsAccountId && inventoryAccountId) {
             lines.push({
               accountId: inventoryAccountId,
@@ -454,7 +443,8 @@ export const POST = withTenantAndPermission('pos')(async (
             await tx.journalEntry.create({
               data: {
                 number: jeNumber,
-                date: new Date(),
+                // ★★★ v9.9: تاریخ JE = تاریخ فاکتور برگشتی
+                date: invoiceDate ? new Date(invoiceDate) : new Date(),
                 description: `سند برگشتی فروش ${returnNumber}`,
                 status: 'posted',
                 sourceType: 'sale_return',

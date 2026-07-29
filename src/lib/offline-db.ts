@@ -26,22 +26,24 @@ export interface CacheStats {
   invoices: number
   installmentPlans: number
   installmentSchedules: number
+  tickets: number          // ★ v6.4: اضافه شد
   syncQueue: number
   lastSync: number | null
 }
 
-// ─── IndexedDB Setup ────────────────────────────────────────────
-
 const DB_NAME = 'ShopAccountingOffline'
-const DB_VERSION = 2 // ★ v6.3: افزایش نسخه برای اقساط
+const DB_VERSION =4  // ★ v6.4: از 2 به 3 تغییر کرد
 const STORES = {
   syncQueue: 'syncQueue',
   products: 'products',
   customers: 'customers',
   categories: 'categories',
   invoices: 'invoices',
-  installmentPlans: 'installmentPlans', // ★ v6.3: جدید
-  installmentSchedules: 'installmentSchedules', // ★ v6.3: جدید
+  installmentPlans: 'installmentPlans',
+  installmentSchedules: 'installmentSchedules',
+  tickets: 'tickets',                 // ★ v6.4: جدید
+  ticketMessages: 'ticketMessages',   // ★ v6.4: جدید
+  offlineOperations: 'offlineOperations',
   meta: 'meta',
 } as const
 
@@ -107,6 +109,24 @@ async function getDB(): Promise<IDBDatabase> {
         store.createIndex('status', 'status')
       }
 
+      // ★ v6.4: tickets store
+if (!db.objectStoreNames.contains(STORES.tickets)) {
+  const store = db.createObjectStore(STORES.tickets, { keyPath: 'id' })
+  store.createIndex('status', 'status')
+  store.createIndex('updatedAt', 'updatedAt')
+}
+
+// ★ v6.4: ticketMessages store
+if (!db.objectStoreNames.contains(STORES.ticketMessages)) {
+  const store = db.createObjectStore(STORES.ticketMessages, { keyPath: 'id' })
+  store.createIndex('ticketId', 'ticketId')
+  store.createIndex('createdAt', 'createdAt')
+}
+
+// meta store (این خط از قبل وجود دارد - تغییر ندهید)
+if (!db.objectStoreNames.contains(STORES.meta)) {
+  db.createObjectStore(STORES.meta, { keyPath: 'key' })
+}
       // meta store (برای lastSync، plan، warehouses و غیره)
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: 'key' })
@@ -764,7 +784,7 @@ export async function getLastSyncTimestamp(): Promise<number | null> {
 
 export async function getCacheStats(): Promise<CacheStats> {
   try {
-    const [products, customers, categories, invoices, installmentPlans, installmentSchedules, syncQueue, lastSync] =
+    const [products, customers, categories, invoices, installmentPlans, installmentSchedules, tickets, syncQueue, lastSync] =
       await Promise.all([
         idbCount(STORES.products),
         idbCount(STORES.customers),
@@ -772,16 +792,15 @@ export async function getCacheStats(): Promise<CacheStats> {
         idbCount(STORES.invoices),
         idbCount(STORES.installmentPlans),
         idbCount(STORES.installmentSchedules),
+        idbCount(STORES.tickets),        // ★ v6.4: جدید
         idbCount(STORES.syncQueue),
         getLastSyncTimestamp(),
       ])
-    return { products, customers, categories, invoices, installmentPlans, installmentSchedules, syncQueue, lastSync }
+    return { products, customers, categories, invoices, installmentPlans, installmentSchedules, tickets, syncQueue, lastSync }
   } catch {
-    return { products: 0, customers: 0, categories: 0, invoices: 0, installmentPlans: 0, installmentSchedules: 0, syncQueue: 0, lastSync: null }
+    return { products: 0, customers: 0, categories: 0, invoices: 0, installmentPlans: 0, installmentSchedules: 0, tickets: 0, syncQueue: 0, lastSync: null }
   }
 }
-
-// ─── Clear All ───────────────────────────────────────────────────
 
 export async function clearAllCache(): Promise<void> {
   await Promise.all([
@@ -791,12 +810,13 @@ export async function clearAllCache(): Promise<void> {
     idbClear(STORES.invoices),
     idbClear(STORES.installmentPlans),
     idbClear(STORES.installmentSchedules),
+    idbClear(STORES.tickets),              // ★ v6.4: جدید
+    idbClear(STORES.ticketMessages),       // ★ v6.4: جدید
     idbClear(STORES.syncQueue),
     idbClear(STORES.meta),
   ])
   await clearCachedPlan()
 }
-
 // ─── Helpers ─────────────────────────────────────────────────────
 
 export function isOfflineId(id: string): boolean {
@@ -811,4 +831,201 @@ export function isOfflineInvoiceNumber(number: string): boolean {
 export function getOfflineDB() {
   console.warn('[OfflineDB] getOfflineDB() منسوخ شده — از توابع async استفاده کنید')
   return null
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.4: Cache Tickets
+// ═══════════════════════════════════════════════════════════════
+
+export async function cacheTickets(tickets: any[]): Promise<void> {
+  try {
+    await idbClear(STORES.tickets)
+    for (const t of tickets) {
+      await idbPut(STORES.tickets, t)
+    }
+    // fallback localStorage
+    localStorage.setItem('cached_tickets', JSON.stringify({
+      tickets,
+      cachedAt: new Date().toISOString(),
+    }))
+    console.log(`[OfflineDB] ✅ ${tickets.length} تیکت cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheTickets error:', err)
+    try {
+      localStorage.setItem('cached_tickets', JSON.stringify({
+        tickets,
+        cachedAt: new Date().toISOString(),
+      }))
+    } catch {}
+  }
+}
+
+export async function getCachedTickets(): Promise<any[]> {
+  try {
+    // ۱. IndexedDB
+    const tickets = await idbGetAll<any>(STORES.tickets)
+    if (tickets.length > 0) {
+      console.log('[OfflineDB] Tickets loaded from IndexedDB')
+      return tickets
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading tickets from IndexedDB:', err)
+  }
+
+  // ۲. localStorage fallback
+  try {
+    const cached = localStorage.getItem('cached_tickets')
+    if (cached) {
+      const data = JSON.parse(cached)
+      console.log('[OfflineDB] Tickets loaded from localStorage')
+      return data.tickets || []
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading tickets from localStorage:', err)
+  }
+
+  return []
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.4: Cache Ticket Messages
+// ═══════════════════════════════════════════════════════════════
+
+export async function cacheTicketMessages(ticketId: string, messages: any[]): Promise<void> {
+  try {
+    // حذف پیام‌های قبلی این تیکت برای جلوگیری از تکرار
+    const allMsgs = await idbGetAll<any>(STORES.ticketMessages)
+    for (const msg of allMsgs) {
+      if (msg.ticketId === ticketId) {
+        await idbDelete(STORES.ticketMessages, msg.id)
+      }
+    }
+    // افزودن پیام‌های جدید
+    for (const m of messages) {
+      await idbPut(STORES.ticketMessages, m)
+    }
+    console.log(`[OfflineDB] ✅ ${messages.length} پیام تیکت cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheTicketMessages error:', err)
+  }
+}
+
+export async function getCachedTicketMessages(ticketId: string): Promise<any[]> {
+  try {
+    const allMsgs = await idbGetAll<any>(STORES.ticketMessages)
+    return allMsgs
+      .filter(m => m.ticketId === ticketId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading ticket messages:', err)
+    return []
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.4: Cache Ticket Stats
+// ═══════════════════════════════════════════════════════════════
+
+export async function cacheTicketStats(stats: any): Promise<void> {
+  try {
+    await idbPut(STORES.meta, { key: 'ticket_stats', value: stats })
+    localStorage.setItem('cached_ticket_stats', JSON.stringify(stats))
+    console.log('[OfflineDB] ✅ Ticket stats cached')
+  } catch (err) {
+    console.error('[OfflineDB] cacheTicketStats error:', err)
+    try {
+      localStorage.setItem('cached_ticket_stats', JSON.stringify(stats))
+    } catch {}
+  }
+}
+
+export async function getCachedTicketStats(): Promise<any | null> {
+  try {
+    // ۱. IndexedDB
+    const record = await idbGet<{ key: string; value: any }>(STORES.meta, 'ticket_stats')
+    if (record?.value) {
+      console.log('[OfflineDB] Ticket stats loaded from IndexedDB')
+      return record.value
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading ticket stats from IndexedDB:', err)
+  }
+
+  // ۲. localStorage fallback
+  try {
+    const cached = localStorage.getItem('cached_ticket_stats')
+    if (cached) {
+      console.log('[OfflineDB] Ticket stats loaded from localStorage')
+      return JSON.parse(cached)
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading ticket stats from localStorage:', err)
+  }
+
+  return null
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.5: Offline Operations Queue (برای Sync Manager)
+// ═══════════════════════════════════════════════════════════════
+
+export type OperationType = 'create_ticket' | 'reply_ticket' | 'close_ticket' | 'rate_ticket' | 'update_stock' | 'create_invoice'
+
+export interface OfflineOperation {
+  id: string
+  type: OperationType
+  endpoint: string
+  method: 'POST' | 'PUT' | 'PATCH'
+  payload: any
+  createdAt: number
+  retryCount: number
+  status: 'pending' | 'syncing' | 'failed' | 'completed'
+  lastError: string | null
+}
+
+export async function addOfflineOperation(op: Omit<OfflineOperation, 'id' | 'createdAt' | 'retryCount' | 'status' | 'lastError'>): Promise<string> {
+  const id = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  const newOp: OfflineOperation = {
+    ...op,
+    id,
+    createdAt: Date.now(),
+    retryCount: 0,
+    status: 'pending',
+    lastError: null,
+  }
+  try {
+    await idbPut(STORES.offlineOperations, newOp)
+    console.log(`[OfflineDB] ✅ Operation queued: ${op.type}`)
+    return id
+  } catch (err) {
+    console.error('[OfflineDB] addOfflineOperation error:', err)
+    throw err
+  }
+}
+
+export async function getOfflineOperations(): Promise<OfflineOperation[]> {
+  try {
+    return await idbGetAll<OfflineOperation>(STORES.offlineOperations)
+  } catch {
+    return []
+  }
+}
+
+export async function removeOfflineOperation(id: string): Promise<void> {
+  try {
+    await idbDelete(STORES.offlineOperations, id)
+  } catch (err) {
+    console.error('[OfflineDB] removeOfflineOperation error:', err)
+  }
+}
+
+export async function updateOfflineOperation(id: string, updates: Partial<OfflineOperation>): Promise<void> {
+  try {
+    const existing = await idbGet<OfflineOperation>(STORES.offlineOperations, id)
+    if (existing) {
+      await idbPut(STORES.offlineOperations, { ...existing, ...updates })
+    }
+  } catch (err) {
+    console.error('[OfflineDB] updateOfflineOperation error:', err)
+  }
 }

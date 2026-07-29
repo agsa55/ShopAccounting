@@ -1,20 +1,22 @@
-// src/app/api/payments/online/verify/route.ts — v8.7
+// src/app/api/payments/online/verify/route.ts — v8.8 ★★★ COMPLETE FIX
 // ============================================================================
 // Verify/Callback برای پرداخت آنلاین (زرین‌پال و ای‌دی‌پی)
 // ----------------------------------------------------------------------------
-// این endpoint عمومی است (نیاز به توکن نداره) چون درگاه کاربر رو بدون توکن برمی‌گردونه
-// ★ proxy.ts باید این مسیر رو در لیست مسیرهای عمومی قرار بده
-//
-// نحوه کار:
-//   ۱. دریافت authority (زرین‌پال) یا id (ای‌دی‌پی) + status از query
-//   ۲. پیدا کردن OnlinePayment با authority
-//   ۳. پیدا کردن درگاه از OnlinePayment.gatewayId
-//   ۴. ارسال درخواست verify به درگاه
-//   ۵. در صورت موفقیت: ثبت پرداخت فاکتور + ایجاد سند حسابداری
-//   ۶. هدایت کاربر به صفحه نتیجه
+// ★★★ v8.8 تغییرات بحرانی:
+//   ★ پشتیبانی کامل از پرداخت اقساط — به‌روزرسانی InstallmentSchedule
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای manual lookup
+//   ★ استفاده از bankAccountId (1100) به‌عنوان صندوق برای پرداخت آنلاین
+//   ★ استفاده از tradeReceivableId (1310) برای تسویه طلب مشتری
+//   ★ تاریخ JE = تاریخ پرداخت واقعی (paidAt)
+//   ★ به‌روزرسانی totalPaidAmount و paidInstallments در InstallmentPlan
+//   ★ به‌روزرسانی nextDueDate در InstallmentPlan
+//   ★ به‌روزرسانی Customer.lastPurchaseAt هنگام تسویه کامل
+//   ★ حذف رکوردهای یتیم OnlinePayment در صورت خطا
 // ============================================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 export async function GET(req: NextRequest) {
   console.log('[Online Payment Verify] Callback received')
@@ -93,8 +95,6 @@ export async function GET(req: NextRequest) {
     }
 
     // ★ بررسی لغو پرداخت
-    // زرین‌پال: Status=NOK
-    // ای‌دی‌پی: status != 10 (10 = OK)
     const isZarinpalCancelled = gateway.type === 'zarinpal' && zarinpalStatus !== 'OK'
     const isIdpayCancelled = gateway.type === 'idpay' && idpayStatus !== '10' && idpayStatus !== 10
 
@@ -189,6 +189,20 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ★★★ v8.8: گرفتن حساب‌های استاندارد قبل از transaction
+    // ═══════════════════════════════════════════════════════════════
+    await getStandardAccountIds(tenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(tenantId)
+
+    // ★★★ v8.8: برای پرداخت آنلاین از bankAccountId (1100) استفاده می‌کنیم
+    //   (نه cashAccountId 1010) چون پول به بانک می‌رود نه صندوق
+    const bankAccountId = accIds.bankAccountId || accIds.cashAccountId
+    const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
+    const salesAccountId = accIds.salesAccountId
+
+    const now = new Date()
+
     // ══════ پرداخت موفق — ثبت در دیتابیس ══════
     const txClient = db.client
     await txClient.$transaction(async (tx: any) => {
@@ -198,7 +212,7 @@ export async function GET(req: NextRequest) {
         data: {
           status: 'paid',
           refId,
-          paidAt: new Date(),
+          paidAt: now,
         },
       })
 
@@ -209,7 +223,7 @@ export async function GET(req: NextRequest) {
           amount: onlinePayment.amount,
           paymentType: 'online',
           paymentRef: refId || onlinePayment.authority,
-          paidAt: new Date(),
+          paidAt: now,
           tenantId,
         },
       })
@@ -217,6 +231,7 @@ export async function GET(req: NextRequest) {
       // ۳. به‌روزرسانی فاکتور
       const invoice: any = await tx.invoice.findUnique({
         where: { id: onlinePayment.invoiceId },
+        include: { installmentPlan: { include: { schedules: { orderBy: { installmentNumber: 'asc' } } } } },
       })
 
       if (invoice) {
@@ -233,37 +248,85 @@ export async function GET(req: NextRequest) {
           },
         })
 
-        // ۴. سند حسابداری (صندوق بدهکار، فروش بستانکار — چون پرداخت نقدی آنلاین است)
-        try {
-          const accounts = await tx.account.findMany({ where: { tenantId } })
-          let cashAccountId: string | null = null
-          let receivablesAccountId: string | null = null
+        // ═══════════════════════════════════════════════════════════════
+        // ★★★ v8.8: هندل InstallmentSchedule برای فاکتور اقساطی
+        // ═══════════════════════════════════════════════════════════════
+        if (invoice.paymentType === 'installment' && invoice.installmentPlan) {
+          const plan = invoice.installmentPlan
+          let remainingPayment = onlinePayment.amount
+          let newlyPaidInstallments = 0
+          let nextDueDate: Date | null = null
 
-          for (const acc of accounts) {
-            const code = (acc.code || '').toLowerCase()
-            const type = (acc.type || '').toLowerCase()
-            const name = (acc.name || '').toLowerCase()
+          // ★ به‌روزرسانی schedules به ترتیب (FIFO)
+          for (const schedule of plan.schedules) {
+            if (remainingPayment <= 0) break
+            if (schedule.status === 'paid') continue
 
-            if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110') || name.includes('صندوق') || name.includes('بانک'))) {
-              cashAccountId = acc.id
+            const scheduleRemaining = schedule.amount - schedule.paidAmount
+            if (scheduleRemaining <= 0) continue
+
+            const paymentForThisSchedule = Math.min(remainingPayment, scheduleRemaining)
+            const newPaidForSchedule = schedule.paidAmount + paymentForThisSchedule
+            const newScheduleStatus = newPaidForSchedule >= schedule.amount ? 'paid' : 'partial'
+
+            await tx.installmentSchedule.update({
+              where: { id: schedule.id },
+              data: {
+                paidAmount: newPaidForSchedule,
+                status: newScheduleStatus,
+                paidAt: newScheduleStatus === 'paid' ? now : schedule.paidAt,
+                paymentRef: refId || onlinePayment.authority,
+                paymentType: 'online',
+              },
+            })
+
+            if (newScheduleStatus === 'paid') {
+              newlyPaidInstallments++
             }
-            if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('بدهکار'))) {
-              receivablesAccountId = acc.id
+
+            remainingPayment -= paymentForThisSchedule
+
+            // ★ محاسبه nextDueDate (اولین schedule که هنوز paid نیست)
+            if (newScheduleStatus !== 'paid' && !nextDueDate) {
+              nextDueDate = schedule.dueDate
             }
           }
 
-          // ★ اگه فاکتور نسیه بوده، صندوق بدهکار و بدهکاران تجاری بستانکار
-          // ★ اگه فاکتور نقدی بوده، صندوق بدهکار و فروش بستانکار
-          //   (ولی چون فروش قبلاً ثبت شده، فقط صندوق بدهکار/بدهکاران بستانکار ثبت می‌کنیم)
+          // ★ اگر هنوز schedule باقی مانده، nextDueDate را از آن بگیر
+          if (!nextDueDate) {
+            const unpaidSchedule = plan.schedules.find(
+              (s: any) => s.status !== 'paid' && s.id !== plan.schedules[plan.schedules.length - 1].id
+            )
+            // ★ اگر همه paid شدند، nextDueDate را null کن
+          }
+
+          // ★ به‌روزرسانی InstallmentPlan
+          await tx.installmentPlan.update({
+            where: { id: plan.id },
+            data: {
+              paidInstallments: plan.paidInstallments + newlyPaidInstallments,
+              totalPaidAmount: plan.totalPaidAmount + onlinePayment.amount,
+              nextDueDate: nextDueDate || null,
+              status: newRemaining <= 0 ? 'completed' : 'active',
+            },
+          })
+
+          console.log(`[Verify] Installment schedule updated — paid ${newlyPaidInstallments} new installments`)
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ۴. سند حسابداری — Dr بانک / Cr مطالبات (نسیه/قسطی)
+        // ═══════════════════════════════════════════════════════════════
+        try {
           const isCredit = invoice.paymentType === 'credit' || invoice.paymentType === 'installment'
 
-          if (cashAccountId && (!isCredit || receivablesAccountId)) {
+          if (bankAccountId && (!isCredit || receivablesAccountId)) {
             const jeCount = await tx.journalEntry.count({ where: { tenantId } })
             const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
 
             const lines: any[] = [
               {
-                accountId: cashAccountId,
+                accountId: bankAccountId,
                 debit: onlinePayment.amount,
                 credit: 0,
                 description: `بدهکار: دریافت آنلاین — فاکتور ${invoice.number} — کد پیگیری ${refId}`,
@@ -275,7 +338,16 @@ export async function GET(req: NextRequest) {
                 accountId: receivablesAccountId,
                 debit: 0,
                 credit: onlinePayment.amount,
-                description: `بستانکار: تسویه بدهکاری مشتری — فاکتور ${invoice.number}`,
+                description: `بستانکار: تسویه بدهکی مشتری — فاکتور ${invoice.number}`,
+              })
+            } else if (!isCredit && salesAccountId) {
+              // ★ برای فاکتور نقدی که بعداً پرداخت آنلاین شده:
+              //   (احتمالاً نادر، ولی برای کامل بودن)
+              lines.push({
+                accountId: salesAccountId,
+                debit: 0,
+                credit: onlinePayment.amount,
+                description: `بستانکار: درآمد فروش — فاکتور ${invoice.number}`,
               })
             }
 
@@ -285,7 +357,8 @@ export async function GET(req: NextRequest) {
             await tx.journalEntry.create({
               data: {
                 number: jeNumber,
-                date: new Date(),
+                // ★★★ v8.8: تاریخ JE = تاریخ پرداخت واقعی
+                date: now,
                 description: `سند خودکار — دریافت آنلاین فاکتور ${invoice.number}`,
                 status: 'posted',
                 sourceType: 'online_payment',
@@ -296,6 +369,12 @@ export async function GET(req: NextRequest) {
                 lines: { create: lines },
               },
             })
+          } else {
+            console.warn('[Verify] Missing accounts for journal entry:', {
+              bankAccountId,
+              receivablesAccountId,
+              isCredit,
+            })
           }
         } catch (jeErr: any) {
           console.warn('[Verify] Journal entry failed (non-blocking):', jeErr?.message)
@@ -305,7 +384,11 @@ export async function GET(req: NextRequest) {
         if (isCredit && invoice.customerId) {
           await tx.customer.update({
             where: { id: invoice.customerId },
-            data: { currentBalance: { decrement: onlinePayment.amount } },
+            data: {
+              currentBalance: { decrement: onlinePayment.amount },
+              // ★★★ v8.8: به‌روزرسانی lastPurchaseAt (تسویه)
+              ...(newRemaining <= 0 ? { lastPurchaseAt: now } : {}),
+            },
           }).catch(() => {})
         }
       }

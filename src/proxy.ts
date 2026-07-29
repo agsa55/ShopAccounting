@@ -36,6 +36,7 @@ const PUBLIC_API_PATHS = [
   '/api/demo/recover',
   '/api/demo/recover-verify',
   '/api/cron/demo-cleanup',
+  '/api/admin/auth/login',  // ★★★ این خط را اضافه کنید
 ];
 
 // ★ فایل‌های استاتیک که باید bypass شوند (PWA + fonts + icons)
@@ -314,6 +315,40 @@ export default function proxy(request: NextRequest) {
       : NextResponse.next();
     setTenantCookies(response, effectiveTenantSlug, tenantView || undefined);
     return response;
+  }
+
+    // ── ۹. Admin UI Protection ──────────────────────────────────────────────────
+   // ── ۹. Admin UI Protection ──────────────────────────────────────────────────
+  if (pathname.startsWith('/admin/') && pathname !== '/admin/login') {
+    const token = request.cookies.get('token')?.value;
+
+    if (!token) {
+      console.log('[Middleware] ❌ Admin redirect: No token found in cookies');
+      return NextResponse.redirect(new URL('/admin/login', request.url));
+    }
+
+    try {
+      const jwt = require('jsonwebtoken');
+      // ★★★ استفاده از ! برای اطمینان از وجود Secret
+      const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as any;
+
+      if (decoded.userType !== 'admin' && decoded.role !== 'SuperAdmin') {
+        console.log('[Middleware] ❌ Admin redirect: Invalid role ->', decoded.userType, decoded.role);
+        return NextResponse.redirect(new URL('/', request.url));
+      }
+
+      console.log('[Middleware] ✅ Admin access granted for user:', decoded.username);
+      
+      // ارسال توکن به سرور برای استفاده احتمالی در APIها
+      const response = NextResponse.next();
+      response.headers.set('x-authorization', `Bearer ${token}`);
+      return response;
+
+    } catch (e: any) {
+      // ★★★ این لاگ دقیقاً به ما می‌گوید چرا توکن رد شده است
+      console.error('[Middleware] ❌ Admin redirect: JWT Verify Failed ->', e.message);
+      return NextResponse.redirect(new URL('/admin/login', request.url));
+    }
   }
 
   // ── ۸. Landing Page ───────────────────────────────────────────────────────

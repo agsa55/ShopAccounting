@@ -891,6 +891,17 @@ exports.Prisma.InitialBalanceScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.AdminUserScalarFieldEnum = {
+  id: 'id',
+  username: 'username',
+  password: 'password',
+  role: 'role',
+  isActive: 'isActive',
+  lastLogin: 'lastLogin',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.FixedAssetScalarFieldEnum = {
   id: 'id',
   tenantId: 'tenantId',
@@ -976,6 +987,7 @@ exports.Prisma.ModelName = {
   Ticket: 'Ticket',
   TicketMessage: 'TicketMessage',
   InitialBalance: 'InitialBalance',
+  AdminUser: 'AdminUser',
   FixedAsset: 'FixedAsset'
 };
 

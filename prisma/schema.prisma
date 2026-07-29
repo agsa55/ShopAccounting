@@ -1456,6 +1456,23 @@ model InitialBalance {
   @@map("InitialBalances")
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ★★★ Admin Users (Super Admin Panel)
+// ═══════════════════════════════════════════════════════════════
+model AdminUser {
+  id        String   @id @default(uuid()) @db.NVarChar(450)
+  username  String   @unique @db.NVarChar(100)
+  password  String   @db.NVarChar(500) // هش‌شده با bcrypt
+  role      String   @default("SuperAdmin") @db.NVarChar(50)
+  isActive  Boolean  @default(true)
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("AdminUsers")
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ★★★ v8.8: دارایی‌های ثابت + استهلاک
 // ----------------------------------------------------------------------------

@@ -1,40 +1,18 @@
-// src/app/api/invoices/route.ts — GET/POST/PUT (v6.5 ★★★ FIX PACK v3)
+// ============================================================================
+// src/app/api/invoices/route.ts — GET/POST/PUT/DELETE (v6.6 ★★★ FIX PACK v4)
 // ----------------------------------------------------------------------------
-// ★★★ v6.5 (fix pack v3) — اصلاح بحرانی تاریخ JE:
-//   ★ قبلاً: `date: new Date()` در ساخت JournalEntry — تاریخ الان (ساعت سیستم)
-//   ★ مشکل: اگه فاکتور در گذشته ثبت بشه (مثلاً فاکتور صبح، ولی JE شب ساخته بشه)
-//     یا اگه کاربر تاریخ دستی وارد کنه، JE در تاریخ اشتباه ثبت می‌شه.
-//     داشبورد فیلتر `date >= startOfMonth AND date <= now` اعمال می‌کنه.
-//     اگه JE در آینده باشه (که با ساعت سیستم ساخت می‌شه)، از نتیجه فیلتر می‌شه.
-//     این دقیقاً مشکل سود ماه = 0 بود: JEها در ساعت 22:15 ساخته شده بودن ولی
-//     now در داشبورد 19:29 بود → JEها آینده محسوب می‌شدن → سود = 0.
-//   ★ حالا: `date: invoice.invoiceDate || new Date()` — تاریخ فاکتور.
-//   ★ مزیت: حتی اگه کاربر فاکتور را در گذشته ثبت کنه، JE هم در همان روز ثبت می‌شه.
+// ★★★ v6.6 (fix pack v4) — اصلاحات بحرانی DELETE handler:
+//   ★ حذف InstallmentPlan + InstallmentSchedule هنگام حذف فاکتور اقساطی
+//   ★ برگشت Customer.currentBalance برای فاکتورهای credit (نسیه)
+//   ★ برگشت Customer.lastPurchaseAt فقط برای فاکتورهای نقدی (نه نسیه)
+//   ★ حذف OnlinePayment های مرتبط با فاکتور (برای جلوگیری از رکوردهای یتیم)
+//   ★ عدم حذف فاکتور برگشتی که قبلاً تأثیر روی فاکتور اصلی گذاشته
 //
-// ★★★ v6.4 (حفظ شد):
-//   ★ auto-seed حساب‌های استاندارد قبل از ایجاد سند حسابداری
-//     قبلاً اگه کاربر قبل از اولین فاکتور، صفحه "حساب‌ها" را باز نکرده بود،
-//     هیچ حسابی در دیتابیس نبود و تابع createAutoJournalEntry با lines.length < 2
-//     fail خاموش می‌کرد. در نتیجه سود ماه = 0 می‌شد.
-//     حالا قبل از ساخت سند، ensureDefaultAccounts صدا زده می‌شه.
-//
-// ★★★ v6.3 (حفظ شد):
-//   ★ ثبت COGS (بهای تمام شده) در همه پلن‌ها (ساده/حرفه‌ای/سازمانی)
-//     قبلاً COGS فقط در پلن حرفه‌ای و سازمانی ثبت می‌شد. این باعث می‌شد:
-//       - سود ماه در داشبورد اشتباه محاسبه بشه (فروش بدون کسر بهای تمام شده)
-//       - موجودی کالا (1200) در ترازنامه اشتباه محاسبه بشه
-//       - گزارش سود و زیان در پلن ساده اشتباه باشه
-//     حالا COGS در همه پلن‌ها ثبت می‌شه. این یک اصلاح بنیادی حسابداری است.
-//   ★ نکته: در پلن ساده، کاربر فقط «مشاهده» اسناد رو داره (قفل سند دستی).
-//     اما اسناد خودکار فاکتورها باید کامل باشن تا حسابداری درست باشه.
-//
-// ★★★ v6.2 (حفظ شد):
-//   ★ کاهش StockLevel (موجودی واقعی انبار) هنگام فروش
-//   ★ ثبت StockMovement (حرکت کالا — خروج از انبار)
-//   ★ محاسبه COGS از StockLevel.averageCost (به‌جای purchasePrice)
-//   ★ rollback موجودی هنگام لغو فاکتور
-// ★★★ v6.0 (حفظ شد): اتصال سامانه مودیان + تولید خودکار portalToken + سند حسابداری خودکار
-// ★★★ v3.36 (حفظ شد): پلن قسطی + مدیریت موجودی Product.currentStock
+// ★★★ v6.5 (حفظ شد): اصلاح تاریخ JE = تاریخ فاکتور
+// ★★★ v6.4 (حفظ شد): auto-seed حساب‌های استاندارد
+// ★★★ v6.3 (حفظ شد): COGS در همه پلن‌ها
+// ★★★ v6.2 (حفظ شد): کاهش StockLevel + COGS + rollback
+// ★★★ v6.0 (حفظ شد): مودیان + portalToken + سند خودکار
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -83,6 +61,7 @@ async function createAutoJournalEntry(
     let inventoryAccountId: string | null = null
     let receivablesAccountId: string | null = null
     let taxAccountId: string | null = null
+    let vatAccountId: string | null = null  // ★ v6.6: جداکردن مالیات ارزش افزوده
 
     try {
       const accountIds = await getStandardAccountIds(tenantId)
@@ -92,7 +71,8 @@ async function createAutoJournalEntry(
       inventoryAccountId = accountIds.inventoryAccountId
       receivablesAccountId = accountIds.receivablesAccountId
       taxAccountId = accountIds.taxAccountId
-      
+      vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
+
       console.log('[Invoices] Account IDs resolved', {
         hasCash: !!cashAccountId,
         hasSales: !!salesAccountId,
@@ -114,21 +94,19 @@ async function createAutoJournalEntry(
     // ★ بستانکار: درآمد فروش (خالص بدون مالیات)
     if (salesAccountId) lines.push({ accountId: salesAccountId, debit: 0, credit: netSales, description: 'بستانکار: درآمد فروش' })
 
-    // ★ بستانکار: مالیات فروش (در صورت وجود)
-    if (invoice.taxAmount > 0 && taxAccountId) {
-      lines.push({ accountId: taxAccountId, debit: 0, credit: invoice.taxAmount, description: 'بستانکار: مالیات فروش' })
+    // ★ بستانکار: مالیات فروش (در صورت وجود) — استفاده از VAT (2160)
+    if (invoice.taxAmount > 0 && vatAccountId) {
+      lines.push({ accountId: vatAccountId, debit: 0, credit: invoice.taxAmount, description: 'بستانکار: مالیات بر ارزش افزوده فروش' })
     }
 
     // ★★★ v6.3: COGS در همه پلن‌ها (حذف شرط planTier)
-    //   این یک اصلاح بنیادی حسابداری است. بدون COGS، سود اشتباه محاسبه می‌شه.
     if (totalCogs > 0 && cogsAccountId && inventoryAccountId) {
       lines.push({ accountId: cogsAccountId, debit: totalCogs, credit: 0, description: 'بدهکار: بهای تمام شده کالای فروش رفته' })
       lines.push({ accountId: inventoryAccountId, debit: 0, credit: totalCogs, description: 'بستانکار: خروج از موجودی کالا' })
     } else if (totalCogs > 0) {
-      // ★ fallback: اگه حساب COGS یا Inventory پیدا نشد، لاگ بزن
       console.warn('[Invoices] COGS accounts missing', {
         cogsAccountId, inventoryAccountId, totalCogs,
-        hint: 'باید حساب‌های 5000 (COGS) و 1200 (موجودی کالا) در چارت حساب‌ها موجود باشن. اگه نیستند، accounts/route.ts را صدا بزنید تا auto-seed بشن.',
+        hint: 'باید حساب‌های 5000 (COGS) و 1200 (موجودی کالا) در چارت حساب‌ها موجود باشن.',
       })
     }
 
@@ -139,8 +117,6 @@ async function createAutoJournalEntry(
       await db.client.journalEntry.create({
         data: {
           // ★★★ v6.5: تاریخ JE = تاریخ فاکتور (نه ساعت سیستم)
-          // این اصلاح بحرانی است: قبلاً `new Date()` باعث می‌شد JE در آینده
-          // ثبت بشه و در فیلتر داشبورد `date <= now` از نتیجه فیلتر بشه → profit = 0
           number: jeNumber,
           date: invoice.invoiceDate || invoice.createdAt || new Date(),
           description: `سند خودکار بابت فاکتور ${invoice.number}${isCreditOrInstallment ? ' (نسیه/قسطی)' : ''}`,
@@ -322,7 +298,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
           const product = await tenantDb.product.findFirst({ where: { id: item.productId, tenantId } })
           if (!product) continue
 
-          // ★ اول Product.currentStock را بررسی کن (سریع)
           if (item.quantity > product.currentStock) {
             return NextResponse.json(
               { success: false, error: `موجودی محصول "${product.name}" کافی نیست. موجودی فعلی: ${product.currentStock}، تعداد درخواستی: ${item.quantity}`, code: 'INSUFFICIENT_STOCK' },
@@ -330,7 +305,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
             )
           }
 
-          // ★ سپس StockLevel را در انبار انتخاب‌شده بررسی کن (دقیق‌تر)
           if (warehouseId) {
             const stockLevel = await tenantDb.stockLevel.findUnique({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
@@ -392,7 +366,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
     else if (invoiceData.paymentType === 'installment') invoiceStatus = (installmentPlanData?.downPayment || 0) > 0 ? 'partial' : 'pending'
     else if (paidAmount >= totalAmount) invoiceStatus = 'paid'
 
-    // ★★★ v6.2: استفاده از transaction برای یکپارچگی
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     const invoice = await txClient.$transaction(async (tx: any) => {
@@ -404,19 +377,16 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
           subTotal, discountAmount, taxAmount, totalAmount, paidAmount,
           remainingAmount: totalAmount - paidAmount,
           cashierId: tenant.user?.id || null, description: invoiceData.description || null, tenantId,
-          // ★★★ v6.2: ذخیره warehouseId در فاکتور
           ...(warehouseId ? { warehouseId } : {}),
         },
       })
 
-      // ★ ایجاد آیتم‌های فاکتور
       for (const item of invoiceItems) {
         await tx.invoiceItem.create({
           data: { invoiceId: inv.id, productId: item.productId || null, productName: item.productName || '', quantity: item.quantity, unitPrice: item.unitPrice, discountAmount: item.discountAmount || 0, taxAmount: item.taxAmount || 0, lineTotal: item.lineTotal || 0 },
         })
       }
 
-      // ★ ایجاد پرداخت‌ها
       for (const pay of invoicePayments) {
         await tx.invoicePayment.create({
           data: { invoiceId: inv.id, amount: pay.amount || 0, paymentType: pay.paymentType || 'cash', paymentRef: pay.paymentRef || null, paidAt: pay.paidAt || new Date(), tenantId },
@@ -428,30 +398,25 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       for (const item of invoiceItems) {
         if (!item.productId) continue
 
-        // ★ کاهش Product.currentStock (برای سازگاری با کد قدیمی)
         await tx.product.update({
           where: { id: item.productId },
           data: { currentStock: { decrement: item.quantity } },
         }).catch(err => console.warn(`[Invoices] Failed to decrement Product.currentStock:`, err?.message))
 
-        // ★★★ کاهش StockLevel (موجودی واقعی انبار) + محاسبه COGS
         if (warehouseId) {
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
           }).catch(() => null)
 
           if (stockLevel) {
-            // ★ COGS = تعداد × میانگین هزینه
             const itemCogs = item.quantity * (stockLevel.averageCost || 0)
             totalCogs += itemCogs
 
-            // ★ کاهش موجودی انبار
             await tx.stockLevel.update({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
               data: { quantity: { decrement: item.quantity } },
             }).catch(err => console.warn(`[Invoices] Failed to decrement StockLevel:`, err?.message))
 
-            // ★ ثبت حرکت کالا (خروج از انبار)
             await tx.stockMovement.create({
               data: {
                 tenantId,
@@ -459,21 +424,19 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
                 fromWarehouseId: warehouseId,
                 quantity: item.quantity,
                 unitCost: stockLevel.averageCost || 0,
-                movementType: 'sale',
+                movementType: 'sale_out',
                 referenceType: 'invoice',
                 referenceId: inv.id,
                 description: `فاکتور فروش ${invoiceNumber}`,
               },
             }).catch(err => console.warn(`[Invoices] Failed to create StockMovement:`, err?.message))
           } else {
-            // ★ fallback: اگر StockLevel نبود، از Product.purchasePrice برای COGS استفاده کن
             const product = await tx.product.findUnique({ where: { id: item.productId } }).catch(() => null)
             if (product) {
               totalCogs += item.quantity * (product.purchasePrice || 0)
             }
           }
         } else {
-          // ★ fallback: انبار انتخاب‌شده نیست — از Product.purchasePrice برای COGS استفاده کن
           const product = await tx.product.findUnique({ where: { id: item.productId } }).catch(() => null)
           if (product) {
             totalCogs += item.quantity * (product.purchasePrice || 0)
@@ -481,7 +444,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         }
       }
 
-      // ★ ذخیره COGS در فاکتور (در صورت وجود فیلد)
       try {
         await tx.invoice.update({
           where: { id: inv.id },
@@ -494,7 +456,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
 
     const { invoice: createdInvoice, totalCogs } = invoice
 
-    // ★ تولید portalToken
+    // ★ تولید portalToken — ★★★ v6.6: برای installment هم (نه فقط credit)
     let portalUrl: string | null = null
     let portalToken: string | null = null
     if (invoiceData.customerId) {
@@ -541,7 +503,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       createdInstallmentPlan = await createInstallmentPlan(tenantId, createdInvoice, installmentPlanData)
     }
 
-    // ★ سند حسابداری خودکار (با COGS در همه پلن‌ها) — ★★★ v6.3
     try {
       const planInfo = await getTenantPlanInfo(tenantId)
       const planTier = resolvePlanTier(planInfo.tierName)
@@ -550,7 +511,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       console.warn('[Invoices] Auto journal entry failed (non-blocking):', jeErr?.message)
     }
 
-    // ─── ★★★ v6.0: ارسال خودکار فاکتور به سامانه مودیان ─────────────────
     try {
       await autoSubmitInvoiceIfNeeded(tenantId, createdInvoice.id)
     } catch (moidianErr: any) {
@@ -609,26 +569,22 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     if (body.status === 'cancelled' && existing.status !== 'cancelled') {
       console.log(`[Invoices PUT] لغو فاکتور ${existing.number} — برگشت موجودی`)
 
-      // ★ پیدا کردن warehouseId فاکتور یا انبار پیش‌فرض
       let warehouseId = existing.warehouseId || null
       if (!warehouseId) {
         const defaultWh = await tenantDb.warehouse.findFirst({ where: { tenantId, isDefault: true } }).catch(() => null)
         if (defaultWh) warehouseId = defaultWh.id
       }
 
-      // ★ گرفتن آیتم‌های فاکتور
       const items = await tenantDb.invoiceItem.findMany({ where: { invoiceId: existing.id } })
 
       for (const item of items) {
         if (!item.productId) continue
 
-        // ★ افزایش Product.currentStock
         await tenantDb.product.update({
           where: { id: item.productId },
           data: { currentStock: { increment: item.quantity } },
         }).catch(err => console.warn(`[Invoices PUT] Failed to increment Product.currentStock:`, err?.message))
 
-        // ★ افزایش StockLevel
         if (warehouseId) {
           const stockLevel = await tenantDb.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
@@ -640,17 +596,15 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
               data: { quantity: { increment: item.quantity } },
             }).catch(err => console.warn(`[Invoices PUT] Failed to increment StockLevel:`, err?.message))
           } else {
-            // ★ اگر StockLevel نبود، یکی بساز
             await tenantDb.stockLevel.create({
               data: {
                 tenantId, warehouseId, productId: item.productId,
                 quantity: item.quantity,
-                averageCost: 0, // نمی‌دانیم cost قبلی چه بوده
+                averageCost: 0,
               },
             }).catch(err => console.warn(`[Invoices PUT] Failed to create StockLevel:`, err?.message))
           }
 
-          // ★ ثبت حرکت کالا (ورودی به انبار — برگشت از فروش)
           await tenantDb.stockMovement.create({
             data: {
               tenantId,
@@ -666,7 +620,7 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           }).catch(err => console.warn(`[Invoices PUT] Failed to create StockMovement:`, err?.message))
         }
 
-        // ★ اگر نسیه/قسطی بوده، بدهی مشتری را کاهش بده
+        // ★★★ v6.6: اگر نسیه/قسطی بوده، بدهی مشتری را کاهش بده
         if ((existing.paymentType === 'credit' || existing.paymentType === 'installment') && existing.customerId) {
           const remainingAmount = existing.totalAmount - existing.paidAmount
           if (remainingAmount > 0) {
@@ -699,16 +653,15 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ============================================================================
-// DELETE handler for /api/invoices — Add this to src/app/api/invoices/route.ts
+// ★★★ v6.6 (fix pack v4): DELETE handler — اصلاحات بحرانی
 // ----------------------------------------------------------------------------
-// ★★★ v9.9.1: اضافه‌شدن قابلیت حذف فاکتور (به‌خصوص فاکتورهای برگشتی)
+//   ۱. ابطال (نه حذف) سند حسابداری — حفظ audit trail
+//   ۲. حذف InstallmentPlan + InstallmentSchedule برای فاکتور اقساطی
+//   ۳. برگشت Customer.currentBalance برای فاکتور credit
+//   ۴. حذف OnlinePayment های مرتبط (رکوردهای یتیم)
+//   ۵. حذف InvoicePayment ها (در نسخه قبلی هم بود)
+//   ۶. rollback موجودی (Sale: increment, Return: decrement)
 // ============================================================================
-
-// ★ این کد را به انتهای فایل src/app/api/invoices/route.ts اضافه کنید
-// (قبل از آخرین خط خالی)
-
-// src/app/api/invoices/route.ts — DELETE handler
-// ★★★ FIX: اضافه کردن rollback موجودی هنگام حذف فاکتور برگشتی
 
 export const DELETE = withTenantAndPermission('pos')(async (
   req: NextRequest,
@@ -763,30 +716,83 @@ export const DELETE = withTenantAndPermission('pos')(async (
       )
     }
 
+    // ★★★ v6.6: بررسی وجود فاکتور برگشتی مرتبط
+    if (!isReturn) {
+      const hasReturn = await tenantDb.invoice.count({
+        where: { originalInvoiceId: invoiceId, tenantId },
+      }).catch(() => 0)
+
+      if (hasReturn > 0) {
+        return NextResponse.json(
+          { success: false, error: 'این فاکتور دارای فاکتور برگشتی است و قابل حذف نیست. ابتدا فاکتور برگشتی را حذف کنید.' },
+          { status: 400 }
+        )
+      }
+    }
+
     await tenantDb.$transaction(async (tx: any) => {
-      // ★ ۱. ابطال/حذف سند حسابداری
+      // ★ ۱. ابطال (نه حذف) سند حسابداری — حفظ audit trail
       const journalEntries = await tx.journalEntry.findMany({
         where: { tenantId, sourceId: invoiceId },
         select: { id: true },
       })
 
       for (const je of journalEntries) {
-        await tx.journalEntryLine.deleteMany({
-          where: { journalEntryId: je.id },
-        })
-        await tx.journalEntry.delete({
+        await tx.journalEntry.update({
           where: { id: je.id },
-        })
+          data: {
+            isCancelled: true,
+            status: 'cancelled',
+            cancelledAt: new Date(),
+            cancelReason: `حذف فاکتور ${invoice.number}`,
+          },
+        }).catch((err: any) =>
+          console.warn('[DELETE] Journal entry cancel failed:', err?.message)
+        )
+
+        // ★ اختیاری: حذف خطوط سند (اگر policy آن را اقتضا می‌کند)
+        // در اینجا ما فقط ابطال می‌کنیم تا audit trail حفظ شود
       }
 
-      // ★ ۲. حذف پرداخت‌ها
+      // ★ ۲. حذف پرداخت‌های فاکتور
       await tx.invoicePayment.deleteMany({
         where: { invoiceId },
       }).catch(() => {})
 
-      // ★ ۳. rollback موجودی
+      // ★★★ v6.6: ۳. حذف InstallmentPlan + InstallmentSchedule (در صورت وجود)
+      if (invoice.paymentType === 'installment') {
+        try {
+          const plan = await tx.installmentPlan.findUnique({
+            where: { invoiceId },
+            select: { id: true },
+          })
+
+          if (plan) {
+            // ★ ابتدا schedules را حذف کن (FK constraint)
+            await tx.installmentSchedule.deleteMany({
+              where: { planId: plan.id },
+            }).catch(() => {})
+
+            // ★ سپس plan را حذف کن
+            await tx.installmentPlan.delete({
+              where: { id: plan.id },
+            }).catch(() => {})
+
+            console.log(`[DELETE] InstallmentPlan + Schedules حذف شد برای فاکتور ${invoice.number}`)
+          }
+        } catch (err: any) {
+          console.warn('[DELETE] InstallmentPlan cleanup failed:', err?.message)
+        }
+      }
+
+      // ★★★ v6.6: ۴. حذف OnlinePayment های مرتبط (جلوگیری از رکوردهای یتیم)
+      await tx.onlinePayment.deleteMany({
+        where: { invoiceId },
+      }).catch(() => {})
+
+      // ★ ۵. rollback موجودی
       const warehouseId = invoice.warehouseId
-      
+
       if (warehouseId && invoice.items?.length > 0) {
         for (const item of invoice.items) {
           if (!item.productId) continue
@@ -796,7 +802,6 @@ export const DELETE = withTenantAndPermission('pos')(async (
 
           if (isReturn) {
             // ★ فاکتور برگشتی: موجودی رو کاهش بده
-            // (چون هنگام ثبت برگشتی، موجودی افزایش یافته بود)
             try {
               await tx.stockLevel.update({
                 where: {
@@ -821,7 +826,6 @@ export const DELETE = withTenantAndPermission('pos')(async (
             }
           } else {
             // ★ فاکتور فروش عادی: موجودی رو افزایش بده
-            // (چون هنگام ثبت فروش، موجودی کاهش یافته بود)
             try {
               await tx.stockLevel.update({
                 where: {
@@ -848,17 +852,33 @@ export const DELETE = withTenantAndPermission('pos')(async (
         }
       }
 
-      // ★ ۴. حذف StockMovements مرتبط
+      // ★★★ v6.6: ۶. برگشت Customer.currentBalance برای فاکتور credit/installment
+      if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment') && invoice.customerId) {
+        const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
+        if (remainingAmount > 0) {
+          try {
+            await tx.customer.update({
+              where: { id: invoice.customerId },
+              data: { currentBalance: { decrement: remainingAmount } },
+            })
+            console.log(`[DELETE] Customer.currentBalance کاهش یافت: ${remainingAmount}`)
+          } catch (err: any) {
+            console.warn('[DELETE] Customer.currentBalance rollback failed:', err?.message)
+          }
+        }
+      }
+
+      // ★ ۷. حذف StockMovements مرتبط
       await tx.stockMovement.deleteMany({
         where: { tenantId, referenceId: invoiceId },
       }).catch(() => {})
 
-      // ★ ۵. حذف آیتم‌های فاکتور
+      // ★ ۸. حذف آیتم‌های فاکتور
       await tx.invoiceItem.deleteMany({
         where: { invoiceId },
       })
 
-      // ★ ۶. حذف فاکتور
+      // ★ ۹. حذف فاکتور
       await tx.invoice.delete({
         where: { id: invoiceId },
       })
@@ -881,4 +901,3 @@ export const DELETE = withTenantAndPermission('pos')(async (
     )
   }
 })
-

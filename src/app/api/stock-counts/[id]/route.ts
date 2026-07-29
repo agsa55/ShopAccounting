@@ -1,14 +1,18 @@
-// src/app/api/stock-counts/[id]/route.ts
-// ShopAccounting v6.5 — Stock Count Detail API
+// src/app/api/stock-counts/[id]/route.ts — v6.6.0 ★★★ ACCOUNT FIX
 // ============================================================================
-// ★ GET: جزئیات یک سند انبار گردانی
-// ★ PUT: به‌روزرسانی آیتم‌ها (تعداد شمرده‌شده، دلیل)
-// ★ DELETE: حذف سند (فقط در حالت draft)
+// ★★★ v6.6.0 تغییرات:
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای manual lookup
+//   ★ استفاده از expense accounts صحیح:
+//     - کمبود (shortage): 5100 هزینه‌های اداری (یا حساب کسری انبار اگه موجود باشه)
+//     - مازاد (surplus): 4900 سایر درآمدها (یا 4200 درآمد خدمات)
+//   ★ تاریخ JE = تاریخ انبارگردانی
+//   ★ fallback به 5100/4900 اگه حساب‌های کسری/مازاد موجود نبودند
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/stock-counts/[id] — جزئیات سند
@@ -69,11 +73,6 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
 // ═══════════════════════════════════════════════════════════════
 //  PUT /api/stock-counts/[id] — به‌روزرسانی آیتم‌ها
-//  Body: {
-//    status?: 'draft' | 'in_progress' | 'completed' | 'cancelled',
-//    notes?: string,
-//    items?: [{ id?, productId, countedQty, reason? }] // به‌روزرسانی یا افزودن
-//  }
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -96,7 +95,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       return NextResponse.json({ success: false, error: 'سند یافت نشد' }, { status: 404 })
     }
 
-    // ★ اگر سند تأیید شده (completed)، نمی‌توان ویرایش کرد
     if (existing.status === 'completed') {
       return NextResponse.json({
         success: false,
@@ -107,19 +105,16 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     const result = await txClient.$transaction(async (tx: any) => {
-      // ★ به‌روزرسانی فیلدهای سند
       const updateData: any = {}
       if (body.status) updateData.status = body.status
       if (body.notes !== undefined) updateData.notes = body.notes
       updateData.updatedAt = new Date()
 
-      // ★ به‌روزرسانی آیتم‌ها (اگه ارسال شده)
       if (body.items && Array.isArray(body.items)) {
         let totalDifference = 0
         let totalItems = 0
 
         for (const item of body.items) {
-          // ★ گرفتن StockLevel فعلی برای unitCost و systemQty
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId: existing.warehouseId, productId: item.productId } },
           }).catch(() => null)
@@ -136,7 +131,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           totalItems++
 
           if (item.id) {
-            // ★ به‌روزرسانی آیتم موجود
             await tx.stockCountItem.update({
               where: { id: item.id },
               data: {
@@ -147,7 +141,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
               },
             })
           } else {
-            // ★ آیتم جدید
             await tx.stockCountItem.create({
               data: {
                 stockCountId: id,
@@ -212,7 +205,6 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
       return NextResponse.json({ success: false, error: 'سند یافت نشد' }, { status: 404 })
     }
 
-    // ★ فقط در حالت draft قابل حذف است
     if (existing.status !== 'draft') {
       return NextResponse.json({
         success: false,
@@ -230,10 +222,8 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  ★★★ v6.5.4: POST /api/stock-counts/[id] — تأیید و ثبت نهایی
-//  (Fallback اگه پوشه approve کپی نشده باشه — همان منطق approve)
-//  Body: { action: 'approve', notes?: string }
-//  یا: { action: 'cancel' }
+//  POST /api/stock-counts/[id] — تأیید و ثبت نهایی
+//  Body: { action: 'approve', notes?: string } یا { action: 'cancel' }
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -280,7 +270,6 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     // ═══════════════════════════════════════════════════════════════
     //  تأیید و ثبت نهایی
     // ═══════════════════════════════════════════════════════════════
-    // ★ گرفتن سند با آیتم‌ها
     const stockCount = await tenantDb.stockCount.findFirst({
       where: { id, tenantId },
       include: {
@@ -314,7 +303,6 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     const itemsWithDifference = stockCount.items.filter((item: any) => item.difference !== 0)
 
     if (itemsWithDifference.length === 0) {
-      // ★ هیچ اختلافی نیست — فقط وضعیت را completed کن
       await tenantDb.stockCount.update({
         where: { id },
         data: {
@@ -331,6 +319,61 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         data: { id, status: 'completed', totalDifference: 0 },
       })
     }
+
+    // ★★★ v6.6.0: گرفتن حساب‌های استاندارد با auto-seed
+    await getStandardAccountIds(tenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(tenantId)
+
+    // ★★★ v6.6.0: تلاش برای پیدا کردن حساب‌های اختصاصی کسری/مازاد
+    //   اگر نبودند، fallback به 5100 (هزینه اداری) و 4200 (درآمد خدمات)
+    let shortageAccountId: string | null = null
+    let surplusAccountId: string | null = null
+    const inventoryAccountId = accIds.inventoryAccountId
+
+    try {
+      const accounts = await db.client.account.findMany({
+        where: { tenantId, isActive: true },
+      })
+
+      for (const acc of accounts) {
+        const code = (acc.code || '').toLowerCase()
+        const name = (acc.name || '').toLowerCase()
+
+        // ★ حساب کسری/ضایعات انبار (اولویت ۱)
+        if (!shortageAccountId && (name.includes('کسری') || name.includes('ضایعات') || name.includes('هزینه انبار'))) {
+          shortageAccountId = acc.id
+        }
+        // ★ fallback: 5100 هزینه‌های اداری (اولویت ۲)
+        if (!shortageAccountId && code === '5100') {
+          shortageAccountId = acc.id
+        }
+        // ★ fallback نهایی: 5106/5110/5120 سایر هزینه‌ها
+        if (!shortageAccountId && code.startsWith('51') && code !== '5150' && code !== '5105') {
+          shortageAccountId = acc.id
+        }
+
+        // ★ حساب مازاد انبار (اولویت ۱)
+        if (!surplusAccountId && (name.includes('مازاد') || name.includes('درآمد انبار') || name.includes('سایر درآمدها'))) {
+          surplusAccountId = acc.id
+        }
+        // ★ fallback: 4900 سایر درآمدها
+        if (!surplusAccountId && code.startsWith('49')) {
+          surplusAccountId = acc.id
+        }
+        // ★ fallback نهایی: 4200 درآمد خدمات
+        if (!surplusAccountId && code === '4200') {
+          surplusAccountId = acc.id
+        }
+      }
+    } catch (err: any) {
+      console.warn('[StockCount Approve] Could not find shortage/surplus accounts:', err?.message)
+    }
+
+    console.log('[StockCount Approve] Resolved accounts:', {
+      inventory: inventoryAccountId,
+      shortage: shortageAccountId,
+      surplus: surplusAccountId,
+    })
 
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
@@ -400,36 +443,12 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       // ═══════════════════════════════════════════════════════════════
       let journalEntryId: string | null = null
 
-      if (totalShortage > 0 || totalSurplus > 0) {
-        let inventoryAccountId: string | null = null
-        let shortageAccountId: string | null = null
-        let surplusAccountId: string | null = null
-
-        try {
-          const accounts = await tx.account.findMany({ where: { tenantId } })
-          for (const acc of accounts) {
-            const code = (acc.code || '').toLowerCase()
-            const type = (acc.type || '').toLowerCase()
-            const name = (acc.name || '').toLowerCase()
-
-            if (!inventoryAccountId && (type === 'inventory' || code.startsWith('120') || name.includes('موجودی') || name.includes('انبار') || name.includes('کالا'))) {
-              inventoryAccountId = acc.id
-            }
-            if (!shortageAccountId && (code.startsWith('51') || code.startsWith('52') || name.includes('کسری') || name.includes('هزینه انبار') || name.includes('ضایعات'))) {
-              shortageAccountId = acc.id
-            }
-            if (!surplusAccountId && (code.startsWith('42') || code.startsWith('49') || name.includes('مازاد') || name.includes('درآمد انبار') || name.includes('سایر درآمدها'))) {
-              surplusAccountId = acc.id
-            }
-          }
-        } catch (err: any) {
-          console.warn('[StockCount Approve] Could not find accounts:', err?.message)
-        }
-
+      if ((totalShortage > 0 || totalSurplus > 0) && inventoryAccountId) {
         const lines: any[] = []
         const jeNumber = `JE-${(await tx.journalEntry.count({ where: { tenantId } }) + 1).toString().padStart(6, '0')}`
 
-        if (totalShortage > 0 && shortageAccountId && inventoryAccountId) {
+        // ★ کمبود (shortage): Dr هزینه / Cr موجودی کالا
+        if (totalShortage > 0 && shortageAccountId) {
           lines.push({
             accountId: shortageAccountId,
             debit: totalShortage,
@@ -442,9 +461,12 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             credit: totalShortage,
             description: `بستانکار: کاهش موجودی کالا (کسری)`,
           })
+        } else if (totalShortage > 0) {
+          console.warn('[StockCount Approve] shortageAccountId missing — shortage journal skipped:', totalShortage)
         }
 
-        if (totalSurplus > 0 && surplusAccountId && inventoryAccountId) {
+        // ★ مازاد (surplus): Dr موجودی کالا / Cr درآمد
+        if (totalSurplus > 0 && surplusAccountId) {
           lines.push({
             accountId: inventoryAccountId,
             debit: totalSurplus,
@@ -457,6 +479,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             credit: totalSurplus,
             description: `بستانکار: مازاد انبار (انبار گردانی ${stockCount.number})`,
           })
+        } else if (totalSurplus > 0) {
+          console.warn('[StockCount Approve] surplusAccountId missing — surplus journal skipped:', totalSurplus)
         }
 
         if (lines.length >= 2) {
@@ -466,7 +490,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           const journalEntry = await tx.journalEntry.create({
             data: {
               number: jeNumber,
-              date: new Date(),
+              // ★★★ v6.6.0: تاریخ JE = تاریخ انبارگردانی
+              date: stockCount.countDate || new Date(),
               description: `سند خودکار انبار گردانی ${stockCount.number} — انبار ${stockCount.Warehouse.name}`,
               status: 'posted',
               sourceType: 'stock_count',
@@ -521,4 +546,3 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     }, { status: 500 })
   }
 })
-

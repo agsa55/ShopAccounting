@@ -1,12 +1,19 @@
-// src/app/api/purchase-invoices/[id]/return/route.ts — v8.7.1 (Fixed)
+// src/app/api/purchase-invoices/[id]/return/route.ts — v8.8.0 (Account Fix)
 // ============================================================================
-// فاکتور برگشتی خرید — با بررسی موجودی انبار
+// ★★★ v8.8.0 تغییرات:
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای manual lookup
+//   ★ استفاده از VAT (2160) برای مالیات بر ارزش افزوده (نه 190 قدیمی)
+//   ★ استفاده از tradePurchasableId (2010) برای نسیه خرید (نه 210 عمومی)
+//   ★ استفاده از cashAccountId (1010) برای خرید نقدی
+//   ★ تاریخ JE = تاریخ فاکتور برگشتی
+//
+// ★★★ v8.7.1 (حفظ شد): بررسی موجودی انبار قبل از برگشت
 // ============================================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-import { getTenantPlanInfo } from '@/lib/plan-limits'
-import { resolvePlanTier } from '@/lib/plan-features'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -151,6 +158,10 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     })
     const returnNumber = `PR-${(returnCount + 1).toString().padStart(6, '0')}`
 
+    // ★★★ v8.8.0: گرفتن حساب‌های استاندارد با auto-seed
+    await getStandardAccountIds(tenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(tenantId)
+
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     // ══════ شروع تراکنش ══════
@@ -246,32 +257,14 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         }
       }
 
-      // ۳. سند حسابداری برگشتی
+      // ★★★ v8.8.0: سند حسابداری برگشتی — استفاده از getStandardAccountIds
       try {
-        const accounts = await tx.account.findMany({ where: { tenantId } })
-        let inventoryAccountId: string | null = null
-        let cashAccountId: string | null = null
-        let payableAccountId: string | null = null
-        let taxAccountId: string | null = null
-
-        for (const acc of accounts) {
-          const code = (acc.code || '').toLowerCase()
-          const type = (acc.type || '').toLowerCase()
-          const name = (acc.name || '').toLowerCase()
-
-          if (!inventoryAccountId && (type === 'inventory' || code.startsWith('120') || name.includes('موجودی'))) {
-            inventoryAccountId = acc.id
-          }
-          if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110'))) {
-            cashAccountId = acc.id
-          }
-          if (!payableAccountId && (type === 'payable' || type === 'accounts_payable' || code.startsWith('210'))) {
-            payableAccountId = acc.id
-          }
-          if (!taxAccountId && (type === 'tax' || code.startsWith('190'))) {
-            taxAccountId = acc.id
-          }
-        }
+        const inventoryAccountId = accIds.inventoryAccountId
+        const cashAccountId = accIds.cashAccountId
+        // ★★★ v8.8.0: برای نسیه از tradePurchasableId (2010) استفاده کنیم
+        const payableAccountId = accIds.tradePurchasableId || accIds.payablesAccountId
+        // ★★★ v8.8.0: VAT (2160) برای مالیات بر ارزش افزوده
+        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
 
         if (inventoryAccountId) {
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
@@ -281,6 +274,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           const lines: any[] = []
           const netAmount = returnSubTotal - returnDiscount
 
+          // ★ بستانکار: موجودی کالا (کاهش)
           lines.push({
             accountId: inventoryAccountId,
             debit: 0,
@@ -288,22 +282,26 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             description: `بستانکار: برگشت کالا به تامین‌کننده — فاکتور برگشتی ${returnNumber}`,
           })
 
-          if (returnTax > 0 && taxAccountId) {
+          // ★ بستانکار: مالیات بر ارزش افزوده (کاهش)
+          if (returnTax > 0 && vatAccountId) {
             lines.push({
-              accountId: taxAccountId,
+              accountId: vatAccountId,
               debit: 0,
               credit: returnTax,
-              description: `بستانکار: مالیات برگشت خرید — فاکتور ${returnNumber}`,
+              description: `بستانکار: مالیات بر ارزش افزوده برگشت خرید — فاکتور ${returnNumber}`,
             })
           }
 
-          const debitAccountId = isCredit ? (payableAccountId || cashAccountId) : cashAccountId
+          // ★ بدهکار: بستانکاران تجاری (نسیه) یا صندوق (نقدی)
+          const debitAccountId = isCredit
+            ? (payableAccountId || cashAccountId)
+            : cashAccountId
           if (debitAccountId) {
             lines.push({
               accountId: debitAccountId,
               debit: returnTotal,
               credit: 0,
-              description: `بدهکار: ${isCredit ? 'بدهکاران تجاری' : 'صندوق'} — فاکتور برگشتی خرید ${returnNumber}`,
+              description: `بدهکار: ${isCredit ? 'بستانکاران تجاری' : 'صندوق'} — فاکتور برگشتی خرید ${returnNumber}`,
             })
           }
 
@@ -314,7 +312,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             const journalEntry = await tx.journalEntry.create({
               data: {
                 number: jeNumber,
-                date: new Date(),
+                // ★★★ v8.8.0: تاریخ JE = تاریخ فاکتور برگشتی
+                date: invoiceDate ? new Date(invoiceDate) : new Date(),
                 description: `سند خودکار بابت فاکتور برگشتی خرید ${returnNumber}`,
                 status: 'posted',
                 sourceType: 'purchase_return',
