@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import StatCard from '@/components/admin/stat-card';
+import { useRouter } from 'next/navigation'; // ← این خط اضافه شد
 
 export default function AdminTenantsPage() {
+  const router = useRouter(); // ← این خط اضافه شد
   const [tenants, setTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null); // ← برای مدیریت لودینگ دکمه
 
   useEffect(() => {
     fetch('/api/admin/tenants')
@@ -22,12 +25,38 @@ export default function AdminTenantsPage() {
     t.subDomain?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // آمار پلن‌ها
+  // آمار پلن‌ها (شامل trial)
   const stats = {
     total: tenants.length,
+    trial: tenants.filter(t => t.planName === 'trial').length, // ← اضافه شد
     basic: tenants.filter(t => t.planName === 'simple' || t.planName === 'basic').length,
     professional: tenants.filter(t => t.planName === 'professional').length,
     enterprise: tenants.filter(t => t.planName === 'enterprise').length,
+  };
+
+  // ← تابع جدید برای ورود به جای مستاجر
+  const handleImpersonate = async (tenantId: string, subDomain: string) => {
+    setImpersonatingId(tenantId);
+    try {
+      const res = await fetch(`/api/admin/tenants/${tenantId}/impersonate`, {
+        method: 'POST',
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        // ریدایرکت سخت (Hard Redirect) برای اعمال کوکی جدید
+        // اگر ساختار روتینگ شما متفاوت است (مثلاً /dashboard)، آن را تغییر دهید
+      window.location.href = `/${subDomain}/dashboard`;
+      } else {
+        alert(data.error || 'خطا در ورود به پنل');
+        setImpersonatingId(null);
+      }
+    } catch (error) {
+      console.error('Impersonate failed:', error);
+      alert('خطای شبکه. لطفاً دوباره تلاش کنید.');
+      setImpersonatingId(null);
+    }
   };
 
   if (loading) {
@@ -52,35 +81,12 @@ export default function AdminTenantsPage() {
       </div>
 
       {/* کارت‌های آماری پلن‌ها */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <StatCard
-          title="کل فروشگاه‌ها"
-          value={stats.total}
-          icon="🏪"
-          gradient="from-[#7C7BEB] to-[#5B5AC7]"
-          subtitle="همه پلن‌ها"
-        />
-        <StatCard
-          title="پلن پایه"
-          value={stats.basic}
-          icon="🥉"
-          gradient="from-gray-400 to-gray-500"
-          subtitle="اشتراک ساده"
-        />
-        <StatCard
-          title="پلن پیشرفته"
-          value={stats.professional}
-          icon="🥈"
-          gradient="from-blue-400 to-blue-600"
-          subtitle="اشتراک حرفه‌ای"
-        />
-        <StatCard
-          title="پلن سازمانی"
-          value={stats.enterprise}
-          icon="🥇"
-          gradient="from-purple-400 to-purple-600"
-          subtitle="اشتراک سازمانی"
-        />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5"> {/* ← تغییر به 5 ستون برای جای دادن پلن تستی */}
+        <StatCard title="کل فروشگاه‌ها" value={stats.total} icon="🏪" gradient="from-[#7C7BEB] to-[#5B5AC7]" subtitle="همه پلن‌ها" />
+        <StatCard title="پلن تستی" value={stats.trial} icon="🎁" gradient="from-green-400 to-green-600" subtitle="دمو ۳ روزه" />
+        <StatCard title="پلن پایه" value={stats.basic} icon="🥉" gradient="from-gray-400 to-gray-500" subtitle="اشتراک ساده" />
+        <StatCard title="پلن پیشرفته" value={stats.professional} icon="🥈" gradient="from-blue-400 to-blue-600" subtitle="اشتراک حرفه‌ای" />
+        <StatCard title="پلن سازمانی" value={stats.enterprise} icon="🥇" gradient="from-purple-400 to-purple-600" subtitle="اشتراک سازمانی" />
       </div>
 
       {/* جستجو */}
@@ -120,13 +126,16 @@ export default function AdminTenantsPage() {
                     <span className="text-[10px] text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">{tenant.subDomain}</span>
                   </td>
                   <td className="px-3 py-2.5">
+                    {/* ← اصلاح شرط نمایش نام پلن برای شامل شدن trial */}
                     <span className={`px-2 py-1 rounded-md text-[10px] font-medium border ${
                       tenant.planName === 'enterprise' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                       tenant.planName === 'professional' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                      tenant.planName === 'trial' ? 'bg-green-50 text-green-700 border-green-100' :
                       'bg-gray-50 text-gray-600 border-gray-100'
                     }`}>
                       {tenant.planName === 'enterprise' ? 'سازمانی' : 
-                       tenant.planName === 'professional' ? 'پیشرفته' : 'پایه'}
+                       tenant.planName === 'professional' ? 'پیشرفته' : 
+                       tenant.planName === 'trial' ? 'تستی (دمو)' : 'پایه'}
                     </span>
                   </td>
                   <td className="px-3 py-2.5">
@@ -148,8 +157,24 @@ export default function AdminTenantsPage() {
                   </td>
                   <td className="px-3 py-2.5 text-gray-600 text-[11px] text-center hidden lg:table-cell">{tenant._count?.Tickets || 0}</td>
                   <td className="px-3 py-2.5">
-                    <button className="text-[#7C7BEB] hover:text-[#6a69d9] text-[10px] font-medium bg-[#EEEDFD] hover:bg-[#E0DFFA] px-2.5 py-1.5 rounded-md transition">
-                      ورود به پنل
+                    {/* ← دکمه با تابع onClick و حالت Loading */}
+                    <button 
+                      onClick={() => handleImpersonate(tenant.id, tenant.subDomain)}
+                      disabled={impersonatingId === tenant.id}
+                      className={`text-[10px] font-medium px-2.5 py-1.5 rounded-md transition flex items-center gap-1 ${
+                        impersonatingId === tenant.id 
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                          : 'text-[#7C7BEB] hover:text-[#6a69d9] bg-[#EEEDFD] hover:bg-[#E0DFFA]'
+                      }`}
+                    >
+                      {impersonatingId === tenant.id ? (
+                        <>
+                          <span className="animate-spin h-3 w-3 border-2 border-[#7C7BEB] border-t-transparent rounded-full"></span>
+                          در حال ورود...
+                        </>
+                      ) : (
+                        'ورود به پنل'
+                      )}
                     </button>
                   </td>
                 </tr>

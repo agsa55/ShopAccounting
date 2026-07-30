@@ -12,7 +12,7 @@
 // ============================================================================
 
 datasource db {
-  provider = "sqlserver"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -23,7 +23,7 @@ generator client {
 }
 
 model Tenant {
-  id                 String   @id @db.NVarChar(1000)
+  id                 String   @id @db.VarChar(1000)
   subDomain          String   @unique
   companyName        String
   planName           String   @default("simple")
@@ -113,8 +113,8 @@ model Tenant {
 }
 
 model OtpCode {
-  id           String    @id @db.NVarChar(450)
-  tenantId     String   @db.NVarChar(1000)
+  id           String    @id @db.VarChar(450)
+  tenantId     String   @db.VarChar(1000)
   mobile       String
   code         String
   codeHash     String    @default("")
@@ -135,8 +135,8 @@ model OtpCode {
 }
 
 model AuditLogs {
-  id         String   @id @db.NVarChar(450)
-  tenantId   String   @db.NVarChar(1000)
+  id         String   @id @db.VarChar(450)
+  tenantId   String   @db.VarChar(1000)
   userId     String?
   action     String
   entityType String?
@@ -153,7 +153,7 @@ model AuditLogs {
 }
 
 model Plans {
-  id                 String          @id @db.NVarChar(450)
+  id                 String          @id @db.VarChar(450)
   name               String          @unique
   nameFa             String
   price              Float
@@ -181,8 +181,8 @@ model Plans {
 }
 
 model PortalUsers {
-  id          String    @id @db.NVarChar(450)
-  tenantId    String   @db.NVarChar(1000)
+  id          String    @id @db.VarChar(450)
+  tenantId    String   @db.VarChar(1000)
   username    String
   password    String
   mobile      String?
@@ -200,9 +200,9 @@ model PortalUsers {
 }
 
 model SubscriptionPayments {
-  id             String        @id @db.NVarChar(450)
-  subscriptionId String   @db.NVarChar(450)
-  tenantId       String   @db.NVarChar(1000)
+  id             String        @id @db.VarChar(450)
+  subscriptionId String   @db.VarChar(450)
+  tenantId       String   @db.VarChar(1000)
   amount         Float
   paymentMethod  String?
   paymentRef     String?
@@ -219,9 +219,9 @@ model SubscriptionPayments {
 }
 
 model Subscriptions {
-  id                   String                 @id @db.NVarChar(450)
-  tenantId             String   @db.NVarChar(1000)
-  planId               String   @db.NVarChar(450)
+  id                   String                 @id @db.VarChar(450)
+  tenantId             String   @db.VarChar(1000)
+  planId               String   @db.VarChar(450)
   startDate            DateTime
   endDate              DateTime
   status               String                 @default("active")
@@ -239,9 +239,9 @@ model Subscriptions {
 }
 
 model UserLookups {
-  id        String   @id @db.NVarChar(450)
+  id        String   @id @db.VarChar(450)
   username  String   @unique
-  tenantId  String  @db.NVarChar(1000)
+  tenantId  String  @db.VarChar(1000)
   userType  String   @default("storeUser")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -299,14 +299,14 @@ model PlanPrice {
 }
 
 model StoreUser {
-  id              String    @id @default(uuid()) @db.NVarChar(450)
+  id              String    @id @default(uuid()) @db.VarChar(450)
   username        String
   password        String
   mobile          String?
   role            String    @default("Cashier")
   permissions     String?
-  tenantId        String  @db.NVarChar(1000)
-  storeId         String?   @db.NVarChar(1000)
+  tenantId        String  @db.VarChar(1000)
+  storeId         String?   @db.VarChar(1000)
   storeName       String?
   isActive        Boolean   @default(true)
   lastLoginAt     DateTime?
@@ -329,15 +329,15 @@ model StoreUser {
 }
 
 model Product {
-  id            String   @id @default(uuid()) @db.NVarChar(450)
+  id            String   @id @default(uuid()) @db.VarChar(450)
   code          String
-  barcode       String?  @db.NVarChar(50)
-  name          String   @db.NVarChar(500)
-  categoryId    String?  @db.NVarChar(450)
-  unitId        String?  @db.NVarChar(450)
+  barcode       String?  @db.VarChar(50)
+  name          String   @db.VarChar(500)
+  categoryId    String?  @db.VarChar(450)
+  unitId        String?  @db.VarChar(450)
   
   // ★★★ v8.8.7: واحد محصول پیش‌فرض (عدد، کیلوگرم، متر، لیتر، ...)
-  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  unitLabel     String   @default("عدد") @db.VarChar(50)
   
   purchasePrice Float    @default(0)
   salePrice     Float    @default(0)
@@ -345,7 +345,7 @@ model Product {
   currentStock  Float    @default(0)          // ★ تغییر: از Int به Float
   minStock      Float    @default(0)
   isActive      Boolean  @default(true)
-  tenantId      String   @db.NVarChar(1000)
+  tenantId      String   @db.VarChar(1000)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -369,11 +369,11 @@ model Product {
 }
 
 model Category {
-  id        String   @id @default(uuid()) @db.NVarChar(450)
+  id        String   @id @default(uuid()) @db.VarChar(450)
   name      String
-  parentId  String?  @db.NVarChar(450)
+  parentId  String?  @db.VarChar(450)
   isActive  Boolean  @default(true)
-  tenantId  String   @db.NVarChar(1000)
+  tenantId  String   @db.VarChar(1000)
   createdAt DateTime @default(now())
 
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -386,12 +386,12 @@ model Category {
 }
 
 model Unit {
-  id        String   @id @default(uuid()) @db.NVarChar(450)
+  id        String   @id @default(uuid()) @db.VarChar(450)
   name      String
   nameFa    String
   symbol    String?
   isDefault Boolean  @default(false)
-  tenantId  String   @db.NVarChar(1000)
+  tenantId  String   @db.VarChar(1000)
   createdAt DateTime @default(now())
 
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -402,7 +402,7 @@ model Unit {
 }
 
 model Customer {
-  id              String    @id @default(uuid()) @db.NVarChar(450)
+  id              String    @id @default(uuid()) @db.VarChar(450)
   code            String
   firstName       String
   lastName        String
@@ -412,15 +412,15 @@ model Customer {
   creditLimit     Float     @default(0)
   currentBalance  Float     @default(0)
   isBlacklisted   Boolean   @default(false)
-  tenantId        String    @db.NVarChar(1000)
+  tenantId        String    @db.VarChar(1000)
   createdAt       DateTime  @default(now())
   lastPurchaseAt  DateTime?
   portalToken     String?   @unique
   // ★★★ v7.4: طرف حساب — شخص حقوقی
-  personType      String    @default("person") @db.NVarChar(10) // person | legal
-  economicCode    String?   @db.NVarChar(20)
-  companyName     String?   @db.NVarChar(200)
-  legalForm       String?   @db.NVarChar(100)
+  personType      String    @default("person") @db.VarChar(10) // person | legal
+  economicCode    String?   @db.VarChar(20)
+  companyName     String?   @db.VarChar(200)
+  legalForm       String?   @db.VarChar(100)
 
   Tenant   Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   invoices Invoice[]
@@ -433,14 +433,14 @@ model Customer {
 }
 
 model Account {
-  id        String   @id @default(uuid()) @db.NVarChar(450)
+  id        String   @id @default(uuid()) @db.VarChar(450)
   code      String
   name      String
   type      String   @default("cash")
   level     Int      @default(1)
-  parentId  String?  @db.NVarChar(450)
+  parentId  String?  @db.VarChar(450)
   isActive  Boolean  @default(true)
-  tenantId  String   @db.NVarChar(1000)
+  tenantId  String   @db.VarChar(1000)
   createdAt DateTime @default(now())
 
   Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -460,9 +460,9 @@ model Account {
 // (اضافه شده به انتهای مدل Account بالا)
 
 model Invoice {
-  id              String    @id @default(uuid()) @db.NVarChar(450)
+  id              String    @id @default(uuid()) @db.VarChar(450)
   number          String
-  customerId      String?   @db.NVarChar(450)
+  customerId      String?   @db.VarChar(450)
   invoiceDate     DateTime  @default(now())
   dueDate         DateTime?
   status          String    @default("draft")
@@ -476,9 +476,9 @@ model Invoice {
   // ★★★ v8.1.1: بهای تمام‌شده کالای فروش‌رفته (COGS)
   //   برای محاسبه سود ناخالص در گزارش‌ها
   cogsAmount      Float     @default(0)
-  cashierId       String?   @db.NVarChar(450)
+  cashierId       String?   @db.VarChar(450)
   description     String?
-  tenantId        String    @db.NVarChar(1000)
+  tenantId        String    @db.VarChar(1000)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -486,25 +486,25 @@ model Invoice {
   //   sale (پیش‌فرض): فاکتور فروش عادی
   //   sale_return: فاکتور برگشتی فروش (مرجوع از مشتری)
   //   service: فاکتور تعمیرات و خدمات (بدون محصول، فقط آیتم‌های خدماتی)
-  invoiceType     String    @default("sale") @db.NVarChar(30)
+  invoiceType     String    @default("sale") @db.VarChar(30)
 
   // ★★★ v8.7: در صورت برگشتی، آی‌دی فاکتور اصلی که از آن برگشته
-  originalInvoiceId String? @db.NVarChar(450)
+  originalInvoiceId String? @db.VarChar(450)
 
   // ★★★ v8.7: در صورت فاکتور خدماتی، نام/کد دستگاه یا وسیله تعمیر شده (اختیاری)
-  serviceDevice   String?   @db.NVarChar(500)
+  serviceDevice   String?   @db.VarChar(500)
   serviceWarranty Boolean   @default(false)
 
   // ★★★ v6.0: فیلدهای مودیان
-  moidianReferenceId   String?   @db.NVarChar(100)
-  moidianStatus        String?   @db.NVarChar(50)
+  moidianReferenceId   String?   @db.VarChar(100)
+  moidianStatus        String?   @db.VarChar(50)
   moidianSubmittedAt   DateTime?
   moidianAcceptedAt    DateTime?
-  moidianError         String?   @db.NVarChar(500)
+  moidianError         String?   @db.VarChar(500)
   moidianRetryCount    Int       @default(0)
 
   // ★★★ v6.1: انبار
-  warehouseId        String?   @db.NVarChar(450)
+  warehouseId        String?   @db.VarChar(450)
 
   Tenant   Tenant           @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   customer Customer?        @relation(fields: [customerId], references: [id])
@@ -533,13 +533,13 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id             String   @id @default(uuid()) @db.NVarChar(450)
-  invoiceId      String   @db.NVarChar(450)
-  productId      String?  @db.NVarChar(450)
-  productName    String   @db.NVarChar(500)
+  id             String   @id @default(uuid()) @db.VarChar(450)
+  invoiceId      String   @db.VarChar(450)
+  productId      String?  @db.VarChar(450)
+  productName    String   @db.VarChar(500)
   
   // ★★★ v8.8.7: واحد محصول / خدمت
-  unitLabel      String   @default("عدد") @db.NVarChar(50)
+  unitLabel      String   @default("عدد") @db.VarChar(50)
   
   quantity       Float    @default(1)          // ★ تغییر: از Int به Float
   unitPrice      Float    @default(0)
@@ -550,7 +550,7 @@ model InvoiceItem {
   // ★★★ v8.7: فیلدهای اضافی برای آیتم‌های خدماتی
   // برای فاکتورهای service: توضیحات کامل خدمت (مثلاً «تعمیر موتور یخچال»)
   // برای فاکتورهای sale_return: دلیل برگشت (اختیاری)
-  description    String?  @db.NVarChar(500)
+  description    String?  @db.VarChar(500)
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
@@ -559,13 +559,13 @@ model InvoiceItem {
   @@map("InvoiceItems")
 }
 model InvoicePayment {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
-  invoiceId   String   @db.NVarChar(450)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  invoiceId   String   @db.VarChar(450)
   amount      Float
   paymentType String   @default("cash")
   paymentRef  String?
   paidAt      DateTime @default(now())
-  tenantId    String   @db.NVarChar(1000)
+  tenantId    String   @db.VarChar(1000)
 
   Tenant  Tenant  @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   invoice Invoice @relation(fields: [invoiceId], references: [id])
@@ -577,8 +577,8 @@ model InvoicePayment {
 }
 
 model InstallmentPlan {
-  id                    String    @id @default(uuid()) @db.NVarChar(450)
-  invoiceId             String    @unique @db.NVarChar(450)
+  id                    String    @id @default(uuid()) @db.VarChar(450)
+  invoiceId             String    @unique @db.VarChar(450)
   customerId            String?
   totalAmount           Float     @default(0)
   downPayment           Float     @default(0)
@@ -593,7 +593,7 @@ model InstallmentPlan {
   totalPaidAmount       Float     @default(0)
   nextDueDate           DateTime?
   description           String?
-  tenantId              String  @db.NVarChar(1000)
+  tenantId              String  @db.VarChar(1000)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -609,8 +609,8 @@ model InstallmentPlan {
 }
 
 model InstallmentSchedule {
-  id                 String    @id @default(uuid()) @db.NVarChar(450)
-  planId             String   @db.NVarChar(450)
+  id                 String    @id @default(uuid()) @db.VarChar(450)
+  planId             String   @db.VarChar(450)
   installmentNumber  Int
   amount             Float     @default(0)
   dueDate            DateTime
@@ -620,7 +620,7 @@ model InstallmentSchedule {
   paymentRef         String?
   paymentType        String?
   notes              String?
-  tenantId           String  @db.NVarChar(1000)
+  tenantId           String  @db.VarChar(1000)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -635,18 +635,18 @@ model InstallmentSchedule {
 }
 
 model JournalEntry {
-  id           String    @id @default(uuid()) @db.NVarChar(450)
+  id           String    @id @default(uuid()) @db.VarChar(450)
   number       String    @default("JE-000000")
-  fiscalYearId String?   @db.NVarChar(450)
+  fiscalYearId String?   @db.VarChar(450)
   date         DateTime  @default(now())
   description  String?
   status       String    @default("draft")
   sourceType   String?
-  sourceId     String?   @db.NVarChar(450)
+  sourceId     String?   @db.VarChar(450)
   totalDebit   Float     @default(0)
   totalCredit  Float     @default(0)
-  createdBy    String?   @db.NVarChar(450)
-  tenantId     String    @db.NVarChar(1000)
+  createdBy    String?   @db.VarChar(450)
+  tenantId     String    @db.VarChar(1000)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -675,9 +675,9 @@ model JournalEntry {
 }
 
 model JournalEntryLine {
-  id             String    @id @default(uuid()) @db.NVarChar(450)
-  journalEntryId String    @db.NVarChar(450)
-  accountId      String?   @db.NVarChar(450)
+  id             String    @id @default(uuid()) @db.VarChar(450)
+  journalEntryId String    @db.VarChar(450)
+  accountId      String?   @db.VarChar(450)
   description    String?
   debit          Float     @default(0)
   credit         Float     @default(0)
@@ -691,14 +691,14 @@ model JournalEntryLine {
 }
 
 model StoreSetting {
-  id                 String   @id @default(uuid()) @db.NVarChar(450)
+  id                 String   @id @default(uuid()) @db.VarChar(450)
   storeName          String?
   address            String?
   phone              String?
   registrationNumber String?
   defaultTaxRate     Float    @default(9)
   logoUrl            String?
-  tenantId           String  @db.NVarChar(1000)
+  tenantId           String  @db.VarChar(1000)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -712,25 +712,25 @@ model StoreSetting {
 }
 
 model PaymentGateway {
-  id         String   @id @default(uuid()) @db.NVarChar(450)
+  id         String   @id @default(uuid()) @db.VarChar(450)
   name       String
   // ★★★ v8.7: نوع درگاه — zarinpal | idpay (هر فروشگاه درگاه اختصاصی خودش)
-  type       String   @default("zarinpal") @db.NVarChar(30)
+  type       String   @default("zarinpal") @db.VarChar(30)
   // ★★★ v8.7: کد مرچنت (merchantId) — از پنل زرین‌پال یا ای‌دی‌پی دریافت می‌شود
-  merchantId String?  @db.NVarChar(200)
+  merchantId String?  @db.VarChar(200)
   // ★★★ v8.7: کلید API (برای ای‌دی‌پی و زرین‌پال جدید)
-  apiKey     String?  @db.NVarChar(500)
+  apiKey     String?  @db.VarChar(500)
   // ★★★ v8.7: توکن/کد اضافی (برای ای‌دی‌پی: x-api-key ممکنه با merchantId متفاوت باشه)
-  terminalCode String? @db.NVarChar(200)
+  terminalCode String? @db.VarChar(200)
   // ★★★ v8.7: آدرس callback (به‌صورت پیش‌فرض /api/payments/online/verify)
-  callbackUrl String? @db.NVarChar(500)
+  callbackUrl String? @db.VarChar(500)
   // ★★★ v8.7: شماره شبا برای تسویه (برای نمایش به کاربر)
-  bankIban    String? @db.NVarChar(50)
-  bankName    String? @db.NVarChar(200)
+  bankIban    String? @db.VarChar(50)
+  bankName    String? @db.VarChar(200)
   // ★★★ v8.7: sandbox یا production
   isActive   Boolean  @default(false)
   sandbox    Boolean  @default(false)
-  tenantId   String  @db.NVarChar(1000)
+  tenantId   String  @db.VarChar(1000)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -742,47 +742,47 @@ model PaymentGateway {
 }
 
 model PosDevice {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
+  id              String   @id @default(uuid()) @db.VarChar(450)
   name            String
-  terminalId      String?  @db.NVarChar(100)
+  terminalId      String?  @db.VarChar(100)
   isActive        Boolean  @default(true)
 
   // ★★★ v8.0: Universal POS Adapter fields ★★★
   // نوع ترمینال: manual | keyboard-hid | web-serial | network-tcp | network-http
-  terminalType    String   @default("manual") @db.NVarChar(50)
+  terminalType    String   @default("manual") @db.VarChar(50)
 
   // نوع کارتخوان (برند): verifone | ingenico | pax | fannipars | kavosh | palch | generic
-  brand           String?  @db.NVarChar(50)
+  brand           String?  @db.VarChar(50)
 
   // اطلاعات بانکی
-  bankName        String?  @db.NVarChar(100)
-  merchantId      String?  @db.NVarChar(50)
-  acceptorCode    String?  @db.NVarChar(50)
-  terminalSerial  String?  @db.NVarChar(100)
+  bankName        String?  @db.VarChar(100)
+  merchantId      String?  @db.VarChar(50)
+  acceptorCode    String?  @db.VarChar(50)
+  terminalSerial  String?  @db.VarChar(100)
 
   // تنظیمات اتصال بر اساس terminalType
   // web-serial: serialPort, baudRate
   // network-tcp: ipAddress, port
   // network-http: apiBaseUrl, apiKey
-  ipAddress       String?  @db.NVarChar(50)
+  ipAddress       String?  @db.VarChar(50)
   port            Int?
-  serialPort      String?  @db.NVarChar(100)
+  serialPort      String?  @db.VarChar(100)
   baudRate        Int      @default(115200)
-  apiBaseUrl      String?  @db.NVarChar(500)
-  apiKey          String?  @db.NVarChar(500)
+  apiBaseUrl      String?  @db.VarChar(500)
+  apiKey          String?  @db.VarChar(500)
 
   // تنظیمات پیشرفته (JSON string)
   // - autoReconnect, timeoutMs, retryCount
   // - shaparakVerify (boolean), shaparakMerchantCode
   // - receiptPrinterWidth, receiptFooter
-  config          String?  @db.NVarChar(max)
+  config          String?  @db.Text
 
   // وضعیت اتصال
   isOnline        Boolean  @default(false)
   lastConnectedAt DateTime?
-  lastError       String?  @db.NVarChar(500)
+  lastError       String?  @db.VarChar(500)
 
-  tenantId        String   @db.NVarChar(1000)
+  tenantId        String   @db.VarChar(1000)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -801,31 +801,31 @@ model PosDevice {
 // هر بار که مشتری با کارتخوان پرداخت می‌کنه، یک رکورد اینجا ذخیره می‌شه
 // شامل شماره پیرو، ۴ رقم آخر کارت، مبلغ، وضعیت تأیید
 model CardPayment {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  invoiceId       String?  @db.NVarChar(450)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  invoiceId       String?  @db.VarChar(450)
 
   // اطلاعات تراکنش
   amount          Float
-  referenceNumber String?  @db.NVarChar(50)   // شماره پیرو (RRN) یا هر کد مرجع دیگه
-  referenceType   String?  @db.NVarChar(20)   // ★★★ v8.1: نوع کد مرجع (rrn | unique_code | trace | terminal | auth_code | stan | other)
-  traceNumber     String?  @db.NVarChar(50)   // شماره پیگیری
-  cardNumber      String?  @db.NVarChar(4)    // ۴ رقم آخر کارت
-  cardType        String?  @db.NVarChar(20)   // bankaii | melli | saderat | ... | unknown
+  referenceNumber String?  @db.VarChar(50)   // شماره پیرو (RRN) یا هر کد مرجع دیگه
+  referenceType   String?  @db.VarChar(20)   // ★★★ v8.1: نوع کد مرجع (rrn | unique_code | trace | terminal | auth_code | stan | other)
+  traceNumber     String?  @db.VarChar(50)   // شماره پیگیری
+  cardNumber      String?  @db.VarChar(4)    // ۴ رقم آخر کارت
+  cardType        String?  @db.VarChar(20)   // bankaii | melli | saderat | ... | unknown
 
   // وضعیت
-  status          String   @default("pending") @db.NVarChar(20)  // pending | successful | failed | reversed
+  status          String   @default("pending") @db.VarChar(20)  // pending | successful | failed | reversed
 
   // ارتباط با کارتخوان
-  posDeviceId     String?  @db.NVarChar(450)
+  posDeviceId     String?  @db.VarChar(450)
 
   // تأیید شاپرک
   shaparakVerified Boolean @default(false)
-  shaparakVerifyError String? @db.NVarChar(500)
+  shaparakVerifyError String? @db.VarChar(500)
 
   // متادیتا
   paidAt          DateTime @default(now())
   description     String?
-  tenantId        String   @db.NVarChar(1000)
+  tenantId        String   @db.VarChar(1000)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -844,13 +844,13 @@ model CardPayment {
 }
 
 model Backup {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
+  id          String   @id @default(uuid()) @db.VarChar(450)
   fileName    String
   fileSize    Int
   recordCount Int?
-  data        String?  @db.NVarChar(max)
+  data        String?  @db.Text
   createdAt   DateTime @default(now())
-  tenantId    String   @db.NVarChar(1000)
+  tenantId    String   @db.VarChar(1000)
 
   Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
 
@@ -860,8 +860,8 @@ model Backup {
 }
 
 model Check {
-  id            String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId      String   @db.NVarChar(1000)
+  id            String   @id @default(uuid()) @db.VarChar(450)
+  tenantId      String   @db.VarChar(1000)
   type          String   @default("receivable")
   checkNumber   String
   bankName      String
@@ -870,10 +870,10 @@ model Check {
   issueDate     DateTime
   dueDate       DateTime
   status        String   @default("pending")
-  customerId    String?  @db.NVarChar(450)
+  customerId    String?  @db.VarChar(450)
   payeeName     String?
   description   String?
-  journalEntryId String? @db.NVarChar(450)
+  journalEntryId String? @db.VarChar(450)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -887,8 +887,8 @@ model Check {
 }
 
 model FiscalYear {
-  id          String    @id @default(uuid()) @db.NVarChar(450)
-  tenantId    String    @db.NVarChar(1000)
+  id          String    @id @default(uuid()) @db.VarChar(450)
+  tenantId    String    @db.VarChar(1000)
 
   name        String
 
@@ -917,17 +917,17 @@ model FiscalYear {
 }
 
 model OnlinePayment {
-  id            String    @id @default(uuid()) @db.NVarChar(450)
-  tenantId      String  @db.NVarChar(1000)
-  invoiceId     String   @db.NVarChar(450)
+  id            String    @id @default(uuid()) @db.VarChar(450)
+  tenantId      String  @db.VarChar(1000)
+  invoiceId     String   @db.VarChar(450)
   customerId    String?
   amount        Float
   authority     String?
   refId         String?
   status        String    @default("pending")
-  gatewayType   String    @default("zarinpal") @db.NVarChar(30)
+  gatewayType   String    @default("zarinpal") @db.VarChar(30)
   // ★★★ v8.7: آی‌دی درگاه اختصاصی فروشگاه (PaymentGateway.id)
-  gatewayId     String?   @db.NVarChar(450)
+  gatewayId     String?   @db.VarChar(450)
   gatewayUrl    String?
   description   String?
   paidAt        DateTime?
@@ -949,8 +949,8 @@ model OnlinePayment {
 }
 
 model SmsSettings {
-  id                    String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId              String   @unique @db.NVarChar(1000)
+  id                    String   @id @default(uuid()) @db.VarChar(450)
+  tenantId              String   @unique @db.VarChar(1000)
   isEnabled             Boolean  @default(true)
   daysBeforeDue         Int      @default(1)
   sendOnDueDate         Boolean  @default(true)
@@ -967,8 +967,8 @@ model SmsSettings {
 }
 
 model SmsLog {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String   @db.NVarChar(1000)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  tenantId        String   @db.VarChar(1000)
   type            String
   recipient       String
   message         String
@@ -992,8 +992,8 @@ model SmsLog {
 }
 
 model RecurringJournal {
-  id                String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId          String   @db.NVarChar(1000)
+  id                String   @id @default(uuid()) @db.VarChar(450)
+  tenantId          String   @db.VarChar(1000)
 
   title             String
   description       String?
@@ -1026,21 +1026,21 @@ model RecurringJournal {
 }
 
 model MoidianSettings {
-  id                  String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId            String   @unique @db.NVarChar(1000)
+  id                  String   @id @default(uuid()) @db.VarChar(450)
+  tenantId            String   @unique @db.VarChar(1000)
 
-  fiscalId            String?  @db.NVarChar(50)
-  economicCode        String?  @db.NVarChar(50)
+  fiscalId            String?  @db.VarChar(50)
+  economicCode        String?  @db.VarChar(50)
 
-  clientId            String?  @db.NVarChar(200)
-  clientSecretEnc     String?  @db.NVarChar(1000)
-  privateKeyEnc       String?  @db.NVarChar(4000)
+  clientId            String?  @db.VarChar(200)
+  clientSecretEnc     String?  @db.VarChar(1000)
+  privateKeyEnc       String?  @db.VarChar(4000)
 
-  accessTokenEnc      String?  @db.NVarChar(2000)
-  refreshTokenEnc     String?  @db.NVarChar(2000)
+  accessTokenEnc      String?  @db.VarChar(2000)
+  refreshTokenEnc     String?  @db.VarChar(2000)
   tokenExpiresAt      DateTime?
 
-  environment         String   @default("sandbox") @db.NVarChar(20)
+  environment         String   @default("sandbox") @db.VarChar(20)
   isInitialized       Boolean  @default(false)
   autoSubmit          Boolean  @default(true)
   lastSyncAt          DateTime?
@@ -1064,13 +1064,13 @@ model MoidianSettings {
 // ═══════════════════════════════════════════════════════════════
 
 model Warehouse {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId    String   @db.NVarChar(1000)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  tenantId    String   @db.VarChar(1000)
   name        String
   code        String
   isDefault   Boolean  @default(false)
   isActive    Boolean  @default(true)
-  branchId    String?  @db.NVarChar(450)
+  branchId    String?  @db.VarChar(450)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1092,14 +1092,14 @@ model Warehouse {
 }
 
 model StockLevel {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId    String   @db.NVarChar(1000)
-  warehouseId String   @db.NVarChar(450)
-  productId   String   @db.NVarChar(450)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  tenantId    String   @db.VarChar(1000)
+  warehouseId String   @db.VarChar(450)
+  productId   String   @db.VarChar(450)
   
   quantity    Float    @default(0)            // ★ تغییر: از Int به Float
   // ★★★ v8.8.7: واحد محصول (برای محاسبه صحیح)
-  unitLabel   String   @default("عدد") @db.NVarChar(50)
+  unitLabel   String   @default("عدد") @db.VarChar(50)
   
   averageCost Float    @default(0)
   createdAt   DateTime @default(now())
@@ -1116,21 +1116,21 @@ model StockLevel {
 }
 
 model StockMovement {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String   @db.NVarChar(1000)
-  productId       String   @db.NVarChar(450)
-  fromWarehouseId String?  @db.NVarChar(450)
-  toWarehouseId   String?  @db.NVarChar(450)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  tenantId        String   @db.VarChar(1000)
+  productId       String   @db.VarChar(450)
+  fromWarehouseId String?  @db.VarChar(450)
+  toWarehouseId   String?  @db.VarChar(450)
   quantity        Float                        // ★ تغییر: از Int به Float
   
   // ★★★ v8.8.7: واحد محصول در حرکت
-  unitLabel       String   @default("عدد") @db.NVarChar(50)
+  unitLabel       String   @default("عدد") @db.VarChar(50)
   
   unitCost        Float    @default(0)
-  movementType    String   @db.NVarChar(50)  // purchase_in | sale_out | transfer | adjustment
-  referenceType   String?  @db.NVarChar(50)  // purchase_invoice | sale_invoice | stock_count | transfer
-  referenceId     String?  @db.NVarChar(450)
-  description     String?  @db.NVarChar(500)
+  movementType    String   @db.VarChar(50)  // purchase_in | sale_out | transfer | adjustment
+  referenceType   String?  @db.VarChar(50)  // purchase_invoice | sale_invoice | stock_count | transfer
+  referenceId     String?  @db.VarChar(450)
+  description     String?  @db.VarChar(500)
   createdAt       DateTime @default(now())
 
   Tenant        Tenant     @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
@@ -1144,23 +1144,23 @@ model StockMovement {
 }
 
 model Supplier {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String   @db.NVarChar(1000)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  tenantId        String   @db.VarChar(1000)
   code            String
   name            String
-  mobile          String?  @db.NVarChar(20)
-  nationalCode    String?  @db.NVarChar(20)
-  address         String?  @db.NVarChar(500)
+  mobile          String?  @db.VarChar(20)
+  nationalCode    String?  @db.VarChar(20)
+  address         String?  @db.VarChar(500)
   creditLimit     Float    @default(0)
   currentBalance  Float    @default(0)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   // ★★★ v7.4: طرف حساب — شخص حقوقی
-  personType      String   @default("person") @db.NVarChar(10) // person | legal
-  economicCode    String?  @db.NVarChar(20)
-  companyName     String?  @db.NVarChar(200)
-  legalForm       String?  @db.NVarChar(100)
+  personType      String   @default("person") @db.VarChar(10) // person | legal
+  economicCode    String?  @db.VarChar(20)
+  companyName     String?  @db.VarChar(200)
+  legalForm       String?  @db.VarChar(100)
 
   Tenant          Tenant            @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
   PurchaseInvoices PurchaseInvoice[]
@@ -1172,9 +1172,9 @@ model Supplier {
 }
 
 model PurchaseInvoice {
-  id              String    @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String    @db.NVarChar(1000)
-  supplierId      String?   @db.NVarChar(450)
+  id              String    @id @default(uuid()) @db.VarChar(450)
+  tenantId        String    @db.VarChar(1000)
+  supplierId      String?   @db.VarChar(450)
   number          String
   invoiceDate     DateTime  @default(now())
   dueDate         DateTime?
@@ -1186,19 +1186,19 @@ model PurchaseInvoice {
   totalAmount     Float     @default(0)
   paidAmount      Float     @default(0)
   remainingAmount Float     @default(0)
-  warehouseId     String    @db.NVarChar(450)
-  journalEntryId  String?   @db.NVarChar(450)
-  description     String?   @db.NVarChar(500)
-  cashierId       String?   @db.NVarChar(450)
+  warehouseId     String    @db.VarChar(450)
+  journalEntryId  String?   @db.VarChar(450)
+  description     String?   @db.VarChar(500)
+  cashierId       String?   @db.VarChar(450)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   // ★★★ v8.7: نوع فاکتور خرید — purchase | purchase_return
   //   purchase (پیش‌فرض): فاکتور خرید عادی
   //   purchase_return: فاکتور برگشتی خرید (مرجوع به تامین‌کننده)
-  invoiceType     String    @default("purchase") @db.NVarChar(30)
+  invoiceType     String    @default("purchase") @db.VarChar(30)
   //   در صورت برگشتی، آی‌دی فاکتور اصلی که از آن برگشته
-  originalPurchaseInvoiceId String? @db.NVarChar(450)
+  originalPurchaseInvoiceId String? @db.VarChar(450)
 
   Tenant        Tenant              @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
   Supplier      Supplier?           @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -1217,14 +1217,14 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceItem {
-  id                String   @id @default(uuid()) @db.NVarChar(450)
-  purchaseInvoiceId String   @db.NVarChar(450)
-  productId         String?  @db.NVarChar(450)
-  productName       String   @db.NVarChar(500)
-  productCode       String?  @db.NVarChar(50)     // ★ اضافه: کد محصول
+  id                String   @id @default(uuid()) @db.VarChar(450)
+  purchaseInvoiceId String   @db.VarChar(450)
+  productId         String?  @db.VarChar(450)
+  productName       String   @db.VarChar(500)
+  productCode       String?  @db.VarChar(50)     // ★ اضافه: کد محصول
   
   // ★★★ v8.8.7: واحد محصول (عدد، کیلوگرم، متر، ...)
-  unitLabel         String   @default("عدد") @db.NVarChar(50)
+  unitLabel         String   @default("عدد") @db.VarChar(50)
   
   quantity          Float    @default(1)          // ★ تغییر: از Int به Float (برای اعشاری)
   unitPrice         Float    @default(0)
@@ -1233,7 +1233,7 @@ model PurchaseInvoiceItem {
   lineTotal         Float    @default(0)
   
   // ★★★ v8.7: دلیل برگشت (فقط برای فاکتورهای برگشتی خرید، اختیاری)
-  returnReason      String?  @db.NVarChar(500)
+  returnReason      String?  @db.VarChar(500)
 
   purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   Product         Product?        @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -1247,17 +1247,17 @@ model PurchaseInvoiceItem {
 // ═══════════════════════════════════════════════════════════════
 
 model StockCount {
-  id           String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId     String   @db.NVarChar(1000)
+  id           String   @id @default(uuid()) @db.VarChar(450)
+  tenantId     String   @db.VarChar(1000)
   number       String   // SC-0001
-  warehouseId  String   @db.NVarChar(450)
+  warehouseId  String   @db.VarChar(450)
   countDate    DateTime @default(now())
   status       String   @default("draft") // draft / in_progress / completed / cancelled
-  countedBy    String?  @db.NVarChar(450)
-  approvedBy   String?  @db.NVarChar(450)
+  countedBy    String?  @db.VarChar(450)
+  approvedBy   String?  @db.VarChar(450)
   approvedAt   DateTime?
-  notes        String?  @db.NVarChar(500)
-  journalEntryId String? @db.NVarChar(450) // سند حسابداری خودکار (FK ساده، بدون relation)
+  notes        String?  @db.VarChar(500)
+  journalEntryId String? @db.VarChar(450) // سند حسابداری خودکار (FK ساده، بدون relation)
   totalDifference Float @default(0) // جمع مالی اختلاف
   totalItems   Int      @default(0) // تعداد آیتم‌های شمارش
   createdAt    DateTime @default(now())
@@ -1278,19 +1278,19 @@ model StockCount {
 }
 
 model StockCountItem {
-  id            String   @id @default(uuid()) @db.NVarChar(450)
-  stockCountId  String   @db.NVarChar(450)
-  productId     String   @db.NVarChar(450)
+  id            String   @id @default(uuid()) @db.VarChar(450)
+  stockCountId  String   @db.VarChar(450)
+  productId     String   @db.VarChar(450)
   
   // ★★★ v8.8.7: واحد محصول
-  unitLabel     String   @default("عدد") @db.NVarChar(50)
+  unitLabel     String   @default("عدد") @db.VarChar(50)
   
   systemQty     Float    @default(0)           // ★ تغییر: از Int به Float
   countedQty    Float    @default(0)
   difference    Float    @default(0)
   unitCost      Float    @default(0)
   differenceAmount Float @default(0)
-  reason        String?  @db.NVarChar(500)
+  reason        String?  @db.VarChar(500)
   countedAt     DateTime @default(now())
 
   stockCount StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
@@ -1302,13 +1302,13 @@ model StockCountItem {
   @@map("StockCountItems")
 }
 model Branch {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId    String   @db.NVarChar(1000)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  tenantId    String   @db.VarChar(1000)
   name        String
   code        String
-  address     String?  @db.NVarChar(500)
-  phone       String?  @db.NVarChar(20)
-  manager     String?  @db.NVarChar(200)
+  address     String?  @db.VarChar(500)
+  phone       String?  @db.VarChar(20)
+  manager     String?  @db.VarChar(200)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1329,25 +1329,25 @@ model Branch {
 // ═══════════════════════════════════════════════════════════════
 
 model Ticket {
-  id           String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId     String   @db.NVarChar(1000)
+  id           String   @id @default(uuid()) @db.VarChar(450)
+  tenantId     String   @db.VarChar(1000)
   ticketNumber String   @unique                  // مثلاً TKT-14030624-0001
-  subject      String   @db.NVarChar(500)
-  description  String   @db.NVarChar(Max)        // متن اولیه تیکت
+  subject      String   @db.VarChar(500)
+  description  String   @db.Text        // متن اولیه تیکت
   category     String   @default("general")      // general | bug | feature | billing | account | accounting | pos
   priority     String   @default("normal")       // low | normal | high | urgent
   status       String   @default("open")         // open | pending | answered | resolved | closed
   // ★ کاربری که تیکت را باز کرده (از فروشگاه)
-  createdById  String   @db.NVarChar(450)
+  createdById  String   @db.VarChar(450)
   // ★ ادمینی که تیکت به او اختصاص داده شده (null = تخصیص داده نشده)
-  assignedTo   String?  @db.NVarChar(450)
+  assignedTo   String?  @db.VarChar(450)
   // ★ رتبه پلن فعلی فروشگاه در زمان ثبت تیکت (برای گزارش‌گیری)
-  planTierAtCreate String?  @db.NVarChar(50)
+  planTierAtCreate String?  @db.VarChar(50)
   // ★ فایل‌های پیوست (JSON آرایه‌ای از آدرس‌ها)
-  attachments  String?  @db.NVarChar(Max)
+  attachments  String?  @db.Text
   // ★ امتیاز رضایت کاربر (۱ تا ۵) — فقط بعد از بسته شدن
   rating       Int?
-  ratingComment String? @db.NVarChar(500)
+  ratingComment String? @db.VarChar(500)
   ratedAt      DateTime?
 
   createdAt    DateTime @default(now())
@@ -1371,14 +1371,14 @@ model Ticket {
 }
 
 model TicketMessage {
-  id          String   @id @default(uuid()) @db.NVarChar(450)
-  ticketId    String   @db.NVarChar(450)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  ticketId    String   @db.VarChar(450)
   // ★ senderType: "customer" (از فروشگاه) | "admin" (از پشتیبان)
   senderType  String   @default("customer")
-  senderId    String   @db.NVarChar(450)
-  senderName  String   @db.NVarChar(200)        // کش شده برای نمایش سریع
-  message     String   @db.NVarChar(Max)
-  attachments String?  @db.NVarChar(Max)         // JSON آرایه آدرس فایل‌ها
+  senderId    String   @db.VarChar(450)
+  senderName  String   @db.VarChar(200)        // کش شده برای نمایش سریع
+  message     String   @db.Text
+  attachments String?  @db.Text         // JSON آرایه آدرس فایل‌ها
   isInternal  Boolean  @default(false)           // یادداشت داخلی پشتیبان (کاربر نمی‌بیند)
   isRead      Boolean  @default(false)           // آیا گیرنده آن را خوانده
   createdAt   DateTime @default(now())
@@ -1406,8 +1406,8 @@ model TicketMessage {
 // ═══════════════════════════════════════════════════════════════
 
 model InitialBalance {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String   @db.NVarChar(1000)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  tenantId        String   @db.VarChar(1000)
   
   // ★ نوع موجودی اولیه
   // cash: موجودی نقد (صندوق)
@@ -1416,26 +1416,26 @@ model InitialBalance {
   // fixed_asset: دارایی ثابت (تجهیزات)
   // liability: بدهی اولیه (وام)
   // equity: سرمایه مالک
-  type            String   @db.NVarChar(30)
+  type            String   @db.VarChar(30)
   
   // ★ عنوان (مثلاً: "صندوق فروشگاه"، "یخچال"، "وام بانک ملی")
-  title           String   @db.NVarChar(200)
+  title           String   @db.VarChar(200)
   
   // ★ مبلغ (ریال)
   amount          Float    @default(0)
   
   // ★ آی‌دی حساب مربوطه (از جدول Account)
-  accountId       String?  @db.NVarChar(450)
+  accountId       String?  @db.VarChar(450)
   
   // ★ برای موجودی کالا: آی‌دی محصول
-  productId       String?  @db.NVarChar(450)
+  productId       String?  @db.VarChar(450)
   quantity        Float?   // تعداد/مقدار
   
   // ★ توضیحات
-  description     String?  @db.NVarChar(500)
+  description     String?  @db.VarChar(500)
   
   // ★ آی‌دی سند افتتاحیه (JournalEntry)
-  journalEntryId  String?  @db.NVarChar(450)
+  journalEntryId  String?  @db.VarChar(450)
   
   // ★ آیا این رکورد در سند افتتاحیه ثبت شده؟
   isPosted        Boolean  @default(false)
@@ -1461,10 +1461,10 @@ model InitialBalance {
 // ★★★ Admin Users (Super Admin Panel)
 // ═══════════════════════════════════════════════════════════════
 model AdminUser {
-  id        String   @id @default(uuid()) @db.NVarChar(450)
-  username  String   @unique @db.NVarChar(100)
-  password  String   @db.NVarChar(500) // هش‌شده با bcrypt
-  role      String   @default("SuperAdmin") @db.NVarChar(50)
+  id        String   @id @default(uuid()) @db.VarChar(450)
+  username  String   @unique @db.VarChar(100)
+  password  String   @db.VarChar(500) // هش‌شده با bcrypt
+  role      String   @default("SuperAdmin") @db.VarChar(50)
   isActive  Boolean  @default(true)
   lastLogin DateTime?
   createdAt DateTime @default(now())
@@ -1481,13 +1481,13 @@ model AdminUser {
 // ═══════════════════════════════════════════════════════════════
 
 model FixedAsset {
-  id              String   @id @default(uuid()) @db.NVarChar(450)
-  tenantId        String   @db.NVarChar(1000)
+  id              String   @id @default(uuid()) @db.VarChar(450)
+  tenantId        String   @db.VarChar(1000)
   
   // ★ اطلاعات دارایی
-  name            String   @db.NVarChar(200)
-  code            String   @db.NVarChar(50)    // کد دارایی
-  category        String   @db.NVarChar(100)   // تجهیزات، ماشین‌آلات، مبلمان، ساختمان
+  name            String   @db.VarChar(200)
+  code            String   @db.VarChar(50)    // کد دارایی
+  category        String   @db.VarChar(100)   // تجهیزات، ماشین‌آلات، مبلمان، ساختمان
   
   // ★ مبالغ
   purchasePrice   Float    @default(0)         // بهای خرید
@@ -1511,12 +1511,12 @@ model FixedAsset {
   status          String   @default("active")  // active | sold | disposed | fully_depreciated
   
   // ★ relations
-  accountId       String?  @db.NVarChar(450)   // حساب دارایی (1400)
-  accumDepAccountId String? @db.NVarChar(450)  // حساب استهلاک انباشته
-  depExpenseAccountId String? @db.NVarChar(450) // حساب هزینه استهلاک
+  accountId       String?  @db.VarChar(450)   // حساب دارایی (1400)
+  accumDepAccountId String? @db.VarChar(450)  // حساب استهلاک انباشته
+  depExpenseAccountId String? @db.VarChar(450) // حساب هزینه استهلاک
   
-  journalEntryId  String?  @db.NVarChar(450)   // سند خرید دارایی
-  description     String?  @db.NVarChar(500)
+  journalEntryId  String?  @db.VarChar(450)   // سند خرید دارایی
+  description     String?  @db.VarChar(500)
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
