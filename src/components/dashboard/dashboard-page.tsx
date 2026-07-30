@@ -434,7 +434,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <KpiCard
           label="فروش امروز"
-          value={formatNumber(stats.todaySales)}
+        value={formatCurrency(stats.todaySales)}
           sublabel={`${formatNumber(stats.todayInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-emerald-500 to-emerald-600"
           icon={
@@ -446,7 +446,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="فروش ماه"
-          value={formatNumber(stats.monthSales)}
+        value={formatCurrency(stats.todaySales)}
           sublabel={`${formatNumber(stats.monthInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-blue-500 to-blue-600"
           icon={
@@ -458,7 +458,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="سود ماه"
-          value={formatNumber(stats.monthlyProfit)}
+        value={formatCurrency(stats.todaySales)}
           sublabel={stats.monthlyProfit >= 0 ? 'سودآور' : 'زیان'}
           gradient="bg-gradient-to-br from-purple-500 to-purple-600"
           icon={
@@ -620,10 +620,10 @@ export default function DashboardPage() {
                       <span className="font-mono text-gray-500 shrink-0">{inv.number}</span>
                       <span className="truncate">{inv.customerName || 'فروش عمومی'}</span>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono font-bold">{formatNumber(inv.totalAmount)}</span>
-                      {getStatusBadge(inv.status)}
-                    </div>
+                   <div className="flex items-center gap-2 shrink-0">
+  <span className="font-mono font-bold text-[10px]">{formatCurrency(inv.totalAmount)}</span>
+  {getStatusBadge(inv.status)}
+</div>
                   </div>
                 ))}
               </div>

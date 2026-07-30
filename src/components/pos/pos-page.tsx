@@ -1316,69 +1316,82 @@ export default function PosPage() {
   // ============ Handlers ============
 
   const handleAddToCart = useCallback(
-    (product: Product) => {
-      if (product.currentStock <= 0) {
-        toast({
-          title: 'محصول ناموجود است',
-          description: `${product.name} در انبار موجود نیست`,
-          variant: 'destructive',
-        })
-        return
-      }
+  (product: any) => {
+    console.log('1️⃣ [START] handleAddToCart فراخوانی شد برای:', product.name);
+    console.log('2️⃣ [STOCK] مقدار currentStock محصول:', product.currentStock);
 
-            setProducts((prev) => {
-        if (prev.find((p) => p.id === product.id)) return prev
-        // ★ OFFLINE-FIX: Cache محصول جدید (import() به‌جای require)
-        const updatedProducts = [...prev, product]
-        import('@/lib/offline-db').then(({ cacheProducts }) => {
-          cacheProducts(updatedProducts).catch((err: any) => {
-            console.warn('[POS] Failed to cache product:', err)
-          })
-        }).catch(() => {})
-        return updatedProducts
-      })
+    // بررسی موجودی
+    if (product.currentStock <= 0) {
+      console.log('❌ [BLOCKED] موجودی محصول صفر یا کمتر است');
+      toast({
+        title: 'محصول ناموجود است',
+        description: `${product.name} در انبار موجود نیست`,
+        variant: 'destructive',
+      });
+      return;
+    }
 
-      const existingItem = cart.find((c) => c.productId === product.id)
-      if (existingItem && existingItem.quantity >= product.currentStock) {
-        toast({
-          title: 'موجودی کافی نیست',
-          description: `موجودی فعلی: ${formatPrice(product.currentStock)} ${getUnitLabel(product)}`,
-          variant: 'destructive',
-        })
-        return
-      }
+    // به‌روزرسانی کش محصولات
+    setProducts((prev: any[]) => {
+      if (prev.find((p) => p.id === product.id)) return prev;
+      const updatedProducts = [...prev, product];
+      import('@/lib/offline-db').then(({ cacheProducts }: any) => {
+        cacheProducts(updatedProducts).catch((err: any) => console.warn('[POS] Cache failed:', err));
+      }).catch(() => {});
+      return updatedProducts;
+    });
 
-      if (typeof addToCart !== 'function') {
-        console.warn('[POS] addToCart is not a function yet')
-        toast({ title: 'لطفاً صبر کنید', description: 'سیستم در حال بارگذاری است' })
-        return
-      }
+    console.log('3️⃣ [CART CHECK] طول فعلی سبد خرید:', cart.length);
+    const existingItem = cart.find((c: any) => c.productId === product.id);
+    
+    if (existingItem && existingItem.quantity >= product.currentStock) {
+      console.log('❌ [BLOCKED] تعداد در سبد از موجودی انبار بیشتر است');
+      toast({
+        title: 'موجودی کافی نیست',
+        description: `موجودی فعلی: ${product.currentStock}`,
+        variant: 'destructive',
+      });
+      return;
+    }
 
-      const lineTotal = computeLineTotal(1, product.salePrice, 0, product.taxRate)
+    if (typeof addToCart !== 'function') {
+      console.log('❌ [BLOCKED] تابع addToCart تعریف نشده است');
+      toast({ title: 'لطفاً صبر کنید', description: 'سیستم در حال بارگذاری است' });
+      return;
+    }
 
-      addToCart({
-        productId: product.id,
-        productName: product.name,
-        quantity: 1,
-        unitPrice: product.salePrice,
-        discount: 0,
-        taxRate: product.taxRate,
-        lineTotal,
-        currentStock: product.currentStock,
-        unitLabel: getUnitLabel(product),
-      })
+    console.log('4️⃣ [EXECUTING] در حال محاسبه و فراخوانی addToCart...');
+    const lineTotal = computeLineTotal(1, product.salePrice, 0, product.taxRate);
 
-      // ★ Toast آفلاین
-      if (!isOnline) {
-        toast({
-          title: '📡 آفلاین',
-          description: 'تغییرات شما ذخیره و پس از اتصال ثبت می‌شوند',
-          duration: 3000,
-        })
-      }
-    },
-    [addToCart, cart, toast, isOnline]
-  )
+    const newItem = {
+      productId: product.id,
+      productName: product.name,
+      quantity: 1,
+      unitPrice: product.salePrice,
+      discount: 0,
+      taxRate: product.taxRate,
+      lineTotal,
+      currentStock: product.currentStock,
+      unitLabel: getUnitLabel(product),
+    };
+
+    console.log('5️⃣ [PAYLOAD] آبجکت ارسالی به addToCart:', newItem);
+    
+    // فراخوانی اصلی
+    addToCart(newItem);
+    
+    console.log('✅ [SUCCESS] addToCart اجرا شد. اگر UI آپدیت نشد، مشکل از تعریف addToCart یا رندر لیست است.');
+
+    if (!isOnline) {
+      toast({
+        title: '📡 آفلاین',
+        description: 'تغییرات شما ذخیره و پس از اتصال ثبت می‌شوند',
+        duration: 3000,
+      });
+    }
+  },
+  [addToCart, cart, toast, isOnline, setProducts, computeLineTotal, getUnitLabel]
+);
 
   const handleIncreaseQuantity = useCallback(
   (productId: string) => {
@@ -1500,108 +1513,131 @@ const handleQuantityChange = useCallback(
     []
   )
 
-  const handleSearchKeyDown = useCallback(
-    async (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && posSearchQuery.trim()) {
-        const q = posSearchQuery.trim()
-        const offline = !isOnline || !navigator.onLine
 
-        // ★ OFFLINE: جستجو در cache
-            // ★ OFFLINE-FIX: جستجو در cache (posRecents + products fallback)
-      if (offline) {
-        const qLower = q.toLowerCase()
-        const offlineSource = posRecents.length > 0 ? posRecents : products
-        // ۱. جستجو با بارکد
-        const byBarcode = offlineSource.find(
-          (p) => p.isActive !== false && p.barcode === q
-        )
-        if (byBarcode) {
-          handleAddToCart(byBarcode)
-          posSearchSetQuery('')
-          return
-        }
-        // ۲. جستجو با کد
-        const byCode = offlineSource.find(
-          (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
-        )
-        if (byCode) {
-          handleAddToCart(byCode)
-          posSearchSetQuery('')
-          return
-        }
-        // ۳. جستجو با نام
-        const byName = offlineSource.find(
-          (p) =>
-            p.isActive !== false &&
-            (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
-        )
-        if (byName) {
-          handleAddToCart(byName)
-          posSearchSetQuery('')
-          return
-        }
-        // ۴. اولین نتیجه filteredProducts
-        if (filteredProducts.length > 0) {
-          handleAddToCart(filteredProducts[0])
-          posSearchSetQuery('')
-          return
-        }
-        toast({
-          title: '📡 آفلاین — یافت نشد',
-          description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
-          variant: 'destructive',
-        })
-        return
-      }
+const isProcessingScan = useRef(false);
 
-        // ★ ONLINE: جستجو در سرور
-        if (/^\d{4,13}$/.test(q)) {
-          const found = await posLookupByBarcode(q)
-          if (found) {
-            handleAddToCart(found)
-            posSearchSetQuery('')
-            return
+// ۲. تابع handleSearchKeyDown را کاملاً با این نسخه جایگزین کنید:
+const handleSearchKeyDown = useCallback(
+  async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+
+      if (isProcessingScan.current) return;
+
+      const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '');
+      if (!q) return;
+
+      isProcessingScan.current = true;
+      const offline = !isOnline || !navigator.onLine;
+
+      try {
+        if (offline) {
+          const qLower = q.toLowerCase();
+          const offlineSource = posRecents.length > 0 ? posRecents : products;
+          
+          const byBarcode = offlineSource.find(
+            (p) => p.isActive !== false && p.barcode === q
+          );
+          if (byBarcode) {
+            handleAddToCart(byBarcode);
+            posSearchSetQuery('');
+            return;
           }
+          
+          const byCode = offlineSource.find(
+            (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
+          );
+          if (byCode) {
+            handleAddToCart(byCode);
+            posSearchSetQuery('');
+            return;
+          }
+
+          const byName = offlineSource.find(
+            (p) =>
+              p.isActive !== false &&
+              (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
+          );
+          if (byName) {
+            handleAddToCart(byName);
+            posSearchSetQuery('');
+            return;
+          }
+
+          if (filteredProducts.length > 0) {
+            handleAddToCart(filteredProducts[0]);
+            posSearchSetQuery('');
+            return;
+          }
+          
+          toast({
+            title: '📡 آفلاین — یافت نشد',
+            description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
+            variant: 'destructive',
+          });
+          return;
         }
 
-        const codeFound = await posLookupByCode(q)
-        if (codeFound) {
-          handleAddToCart(codeFound)
-          posSearchSetQuery('')
-          return
+        // ★ جستجو به عنوان بارکد
+        const foundByBarcode = await posLookupByBarcode(q);
+        if (foundByBarcode && foundByBarcode.id) {
+          handleAddToCart(foundByBarcode);
+          posSearchSetQuery('');
+          return;
         }
 
+        // ★ جستجو به عنوان کد محصول
+        const codeFound = await posLookupByCode(q);
+        if (codeFound && codeFound.id) {
+          handleAddToCart(codeFound);
+          posSearchSetQuery('');
+          return;
+        }
+
+        // ★ استفاده از اولین نتیجه جستجوی متنی
         if (posSearchResults.length > 0) {
-          handleAddToCart(posSearchResults[0])
-          posSearchSetQuery('')
-          return
+          const firstResult = posSearchResults[0];
+          if (firstResult && firstResult.id) {
+            handleAddToCart(firstResult);
+            posSearchSetQuery('');
+            return;
+          }
         }
 
         toast({
           title: 'یافت نشد',
-          description: `محصولی با بارکد/کد "${q}" یافت نشد`,
+          description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
           variant: 'destructive',
-        })
-      }
+        });
 
-      if (e.key === 'Escape') {
-        posSearchSetQuery('')
-        searchInputRef.current?.blur()
+      } catch (error) {
+        console.error('Barcode scan error:', error);
+        toast({ title: 'خطا', description: 'خطا در پردازش اسکن', variant: 'destructive' });
+      } finally {
+        setTimeout(() => {
+          isProcessingScan.current = false;
+        }, 500);
       }
-    },
-    [
-      posSearchQuery,
-      posSearchResults,
-      posRecents,
-      posLookupByBarcode,
-      posLookupByCode,
-      posSearchSetQuery,
-      handleAddToCart,
-      filteredProducts,
-      toast,
-      isOnline,
-    ]
-  )
+    }
+
+    if (e.key === 'Escape') {
+      posSearchSetQuery('');
+      searchInputRef.current?.blur();
+    }
+  },
+  [
+    posSearchResults,
+    posRecents,
+    posLookupByBarcode,
+    posLookupByCode,
+    posSearchSetQuery,
+    handleAddToCart,
+    filteredProducts,
+    toast,
+    isOnline,
+    products,
+  ]
+);
 
   // ★ اسکنر بارکد کیبورد (با پشتیبانی آفلاین)
   useEffect(() => {

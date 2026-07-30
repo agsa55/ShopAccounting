@@ -492,9 +492,11 @@ function MobileInvoiceCard({
 
         {/* ردیف ۳: مبالغ */}
         <div className="grid grid-cols-3 gap-1.5 mb-2.5">
-          <div className="bg-gray-50 rounded p-1.5 text-center">
+                  <div className="bg-gray-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">مبلغ کل</p>
-            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">{formatNumber(inv.totalAmount)}</p>
+            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">
+              {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal" dir="rtl">ریال</span>
+            </p>
           </div>
           <div className="bg-blue-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">انبار</p>
@@ -589,7 +591,8 @@ export function PurchaseInvoicesPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   const [editingOfflineId, setEditingOfflineId] = useState<string | null>(null)
   const [loadingEditItems, setLoadingEditItems] = useState(false)
-
+ const productSearchInputRef = useRef<HTMLInputElement>(null)
+  const isProcessingProductScan = useRef(false)
   // ─── Delete State ─────────────────────────────────────────────────────────
   const [deletingInvoice, setDeletingInvoice] = useState<PurchaseInvoice | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -925,6 +928,77 @@ export function PurchaseInvoicesPage() {
     setProductSearch('')
     setProductSearchResults([])
   }, [cart])
+
+    // ★ تابع جدید: مدیریت اسکن بارکد در جستجوی فاکتور خرید
+  const handleProductSearchKeyDown = useCallback(
+    async (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+
+        if (isProcessingProductScan.current) return;
+
+        const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '');
+        if (!q) return;
+
+        isProcessingProductScan.current = true;
+
+        try {
+          const tid = tenantId || useAppStore.getState().currentTenant?.id;
+          const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+          const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+
+          // ۱. جستجو به عنوان بارکد
+          const resBarcode = await fetch(`/api/products/lookup?barcode=${encodeURIComponent(q)}&tenantId=${tid}`, { headers });
+          const dataBarcode = await resBarcode.json();
+
+          if (dataBarcode.success && dataBarcode.data) {
+            const product = Array.isArray(dataBarcode.data) ? dataBarcode.data[0] : dataBarcode.data;
+            if (product && product.id) {
+              handleAddProduct(product);
+              setProductSearch('');
+              setProductSearchResults([]);
+              if (productSearchInputRef.current) productSearchInputRef.current.value = '';
+              return;
+            }
+          }
+
+          // ۲. جستجو به عنوان کد محصول (اگر بارکد پیدا نشد)
+          const resCode = await fetch(`/api/products/lookup?code=${encodeURIComponent(q)}&tenantId=${tid}`, { headers });
+          const dataCode = await resCode.json();
+
+          if (dataCode.success && dataCode.data) {
+            const product = Array.isArray(dataCode.data) ? dataCode.data[0] : dataCode.data;
+            if (product && product.id) {
+              handleAddProduct(product);
+              setProductSearch('');
+              setProductSearchResults([]);
+              if (productSearchInputRef.current) productSearchInputRef.current.value = '';
+              return;
+            }
+          }
+
+          // ۳. اگر هیچکدام پیدا نشد
+          toast({
+            title: 'یافت نشد',
+            description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
+            variant: 'destructive',
+          });
+
+        } catch (error) {
+          console.error('Barcode scan error in purchase:', error);
+        } finally {
+          setTimeout(() => {
+            isProcessingProductScan.current = false;
+          }, 500);
+          // حفظ فوکوس روی اینپوت برای اسکن بعدی
+          if (productSearchInputRef.current) {
+            productSearchInputRef.current.focus();
+          }
+        }
+      }
+    },
+    [tenantId, handleAddProduct, toast]
+  );
 
   const handleUpdateItem = useCallback((index: number, field: keyof CartItem, value: any) => {
     const newCart = [...cart]
@@ -1694,7 +1768,9 @@ export function PurchaseInvoicesPage() {
                               </span>
                             </TableCell>
                             <TableCell className="text-xs hidden lg:table-cell">{inv.warehouse?.name || '—'}</TableCell>
-                            <TableCell className="text-xs font-bold" dir="ltr">{formatNumber(inv.totalAmount)}</TableCell>
+                                                      <TableCell className="text-xs font-bold" dir="rtl">
+                              {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal" dir="rtl">ریال</span>
+                            </TableCell>
                             <TableCell className="text-center hidden xl:table-cell">
                               <div className="flex flex-col items-center gap-0.5">
                                 <Badge variant="outline" className="text-[9px]">
@@ -1854,12 +1930,15 @@ export function PurchaseInvoicesPage() {
                 </div>
 
                 {/* جستجوی محصول */}
+                              {/* جستجوی محصول */}
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
-                    placeholder="جستجو محصول..."
+                    ref={productSearchInputRef}
+                    placeholder="جستجو محصول / اسکن بارکد [Enter]"
                     value={productSearch}
                     onChange={e => setProductSearch(e.target.value)}
+                    onKeyDown={handleProductSearchKeyDown}
                     className="pr-9 h-9 text-sm"
                     disabled={!isOnline && !productSearch}
                   />
@@ -1880,7 +1959,6 @@ export function PurchaseInvoicesPage() {
                     </div>
                   )}
                 </div>
-
                 {/* افزودن ردیف دستی (آفلاین) */}
                 {!isOnline && (
                   <Button
@@ -1959,23 +2037,23 @@ export function PurchaseInvoicesPage() {
                     <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 sm:p-4 space-y-2">
                       <div className="flex justify-between text-xs">
                         <span className="text-gray-700 font-medium">جمع کل:</span>
-                        <span className="font-bold text-gray-900" dir="ltr">{formatNumber(totals.subTotal)} ریال</span>
+                        <span className="font-bold text-gray-900" dir="rtl">{formatNumber(totals.subTotal)} ریال</span>
                       </div>
                       {totals.discount > 0 && (
                         <div className="flex justify-between text-xs">
                           <span className="text-gray-700">تخفیف:</span>
-                          <span className="text-red-600 font-bold" dir="ltr">-{formatNumber(totals.discount)} ریال</span>
+                          <span className="text-red-600 font-bold" dir="rtl">-{formatNumber(totals.discount)} ریال</span>
                         </div>
                       )}
                       {totals.tax > 0 && (
                         <div className="flex justify-between text-xs">
                           <span className="text-gray-700">مالیات:</span>
-                          <span className="text-amber-600 font-bold" dir="ltr">+{formatNumber(totals.tax)} ریال</span>
+                          <span className="text-amber-600 font-bold" dir="rtl">+{formatNumber(totals.tax)} ریال</span>
                         </div>
                       )}
                       <div className="flex justify-between text-sm pt-2 border-t border-emerald-200 font-bold">
                         <span className="text-emerald-900">مبلغ نهایی:</span>
-                        <span className="text-emerald-700" dir="ltr">{formatNumber(totals.total)} ریال</span>
+                        <span className="text-emerald-700" dir="rtl">{formatNumber(totals.total)} ریال</span>
                       </div>
                     </div>
                   </>
@@ -2056,7 +2134,7 @@ export function PurchaseInvoicesPage() {
             {deletingInvoice && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs space-y-1">
                 <div className="flex justify-between"><span className="text-slate-500">شماره:</span><span className="font-mono">{deletingInvoice.number}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">مبلغ:</span><span className="font-bold">{formatNumber(deletingInvoice.totalAmount)} ریال</span></div>
+                <div className="flex justify-between"><span className="text-slate-500" dir="rtl">مبلغ:</span><span className="font-bold">{formatNumber(deletingInvoice.totalAmount)} ریال</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">تامین‌کننده:</span><span>{deletingInvoice.supplier?.name || '—'}</span></div>
               </div>
             )}
@@ -2150,7 +2228,7 @@ export function PurchaseInvoicesPage() {
                             </div>
                           </div>
                           {itemReturnAmount > 0 && (
-                            <p className="text-xs text-amber-700 font-bold text-left">مبلغ: {itemReturnAmount.toLocaleString('fa-IR')} ریال</p>
+                            <p className="text-xs text-amber-700 font-bold text-left" dir="rtl">مبلغ: {itemReturnAmount.toLocaleString('fa-IR')} ریال</p>
                           )}
                         </CardContent>
                       </Card>
@@ -2389,7 +2467,7 @@ export function PurchaseInvoicesPage() {
                             </div>
                           </div>
 
-                          <div className="text-[10px] text-gray-600 text-left bg-gray-50 rounded px-2 py-0.5">
+                          <div className="text-[10px] text-gray-600 text-left bg-gray-50 rounded px-2 py-0.5" dir="rtl">
                             جمع: <span className="font-bold">{((item.quantity * item.unitPrice) - item.discountAmount + item.taxAmount).toLocaleString('fa-IR')}</span> ریال
                           </div>
                         </div>
@@ -2412,7 +2490,7 @@ export function PurchaseInvoicesPage() {
                 {/* جمع کل */}
                 <div className="bg-blue-600 text-white rounded-lg p-3 flex justify-between items-center">
                   <span className="text-xs sm:text-sm">مبلغ قابل پرداخت:</span>
-                  <span className="font-bold text-sm sm:text-base">
+                  <span className="font-bold text-sm sm:text-base" dir="rtl">
                     {serviceItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice - i.discountAmount + i.taxAmount), 0).toLocaleString('fa-IR')} ریال
                   </span>
                 </div>

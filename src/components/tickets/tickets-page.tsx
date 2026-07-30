@@ -351,6 +351,7 @@ export function TicketsPage() {
   }, [])
 
   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
+   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
   const handleSubmitTicket = async () => {
     if (form.subject.trim().length < 5) {
       toast({ title: 'توجه', description: 'موضوع حداقل باید ۵ کاراکتر باشد', variant: 'destructive' })
@@ -365,8 +366,6 @@ export function TicketsPage() {
     const trulyOnline = isOnline && navigator.onLine
 
     // ★ v6.4: ایجاد تیکت به صورت محلی در حالت آفلاین
-       // ★ v6.4: ایجاد تیکت به صورت محلی در حالت آفلاین
-       // ★ v6.4: ایجاد تیکت به صورت محلی در حالت آفلاین
     if (!trulyOnline) {
       const newTicket: Ticket = {
         id: `offline_${Date.now()}`,
@@ -393,10 +392,8 @@ export function TicketsPage() {
         _isOffline: true
       }
 
-      // ★ ذخیره در state
       setTickets(prev => [newTicket, ...prev])
       
-      // ★ ذخیره در IndexedDB برای پایداری
       try {
         const cachedTickets = await getCachedTickets()
         await cacheTickets([newTicket, ...cachedTickets])
@@ -407,6 +404,11 @@ export function TicketsPage() {
       
       setForm({ subject: '', description: '', category: 'general', priority: 'normal' })
       setCreateDialogOpen(false)
+      
+      // ★ اصلاح: ریست کردن فیلترها برای اطمینان از نمایش تیکت جدید
+      setStatusFilter('all')
+      setCategoryFilter('all')
+      setPriorityFilter('all')
       setPage(1)
 
       toast({
@@ -416,7 +418,8 @@ export function TicketsPage() {
       setSubmitting(false)
       return
     }
-    // ارسال آنلاین
+
+    // ★ ارسال آنلاین
     try {
       const res = await fetch('/api/tickets', {
         method: 'POST',
@@ -434,13 +437,20 @@ export function TicketsPage() {
         const ticketNumber = data.data?.ticketNumber || ''
         toast({
           title: 'تیکت ارسال شد ✓',
-          description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.\nوضعیت: ارسال شده — در انتظار بررسی پشتیبانی.`,
+          description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.`,
           duration: 6000,
         })
         setForm({ subject: '', description: '', category: 'general', priority: 'normal' })
         setCreateDialogOpen(false)
+        
+        // ★ اصلاح کلیدی: ریست کردن فیلترها تا تیکت جدید (که وضعیتش Open است) مخفی نشود
+        setStatusFilter('all')
+        setCategoryFilter('all')
+        setPriorityFilter('all')
         setPage(1)
-        loadTickets(true)
+        
+        // نکته: به دلیل تغییر state فیلترها، useEffect به صورت خودکار loadTickets را 
+        // با فیلترهای جدید اجرا می‌کند و لیست به‌روز را از سرور می‌گیرد.
       } else {
         toast({
           title: 'خطا',

@@ -121,8 +121,8 @@ interface InstallmentScheduleItem {
 // ═══════════════════════════════════════════════════════════════
 
 function formatCurrency(num: number | undefined | null): string {
-  if (num === undefined || num === null || isNaN(num)) return '۰ تومان'
-  return `${num.toLocaleString('fa-IR')} تومان`
+  if (num === undefined || num === null || isNaN(num)) return '۰ ریال'
+  return `${num.toLocaleString('fa-IR')} ریال`
 }
 
 function formatNumber(num: number | undefined | null): string {
@@ -531,18 +531,24 @@ function MobileInvoiceCard({
           {getPaymentTypeBadge(inv.paymentType)}
         </div>
 
-        <div className="grid grid-cols-3 gap-1.5 mb-2.5">
+               <div className="grid grid-cols-3 gap-1.5 mb-2.5">
           <div className="bg-gray-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">کل</p>
-            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">{formatNumber(inv.totalAmount)}</p>
+            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">
+              {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
           <div className="bg-emerald-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">پرداخت</p>
-            <p className="text-[10px] font-bold text-emerald-600 leading-tight mt-0.5">{formatNumber(inv.paidAmount)}</p>
+            <p className="text-[10px] font-bold text-emerald-600 leading-tight mt-0.5">
+              {formatNumber(inv.paidAmount)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
           <div className={`rounded p-1.5 text-center ${remaining > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
             <p className="text-[9px] text-gray-400 leading-tight">باقی</p>
-            <p className={`text-[10px] font-bold leading-tight mt-0.5 ${remaining > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{formatNumber(remaining)}</p>
+            <p className={`text-[10px] font-bold leading-tight mt-0.5 ${remaining > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+              {formatNumber(remaining)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
         </div>
 
@@ -2108,10 +2114,14 @@ export default function InvoicesPage() {
                                 <TableCell className="text-xs max-w-[120px] lg:max-w-none">
                                   <span className="truncate block">{inv.customerName || <span className="text-gray-400">فروش عمومی</span>}</span>
                                 </TableCell>
-                                <TableCell className="text-xs text-right font-mono">{formatCurrency(inv.totalAmount)}</TableCell>
-                                <TableCell className="text-xs text-right font-mono hidden lg:table-cell">
-                                  <span className={isPaid ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(inv.paidAmount)}</span>
-                                </TableCell>
+                               <TableCell className="text-xs text-right font-mono">
+  {formatNumber(inv.totalAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
+</TableCell>
+<TableCell className="text-xs text-right font-mono hidden lg:table-cell">
+  <span className={isPaid ? 'text-emerald-600' : 'text-amber-600'}>
+    {formatNumber(inv.paidAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
+  </span>
+</TableCell>
                                 <TableCell className="hidden xl:table-cell">{getPaymentTypeBadge(inv.paymentType)}</TableCell>
                                 <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}</TableCell>
                                 <TableCell className="text-xs hidden lg:table-cell">{formatDateShort(inv.createdAt)}</TableCell>

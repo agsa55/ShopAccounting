@@ -16,17 +16,20 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' },
       include: {
         Tenant: {
-          select: {
-            id: true,
-            companyName: true,
-            subDomain: true,
-            planName: true,
-          }
+          select: { id: true, companyName: true, subDomain: true, planName: true }
         },
         CreatedBy: {
+          select: { id: true, username: true }
+        },
+        // ★ اصلاح: دریافت تمام پیام‌های تیکت به ترتیب تاریخ (از قدیمی به جدید)
+        Messages: {
+          orderBy: { createdAt: 'asc' },
           select: {
             id: true,
-            username: true,
+            message: true,
+            senderType: true,
+            senderName: true,
+            createdAt: true,
           }
         },
         _count: {
@@ -47,6 +50,14 @@ export async function GET(request: NextRequest) {
       tenantPlan: t.Tenant?.planName || '',
       createdByName: t.CreatedBy?.username || 'ناشناس',
       messagesCount: t._count.Messages,
+      // ★ ارسال تمام پیام‌ها به فرانت‌اند
+      messages: t.Messages.map(m => ({
+        id: m.id,
+        message: m.message,
+        senderType: m.senderType,
+        senderName: m.senderName,
+        createdAt: m.createdAt,
+      })),
       createdAt: t.createdAt,
       firstResponseAt: t.firstResponseAt,
       resolvedAt: t.resolvedAt,
