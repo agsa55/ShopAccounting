@@ -26,6 +26,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useStore } from '@/lib/store'
+
 import {
   Dialog,
   DialogContent,
@@ -91,6 +93,7 @@ import {
   MessageSquare,
   Send,
   AlertCircle,
+  FileArchive,
 } from 'lucide-react'
 
 // ★★★ v3.26: Datepicker شمسی اشتراک
@@ -1606,16 +1609,16 @@ function InvoiceTemplateTab() {
 
 interface BackupInfo {
   id: string
+  fileName: string
+  fileSize: number
+  recordCount: number | null
   createdAt: string
-  size: string
-  recordCounts: Record<string, number>
 }
 
 function BackupTab() {
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const [lastBackupResult, setLastBackupResult] = useState<any>(null)
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null)
@@ -1624,13 +1627,16 @@ function BackupTab() {
   const [deleteBackupId, setDeleteBackupId] = useState<string | null>(null)
 
   const fetchBackups = useCallback(async () => {
-    const tid = getTenantIdFromStore()
-    if (!tid) { setLoading(false); return }
+    setLoading(true)
     try {
-      const res = await fetch(`/api/backup?tenantId=${tid}`)
+      const token = localStorage.getItem('token')
+      // ★★★ تغییر: حذف tenantId از URL، Middleware خودش آن را از توکن می‌خواند
+      const res = await fetch('/api/backup', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
       const data = await res.json()
-      if (data.success && data.data?.backups) {
-        setBackups(data.data.backups)
+      if (data.success && data.data) {
+        setBackups(data.data)
       } else {
         setBackups([])
       }
@@ -1646,15 +1652,18 @@ function BackupTab() {
 
   // ایجاد پشتیبان جدید
   const handleCreateBackup = async () => {
-    const tid = getTenantIdFromStore()
-    if (!tid) return
     setCreating(true)
     setLastBackupResult(null)
     try {
+      const token = localStorage.getItem('token')
       const res = await fetch('/api/backup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId: tid }),
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        // ★★★ تغییر: دیگر نیازی به ارسال tenantId در body نیست
+        body: JSON.stringify({}), 
       })
       const data = await res.json()
       if (data.success) {
@@ -1670,11 +1679,13 @@ function BackupTab() {
   }
 
   // دانلود پشتیبان
-  const handleDownloadBackup = async (backupId: string) => {
-    const tid = getTenantIdFromStore()
-    if (!tid) return
+  const handleDownloadBackup = async (backupId: string, fileName: string) => {
     try {
-      const res = await fetch(`/api/backup?action=download&id=${backupId}&tenantId=${tid}`)
+      const token = localStorage.getItem('token')
+      // ★★★ تغییر: استفاده از API اختصاصی دانلود
+      const res = await fetch(`/api/backup/download?id=${backupId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
       if (!res.ok) {
         alert('خطا در دانلود پشتیبان')
         return
@@ -1683,7 +1694,7 @@ function BackupTab() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `backup-${tid}-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = fileName // ★★★ استفاده از نام فایل واقعی سرور
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
@@ -1693,49 +1704,28 @@ function BackupTab() {
     }
   }
 
-  // دانلود خروجی کامل (برای انتقال به سیستم دیگر)
-  const handleFullExport = async () => {
-    const tid = getTenantIdFromStore()
-    if (!tid) return
-    setExporting(true)
-    try {
-      const res = await fetch(`/api/export?tenantId=${tid}`)
-      if (!res.ok) {
-        alert('خطا در خروجی‌گیری')
-        return
-      }
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `shopaccounting-export-${tid}-${new Date().toISOString().slice(0, 10)}.json`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-    } catch {
-      alert('خطا در خروجی‌گیری')
-    }
-    setExporting(false)
-  }
-
   // بازیابی از پشتیبان
   const handleRestore = async () => {
     if (!selectedBackupId) return
-    const tid = getTenantIdFromStore()
-    if (!tid) return
     setRestoring(true)
     try {
-      const res = await fetch('/api/backup', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ backupId: selectedBackupId, confirmDelete: true, tenantId: tid }),
+      const token = localStorage.getItem('token')
+      // ★★★ تغییر: متد POST به جای PUT و آدرس جدید /api/backup/restore
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ backupId: selectedBackupId }),
       })
       const data = await res.json()
       if (data.success) {
-        alert(`بازیابی موفق! ${data.data.restoredRecords} رکورد بازیابی شد.`)
+        alert(`بازیابی موفق! ${data.data.restoredCount} رکورد بازیابی شد. صفحه رفرش می‌شود...`)
         setRestoreDialogOpen(false)
         setSelectedBackupId(null)
+        // رفرش صفحه برای اعمال تغییرات
+        window.location.reload() 
       } else {
         alert(data.error || 'خطا در بازیابی')
       }
@@ -1748,10 +1738,12 @@ function BackupTab() {
   // حذف پشتیبان
   const handleDeleteBackup = async () => {
     if (!deleteBackupId) return
-    const tid = getTenantIdFromStore()
-    if (!tid) return
     try {
-      const res = await fetch(`/api/backup?id=${deleteBackupId}&tenantId=${tid}`, { method: 'DELETE' })
+      const token = localStorage.getItem('token')
+      const res = await fetch(`/api/backup?id=${deleteBackupId}`, { 
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
       const data = await res.json()
       if (data.success) {
         fetchBackups()
@@ -1765,99 +1757,95 @@ function BackupTab() {
     setDeleteBackupId(null)
   }
 
-  return (
-    <div className="space-y-2">
-      {/* ★★★ v3.13: خروجی‌گیری کامل + ایجاد پشتیبان در یک ردیف برای فشرده‌سازی */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {/* خروجی‌گیری کامل */}
-        <Card className="border-blue-200 bg-blue-50/30">
-          <CardContent className="p-2.5 sm:p-3 space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Download className="w-4 h-4 text-blue-600" />
-              <p className="text-xs font-bold text-blue-800">خروجی‌گیری کامل داده‌ها</p>
-            </div>
-            <p className="text-[10px] text-blue-700 leading-relaxed">
-              تمام داده‌های فروشگاه (محصولات، مشتریان، فاکتورها، اقساط، حسابداری) به فایل JSON
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-blue-500 text-blue-600 hover:bg-blue-50 w-full h-7 text-xs"
-              onClick={handleFullExport}
-              disabled={exporting}
-            >
-              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5 ml-1" />}
-              دانلود JSON
-            </Button>
-          </CardContent>
-        </Card>
+  // تابع کمکی برای فرمت حجم فایل
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+  }
 
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleString('fa-IR', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit'
+    })
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* کارت‌های عملیات اصلی */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* ایجاد پشتیبان */}
         <Card className="border-emerald-200 bg-emerald-50/30">
-          <CardContent className="p-2.5 sm:p-3 space-y-2">
-            <div className="flex items-center gap-1.5">
+          <CardContent className="p-3 sm:p-4 space-y-2">
+            <div className="flex items-center gap-2">
               <Database className="w-4 h-4 text-emerald-600" />
-              <p className="text-xs font-bold text-emerald-800">ایجاد پشتیبان جدید</p>
+              <p className="text-sm font-bold text-emerald-800">ایجاد پشتیبان جدید</p>
             </div>
-            <p className="text-[10px] text-emerald-700 leading-relaxed">
-              یک پشتیبان از داده‌های فعلی در سرور ایجاد کنید
+            <p className="text-[11px] text-emerald-700 leading-relaxed">
+              یک نسخه فشرده و امن از تمام داده‌های فروشگاه (فاکتورها، حسابداری، انبار و...) در سرور ذخیره می‌شود.
             </p>
             <Button
               size="sm"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white w-full h-7 text-xs"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white w-full h-8 text-xs"
               onClick={handleCreateBackup}
               disabled={creating}
             >
-              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5 ml-1" />}
-              ایجاد پشتیبان
+              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin ml-1" /> : <Database className="w-3.5 h-3.5 ml-1" />}
+              {creating ? 'در حال پردازش...' : 'ایجاد پشتیبان'}
             </Button>
           </CardContent>
         </Card>
+
+        {/* نتیجه آخرین پشتیبان‌گیری */}
+        {lastBackupResult && (
+          <Alert className="border-emerald-200 bg-emerald-50 py-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <AlertDescription className="text-emerald-800 text-xs">
+              پشتیبان با موفقیت ایجاد شد. 
+              <span className="font-bold mr-1">حجم: {formatSize(lastBackupResult.fileSize)}</span>
+              <span className="font-bold mr-1">| رکورد: {lastBackupResult.recordCount?.toLocaleString('fa-IR')}</span>
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
 
-      {/* نتیجه آخرین پشتیبان‌گیری */}
-      {lastBackupResult && (
-        <Alert className="border-emerald-200 bg-emerald-50 py-1.5">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          <AlertDescription className="text-emerald-800 text-[11px]">
-            پشتیبان ایجاد شد — حجم: {lastBackupResult.size} | رکورد: {lastBackupResult.totalRecords}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* ★★★ v3.13: لیست پشتیبان‌ها — فشرده، تک‌خطی */}
+      {/* لیست پشتیبان‌ها */}
       <Card className="border-gray-200">
-        <CardHeader className="p-2.5 sm:p-3 pb-1">
-          <CardTitle className="text-xs flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-emerald-600" />
-            پشتیبان‌های قبلی ({backups.length})
+        <CardHeader className="p-3 sm:p-4 pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <FileArchive className="w-4 h-4 text-emerald-600" />
+            پشتیبان‌های ذخیره شده ({backups.length})
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-2 pt-1">
+        <CardContent className="p-3 pt-0">
           {loading ? (
-            <div className="flex items-center gap-2 py-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-              <span className="text-[11px] text-gray-500">در حال بارگذاری...</span>
+            <div className="flex items-center gap-2 py-4 justify-center">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+              <span className="text-xs text-gray-500">در حال بارگذاری...</span>
             </div>
           ) : backups.length === 0 ? (
-            <p className="text-[11px] text-gray-400 py-3 text-center">هنوز پشتیبانی ایجاد نشده است</p>
+            <p className="text-xs text-gray-400 py-6 text-center">هنوز هیچ پشتیبانی ایجاد نشده است.</p>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-2">
               {backups.map((backup) => (
-                <div key={backup.id} className="flex items-center justify-between gap-2 px-2 py-1.5 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors">
+                <div key={backup.id} className="flex items-center justify-between gap-3 px-3 py-2.5 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100/80 transition-colors">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-gray-700">{formatDate(backup.createdAt)}</p>
-                    <p className="text-[10px] text-gray-400">حجم: {backup.size}</p>
+                    <p className="text-xs font-medium text-gray-800 truncate">{backup.fileName}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">
+                      {formatDate(backup.createdAt)} • {formatSize(backup.fileSize)} 
+                      {backup.recordCount && ` • ${backup.recordCount.toLocaleString('fa-IR')} رکورد`}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-gray-500 hover:text-emerald-600" onClick={() => handleDownloadBackup(backup.id)} title="دانلود">
-                      <Download className="w-3 h-3" />
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-gray-500 hover:text-emerald-600 hover:bg-emerald-50" onClick={() => handleDownloadBackup(backup.id, backup.fileName)} title="دانلود فایل">
+                      <Download className="w-3.5 h-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-amber-500 hover:text-amber-700" onClick={() => { setSelectedBackupId(backup.id); setRestoreDialogOpen(true) }} title="بازیابی">
-                      <RefreshCw className="w-3 h-3" />
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-amber-600 hover:text-amber-700 hover:bg-amber-50" onClick={() => { setSelectedBackupId(backup.id); setRestoreDialogOpen(true) }} title="بازیابی (جایگزینی داده‌ها)">
+                      <RefreshCw className="w-3.5 h-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => { setDeleteBackupId(backup.id); setDeleteDialogOpen(true) }} title="حذف">
-                      <Trash2 className="w-3 h-3" />
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { setDeleteBackupId(backup.id); setDeleteDialogOpen(true) }} title="حذف دائمی">
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -1867,12 +1855,11 @@ function BackupTab() {
         </CardContent>
       </Card>
 
-      {/* ★★★ v3.13: بازیابی از فایل — فشرده، تک‌خطی */}
-      <Alert className="border-amber-200 bg-amber-50 py-1.5">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-        <AlertDescription className="text-amber-800 text-[11px]">
-          بازیابی از فایل پشتیبان، داده‌های فعلی را جایگزین می‌کند (غیرقابل بازگشت).
-          برای آپلود فایل، اینجا کلیک کنید.
+      {/* هشدار بازیابی */}
+      <Alert className="border-amber-200 bg-amber-50/50 py-2">
+        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+        <AlertDescription className="text-amber-800 text-xs leading-relaxed">
+          <strong>توجه:</strong> عملیات «بازیابی»، تمام داده‌های فعلی فروشگاه را پاک کرده و داده‌های فایل پشتیبان را جایگزین می‌کند. این عمل <strong>غیرقابل بازگشت</strong> است.
         </AlertDescription>
       </Alert>
 
@@ -1880,10 +1867,14 @@ function BackupTab() {
       <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>تأیید بازیابی از پشتیبان</AlertDialogTitle>
-            <AlertDialogDescription>
-              با تأیید این عمل، تمام داده‌های فعلی فروشگاه حذف شده و داده‌های پشتیبان جایگزین می‌شود.
-              آیا مطمئن هستید؟ این عمل قابل بازگشت نیست.
+            <AlertDialogTitle className="text-red-600 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" />
+              تأیید بازیابی از پشتیبان
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">
+              با تأیید این عمل، <strong>تمام داده‌های فعلی</strong> فروشگاه حذف شده و داده‌های این پشتیبان جایگزین می‌شود. 
+              <br/><br/>
+              آیا کاملاً مطمئن هستید؟ این عمل قابل بازگشت نیست.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1891,9 +1882,10 @@ function BackupTab() {
             <AlertDialogAction
               onClick={handleRestore}
               disabled={restoring}
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : 'بازیابی'}
+              {restoring ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+              بله، بازیابی کن
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1903,9 +1895,9 @@ function BackupTab() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>حذف پشتیبان</AlertDialogTitle>
+            <AlertDialogTitle>حذف فایل پشتیبان</AlertDialogTitle>
             <AlertDialogDescription>
-              آیا از حذف این پشتیبان مطمئن هستید؟ این عمل قابل بازگشت نیست.
+              آیا از حذف دائمی این فایل پشتیبان مطمئن هستید؟ این عمل فقط فایل بکاپ را پاک می‌کند و تأثیری روی داده‌های فعال فروشگاه ندارد.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1914,7 +1906,7 @@ function BackupTab() {
               onClick={handleDeleteBackup}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              حذف
+              حذف دائمی
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1936,429 +1928,249 @@ function BackupTab() {
 //   - نمایش قیمت واقعی هر پلن + مشخصات
 //   - دکمه ارتقا (با اعمال قوانین ارتقا)
 function SubscriptionTab() {
-  const { currentTenant } = useAppStore()
-  const planNameFromStore = useAppStore((s) => s.planName)
-  const [userCount, setUserCount] = useState(0)
-  const [productCount, setProductCount] = useState(0)
-  const [invoiceCount, setInvoiceCount] = useState(0)
-  // ★★★ v9.0: default 'annual' (نه monthly)
-  const [billingCycle, setBillingCycle] = useState<'annual' | 'lifetime'>('annual')
+  const rawPlanName = useStore((s) => s.planName)
+  const [status, setStatus] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [renewing, setRenewing] = useState(false)
   const [upgrading, setUpgrading] = useState<string | null>(null)
-  // ★★★ v3.19: state برای planName واقعی از API
-  const [realPlanName, setRealPlanName] = useState<string>('')
-  // ★★★ v9.0: state برای billingCycle واقعی از API
-  const [realBillingCycle, setRealBillingCycle] = useState<string>('')
-
-  // ★★★ v9.0: تشخیص پلن فعلی از چند منبع
-  const currentPlanName: PlanName = (() => {
-    // اولویت ۱: از API (realPlanName)
-    const name = (realPlanName || currentTenant?.planName || planNameFromStore || 'simple').toLowerCase().trim()
-    if (name === 'professional' || name === 'standard' || name.includes('پیشرفته')) return 'professional'
-    if (name === 'enterprise' || name === 'organization' || name.includes('سازمانی')) return 'enterprise'
-    // ★ v9.0: "حرفه‌ای" در نسخه جدید به enterprise اشاره دارد
-    if (name.includes('حرفه')) return 'enterprise'
-    // اگه tier از طریق planTierName اومده باشه
-    if (name === 'professional_tier' || name === 'professional-annual' || name === 'professional-lifetime') return 'professional'
-    if (name === 'enterprise_tier' || name === 'enterprise-annual' || name === 'enterprise-lifetime') return 'enterprise'
-    if (name.includes('پایه')) return 'simple'
-    // ★ backward compatibility: نام‌های قدیمی
-    if (name.includes('ساده')) return 'simple'
-    return 'simple'
-  })()
-
-  // ★★★ v9.0: تشخیص دوره فعلی tenant از API
-  const currentBillingCycle: BillingCycle = (() => {
-    const bc = (realBillingCycle || currentTenant?.billingCycle || billingCycle || 'annual').toLowerCase().trim()
-    if (isLifetimeCycle(bc)) return 'lifetime'
-    return 'annual'
-  })()
 
   useEffect(() => {
-    const tid = getTenantIdFromStore()
-    if (!tid) return
-
-    // ★★★ v3.19: لود planName واقعی از API trial-check
-    fetch('/api/tenants/trial-check')
-      .then((r) => r.json())
-      .then((data) => {
+    async function fetchStatus() {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) return
+        const res = await fetch('/api/subscription/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json()
         if (data.success && data.data) {
-          if (data.data.planName) setRealPlanName(data.data.planName)
-          if (data.data.tierName) setRealPlanName(data.data.tierName)
-          if (data.data.billingCycle) setRealBillingCycle(data.data.billingCycle)
+          setStatus(data.data)
         }
-      })
-      .catch(() => {})
+      } catch (err) {
+        console.error('Failed to fetch subscription status', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchStatus()
+  }, [])
 
-    fetch(`/api/employees?tenantId=${tid}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          let list: any[] = []
-          if (Array.isArray(data.data)) list = data.data
-          else if (data.data && Array.isArray(data.data.users)) list = data.data.users
-          else if (data.data && Array.isArray(data.data.employees)) list = data.data.employees
-          setUserCount(list.length)
-        }
+  const handleRenewAnnual = async () => {
+    setRenewing(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/subscription/renew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ billingCycle: 'annual' }),
       })
-      .catch(() => {})
+      const data = await res.json()
+      if (data.success) {
+        alert('✅ اشتراک شما با موفقیت برای یک سال دیگر تمدید شد!')
+        window.location.reload()
+      } else {
+        alert('❌ خطا: ' + (data.error || 'نامشخص'))
+      }
+    } catch (err) {
+      alert('❌ خطا در ارتباط با سرور')
+    } finally {
+      setRenewing(false)
+    }
+  }
 
-    fetch(`/api/products?tenantId=${tid}&limit=9999`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          const prods = Array.isArray(data.data) ? data.data : (data.data?.products || [])
-          setProductCount(prods.length)
-        }
+  const handleUpgrade = async (tierName: string, billingCycle: 'annual' | 'lifetime') => {
+    setUpgrading(`${tierName}-${billingCycle}`)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/subscription/upgrade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tierName, billingCycle }),
       })
-      .catch(() => {})
-  }, [currentTenant])
+      const data = await res.json()
+      if (data.success) {
+        const cycleLabel = billingCycle === 'lifetime' ? 'مادام‌العمر' : 'سالانه'
+        alert(`✅ پلن شما با موفقیت به ${cycleLabel} ارتقا یافت!`)
+        window.location.reload()
+      } else {
+        alert('❌ خطا: ' + (data.error || 'نامشخص'))
+      }
+    } catch (err) {
+      alert('❌ خطا در ارتباط با سرور')
+    } finally {
+      setUpgrading(null)
+    }
+  }
 
-  // ★★★ v9.0: اطلاعات واقعی پلن‌ها — فقط دو دوره: annual + lifetime
-  const PLAN_DETAILS: Record<PlanName, {
-    name: string
-    nameEn: string
-    icon: any
-    color: string
-    annualPrice: number
-    lifetimePrice: number
-    maxUsers: number
-    maxProducts: number
-    maxInvoices: number
-    description: string
-    features: string[]
-  }> = {
+  if (loading) {
+    return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div></div>
+  }
+
+  if (!status) {
+    return (
+      <div className="text-center py-10 text-gray-500">
+        <Lock className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+        <p>لطفاً یک بار از حساب خارج و دوباره وارد شوید (خطای احراز هویت)</p>
+      </div>
+    )
+  }
+
+  // ★★★ منطق عیب‌یابی و تشخیص قطعی پلن فعلی (رفع باگ basic/simple)
+  const normalizedCurrent = (String(rawPlanName).toLowerCase() === 'basic' || String(rawPlanName).toLowerCase() === 'simple') ? 'simple' : String(rawPlanName)
+
+  const PLANS_INFO = {
     simple: {
-      name: 'پایه',
-      nameEn: 'Basic',
-      icon: Store,
+      label: 'پایه',
+      icon: Zap,
       color: 'emerald',
       annualPrice: 1_590_000,
       lifetimePrice: 16_000_000,
-      maxUsers: 2,
-      maxProducts: 200,
-      maxInvoices: 500,
-      description: 'حسابداری پایه، فقط فروش نقدی، مناسب خرده‌فروش‌های کوچک',
-      features: [
-        'فروش نقدی',
-        'گزارش ساده درآمد/هزینه',
-        'مشاهده اسناد حسابداری',
-        'چاپ فاکتور',
-        'پشتیبان‌گیری',
-      ],
+      features: ['تا ۲ کاربر', '۲۰۰ محصول', '۵۰۰ فاکتور', 'داشبورد مالی'],
     },
     professional: {
-      name: 'پیشرفته',
-      nameEn: 'Advanced',
+      label: 'پیشرفته',
       icon: Crown,
       color: 'blue',
       annualPrice: 2_760_000,
       lifetimePrice: 28_000_000,
-      maxUsers: 5,
-      maxProducts: 2000,
-      maxInvoices: 0, // نامحدود
-      description: 'حسابداری دوطرفه کامل، فروش نسیه/قسطی، تراز آزمایشی، مدیریت طلب و بدهی',
-      features: [
-        'تمام قابلیت‌های پلن پایه',
-        'فروش کارتخوان، نسیه و قسطی',
-        'چارت حساب‌ها + سند دستی',
-        'تراز آزمایشی + دفتر کل',
-        'مدیریت اقساط',
-        'ویرایش مالیات + حذف فاکتور',
-      ],
+      features: ['تا ۵ کاربر', '۲۰۰۰ محصول', 'فاکتور نامحدود', 'حسابداری دوطرفه'],
+      featured: true,
     },
     enterprise: {
-      name: 'حرفه‌ای',
-      nameEn: 'Professional',
+      label: 'حرفه‌ای',
       icon: Building2,
       color: 'purple',
       annualPrice: 3_550_000,
       lifetimePrice: 36_000_000,
-      maxUsers: 0, // نامحدود
-      maxProducts: 0, // نامحدود
-      maxInvoices: 0, // نامحدود
-      description: 'تمام قابلیت‌ها + حسابداری شعب، گزارش تلفیقی، اتصال مودیان، بستن سال مالی',
-      features: [
-        'تمام قابلیت‌های پلن پیشرفته',
-        'حسابداری چند شعبه',
-        'گزارش‌های تلفیقی',
-        'بستن سال مالی',
-        'اتصال سامانه مودیان',
-        'مدیریت چند صندوق',
-        'کاربر و محصول نامحدود',
-      ],
+      features: ['کاربر نامحدود', 'محصول نامحدود', 'حسابداری شعب', 'اتصال مودیان'],
     },
   }
 
-  const formatPrice = (n: number) => n.toLocaleString('fa-IR')
-
-  // ★★★ v9.0: handleUpgrade با اعمال قوانین ارتقا
-  // - targetPlan: نام کد پلن هدف ('simple' | 'professional' | 'enterprise')
-  // - targetCycle: دوره هدف ('annual' | 'lifetime')
-  const handleUpgrade = async (
-    targetPlan: PlanName,
-    targetCycle: BillingCycle,
-  ) => {
-    // ★ بررسی مجاز بودن ارتقا با تابع مرکزی canUpgradePlan
-    if (!canUpgradePlan(currentPlanName, currentBillingCycle, targetPlan, targetCycle)) {
-      alert('این ارتقا مجاز نیست. شما نمی‌توانید به پلن یا دوره پایین‌تر برگردید.')
-      return
-    }
-    if (targetPlan === currentPlanName && targetCycle === currentBillingCycle) return
-
-    const upgradeKey = `${targetPlan}_${targetCycle}`
-    setUpgrading(upgradeKey)
-    try {
-      const tid = getTenantIdFromStore()
-      if (!tid) {
-        alert('خطا: شناسه فروشگاه در دسترس نیست')
-        setUpgrading(null)
-        return
-      }
-      // ★★★ v5.1 (Phase 4): استفاده از /api/subscription/checkout
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch('/api/subscription/checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          tierName: targetPlan,
-          billingCycle: targetCycle,
-          action: 'upgrade',
-        }),
-      })
-      const data = await res.json()
-      if (data.success && data.data?.paymentUrl) {
-        // ★ هدایت به درگاه زرین‌پال
-        if (typeof window !== 'undefined') {
-          window.location.href = data.data.paymentUrl
-        }
-      } else {
-        alert(data.error || 'خطا در ایجاد درخواست پرداخت')
-      }
-    } catch (err) {
-      alert('خطا در ارتباط با سرور')
-    }
-    setUpgrading(null)
-  }
-
-  const currentPlan = PLAN_DETAILS[currentPlanName]
-  const currentPrice = currentBillingCycle === 'lifetime'
-    ? currentPlan.lifetimePrice
-    : currentPlan.annualPrice
-
-  // ★ محاسبه درصد مصرف
-  const userUsagePct = currentPlan.maxUsers > 0 ? Math.min(100, (userCount / currentPlan.maxUsers) * 100) : 0
-  const productUsagePct = currentPlan.maxProducts > 0 ? Math.min(100, (productCount / currentPlan.maxProducts) * 100) : 0
-  const invoiceUsagePct = currentPlan.maxInvoices > 0 ? Math.min(100, (invoiceCount / currentPlan.maxInvoices) * 100) : 0
-
-  // ★★★ v9.0: آیا tenant فعلاً روی پلن مادام‌العمر است؟
-  const isCurrentLifetime = currentBillingCycle === 'lifetime'
-
   return (
-    <div className="space-y-2">
-      {/* ★★★ v3.13: کارت پلن فعلی + دوره اشتراک در یک Card فشرده */}
-      <Card className={`border-${currentPlan.color}-200 bg-${currentPlan.color}-50/30`}>
-        <CardContent className="p-2.5 sm:p-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className={`w-9 h-9 rounded-lg bg-${currentPlan.color}-100 flex items-center justify-center shrink-0`}>
-                <currentPlan.icon className={`w-4 h-4 text-${currentPlan.color}-600`} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-bold text-gray-900">پلن {currentPlan.name}</p>
-                  <Badge className={`bg-${currentPlan.color}-100 text-${currentPlan.color}-700 text-[9px]`}>فعال</Badge>
-                  {isCurrentLifetime && (
-                    <Badge className="bg-amber-100 text-amber-700 text-[9px]">مادام‌العمر</Badge>
-                  )}
-                </div>
-                <p className="text-[10px] text-gray-500 truncate">{currentPlan.description}</p>
+    <div className="space-y-6">
+      {/* کارت وضعیت فعلی */}
+      <Card className={`border-2 ${status.isLifetime ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200'}`}>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              {status.isLifetime ? <Sparkles className="w-5 h-5 text-emerald-600" /> : <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+              <div>
+                <CardTitle className="text-lg">پلن فعلی: {status.tierNameFa || 'پایه'}</CardTitle>
+                <CardDescription className="mt-1">{status.message}</CardDescription>
               </div>
             </div>
+            <Badge className={status.isLifetime ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}>
+              {status.isLifetime ? 'مادام‌العمر' : 'فعال'}
+            </Badge>
           </div>
-
-          {/* ★★★ v9.0: نمایش وضعیت دوره فعلی (بدون امکان تنزل) */}
-          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-md">
-            <div
-              className={`flex-1 py-1 text-[11px] rounded text-center transition-colors ${
-                currentBillingCycle === 'annual'
-                  ? 'bg-white text-emerald-700 shadow-sm font-bold'
-                  : 'text-gray-500'
-              }`}
-            >
-              سالانه — {formatPrice(currentPlan.annualPrice)} ت
-              {currentBillingCycle === 'annual' && (
-                <span className="block text-[8px] text-emerald-600">دوره فعلی شما</span>
-              )}
-            </div>
-            <div
-              className={`flex-1 py-1 text-[11px] rounded text-center transition-colors ${
-                currentBillingCycle === 'lifetime'
-                  ? 'bg-white text-amber-700 shadow-sm font-bold'
-                  : 'text-gray-500'
-              }`}
-            >
-              مادام‌العمر — {formatPrice(currentPlan.lifetimePrice)} ت
-              {currentBillingCycle === 'lifetime' && (
-                <span className="block text-[8px] text-amber-600">دوره فعلی شما</span>
-              )}
-            </div>
-          </div>
-
-          {/* محدودیت‌ها — فشرده در یک ردیف */}
-          <div className="grid grid-cols-3 gap-1.5 text-center">
-            <div className="bg-white rounded p-1.5">
-              <p className="text-[9px] text-gray-500">کاربران</p>
-              <p className="text-[11px] font-bold text-gray-700">
-                {formatPrice(userCount)} / {currentPlan.maxUsers === 0 ? '∞' : formatPrice(currentPlan.maxUsers)}
-              </p>
-              {currentPlan.maxUsers > 0 && (
-                <div className="w-full bg-gray-200 rounded-full h-0.5 mt-0.5">
-                  <div className="bg-emerald-500 h-0.5 rounded-full" style={{ width: `${userUsagePct}%` }} />
-                </div>
-              )}
-            </div>
-            <div className="bg-white rounded p-1.5">
-              <p className="text-[9px] text-gray-500">محصولات</p>
-              <p className="text-[11px] font-bold text-gray-700">
-                {formatPrice(productCount)} / {currentPlan.maxProducts === 0 ? '∞' : formatPrice(currentPlan.maxProducts)}
-              </p>
-              {currentPlan.maxProducts > 0 && (
-                <div className="w-full bg-gray-200 rounded-full h-0.5 mt-0.5">
-                  <div className="bg-emerald-500 h-0.5 rounded-full" style={{ width: `${productUsagePct}%` }} />
-                </div>
-              )}
-            </div>
-            <div className="bg-white rounded p-1.5">
-              <p className="text-[9px] text-gray-500">فاکتور/سال</p>
-              <p className="text-[11px] font-bold text-gray-700">
-                {formatPrice(invoiceCount)} / {currentPlan.maxInvoices === 0 ? '∞' : formatPrice(currentPlan.maxInvoices)}
-              </p>
-              {currentPlan.maxInvoices > 0 && (
-                <div className="w-full bg-gray-200 rounded-full h-0.5 mt-0.5">
-                  <div className="bg-emerald-500 h-0.5 rounded-full" style={{ width: `${invoiceUsagePct}%` }} />
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
+        </CardHeader>
       </Card>
 
-      {/* ★★★ v9.0: ۳ کارت پلن، هر کارت شامل هر دو دوره سالانه و مادام‌العمر */}
-      <Card className="border-gray-200">
-        <CardHeader className="p-2.5 sm:p-3 pb-1">
-          <CardTitle className="text-xs flex items-center gap-1.5">
-            <Crown className="w-3.5 h-3.5 text-emerald-600" />
-            انتخاب پلن و دوره اشتراک
-          </CardTitle>
-          <p className="text-[10px] text-gray-500 mt-0.5">
-            در هر پلن می‌تونید سالانه یا مادام‌العمر رو انتخاب و ارتقا پیدا کنید.
-            تنزل به پلن یا دوره پایین‌تر مجاز نیست.
-          </p>
-        </CardHeader>
-        <CardContent className="p-2 pt-1">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {(['simple', 'professional', 'enterprise'] as const).map((planKey) => {
-              const plan = PLAN_DETAILS[planKey]
-              const Icon = plan.icon
-              const isCurrent = planKey === currentPlanName
+      {/* ★★★ کارت‌های پلن‌ها با ۳ دکمه در پلن فعال */}
+      <div>
+        <h3 className="text-base font-bold text-gray-800 mb-3">مدیریت اشتراک</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(Object.keys(PLANS_INFO) as any[]).map((pn: any) => {
+            const info = PLANS_INFO[pn]
+            const Icon = info.icon
+            
+            // ★★★ تشخیص درست پلن فعلی
+            const isCurrent = pn === normalizedCurrent
+            
+            console.log(`[DEBUG Inside SettingsPage] pn: '${pn}' | raw: '${rawPlanName}' | normalized: '${normalizedCurrent}' | isCurrent: ${isCurrent}`)
 
-              return (
-                <div
-                  key={planKey}
-                  className={`relative rounded-lg border-2 overflow-hidden ${isCurrent ? `border-${plan.color}-400 bg-${plan.color}-50/30` : `border-gray-200`}`}
-                >
-                  {isCurrent && (
-                    <div className={`bg-${plan.color}-500 text-white text-center text-[9px] font-bold py-0.5`}>
-                      پلن فعلی شما
+            const colorClasses: any = {
+              emerald: { border: 'border-emerald-200', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', button: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
+              blue: { border: 'border-blue-300', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', button: 'bg-blue-600 hover:bg-blue-700 text-white' },
+              purple: { border: 'border-purple-300', iconBg: 'bg-purple-100', iconColor: 'text-purple-600', button: 'bg-purple-600 hover:bg-purple-700 text-white' },
+            }[info.color]
+
+            return (
+              <Card key={pn} className={`relative overflow-hidden transition-all hover:shadow-md ${colorClasses.border} ${isCurrent ? 'ring-2 ring-emerald-400' : ''} ${info.featured ? 'ring-2 ring-blue-400' : ''}`}>
+                {isCurrent && <div className="absolute top-0 left-0 right-0 bg-emerald-500 text-white text-center text-[10px] font-bold py-1 z-10">پلن فعلی</div>}
+                {info.featured && !isCurrent && <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-center text-[10px] font-bold py-1 z-10">پیشنهادی</div>}
+
+                <CardContent className={`p-5 ${isCurrent || info.featured ? 'pt-8' : ''}`}>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${colorClasses.iconBg}`}>
+                      <Icon className={`w-6 h-6 ${colorClasses.iconColor}`} />
                     </div>
-                  )}
-                  <div className={`p-2 space-y-1.5 ${isCurrent ? '' : ''}`}>
-                    {/* هدر پلن */}
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-7 h-7 rounded bg-${plan.color}-100 flex items-center justify-center shrink-0`}>
-                        <Icon className={`w-3.5 h-3.5 text-${plan.color}-600`} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-900">{plan.name}</p>
-                        <p className="text-[8px] text-gray-400">{plan.nameEn}</p>
-                      </div>
-                    </div>
-
-                    {/* مشخصات پلن */}
-                    <div className="space-y-0.5 text-[10px] pb-1 border-b border-gray-100">
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Users className="w-2.5 h-2.5 text-gray-400" />
-                        {plan.maxUsers === 0 ? 'کاربر نامحدود' : `تا ${formatPrice(plan.maxUsers)} کاربر`}
-                      </div>
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Package className="w-2.5 h-2.5 text-gray-400" />
-                        {plan.maxProducts === 0 ? 'محصول نامحدود' : `تا ${formatPrice(plan.maxProducts)} محصول`}
-                      </div>
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <FileText className="w-2.5 h-2.5 text-gray-400" />
-                        {plan.maxInvoices === 0 ? 'فاکتور نامحدود' : `تا ${formatPrice(plan.maxInvoices)} فاکتور/سال`}
-                      </div>
-                    </div>
-
-                    {/* ★★★ v9.0: هر دو دوره سالانه و مادام‌العمر با دکمه ارتقا (با اعمال قوانین) */}
-                    <div className="space-y-1">
-                      {/* سالانه */}
-                      <PlanCycleRow
-                        label="سالانه"
-                        price={plan.annualPrice}
-                        unit="ت/سال"
-                        icon={<CalendarDays className="w-2.5 h-2.5 text-gray-400" />}
-                        isCurrent={isCurrent && currentBillingCycle === 'annual'}
-                        canUpgrade={canUpgradePlan(currentPlanName, currentBillingCycle, planKey, 'annual')}
-                        isUpgrading={upgrading === `${planKey}_annual`}
-                        color={plan.color}
-                        onUpgrade={() => handleUpgrade(planKey, 'annual')}
-                      />
-
-                      {/* مادام‌العمر */}
-                      <PlanCycleRow
-                        label="مادام‌العمر"
-                        price={plan.lifetimePrice}
-                        unit="ت (یکبار)"
-                        icon={<Crown className="w-2.5 h-2.5 text-amber-500" />}
-                        isCurrent={isCurrent && currentBillingCycle === 'lifetime'}
-                        canUpgrade={canUpgradePlan(currentPlanName, currentBillingCycle, planKey, 'lifetime')}
-                        isUpgrading={upgrading === `${planKey}_lifetime`}
-                        color="amber"
-                        onUpgrade={() => handleUpgrade(planKey, 'lifetime')}
-                        highlight
-                      />
+                    <div>
+                      <h3 className="font-bold text-base">{info.label}</h3>
+                      <p className="text-[10px] text-gray-500">{pn}</p>
                     </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* ★★★ v3.13: قابلیت‌های هر پلن — جدول مقایسه‌ای فشرده */}
-      <Card className="border-gray-200">
-        <CardHeader className="p-2.5 sm:p-3 pb-1">
-          <CardTitle className="text-xs flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            قابلیت‌های پلن {currentPlan.name}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-2 pt-1">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-            {currentPlan.features.map((feature, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-[11px] text-gray-700 py-0.5">
-                <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                <span>{feature}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+                  <div className="mb-4 space-y-1.5">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-bold">{info.annualPrice.toLocaleString('fa-IR')}</span>
+                      <span className="text-xs text-gray-500">تومان/سالانه</span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-sm font-medium text-gray-600">{info.lifetimePrice.toLocaleString('fa-IR')}</span>
+                      <span className="text-[10px] text-gray-400">تومان/مادام‌العمر</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 mb-4 text-[11px]">
+                    {info.features.map((feat: string, idx: number) => (
+                      <div key={idx} className="flex items-center gap-1.5 text-gray-600">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                        {feat}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ★★★ دکمه‌های عملیات - ۳ دکمه برای پلن فعال */}
+                  <div className="space-y-2">
+                    {isCurrent ? (
+                      <>
+                        {/* دکمه ۱: نشانگر پلن فعال */}
+                        <Button className="w-full gap-2 bg-gray-100 text-gray-600 hover:bg-gray-100 cursor-default" disabled>
+                          <CheckCircle2 className="w-4 h-4" />
+                          پلن فعلی شما
+                        </Button>
+                        
+                        {/* دکمه ۲: تمدید یک سال دیگر */}
+                        <Button
+                          className={`w-full gap-2 ${colorClasses.button}`}
+                          onClick={handleRenewAnnual}
+                          disabled={renewing || status.isLifetime}
+                        >
+                          {renewing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          {status.isLifetime ? 'تمدید (مادام‌العمر فعال)' : 'تمدید یک سال دیگر'}
+                        </Button>
+                        
+                        {/* دکمه ۳: ارتقا به مادام‌العمر */}
+                        <Button
+                          variant="outline"
+                          className="w-full gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                          onClick={() => handleUpgrade(pn, 'lifetime')}
+                          disabled={upgrading === `${pn}-lifetime` || status.isLifetime}
+                        >
+                          {upgrading === `${pn}-lifetime` ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          {status.isLifetime ? 'مادام‌العمر فعال' : 'ارتقا به مادام‌العمر'}
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button className={`w-full gap-2 ${colorClasses.button}`} onClick={() => handleUpgrade(pn, 'annual')} disabled={upgrading === `${pn}-annual`}>
+                          {upgrading === `${pn}-annual` ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />}
+                          ارتقا به {info.label} (سالانه)
+                        </Button>
+                        <Button variant="outline" className="w-full gap-2 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={() => handleUpgrade(pn, 'lifetime')} disabled={upgrading === `${pn}-lifetime`}>
+                          {upgrading === `${pn}-lifetime` ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                          ارتقا به {info.label} (مادام‌العمر)
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -5167,108 +4979,145 @@ export default function SettingsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full" dir="rtl">
         {/* ★★★ v3.10: dir="rtl" صریح + flex flex-row + justify-start برای RTL بودن تب‌ها */}
-        <div className="overflow-x-auto mb-2 sm:mb-3 scrollbar-hide" dir="rtl">
-          <TabsList dir="rtl" className="w-full flex flex-row flex-nowrap justify-start h-auto gap-1 bg-white border rounded-lg p-1 overflow-x-auto">
-            <TabsTrigger value="store" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-              <Store className="w-4 h-4" />
-              <span className="hidden sm:inline">فروشگاه</span>
-            </TabsTrigger>
-            {/* ★★★ v5.1: تب درگاه پرداخت فقط در پلن حرفه‌ای و سازمانی */}
-            {features.canOnlinePayment && (
-              <TabsTrigger value="gateway" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-                <CreditCard className="w-4 h-4" />
-                <span className="hidden sm:inline">درگاه پرداخت</span>
-              </TabsTrigger>
-            )}
-            {/* ★★★ v5.1: تب کارتخوان فقط در پلن حرفه‌ای و سازمانی (canMultiCashRegister) */}
-            {features.canMultiCashRegister && (
-              <TabsTrigger value="pos" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-                <Monitor className="w-4 h-4" />
-                <span className="hidden sm:inline">کارتخوان</span>
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="invoice" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-              <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">قالب فاکتور</span>
-            </TabsTrigger>
-            {/* ★★★ v9.2: در حالت دمو، تب «پشتیبان‌گیری» غیرفعال است */}
-            <TabsTrigger
-              value="backup"
-              dir="rtl"
-              disabled={isDemo}
-              title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
-              className={`flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700 ${
-                isDemo ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">پشتیبان‌گیری</span>
-              {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded">دمو</span>}
-            </TabsTrigger>
-            {/* ★★★ v9.2: در حالت دمو، تب «اشتراک» غیرفعال است */}
-            <TabsTrigger
-              value="subscription"
-              dir="rtl"
-              disabled={isDemo}
-              title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
-              className={`flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700 ${
-                isDemo ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <Crown className="w-4 h-4" />
-              <span className="hidden sm:inline">اشتراک</span>
-              {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded">دمو</span>}
-            </TabsTrigger>
-            {/* ★★★ v9.2: در حالت دمو، تب «کاربران» فعال است (تغییر از v9.2) */}
-            <TabsTrigger value="employees" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">کاربران</span>
-            </TabsTrigger>
-            {/* ★★★ v5.2 (Phase 4): تب اعلان SMS فقط در پلن حرفه‌ای+ (canAccessInstallments) */}
-            {features.canAccessInstallments && (
-              <TabsTrigger value="sms" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-                <Bell className="w-4 h-4" />
-                <span className="hidden sm:inline">اعلان SMS</span>
-              </TabsTrigger>
-            )}
-            {/* ★★★ v6.0: تب مودیان فقط در پلن حرفه‌ای+ (canMoidianIntegration) */}
-            {features.canMoidianIntegration && (
-              <TabsTrigger value="moidian" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
-                <Building2 className="w-4 h-4" />
-                <span className="hidden sm:inline">مودیان</span>
-              </TabsTrigger>
-            )}
-            {/* ★★★ v5.1: تب سازمانی فقط در پلن سازمانی */}
-            {isEnterprise && (
-              <TabsTrigger value="enterprise" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
-                <Crown className="w-4 h-4" />
-                <span className="hidden sm:inline">سازمانی</span>
-              </TabsTrigger>
-            )}
-            {/* ★★★ v5.1: تب سال مالی فقط در پلن سازمانی (canFiscalYearManagement) */}
-            {features.canFiscalYearManagement && (
-              <TabsTrigger value="fiscal-year" dir="rtl" className="flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-                <CalendarDays className="w-4 h-4" />
-                <span className="hidden sm:inline">سال مالی</span>
-              </TabsTrigger>
-            )}
-            {/* ★★★ v8.8: تب راه‌اندازی اولیه فروشگاه — برای همه پلن‌ها */}
-            {/* ★★★ v9.2.5: در حالت دمو، تب «راه‌اندازی» غیرفعال است */}
-            <TabsTrigger
-              value="initial-balance"
-              dir="rtl"
-              disabled={isDemo}
-              title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
-              className={`flex-shrink-0 min-w-fit gap-1.5 text-xs sm:text-sm data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700 ${
-                isDemo ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              <span className="hidden sm:inline">راه‌اندازی</span>
-              {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded">دمو</span>}
-            </TabsTrigger>
-          </TabsList>
-        </div>
+     <div className="mb-2 sm:mb-3" dir="rtl">
+  <TabsList 
+    dir="rtl" 
+    className="w-max flex flex-row flex-nowrap gap-1.5 bg-gray-50/80 border border-gray-200 rounded-xl p-1.5 overflow-x-auto scrollbar-hide h-auto"
+  >
+    <TabsTrigger 
+      value="store" 
+      className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+    >
+      <Store className="w-4 h-4" />
+      <span className="hidden sm:inline">فروشگاه</span>
+    </TabsTrigger>
+
+    {/* ★★★ v5.1: تب درگاه پرداخت فقط در پلن حرفه‌ای و سازمانی */}
+    {features.canOnlinePayment && (
+      <TabsTrigger 
+        value="gateway" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+      >
+        <CreditCard className="w-4 h-4" />
+        <span className="hidden sm:inline">درگاه پرداخت</span>
+      </TabsTrigger>
+    )}
+
+    {/* ★★★ v5.1: تب کارتخوان فقط در پلن حرفه‌ای و سازمانی */}
+    {features.canMultiCashRegister && (
+      <TabsTrigger 
+        value="pos" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+      >
+        <Monitor className="w-4 h-4" />
+        <span className="hidden sm:inline">کارتخوان</span>
+      </TabsTrigger>
+    )}
+
+    <TabsTrigger 
+      value="invoice" 
+      className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+    >
+      <FileText className="w-4 h-4" />
+      <span className="hidden sm:inline">قالب فاکتور</span>
+    </TabsTrigger>
+
+    {/* ★★★ v9.2: در حالت دمو، تب «پشتیبان‌گیری» غیرفعال است */}
+    <TabsTrigger
+      value="backup"
+      disabled={isDemo}
+      title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
+      className={`flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100 ${
+        isDemo ? 'opacity-50 cursor-not-allowed' : ''
+      }`}
+    >
+      <Database className="w-4 h-4" />
+      <span className="hidden sm:inline">پشتیبان‌گیری</span>
+      {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
+    </TabsTrigger>
+
+    {/* ★★★ v9.2: در حالت دمو، تب «اشتراک» غیرفعال است */}
+    <TabsTrigger
+      value="subscription"
+      disabled={isDemo}
+      title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
+      className={`flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100 ${
+        isDemo ? 'opacity-50 cursor-not-allowed' : ''
+      }`}
+    >
+      <Crown className="w-4 h-4" />
+      <span className="hidden sm:inline">اشتراک</span>
+      {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
+    </TabsTrigger>
+
+    {/* ★★★ v9.2: تب کاربران */}
+    <TabsTrigger 
+      value="employees" 
+      className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+    >
+      <Users className="w-4 h-4" />
+      <span className="hidden sm:inline">کاربران</span>
+    </TabsTrigger>
+
+    {/* ★★★ v5.2: تب اعلان SMS فقط در پلن حرفه‌ای+ */}
+    {features.canAccessInstallments && (
+      <TabsTrigger 
+        value="sms" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+      >
+        <Bell className="w-4 h-4" />
+        <span className="hidden sm:inline">اعلان SMS</span>
+      </TabsTrigger>
+    )}
+
+    {/* ★★★ v6.0: تب مودیان فقط در پلن حرفه‌ای+ */}
+    {features.canMoidianIntegration && (
+      <TabsTrigger 
+        value="moidian" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700 data-[state=active]:shadow-sm hover:bg-purple-100"
+      >
+        <Building2 className="w-4 h-4" />
+        <span className="hidden sm:inline">مودیان</span>
+      </TabsTrigger>
+    )}
+
+    {/* ★★★ v5.1: تب سازمانی فقط در پلن سازمانی */}
+    {isEnterprise && (
+      <TabsTrigger 
+        value="enterprise" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700 data-[state=active]:shadow-sm hover:bg-purple-100"
+      >
+        <Crown className="w-4 h-4" />
+        <span className="hidden sm:inline">سازمانی</span>
+      </TabsTrigger>
+    )}
+
+    {/* ★★★ v5.1: تب سال مالی فقط در پلن سازمانی */}
+    {features.canFiscalYearManagement && (
+      <TabsTrigger 
+        value="fiscal-year" 
+        className="flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100"
+      >
+        <CalendarDays className="w-4 h-4" />
+        <span className="hidden sm:inline">سال مالی</span>
+      </TabsTrigger>
+    )}
+
+    {/* ★★★ v8.8: تب راه‌اندازی اولیه فروشگاه */}
+    <TabsTrigger
+      value="initial-balance"
+      disabled={isDemo}
+      title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
+      className={`flex-shrink-0 min-w-fit gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-all data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm hover:bg-gray-100 ${
+        isDemo ? 'opacity-50 cursor-not-allowed' : ''
+      }`}
+    >
+      <Wallet className="w-4 h-4" />
+      <span className="hidden sm:inline">راه‌اندازی</span>
+      {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
+    </TabsTrigger>
+  </TabsList>
+</div>
 
         <TabsContent value="store"><StoreSettingsTab /></TabsContent>
         {/* ★★★ v5.1: تب‌های مشروط فقط هنگام مجاز بودن رندر می‌شوند */}

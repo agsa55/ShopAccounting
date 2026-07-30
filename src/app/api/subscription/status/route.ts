@@ -1,18 +1,15 @@
 // ============================================================================
-// src/app/api/subscription/status/route.ts — GET (v9.0 ★★★)
+// src/app/api/subscription/status/route.ts — GET (v9.6.0 ★★★)
 // ShopAccounting — Get Current Subscription Status for Client
 // ----------------------------------------------------------------------------
 // این API وضعیت اشتراک فعلی Tenant را برمی‌گرداند:
 //   - daysRemaining, expiresAt, tierName, billingCycle
+//   - وضعیت جدید v9.6.0: status, canCreate, canRead, message
 //   - قیمت‌ها برای نمایش در صفحه تمدید
 //   - گزینه‌های ارتقا
 //
 // ★★★ v9.0: پشتیبانی از پلن مادام‌العمر (lifetime)
-//   - اگر billingCycle='lifetime' باشد:
-//     • isExpired همیشه false
-//     • daysRemaining = -1 (یعنی نامحدود)
-//     • expiresAt = null
-//     • هدرهای هشدار انقضا ست نمی‌شوند
+// ★★★ v9.6.0: پشتیبانی از منطق ۳ مرحله‌ای (هشدار، دوره مهلت، فقط خواندنی)
 //
 // ★ نیاز به توکن معتبر دارد (withTenantIsolation)
 // ============================================================================
@@ -42,7 +39,7 @@ export const GET = withTenantIsolation(
       const tenantBillingCycle = tenantRecord?.billingCycle || ''
       const isLifetime = isLifetimeCycle(tenantBillingCycle)
 
-      // ★★★ v9.0: اگر پلن مادام‌العمر است → وضعیت ثابت
+      // ★★★ v9.0 & v9.6.0: اگر پلن مادام‌العمر است → وضعیت ثابت و دسترسی کامل
       if (isLifetime && tenantRecord?.planTier) {
         const clientStatus = {
           isActive: tenantRecord.status !== 'suspended',
@@ -53,9 +50,13 @@ export const GET = withTenantIsolation(
           tierNameFa: tenantRecord.planTier.nameFa,
           billingCycle: 'lifetime',
           isLifetime: true,
-          // ★ اطلاعات قیمت‌گذاری برای UI (اختیاری)
-          currentPrice: 0, // چون قبلاً پرداخت شده
+          currentPrice: 0,
           upgradeOptions: [],
+          // ★★★ v9.6.0: فیلدهای جدید برای مادام‌العمر
+          status: 'active',
+          canCreate: true,
+          canRead: true,
+          message: 'اشتراک مادام‌العمر شما فعال است.',
         }
 
         const response = NextResponse.json({
@@ -63,32 +64,39 @@ export const GET = withTenantIsolation(
           data: clientStatus,
         })
 
-        // ★★★ v9.0: برای lifetime، هیچ هدر هشدار انقضایی ست نمی‌شود
         return response
       }
 
-      // ★★★ برای پلن‌های سالانه — منطق قبلی
+      // ★★★ v9.6.0: برای پلن‌های سالانه — دریافت وضعیت با منطق ۳ مرحله‌ای
       const serverStatus = await checkSubscriptionStatus(tenant.tenantId)
       const clientStatus = await getClientSubscriptionStatus(tenant.tenantId, serverStatus)
 
-      // ★ هدر هشدار انقضا (برای کلاینت‌هایی که fetch می‌خوره)
       const response = NextResponse.json({
         success: true,
         data: {
           ...clientStatus,
           isLifetime: false,
+          // ★★★ v9.6.0: تزریق فیلدهای جدید از serverStatus به پاسخ کلاینت
+          status: serverStatus.status,
+          canCreate: serverStatus.canCreate,
+          canRead: serverStatus.canRead,
+          message: serverStatus.message,
         },
       })
 
-      if (clientStatus.daysRemaining > 0 && clientStatus.daysRemaining <= 3) {
-        // ★★★ v9.3.2: فقط عدد را در هدر می‌گذاریم (هدرها فقط ASCII پشتیبانی می‌کنند)
-        //   کلاینت می‌تواند از این عدد برای ساخت پیام فارسی استفاده کند
-        response.headers.set('X-Subscription-Days-Remaining', String(clientStatus.daysRemaining))
-        response.headers.set('X-Subscription-Warning', `subscription_expiring_in_${clientStatus.daysRemaining}_days`)
+      // ★ هدر هشدار انقضا (برای کلاینت‌هایی که fetch می‌خوره یا Middleware)
+      if (serverStatus.daysRemaining > 0 && serverStatus.daysRemaining <= 7) {
+        // ★★★ v9.6.0: تغییر بازه هشدار به ۷ روز
+        response.headers.set('X-Subscription-Days-Remaining', String(serverStatus.daysRemaining))
+        response.headers.set('X-Subscription-Warning', `subscription_expiring_in_${serverStatus.daysRemaining}_days`)
       }
 
-      if (clientStatus.isExpired) {
+      if (serverStatus.isExpired) {
         response.headers.set('X-Subscription-Expired', 'true')
+        // اگر در حالت فقط خواندنی است، یک هدر خاص هم اضافه می‌کنیم
+        if (serverStatus.status === 'read_only') {
+          response.headers.set('X-Subscription-Read-Only', 'true')
+        }
       }
 
       return response

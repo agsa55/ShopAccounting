@@ -172,10 +172,14 @@ export function useSetupWizard() {
   const [open, setOpen] = useState(false)
   const [checked, setChecked] = useState(false)
 
-  useEffect(() => {
+   useEffect(() => {
     if (!tenantId || checked) return
     setChecked(true)
 
+    // ★ اصلاح حیاتی: ابتدا چک کنیم آیا کاربر قبلاً ویزارد را تکمیل یا رد کرده است
+    if (isWizardDone(tenantId)) {
+      return // اگر قبلاً انجام شده، دیگر هیچ کاری نکن و ویزارد را باز نکن
+    }
     // ★ بررسی سریع بدون await
     Promise.all([
       fetch('/api/fiscal-years', { 

@@ -1,8 +1,10 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v8.8.10
+// src/components/app-shell.tsx — v9.6.0 ★★★
 // ★ PWA Install Button + دکمه نصب در هدر
+// ★ v9.6.0: اضافه شدن SubscriptionBanner برای نمایش هشدارهای اشتراک
+//   (هشدار ۷ روزه، دوره مهلت، حالت فقط خواندنی)
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
@@ -18,7 +20,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, // ★ آیکون نصب PWA
+  Download, AlertTriangle, // ★ آیکون نصب PWA + آیکون هشدار
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -387,6 +389,125 @@ function renderCurrentView(view: AppView) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
+   ═══════════════════════════════════════════════════════════════ */
+
+interface SubscriptionStatus {
+  status: 'active' | 'warning' | 'grace_period' | 'read_only' | 'expired'
+  daysRemaining: number
+  canCreate: boolean
+  canRead: boolean
+  message: string
+  isLifetime?: boolean
+}
+
+function SubscriptionBanner() {
+  const [status, setStatus] = useState<SubscriptionStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) {
+          setLoading(false)
+          return
+        }
+
+        const res = await fetch('/api/subscription/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json()
+
+        if (data.success && data.data) {
+          setStatus(data.data)
+          // ✅ خط problematic حذف شد. state محلی همین کامپوننت برای نمایش بنر کاملاً کافی است.
+        }
+      } catch (err) {
+        console.warn('[SubscriptionBanner] Fetch error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchStatus()
+    // آپدیت هر ۵ دقیقه
+    const interval = setInterval(fetchStatus, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // اگر در حال لودینگ یا وضعیت active است، چیزی نمایش نده
+  if (loading || !status || status.status === 'active') return null
+
+  // تنظیمات بصری بر اساس وضعیت
+  const config = {
+    warning: {
+      bg: 'bg-yellow-50',
+      text: 'text-yellow-900',
+      border: 'border-yellow-200',
+      icon: '⚠️',
+      buttonBg: 'bg-yellow-600 hover:bg-yellow-700',
+    },
+    grace_period: {
+      bg: 'bg-orange-50',
+      text: 'text-orange-900',
+      border: 'border-orange-200',
+      icon: '⏰',
+      buttonBg: 'bg-orange-600 hover:bg-orange-700',
+    },
+    read_only: {
+      bg: 'bg-red-50',
+      text: 'text-red-900',
+      border: 'border-red-300',
+      icon: '🔒',
+      buttonBg: 'bg-red-600 hover:bg-red-700',
+    },
+    expired: {
+      bg: 'bg-red-100',
+      text: 'text-red-900',
+      border: 'border-red-400',
+      icon: '🚫',
+      buttonBg: 'bg-red-600 hover:bg-red-700',
+    },
+  }[status.status]
+
+  if (!config) return null
+
+  return (
+    <div className={`${config.bg} ${config.border} border-b px-3 sm:px-4 py-2.5 sm:py-3`}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div className={`flex items-start sm:items-center gap-2 ${config.text} text-xs sm:text-sm`}>
+          <span className="text-base sm:text-lg shrink-0">{config.icon}</span>
+          <div className="flex-1">
+            <p className="font-medium leading-relaxed">{status.message}</p>
+            {status.status === 'read_only' && (
+              <p className="text-[10px] sm:text-xs mt-1 opacity-80">
+                شما همچنان می‌توانید گزارشات را مشاهده کرده و خروجی بگیرید.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <a
+          href="/subscription/renew"
+          onClick={(e) => {
+            e.preventDefault()
+            useStore.getState().setCurrentView('settings-subscription' as AppView)
+          }}
+          className={`${config.buttonBg} text-white text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-md transition-colors shrink-0 flex items-center gap-1 shadow-sm`}
+        >
+          <RefreshCw className="w-3 h-3" />
+          تمدید اشتراک
+        </a>
+      </div>
+    </div>
+  )
+}
+/* ═══════════════════════════════════════════════════════════════
    AppSidebar
    ═══════════════════════════════════════════════════════════════ */
 
@@ -563,6 +684,10 @@ function AppSidebar() {
               <SidebarPlanCard onClick={() => setCurrentView('settings-subscription' as AppView)} />
               <a
                 href="/subscription/renew"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setCurrentView('settings-subscription' as AppView)
+                }}
                 className="w-full text-[10px] py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors flex items-center justify-center gap-1 font-medium"
               >
                 <RefreshCw className="w-2.5 h-2.5" />
@@ -576,13 +701,14 @@ function AppSidebar() {
               ) : (
                 <>
                   {!isExpired && daysRemaining > 0 && daysRemaining !== -1 && (
-                    <p className="text-[9px] text-gray-500 text-center flex items-center justify-center gap-0.5">
-                      <Clock className="w-2.5 h-2.5" />
-                      {daysRemaining > 30
-                        ? `${Math.floor(daysRemaining / 30)} ماه و ${daysRemaining % 30} روز`
+                    <span className="text-[10px] text-gray-600 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
+                      {daysRemaining >= 360 
+                        ? '۱ سال' 
+                        : daysRemaining > 30 
+                        ? `${Math.floor(daysRemaining / 30)} ماه و ${daysRemaining % 30} روز` 
                         : `${daysRemaining} روز`}
                       {' '}تا پایان اشتراک
-                    </p>
+                    </span>
                   )}
                   {daysRemaining === -1 && (
                     <p className="text-[9px] text-emerald-600 text-center font-medium flex items-center justify-center gap-0.5">
@@ -730,9 +856,6 @@ function PWAInstallButton() {
 }
 
 
-/* ═══════════════════════════════════════════════════════════════
-   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی (متصل به sync-engine)
-   ═══════════════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════════════
    ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
    ═══════════════════════════════════════════════════════════════ */
@@ -1111,6 +1234,9 @@ export default function AppShell() {
         <OfflineBanner />
         <DemoBanner />
         <AppHeader />
+        
+        {/* ★★★ v9.6.0: بنر هشدار اشتراک — بین هدر و محتوای اصلی */}
+        <SubscriptionBanner />
 
         {isPosView ? (
           <div className="flex-1 min-h-0 overflow-hidden">

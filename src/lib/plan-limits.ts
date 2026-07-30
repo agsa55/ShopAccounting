@@ -1,35 +1,23 @@
 // ============================================================================
-// src/lib/plan-limits.ts — Plan Limits, Billing & Subscription Utilities (v9.0)
+// src/lib/plan-limits.ts — Plan Limits, Billing & Subscription Utilities (v9.6.0)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
-// ★★★ v9.0 — تغییرات اساسی:
-//   ★ حذف پلن ماهانه — فقط annual (سالانه) و lifetime (مادام‌العمر)
-//   ★ تغییر نام پلن‌ها:
-//       ساده    → پایه
-//       حرفه‌ای → پیشرفته
-//       سازمانی → حرفه‌ای
-//   ★ نام کد پلن‌ها ثابت ماند: simple / professional / enterprise
-//   ★ قیمت‌گذاری واقعی (تومان):
-//     - پایه:      سالانه ۱,۵۹۰,۰۰۰ / مادام‌العمر ۱۶,۰۰۰,۰۰۰
-//     - پیشرفته:   سالانه ۲,۷۶۰,۰۰۰ / مادام‌العمر ۲۸,۰۰۰,۰۰۰
-//     - حرفه‌ای:   سالانه ۳,۵۵۰,۰۰۰ / مادام‌العمر ۳۶,۰۰۰,۰۰۰
-//   ★ پلن مادام‌العمر → expiresAt=null, daysRemaining=-1, isExpired=false
+// ★★★ v9.6.0 — تغییرات جدید:
+//   ★ اضافه شدن منطق ۳ مرحله‌ای انقضا: هشدار (۷ روز قبل)، دوره مهلت (۷ روز بعد)، فقط خواندنی (بعد از آن)
+//   ★ اضافه شدن فیلدهای status, canCreate, canRead, message برای کنترل دقیق‌تر دسترسی
 //
-// ★★★ v3.0 — تغییرات قبلی:
-//   ★ حذف پلن رایگان (free) — فقط simple, professional, enterprise
-//   ★ حذف دوره‌های quarterly و semiannual
-//   ★ همه پلن‌ها در بانک مشترک (dbType همیشه 'shared')
-//   ★ حذف ارجاعات به tenant-provisioning و db-encrypt
+// ★★★ v9.0 — تغییرات اساسی قبلی:
+//   ★ حذف پلن ماهانه — فقط annual (سالانه) و lifetime (مادام‌العمر)
+//   ★ تغییر نام پلن‌ها: ساده → پایه، حرفه‌ای → پیشرفته، سازمانی → حرفه‌ای
+//   ★ نام کد پلن‌ها ثابت ماند: simple / professional / enterprise
+//   ★ قیمت‌گذاری واقعی (تومان)
+//   ★ پلن مادام‌العمر → expiresAt=null, daysRemaining=-1, isExpired=false
 // ============================================================================
 
 // ═══════════════════════════════════════════════════════════════════════
 //  ★★★ v9.0: helper تشخیص پلن مادام‌العمر
 // ═══════════════════════════════════════════════════════════════════════
 
-/**
- * تشخیص اینکه آیا یک دوره اشتراک مادام‌العمر است یا نه.
- * برای backward compatibility، رشته‌های فارسی «مادام‌العمر» و «مادام‌العمر » هم پذیرفته می‌شوند.
- */
 export function isLifetimeCycle(cycle: string | null | undefined): boolean {
   if (!cycle) return false
   const lower = String(cycle).toLowerCase().trim()
@@ -40,26 +28,29 @@ export function isLifetimeCycle(cycle: string | null | undefined): boolean {
 //  تایپ‌ها (Types)
 // ═══════════════════════════════════════════════════════════════════════
 
-/** دوره اشتراک — سالانه و مادام‌العمر (v9.0: حذف monthly، اضافه شدن lifetime) */
 export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
-// ★★★ v9.0: 'monthly' فقط برای backward compatibility باقی مانده است.
-//   در کد جدید فقط 'annual' و 'lifetime' استفاده می‌شود.
-//   اگر مقدار 'monthly' خوانده شد، باید به 'annual' تبدیل شود.
+
+// ★★★ v9.6.0: اضافه شدن فیلدهای کنترل دسترسی و وضعیت
+export type SubscriptionStatusType = 'active' | 'warning' | 'grace_period' | 'read_only' | 'expired';
 
 export interface SubscriptionStatusResult {
   isActive: boolean;
-  isTrial: boolean;       // ★ همیشه false در v3.0
+  isTrial: boolean;
   isExpired: boolean;
-  daysRemaining: number;  // ★★★ v9.0: -1 یعنی «نامحدود» (مادام‌العمر)
+  daysRemaining: number;
   tierName: string;
   tierNameFa: string;
   billingCycle: BillingCycle;
-  expiresAt: Date | null;  // ★★★ v9.0: null برای پلن مادام‌العمر
+  expiresAt: Date | null;
   planTierId: number | null;
-  isIsolated: boolean;    // ★ همیشه false در v3.0
-  dbName: string | null;  // ★ همیشه null در v3.0
-  // ★★★ v9.0: flag جدید برای مشخص کردن پلن مادام‌العمر
+  isIsolated: boolean;
+  dbName: string | null;
   isLifetime?: boolean;
+  // ★★★ v9.6.0: فیلدهای جدید برای کنترل هوشمند دسترسی
+  status: SubscriptionStatusType;
+  canCreate: boolean;
+  canRead: boolean;
+  message: string;
 }
 
 export interface PlanLimitResult {
@@ -81,6 +72,7 @@ export interface FullLimitCheck {
   overallAllowed: boolean;
 }
 
+// ★★★ v9.6.0: اضافه شدن فیلدهای جدید به TenantPlanInfo
 export interface TenantPlanInfo {
   tierName: string;
   tierNameFa: string;
@@ -88,16 +80,19 @@ export interface TenantPlanInfo {
   isTrial: boolean;
   isExpired: boolean;
   isActive: boolean;
-  daysRemaining: number;  // ★★★ v9.0: -1 یعنی «نامحدود» (مادام‌العمر)
+  daysRemaining: number;
   maxUsers: number;
   maxProducts: number;
   maxInvoices: number;
   maxCustomers: number;
   dbType: 'shared';
   planTierId: number | null;
-  expiresAt: Date | null;  // ★★★ v9.0: null برای پلن مادام‌العمر
-  // ★★★ v9.0: flag جدید برای مشخص کردن پلن مادام‌العمر
+  expiresAt: Date | null;
   isLifetime?: boolean;
+  status: SubscriptionStatusType;
+  canCreate: boolean;
+  canRead: boolean;
+  message: string;
 }
 
 export interface UpgradeOption {
@@ -150,7 +145,7 @@ export const PLAN_LIMITS: Record<string, PlanLimitDef> = {
     tierName: 'professional',
     maxUsers: 5,
     maxProducts: 2000,
-    maxInvoices: 0, // ★★★ v3.2: 0 = نامحدود
+    maxInvoices: 0,
     maxCustomers: 2000,
     dbType: 'shared',
     isTrial: false,
@@ -159,10 +154,10 @@ export const PLAN_LIMITS: Record<string, PlanLimitDef> = {
   },
   enterprise: {
     tierName: 'enterprise',
-    maxUsers: 0, // ★★★ v3.2: 0 = نامحدود
-    maxProducts: 0, // ★★★ v3.2: 0 = نامحدود
-    maxInvoices: 0, // ★★★ v3.2: 0 = نامحدود
-    maxCustomers: 0, // ★★★ v3.2: 0 = نامحدود
+    maxUsers: 0,
+    maxProducts: 0,
+    maxInvoices: 0,
+    maxCustomers: 0,
     dbType: 'shared',
     isTrial: false,
     trialDays: 0,
@@ -170,66 +165,54 @@ export const PLAN_LIMITS: Record<string, PlanLimitDef> = {
   },
 };
 
-// ─── اطلاعات فارسی پلن‌ها + قیمت‌گذاری واقعی (v9.0) ──────────────
-// ★★★ v9.0: تغییر نام پلن‌ها + قیمت‌های جدید + حذف monthlyPrice واقعی
-//   - 'monthlyPrice' فقط برای backward compatibility نگه داشته شده
-//   - در کد جدید از 'annualPrice' و 'lifetimePrice' استفاده کنید
-
 export const TIER_FA_INFO: Record<string, {
   nameFa: string;
   description: string;
-  monthlyPrice: number;   // ★★★ v9.0: فقط برای backward compat — دیگر استفاده نمی‌شود
+  monthlyPrice: number;
   annualPrice: number;
-  lifetimePrice: number;  // ★★★ v9.0: جدید — قیمت مادام‌العمر
+  lifetimePrice: number;
   features?: string[];
 }> = {
   simple: {
-    nameFa: 'پایه',          // ★★★ v9.0: «ساده» → «پایه»
+    nameFa: 'پایه',
     description: 'مناسب فروشگاه‌های کوچک — تا ۲ کاربر و ۲۰۰ محصول',
-    monthlyPrice: 1590000,   // ★★★ v9.0: برابر با annualPrice (برای backward compat)
-    annualPrice: 1590000,    // ★★★ v9.0: ۱,۵۹۰,۰۰۰ (قبلاً ۱,۷۹۰,۰۰۰)
-    lifetimePrice: 16000000, // ★★★ v9.0: ۱۶,۰۰۰,۰۰۰
+    monthlyPrice: 1590000,
+    annualPrice: 1590000,
+    lifetimePrice: 16000000,
     features: ['تا ۲ کاربر', '۲۰۰ محصول', '۵۰۰ فاکتور', 'داشبورد مالی'],
   },
   professional: {
-    nameFa: 'پیشرفته',       // ★★★ v9.0: «حرفه‌ای» → «پیشرفته»
+    nameFa: 'پیشرفته',
     description: 'فروشگاه‌های متوسط — تا ۵ کاربر و ۲۰۰۰ محصول',
-    monthlyPrice: 2760000,   // ★★★ v9.0: برابر با annualPrice
-    annualPrice: 2760000,    // ★★★ v9.0: ۲,۷۶۰,۰۰۰ (قبلاً ۲,۱۹۰,۰۰۰)
-    lifetimePrice: 28000000, // ★★★ v9.0: ۲۸,۰۰۰,۰۰۰
+    monthlyPrice: 2760000,
+    annualPrice: 2760000,
+    lifetimePrice: 28000000,
     features: ['تا ۵ کاربر', '۲۰۰۰ محصول', '۵۰۰۰ فاکتور', 'حسابداری دوطرفه', 'گزارشات مالی'],
   },
   enterprise: {
-    nameFa: 'حرفه‌ای',        // ★★★ v9.0: «سازمانی» → «حرفه‌ای»
+    nameFa: 'حرفه‌ای',
     description: 'کسب‌وکارهای بزرگ و سازمان‌ها',
-    monthlyPrice: 3550000,   // ★★★ v9.0: برابر با annualPrice
-    annualPrice: 3550000,    // ★★★ v9.0: ۳,۵۵۰,۰۰۰ (قبلاً ۲,۷۹۰,۰۰۰)
-    lifetimePrice: 36000000, // ★★★ v9.0: ۳۶,۰۰۰,۰۰۰
+    monthlyPrice: 3550000,
+    annualPrice: 3550000,
+    lifetimePrice: 36000000,
     features: ['کاربر نامحدود', 'محصول نامحدود', 'فاکتور نامحدود', 'حسابداری شعب', 'اتصال مودیان'],
   },
 };
 
-// ★★★ برای backward compat (کدهایی که price می‌خوان، annualPrice رو میدیم — v9.0)
 export const TIER_FA_INFO_COMPAT: Record<string, { nameFa: string; description: string; price: number; features?: string[] }> = {
   simple: { nameFa: 'پایه', description: TIER_FA_INFO.simple.description, price: TIER_FA_INFO.simple.annualPrice, features: TIER_FA_INFO.simple.features },
   professional: { nameFa: 'پیشرفته', description: TIER_FA_INFO.professional.description, price: TIER_FA_INFO.professional.annualPrice, features: TIER_FA_INFO.professional.features },
   enterprise: { nameFa: 'حرفه‌ای', description: TIER_FA_INFO.enterprise.description, price: TIER_FA_INFO.enterprise.annualPrice, features: TIER_FA_INFO.enterprise.features },
 };
 
-// ★ تخفیف دوره‌ها نسبت به ۱۰ سال اشتراک سالانه (v9.0)
-//   - annual: تخفیف ندارد (قیمت پایه)
-//   - lifetime: تخفیف نسبت به ۱۰ سال اشتراک سالانه
-//   - monthly: برابر با annual (به‌خاطر حذف monthly در v9.0)
 export const CYCLE_DISCOUNT: Record<BillingCycle, number> = {
   monthly: 0,
-  annual: 0, // در قیمت‌گذاری واقعی، تخفیف در خود قیمت سالانه لحاظ شده
-  lifetime: 0, // ★★★ v9.0: تخفیف مادام‌العمر در خود قیمت لحاظ شده
+  annual: 0,
+  lifetime: 0,
 };
 
-// ─── Billing Cycle Labels (v9.0) ──────────────────────────────────
-
 export const BILLING_CYCLE_LABELS: Record<BillingCycle, string> = {
-  monthly: 'سالانه',  // ★★★ v9.0: backward compat — monthly دیگر استفاده نمی‌شود
+  monthly: 'سالانه',
   annual: 'سالانه',
   lifetime: 'مادام‌العمر',
 };
@@ -243,38 +226,26 @@ export interface ParsedPlanName {
   billingCycle: BillingCycle;
 }
 
-/**
- * تبدیل نام قدیمی پلن به فرمت جدید
- * ★★★ v9.0: تبدیل monthly → annual، پشتیبانی از lifetime
- * ★★★ v3.0: رایگان به ساده مپ می‌شه
- */
 export function parseLegacyPlanName(planName: string): ParsedPlanName {
-  // ★★★ v9.0: default 'annual' (نه 'monthly')
   if (!planName) return { tierName: 'simple', billingCycle: 'annual' };
 
   const lower = planName.toLowerCase();
 
-  // ★ رایگان/trial → simple / annual
   if (lower === 'trial' || lower === 'free') {
     return { tierName: 'simple', billingCycle: 'annual' };
   }
 
-  // ★ فرمت قدیمی: simple_monthly, professional_annual, etc
   if (planName.includes('_')) {
     const parts = planName.split('_');
     const tierName = parts[0];
     const cycle = parts[1] as string;
     const validTiers = ['simple', 'professional', 'enterprise'];
-    // ★★★ v9.0: اضافه شدن 'lifetime' به دوره‌های معتبر
     const validCycles: BillingCycle[] = ['monthly', 'annual', 'lifetime'];
 
-    // ★ قبول کردن دوره‌های قدیمی و تبدیل به نزدیک‌ترین
-    //   v9.0: quarterly/semiannual → annual (نه monthly)
     if (cycle === 'quarterly' || cycle === 'semiannual') {
       return { tierName: validTiers.includes(tierName) ? tierName : 'simple', billingCycle: 'annual' };
     }
 
-    // ★★★ v9.0: تبدیل monthly → annual (چون monthly دیگر پشتیبانی نمی‌شود)
     if (cycle === 'monthly') {
       return { tierName: validTiers.includes(tierName) ? tierName : 'simple', billingCycle: 'annual' };
     }
@@ -284,23 +255,17 @@ export function parseLegacyPlanName(planName: string): ParsedPlanName {
     }
   }
 
-  // ★ نام ساده پلن
   const validTiers = ['simple', 'professional', 'enterprise'];
   if (validTiers.includes(lower)) {
-    // ★★★ v9.0: default 'annual' (نه 'monthly')
     return { tierName: lower, billingCycle: 'annual' };
   }
 
-  // ★ فارسی — v9.0: نام‌های جدید و قدیمی
   if (lower.includes('پایه') || lower.includes('ساده')) return { tierName: 'simple', billingCycle: 'annual' };
   if (lower.includes('پیشرفته')) return { tierName: 'professional', billingCycle: 'annual' };
-  // ★★★ v9.0: «حرفه‌ای» در نسخه جدید به enterprise اشاره دارد
   if (lower.includes('حرفه')) return { tierName: 'enterprise', billingCycle: 'annual' };
   if (lower.includes('سازمانی')) return { tierName: 'enterprise', billingCycle: 'annual' };
 
-  // ★★★ v9.0: تشخیص lifetime از نام پلن
   if (lower.includes('lifetime') || lower.includes('مادام‌العمر')) {
-    // تشخیص tier از نام
     let tier = 'simple';
     if (lower.includes('professional') || lower.includes('پیشرفته')) tier = 'professional';
     else if (lower.includes('enterprise') || lower.includes('حرفه') || lower.includes('سازمانی')) tier = 'enterprise';
@@ -315,29 +280,22 @@ export function getPlanLimits(tierName: string): PlanLimitDef {
   return PLAN_LIMITS[tierName] || PLAN_LIMITS.simple;
 }
 
-/** ★ در v3.0 همیشه false — دیگه دیتابیس اختصاصی نداریم */
 export function planNeedsIsolation(_tierName: string): boolean {
   return false;
 }
 
-/**
- * تعداد روزهای یک دوره اشتراک
- * ★★★ v9.0: lifetime → 0 (یعنی «نامحدود» — باید در کد به‌عنوان نامحدود تفسیر شود)
- */
 export function getBillingDurationDays(cycle: BillingCycle): number {
   switch (cycle) {
-    case 'monthly': return 365;  // ★★★ v9.0: backward compat — monthly دیگر استفاده نمی‌شود، برابر annual
+    case 'monthly': return 365;
     case 'annual': return 365;
-    case 'lifetime': return 0;   // ★★★ v9.0: 0 = نامحدود / بدون انقضا
+    case 'lifetime': return 0;
     default: return 365;
   }
 }
 
-/** ★★★ v9.0: دریافت قیمت بر اساس پلن و دوره (پشتیبانی از lifetime) */
 export function getPlanPrice(tierName: string, cycle: BillingCycle): number {
   const info = TIER_FA_INFO[tierName];
   if (!info) return 0;
-  // ★★★ v9.0: lifetime → lifetimePrice، annual/monthly → annualPrice
   if (cycle === 'lifetime') return info.lifetimePrice;
   return info.annualPrice;
 }
@@ -371,7 +329,7 @@ export function hasNewSchemaFieldsSync(): boolean {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  بررسی وضعیت اشتراک (Subscription Status)
+//  بررسی وضعیت اشتراک (Subscription Status) — ★★★ v9.6.0 به‌روز شده
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function checkSubscriptionStatus(tenantId: string): Promise<SubscriptionStatusResult> {
@@ -379,16 +337,20 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
     isActive: true,
     isTrial: false,
     isExpired: false,
-    // ★★★ v9.0: default -1 (نامحدود) برای حالت fallback — در عمل باید از tenant بخوانیم
     daysRemaining: -1,
     tierName: 'simple',
-    tierNameFa: 'پایه',  // ★★★ v9.0: «ساده» → «پایه»
-    billingCycle: 'annual',  // ★★★ v9.0: default 'annual' (نه 'monthly')
+    tierNameFa: 'پایه',
+    billingCycle: 'annual',
     expiresAt: null,
     planTierId: null,
     isIsolated: false,
     dbName: null,
     isLifetime: false,
+    // ★★★ v9.6.0 defaults
+    status: 'active',
+    canCreate: true,
+    canRead: true,
+    message: 'اشتراک فعال است.',
   };
 
   try {
@@ -399,16 +361,14 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
 
     if (!tenant) return defaultResult;
 
-    // ★★★ v9.0: تشخیص پلن مادام‌العمر
     const tenantBillingCycle = (tenant.billingCycle as BillingCycle) || 'annual'
     const isLifetime = isLifetimeCycle(tenantBillingCycle)
 
     let tierName = 'simple';
     let billingCycle: BillingCycle = tenantBillingCycle;
     let planTierId: number | null = null;
-    let tierNameFa = 'پایه';  // ★★★ v9.0: default «پایه»
+    let tierNameFa = 'پایه';
 
-    // ★ اگر schema جدید فعال باشه، اطلاعات رو از PlanTier بخون
     if (tenant.planTierId) {
       planTierId = tenant.planTierId;
       try {
@@ -420,7 +380,6 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
           tierNameFa = planTier.nameFa || TIER_FA_INFO[planTier.name]?.nameFa || planTier.name;
         }
       } catch { /* ignore */ }
-      // ★★★ v9.0: اگر tenant.billingCycle از نوع monthly است، به annual تبدیل کن
       if (billingCycle === 'monthly') {
         billingCycle = 'annual';
       }
@@ -436,28 +395,55 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
       return {
         isActive: tenant.status !== 'suspended',
         isTrial: false,
-        isExpired: false,  // ★ مادام‌العمر هرگز منقضی نمی‌شود
-        daysRemaining: -1, // ★ -1 = نامحدود
+        isExpired: false,
+        daysRemaining: -1,
         tierName,
         tierNameFa,
         billingCycle: 'lifetime',
-        expiresAt: null,   // ★ null برای مادام‌العمر
+        expiresAt: null,
         planTierId,
         isIsolated: false,
         dbName: null,
         isLifetime: true,
+        status: 'active',
+        canCreate: true,
+        canRead: true,
+        message: 'اشتراک مادام‌العمر فعال است.',
       };
     }
 
-    // ★★★ برای پلن‌های سالانه — منطق قبلی
+    // ★★★ v9.6.0: منطق ۳ مرحله‌ای انقضا
     const now = new Date();
     const expiresAt = tenant.expiresAt ? new Date(tenant.expiresAt) : null;
-    const isExpired = expiresAt ? expiresAt < now : false;
-    const daysRemaining = expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))) : 999;
+    
+    if (!expiresAt) {
+        return { ...defaultResult, tierName, tierNameFa, billingCycle, planTierId };
+    }
+
+    const diffTime = expiresAt.getTime() - now.getTime();
+    const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const isExpired = daysRemaining <= 0;
+
+    let status: SubscriptionStatusType = 'active';
+    let canCreate = true;
+    let canRead = true;
+    let message = 'اشتراک فعال است.';
+
+    if (daysRemaining > 0 && daysRemaining <= 7) {
+      status = 'warning';
+      message = `اشتراک شما ${daysRemaining} روز دیگر منقضی می‌شود. لطفاً برای تمدید اقدام کنید.`;
+    } else if (daysRemaining <= 0 && daysRemaining >= -7) {
+      status = 'grace_period';
+      message = `اشتراک شما منقضی شده است. شما ${Math.abs(daysRemaining)} روز فرصت دارید برای تمدید و حفظ دسترسی کامل.`;
+    } else if (daysRemaining < -7) {
+      status = 'read_only';
+      canCreate = false;
+      message = 'اشتراک شما منقضی شده است. شما در حالت فقط خواندنی هستید. برای ثبت اطلاعات جدید، لطفاً اشتراک خود را تمدید کنید.';
+    }
 
     return {
-      isActive: !isExpired,
-      isTrial: false, // ★ همیشه false در v3.0
+      isActive: status === 'active' || status === 'warning' || status === 'grace_period',
+      isTrial: false,
       isExpired,
       daysRemaining,
       tierName,
@@ -465,9 +451,13 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
       billingCycle,
       expiresAt,
       planTierId,
-      isIsolated: false, // ★ همیشه false در v3.0
-      dbName: null,      // ★ همیشه null در v3.0
+      isIsolated: false,
+      dbName: null,
       isLifetime: false,
+      status,
+      canCreate,
+      canRead,
+      message,
     };
   } catch (error: any) {
     console.warn('[PlanLimits] checkSubscriptionStatus error:', error.message);
@@ -526,7 +516,7 @@ export async function checkPlanLimit(
     if (currentCount === undefined) {
       try {
         const { db } = await import('@/lib/db');
-        const tenantDb = db.client; // ★ در v3.0 همون client
+        const tenantDb = db.client;
 
         if (resourceType === 'users') {
           current = await tenantDb.storeUser.count({ where: { tenantId, isActive: true } });
@@ -543,7 +533,6 @@ export async function checkPlanLimit(
     const remaining = limit > 0 ? Math.max(0, limit - current) : 999999;
     const percentUsed = limit > 0 ? Math.round((current / limit) * 100) : 0;
 
-    // ★★★ v3.2: اگه limit === 0 یعنی نامحدود — همیشه allowed
     return {
       allowed: limit === 0 ? true : current < limit,
       current,
@@ -610,7 +599,7 @@ export async function enforcePlanLimit(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  دریافت اطلاعات پلن Tenant
+//  دریافت اطلاعات پلن Tenant — ★★★ v9.6.0 به‌روز شده
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function getTenantPlanInfo(tenantId: string): Promise<TenantPlanInfo> {
@@ -632,8 +621,12 @@ export async function getTenantPlanInfo(tenantId: string): Promise<TenantPlanInf
     dbType: 'shared',
     planTierId: status.planTierId,
     expiresAt: status.expiresAt,
-    // ★★★ v9.0: flag جدید برای مشخص کردن پلن مادام‌العمر
     isLifetime: status.isLifetime || false,
+    // ★★★ v9.6.0: فیلدهای جدید
+    status: status.status,
+    canCreate: status.canCreate,
+    canRead: status.canRead,
+    message: status.message,
   };
 }
 
@@ -648,7 +641,6 @@ export async function getUpgradeOptions(tenantId: string): Promise<UpgradeOption
     const options: UpgradeOption[] = [];
 
     const tiers = ['simple', 'professional', 'enterprise'];
-    // ★★★ v9.0: فقط annual و lifetime (نه monthly)
     const cycles: BillingCycle[] = ['annual', 'lifetime'];
 
     for (let i = currentTierIndex + 1; i < tiers.length; i++) {
@@ -687,19 +679,15 @@ export async function getRenewOptions(tenantId: string): Promise<RenewOption[]> 
     const faInfo = TIER_FA_INFO[status.tierName];
     const options: RenewOption[] = [];
 
-    // ★★★ v9.0: اگر tenant روی پلن مادام‌العمر است → فقط گزینه‌های ارتقا (نه تمدید)
     if (status.isLifetime) {
-      // ★ مادام‌العمر نیاز به تمدید ندارد — گزینه خالی برگردان
       return [];
     }
 
-    // ★★★ v9.0: فقط annual و lifetime (نه monthly)
     const cycles: BillingCycle[] = ['annual', 'lifetime'];
 
     for (const cycle of cycles) {
       const durationDays = getBillingDurationDays(cycle);
       const price = getPlanPrice(status.tierName, cycle);
-      // ★★★ v9.0: محاسبه تخفیف نسبت به ۱۰ سال اشتراک سالانه (برای lifetime)
       const tenYearAnnual = faInfo.annualPrice * 10;
       const discount = cycle === 'lifetime' && tenYearAnnual > 0
         ? Math.round((1 - price / tenYearAnnual) * 100)
@@ -722,7 +710,7 @@ export async function getRenewOptions(tenantId: string): Promise<RenewOption[]> 
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  ارتقا پلن (Upgrade Plan) — ساده‌شده در v3.0
+//  ارتقا پلن (Upgrade Plan)
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function upgradePlan(
@@ -734,7 +722,7 @@ export async function upgradePlan(
     const { db } = await import('@/lib/db');
 
     let planTierId: number | null = null;
-    let durationDays = 365;  // ★★★ v9.0: default 365 (نه 30)
+    let durationDays = 365;
 
     try {
       const planTier = await db.client.planTier.findFirst({
@@ -757,7 +745,6 @@ export async function upgradePlan(
       }
     } catch { /* ignore */ }
 
-    // ★★★ v9.0: اگر پلن مادام‌العمر است → expiresAt = null
     const now = new Date();
     const isLifetime = isLifetimeCycle(newBillingCycle) || durationDays === 0;
     const expiresAt = isLifetime ? null : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
@@ -774,7 +761,7 @@ export async function upgradePlan(
     const updateData: any = {
       planName: `${newTierName}_${newBillingCycle}`,
       soldAt: now,
-      expiresAt,  // ★★★ v9.0: null برای lifetime
+      expiresAt,
     };
 
     if (planTierId) {
@@ -787,7 +774,6 @@ export async function upgradePlan(
       data: updateData,
     });
 
-    // ★★★ v3.0: دیگه نیاز به provisioning نیست
     return { success: true };
   } catch (error: any) {
     console.error('[PlanLimits] upgradePlan error:', error.message);
@@ -835,13 +821,13 @@ export async function renewSubscription(
 export async function setInitialPlan(
   tenantId: string,
   tierName: string,
-  billingCycle: BillingCycle = 'annual'  // ★★★ v9.0: default 'annual' (نه 'monthly')
+  billingCycle: BillingCycle = 'annual'
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const { db } = await import('@/lib/db');
 
     let planTierId: number | null = null;
-    let durationDays = 365;  // ★★★ v9.0: default 365 (نه 30)
+    let durationDays = 365;
 
     try {
       const planTier = await db.client.planTier.findFirst({
@@ -864,7 +850,6 @@ export async function setInitialPlan(
       }
     } catch { /* ignore */ }
 
-    // ★★★ v9.0: اگر پلن مادام‌العمر است → expiresAt = null
     const now = new Date();
     const isLifetime = isLifetimeCycle(billingCycle) || durationDays === 0;
     const expiresAt = isLifetime ? null : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
@@ -872,7 +857,7 @@ export async function setInitialPlan(
     const updateData: any = {
       planName: `${tierName}_${billingCycle}`,
       soldAt: now,
-      expiresAt,  // ★★★ v9.0: null برای lifetime
+      expiresAt,
     };
 
     if (planTierId) {
@@ -963,17 +948,14 @@ export async function getAllPlansWithPrices(dbClient?: any): Promise<PlanWithPri
     }
   }
 
-  // Fallback: داده‌های محلی
   let id = 1;
   for (const [name, limit] of Object.entries(PLAN_LIMITS)) {
     const faInfo = TIER_FA_INFO[name];
-    // ★★★ v9.0: فقط annual و lifetime (نه monthly)
     const cycles: BillingCycle[] = ['annual', 'lifetime'];
 
     const prices = cycles.map((cycle) => {
       const durationDays = getBillingDurationDays(cycle);
       const price = getPlanPrice(name, cycle);
-      // ★★★ v9.0: تخفیف مادام‌العمر نسبت به ۱۰ سال اشتراک سالانه
       const tenYearAnnual = faInfo.annualPrice * 10;
       const discount = cycle === 'lifetime' && tenYearAnnual > 0
         ? Math.round((1 - price / tenYearAnnual) * 100)
@@ -986,7 +968,7 @@ export async function getAllPlansWithPrices(dbClient?: any): Promise<PlanWithPri
       name,
       nameFa: faInfo.nameFa,
       description: faInfo.description,
-      price: faInfo.annualPrice,  // ★★★ v9.0: price پیش‌فرض = annualPrice
+      price: faInfo.annualPrice,
       dbType: 'shared',
       isTrial: false,
       trialDays: 0,
@@ -1003,11 +985,10 @@ export async function getAllPlansWithPrices(dbClient?: any): Promise<PlanWithPri
 
 // ═══════════════════════════════════════════════════════════════════════
 //  تابع کمکی: آیا پلن پولی است؟
-//  ★ در v3.0 همیشه true (رایگان حذف شد)
 // ═══════════════════════════════════════════════════════════════════════
 
 export function isPaidPlan(planName: string | null | undefined): boolean {
-  if (!planName) return true; // ★ پیش‌فرض: پولی
+  if (!planName) return true;
   const paidPlans = ['simple', 'professional', 'enterprise'];
   return paidPlans.includes(planName.toLowerCase()) || planName.toLowerCase().includes('simple') || planName.toLowerCase().includes('professional') || planName.toLowerCase().includes('enterprise');
 }

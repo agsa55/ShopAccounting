@@ -1,294 +1,121 @@
 // ============================================================================
-// src/app/api/backup/route.ts — GET/POST/DELETE (v3.1)
-// ShopAccounting — Unified Single Database Architecture
+// src/app/api/backup/restore/route.ts — بازیابی بکاپ
 // ============================================================================
-// ★★★ v3.1:
-//   ★ تمام query ها با tenantId فیلتر می‌شن
-//   ★ هنگام ایجاد پشتیبان، tenantId ذخیره می‌شه
-//   ★ هر فروشگاه فقط پشتیبان‌های خودش رو می‌بینه
+// ⚠️ این API داده‌های فعلی Tenant را پاک کرده و داده‌های بکاپ را جایگزین می‌کند
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import { withTenantIsolation } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-import { getUserFromRequest } from '@/lib/jwt'
+import { gunzip } from 'zlib'
+import { promisify } from 'util'
 
-// ═══════════════════════════════════════════════════════════════
-//  GET /api/backup — لیست پشتیبان‌های فروشگاه
-// ═══════════════════════════════════════════════════════════════
+const gunzipAsync = promisify(gunzip)
 
-export async function GET(request: NextRequest) {
-  try {
-    const user = await getUserFromRequest(request)
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'دسترسی غیرمجاز' },
-        { status: 401 }
-      )
-    }
-
-    const tenantId = user.tenantId
-    if (!tenantId) {
-      return NextResponse.json(
-        { success: false, error: 'شناسه فروشگاه نامشخص' },
-        { status: 400 }
-      )
-    }
-
-    // ★★★ v3.1: فیلتر با tenantId
-    const backups = await db.client.backup.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-    })
-
-    const formattedBackups = backups.map((b: any) => ({
-      id: b.id,
-      fileName: b.fileName,
-      fileSize: b.fileSize,
-      recordCount: b.recordCount,
-      size: formatFileSize(b.fileSize),
-      createdAt: b.createdAt.toISOString(),
-    }))
-
-    return NextResponse.json({
-      success: true,
-      data: { backups: formattedBackups },
-    })
-  } catch (error: any) {
-    console.error('[Backup GET] Error:', error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در بارگذاری پشتیبان‌ها' },
-      { status: 500 }
-    )
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  POST /api/backup — ایجاد پشتیبان جدید
-// ═══════════════════════════════════════════════════════════════
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = await getUserFromRequest(request)
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'دسترسی غیرمجاز' },
-        { status: 401 }
-      )
-    }
-
-    const tenantId = user.tenantId
-    if (!tenantId) {
-      return NextResponse.json(
-        { success: false, error: 'شناسه فروشگاه نامشخص' },
-        { status: 400 }
-      )
-    }
-
-    const tenantDb = db.client
-
-    // ─── جمع‌آوری داده‌ها برای پشتیبان ───
-    const backupData: any = {
-      _meta: {
-        exportDate: new Date().toISOString(),
-        tenantId,
-        version: '3.1',
-      },
-      products: [],
-      customers: [],
-      invoices: [],
-      invoiceItems: [],
-      invoicePayments: [],
-      installmentPlans: [],
-      installmentSchedules: [],
-      journalEntries: [],
-      categories: [],
-      accounts: [],
-      storeSettings: [],
-    }
-
-    let totalRecords = 0
-
+export const POST = withTenantIsolation(
+  async (req: NextRequest, ctx: any, tenant: any) => {
     try {
-      backupData.products = await tenantDb.product.findMany({ where: { tenantId } })
-      totalRecords += backupData.products.length
-    } catch {}
+      const tenantId = tenant.tenantId
+      const { backupId } = await req.json()
 
-    try {
-      backupData.customers = await tenantDb.customer.findMany({ where: { tenantId } })
-      totalRecords += backupData.customers.length
-    } catch {}
-
-    try {
-      backupData.invoices = await tenantDb.invoice.findMany({ where: { tenantId } })
-      totalRecords += backupData.invoices.length
-
-      const invoiceIds = backupData.invoices.map((inv: any) => inv.id)
-      if (invoiceIds.length > 0) {
-        try {
-          backupData.invoiceItems = await tenantDb.invoiceItem.findMany({
-            where: { invoiceId: { in: invoiceIds } },
-          })
-          totalRecords += backupData.invoiceItems.length
-        } catch {}
+      if (!backupId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه بکاپ الزامی است' },
+          { status: 400 }
+        )
       }
-    } catch {}
 
-    try {
-      backupData.invoicePayments = await tenantDb.invoicePayment.findMany({ where: { tenantId } })
-      totalRecords += backupData.invoicePayments.length
-    } catch {}
+      // ۱. دریافت بکاپ
+      const backup = await db.client.backup.findFirst({
+        where: { id: backupId, tenantId },
+      })
 
-    try {
-      backupData.installmentPlans = await tenantDb.installmentPlan.findMany({ where: { tenantId } })
-      totalRecords += backupData.installmentPlans.length
-
-      const planIds = backupData.installmentPlans.map((p: any) => p.id)
-      if (planIds.length > 0) {
-        try {
-          backupData.installmentSchedules = await tenantDb.installmentSchedule.findMany({
-            where: { planId: { in: planIds } },
-          })
-          totalRecords += backupData.installmentSchedules.length
-        } catch {}
+      if (!backup || !backup.data) {
+        return NextResponse.json(
+          { success: false, error: 'بکاپ یافت نشد' },
+          { status: 404 }
+        )
       }
-    } catch {}
 
-    try {
-      backupData.journalEntries = await tenantDb.journalEntry.findMany({ where: { tenantId } })
-      totalRecords += backupData.journalEntries.length
-    } catch {}
+      // ۲. باز کردن فشرده‌سازی
+      const buffer = Buffer.from(backup.data, 'base64')
+      const decompressed = await gunzipAsync(buffer)
+      const backupData = JSON.parse(decompressed.toString('utf8'))
 
-    try {
-      backupData.categories = await tenantDb.category.findMany({ where: { tenantId } })
-      totalRecords += backupData.categories.length
-    } catch {}
+      // ۳. پاک کردن داده‌های فعلی Tenant (به ترتیب معکوس وابستگی)
+      console.log(`[Restore] Clearing current data for tenant: ${tenantId}`)
+      
+      const clearOrder = [...TABLES_TO_BACKUP].reverse()
+      for (const tableName of clearOrder) {
+        try {
+          // @ts-ignore
+          const model = db.client[tableName.charAt(0).toLowerCase() + tableName.slice(1)]
+          if (model) {
+            await model.deleteMany({ where: { tenantId } })
+          }
+        } catch (err: any) {
+          console.warn(`[Restore] Error clearing ${tableName}:`, err.message)
+        }
+      }
 
-    try {
-      backupData.accounts = await tenantDb.account.findMany({ where: { tenantId } })
-      totalRecords += backupData.accounts.length
-    } catch {}
+      // ۴. درج داده‌های بکاپ (به ترتیب وابستگی)
+      console.log(`[Restore] Restoring data from backup...`)
+      let restoredCount = 0
 
-    try {
-      backupData.storeSettings = await tenantDb.storeSetting.findMany({ where: { tenantId } })
-      totalRecords += backupData.storeSettings.length
-    } catch {}
+      for (const tableName of TABLES_TO_BACKUP) {
+        const records = backupData[tableName]
+        if (!records || records.length === 0) continue
 
-    const jsonContent = JSON.stringify(backupData, null, 2)
-    const fileSize = Buffer.byteLength(jsonContent, 'utf-8')
-    const fileName = `backup-${new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)}.json`
+        try {
+          // @ts-ignore
+          const model = db.client[tableName.charAt(0).toLowerCase() + tableName.slice(1)]
+          if (!model) continue
 
-    // ★★★ v3.1: ذخیره در دیتابیس با tenantId
-    const backup = await db.client.backup.create({
-      data: {
-        id: `backup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        fileName,
-        fileSize,
-        recordCount: totalRecords,
-        data: jsonContent,
-        tenantId,  // ★★★ این فیلد حتماً باید ست بشه
-      },
-    })
+          // حذف tenantId از داده‌ها (چون در create مشخص می‌کنیم) و درج دسته‌ای
+          const cleanedRecords = records.map((r: any) => {
+            const { tenantId: _, ...rest } = r
+            return { ...rest, tenantId }
+          })
 
-    console.log('[Backup POST] Backup created', {
-      id: backup.id,
-      tenantId,
-      fileName,
-      fileSize,
-      recordCount: totalRecords,
-    })
+          // درج دسته‌ای در گروه‌های ۱۰۰ تایی
+          for (let i = 0; i < cleanedRecords.length; i += 100) {
+            const batch = cleanedRecords.slice(i, i + 100)
+            // @ts-ignore
+            await model.createMany({ data: batch, skipDuplicates: true })
+          }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: backup.id,
-        fileName,
-        fileSize,
-        recordCount: totalRecords,
-        size: formatFileSize(fileSize),
-        createdAt: backup.createdAt.toISOString(),
-      },
-    })
-  } catch (error: any) {
-    console.error('[Backup POST] Error:', error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در ایجاد پشتیبان' },
-      { status: 500 }
-    )
+          restoredCount += records.length
+          console.log(`[Restore] ${tableName}: ${records.length} records restored`)
+        } catch (err: any) {
+          console.error(`[Restore] Error restoring ${tableName}:`, err.message)
+        }
+      }
+
+      console.log(`[Restore] ✅ Restore completed: ${restoredCount} records`)
+
+      return NextResponse.json({
+        success: true,
+        data: { restoredCount },
+      })
+    } catch (error: any) {
+      console.error('[Restore] Error:', error)
+      return NextResponse.json(
+        { success: false, error: 'خطا در بازیابی: ' + error.message },
+        { status: 500 }
+      )
+    }
   }
-}
+)
 
-// ═══════════════════════════════════════════════════════════════
-//  DELETE /api/backup — حذف پشتیبان
-// ═══════════════════════════════════════════════════════════════
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const user = await getUserFromRequest(request)
-
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'دسترسی غیرمجاز' },
-        { status: 401 }
-      )
-    }
-
-    const tenantId = user.tenantId
-
-    // ★★★ v3.1: قبول backupId از query param یا body
-    const { searchParams } = new URL(request.url)
-    let backupId = searchParams.get('id')
-
-    if (!backupId) {
-      try {
-        const body = await request.json()
-        backupId = body.backupId || body.id
-      } catch { /* body وجود نداره */ }
-    }
-
-    if (!backupId) {
-      return NextResponse.json(
-        { success: false, error: 'شناسه پشتیبان الزامی است' },
-        { status: 400 }
-      )
-    }
-
-    // ★★★ v3.1: بررسی tenantId
-    const existing = await db.client.backup.findFirst({
-      where: { id: backupId, tenantId },
-    })
-
-    if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'پشتیبان یافت نشد' },
-        { status: 404 }
-      )
-    }
-
-    await db.client.backup.delete({
-      where: { id: backupId },
-    })
-
-    console.log('[Backup DELETE] Deleted', { backupId, tenantId })
-
-    return NextResponse.json({
-      success: true,
-      message: 'پشتیبان با موفقیت حذف شد',
-    })
-  } catch (error: any) {
-    console.error('[Backup DELETE] Error:', error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در حذف پشتیبان' },
-      { status: 500 }
-    )
-  }
-}
-
-// ─── Helper ───
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+// لیست جداول (همانند backup/route.ts)
+const TABLES_TO_BACKUP = [
+  'StoreSetting', 'SmsSettings', 'MoidianSettings', 'PaymentGateway', 'PosDevice',
+  'Branch', 'Warehouse', 'Category', 'Unit', 'Account',
+  'Customer', 'Supplier', 'Product', 'StockLevel',
+  'FiscalYear', 'JournalEntry', 'JournalEntryLine', 'InitialBalance', 'FixedAsset',
+  'Invoice', 'InvoiceItem', 'InvoicePayment', 'InstallmentPlan', 'InstallmentSchedule',
+  'PurchaseInvoice', 'PurchaseInvoiceItem',
+  'StockMovement', 'StockCount', 'StockCountItem',
+  'Check', 'CardPayment', 'OnlinePayment',
+  'StoreUser', 'Ticket', 'TicketMessage', 'SmsLog', 'RecurringJournal', 'AuditLog',
+] as const
