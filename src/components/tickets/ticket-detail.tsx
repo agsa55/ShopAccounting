@@ -64,6 +64,11 @@ interface TicketDetail {
 }
 
 // ─── کمک‌تابع‌ها ────────────────────────────────────────────────
+function toFaNum(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return ''
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+}
+
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {}
   const token = localStorage.getItem('token')
@@ -555,7 +560,7 @@ export function TicketDetail() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-[10px] text-gray-400 font-mono" dir="ltr">
-              {ticket.ticketNumber}
+              {toFaNum(ticket.ticketNumber)}
             </span>
             <Badge className={`text-[10px] ${statusCfg.bg} ${statusCfg.color}`}>
               <StatusIcon className="w-3 h-3 ml-1" />
@@ -652,7 +657,7 @@ export function TicketDetail() {
                               rel="noopener noreferrer"
                               className="text-[10px] text-blue-600 underline hover:text-blue-800"
                             >
-                              پیوست {i + 1}
+                              پیوست {toFaNum(i + 1)}
                             </a>
                           ))}
                         </div>
@@ -696,7 +701,7 @@ export function TicketDetail() {
               </Button>
             </div>
             <div className="flex items-center justify-between mt-1.5">
-              <p className="text-[10px] text-gray-400">{reply.length}/5000</p>
+              <p className="text-[10px] text-gray-400">{toFaNum(reply.length)}/5000</p>
               <Button
                 variant="ghost"
                 size="sm"
@@ -748,7 +753,7 @@ export function TicketDetail() {
           <CardContent className="p-3">
             <div className="flex items-center gap-2 mb-1">
               <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-              <span className="text-xs font-medium text-amber-700">امتیاز شما: {ticket.rating} از ۵</span>
+              <span className="text-xs font-medium text-amber-700">امتیاز شما: {toFaNum(ticket.rating)} از ۵</span>
             </div>
             {ticket.ratingComment && (
               <p className="text-xs text-amber-800 italic">«{ticket.ratingComment}»</p>
@@ -767,7 +772,7 @@ export function TicketDetail() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-gray-600">
-            آیا از بستن تیکت <span className="font-mono" dir="ltr">{ticket.ticketNumber}</span> مطمئن هستید؟
+            آیا از بستن تیکت <span className="font-mono" dir="ltr">{toFaNum(ticket.ticketNumber)}</span> مطمئن هستید؟
             <br />
             <span className="text-xs text-gray-500">
               پس از بستن، در صورت نیاز می‌توانید تیکت را مجدداً باز کنید.
@@ -825,7 +830,7 @@ export function TicketDetail() {
                 className="min-h-[80px] text-sm"
                 maxLength={500}
               />
-              <p className="text-[10px] text-gray-400 mt-1">{ratingComment.length}/500</p>
+              <p className="text-[10px] text-gray-400 mt-1">{toFaNum(ratingComment.length)}/500</p>
             </div>
           </div>
           <DialogFooter>

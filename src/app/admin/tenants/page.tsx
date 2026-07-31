@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import StatCard from '@/components/admin/stat-card';
-import { useRouter } from 'next/navigation'; // ← این خط اضافه شد
+import { useRouter } from 'next/navigation';
+import { Search, Store, Loader2, Phone } from 'lucide-react';
+
+// ★ تابع کمکی برای تبدیل اعداد به فارسی (برای آمارهای کلی)
+const toFaNum = (n: number | string | null | undefined): string => {
+  if (n === null || n === undefined) return '۰';
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)]);
+};
 
 export default function AdminTenantsPage() {
-  const router = useRouter(); // ← این خط اضافه شد
+  const router = useRouter();
   const [tenants, setTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [impersonatingId, setImpersonatingId] = useState<string | null>(null); // ← برای مدیریت لودینگ دکمه
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/tenants')
@@ -22,19 +29,18 @@ export default function AdminTenantsPage() {
 
   const filteredTenants = tenants.filter(t => 
     t.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.subDomain?.toLowerCase().includes(searchTerm.toLowerCase())
+    t.subDomain?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.ownerMobile?.includes(searchTerm)
   );
 
-  // آمار پلن‌ها (شامل trial)
   const stats = {
     total: tenants.length,
-    trial: tenants.filter(t => t.planName === 'trial').length, // ← اضافه شد
+    trial: tenants.filter(t => t.planName === 'trial').length,
     basic: tenants.filter(t => t.planName === 'simple' || t.planName === 'basic').length,
     professional: tenants.filter(t => t.planName === 'professional').length,
     enterprise: tenants.filter(t => t.planName === 'enterprise').length,
   };
 
-  // ← تابع جدید برای ورود به جای مستاجر
   const handleImpersonate = async (tenantId: string, subDomain: string) => {
     setImpersonatingId(tenantId);
     try {
@@ -45,9 +51,7 @@ export default function AdminTenantsPage() {
       const data = await res.json();
       
       if (res.ok && data.success) {
-        // ریدایرکت سخت (Hard Redirect) برای اعمال کوکی جدید
-        // اگر ساختار روتینگ شما متفاوت است (مثلاً /dashboard)، آن را تغییر دهید
-      window.location.href = `/${subDomain}/dashboard`;
+        window.location.href = `/${subDomain}/dashboard`;
       } else {
         alert(data.error || 'خطا در ورود به پنل');
         setImpersonatingId(null);
@@ -64,70 +68,83 @@ export default function AdminTenantsPage() {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#7C7BEB] mx-auto mb-3"></div>
-          <p className="text-gray-500 text-xs">در حال بارگذاری...</p>
+          <p className="text-gray-500 text-sm">در حال بارگذاری...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* هدر */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-lg font-bold text-gray-800">مدیریت فروشگاه‌ها</h1>
-          <p className="text-[11px] text-gray-500 mt-0.5">لیست کامل فروشگاه‌های ثبت‌نام شده</p>
+          <h1 className="text-xl font-bold text-gray-800">مدیریت فروشگاه‌ها</h1>
+          <p className="text-sm text-gray-500 mt-1">لیست کامل فروشگاه‌های ثبت‌نام شده در سیستم</p>
         </div>
       </div>
 
       {/* کارت‌های آماری پلن‌ها */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5"> {/* ← تغییر به 5 ستون برای جای دادن پلن تستی */}
-        <StatCard title="کل فروشگاه‌ها" value={stats.total} icon="🏪" gradient="from-[#7C7BEB] to-[#5B5AC7]" subtitle="همه پلن‌ها" />
-        <StatCard title="پلن تستی" value={stats.trial} icon="🎁" gradient="from-green-400 to-green-600" subtitle="دمو ۳ روزه" />
-        <StatCard title="پلن پایه" value={stats.basic} icon="🥉" gradient="from-gray-400 to-gray-500" subtitle="اشتراک ساده" />
-        <StatCard title="پلن پیشرفته" value={stats.professional} icon="🥈" gradient="from-blue-400 to-blue-600" subtitle="اشتراک حرفه‌ای" />
-        <StatCard title="پلن سازمانی" value={stats.enterprise} icon="🥇" gradient="from-purple-400 to-purple-600" subtitle="اشتراک سازمانی" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <StatCard title="کل فروشگاه‌ها" value={toFaNum(stats.total)} icon={<Store className="w-5 h-5" />} gradient="from-[#7C7BEB] to-[#5B5AC7]" subtitle="همه پلن‌ها" />
+        <StatCard title="پلن تستی" value={toFaNum(stats.trial)} icon="🎁" gradient="from-green-400 to-green-600" subtitle="دمو ۳ روزه" />
+        <StatCard title="پلن پایه" value={toFaNum(stats.basic)} icon="🥉" gradient="from-gray-400 to-gray-500" subtitle="اشتراک ساده" />
+        <StatCard title="پلن پیشرفته" value={toFaNum(stats.professional)} icon="🥈" gradient="from-blue-400 to-blue-600" subtitle="اشتراک حرفه‌ای" />
+        <StatCard title="پلن سازمانی" value={toFaNum(stats.enterprise)} icon="🥇" gradient="from-purple-400 to-purple-600" subtitle="اشتراک سازمانی" />
       </div>
 
       {/* جستجو */}
-      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100">
-        <input
-          type="text"
-          placeholder="جستجو بر اساس نام فروشگاه یا ساب‌دامین..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB] focus:border-transparent outline-none transition text-xs"
-        />
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="relative">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="جستجو بر اساس نام، ساب‌دامین یا شماره تماس..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white"
+          />
+        </div>
       </div>
 
       {/* جدول */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right">
             <thead className="bg-[#F9F8FF] border-b border-gray-100">
               <tr>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB]">نام فروشگاه</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB] hidden sm:table-cell">ساب‌دامین</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB]">پلن</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB]">وضعیت</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB] hidden md:table-cell">روز باقی‌مانده</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB] hidden lg:table-cell">تیکت‌ها</th>
-                <th className="px-3 py-2.5 font-semibold text-[11px] text-[#7C7BEB]">عملیات</th>
+                {/* ★ افزایش سایز فونت هدر جدول به text-xs */}
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB]">نام فروشگاه</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB] hidden sm:table-cell">ساب‌دامین</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB] hidden md:table-cell">شماره تماس</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB]">پلن</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB]">وضعیت</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB] hidden lg:table-cell">زمان باقی‌مانده</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB] hidden xl:table-cell">تیکت‌ها</th>
+                <th className="px-4 py-3 font-semibold text-xs text-[#7C7BEB]">عملیات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredTenants.map((tenant: any) => (
-                <tr key={tenant.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-3 py-2.5">
-                    <div className="text-xs font-medium text-gray-800">{tenant.companyName || 'بدون نام'}</div>
-                    <div className="text-[10px] text-gray-400 sm:hidden font-mono">{tenant.subDomain}</div>
+                <tr key={tenant.id} className="hover:bg-gray-50/70 transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="text-sm font-semibold text-gray-800">{tenant.companyName || 'بدون نام'}</div>
+                    <div className="text-xs text-gray-400 sm:hidden font-mono mt-0.5">{tenant.subDomain}</div>
                   </td>
-                  <td className="px-3 py-2.5 hidden sm:table-cell">
-                    <span className="text-[10px] text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">{tenant.subDomain}</span>
+                  <td className="px-4 py-3 hidden sm:table-cell">
+                    <span className="text-xs text-gray-600 font-mono bg-gray-100 px-2.5 py-1 rounded-md">{tenant.subDomain}</span>
                   </td>
-                  <td className="px-3 py-2.5">
-                    {/* ← اصلاح شرط نمایش نام پلن برای شامل شدن trial */}
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-medium border ${
+                  
+                  {/* ★ ستون جدید شماره تماس با آیکون و اعداد فارسی */}
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <div className="text-right flex items-center gap-1.5 text-sm text-gray-700 font-mono" dir="rtl">
+                      <Phone className="w-3.5 h-3.5 text-gray-400" />
+                      {tenant.ownerMobile}
+                    </div>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border ${
                       tenant.planName === 'enterprise' ? 'bg-purple-50 text-purple-700 border-purple-100' :
                       tenant.planName === 'professional' ? 'bg-blue-50 text-blue-700 border-blue-100' :
                       tenant.planName === 'trial' ? 'bg-green-50 text-green-700 border-green-100' :
@@ -138,38 +155,42 @@ export default function AdminTenantsPage() {
                        tenant.planName === 'trial' ? 'تستی (دمو)' : 'پایه'}
                     </span>
                   </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`flex items-center gap-1 text-[10px] font-medium ${
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
                       tenant.status === 'active' ? 'text-green-600' : 'text-red-600'
                     }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${tenant.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                      <span className={`w-2 h-2 rounded-full ${tenant.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`}></span>
                       {tenant.status === 'active' ? 'فعال' : 'غیرفعال'}
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 hidden md:table-cell">
-                    {tenant.billingCycle === 'lifetime' ? (
-                      <span className="text-green-600 font-medium text-[10px] bg-green-50 px-2 py-1 rounded">مادام‌العمر</span>
-                    ) : (
-                      <span className={tenant.remainingDays <= 7 ? 'text-red-600 font-bold text-[10px]' : 'text-gray-600 text-[10px]'}>
-                        {tenant.remainingDays} روز
-                      </span>
-                    )}
+                  
+                  {/* ★ نمایش دقیق زمان باقی‌مانده (محاسبه‌شده در API) */}
+                  <td className="px-4 py-3 hidden lg:table-cell">
+                    <span className={`text-xs font-semibold ${
+                      tenant.remainingTimeText === 'منقضی شده' ? 'text-red-600' :
+                      tenant.remainingTimeText === 'مادام‌العمر' ? 'text-green-600' :
+                      tenant.remainingDays <= 7 ? 'text-orange-600' : 'text-gray-700'
+                    }`}>
+                      {tenant.remainingTimeText}
+                    </span>
                   </td>
-                  <td className="px-3 py-2.5 text-gray-600 text-[11px] text-center hidden lg:table-cell">{tenant._count?.Tickets || 0}</td>
-                  <td className="px-3 py-2.5">
-                    {/* ← دکمه با تابع onClick و حالت Loading */}
+                  
+                  <td className="px-4 py-3 text-gray-600 text-sm text-center hidden xl:table-cell font-medium">
+                    {toFaNum(tenant._count?.Tickets || 0)}
+                  </td>
+                  <td className="px-4 py-3">
                     <button 
                       onClick={() => handleImpersonate(tenant.id, tenant.subDomain)}
                       disabled={impersonatingId === tenant.id}
-                      className={`text-[10px] font-medium px-2.5 py-1.5 rounded-md transition flex items-center gap-1 ${
+                      className={`text-xs font-medium px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${
                         impersonatingId === tenant.id 
                           ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                          : 'text-[#7C7BEB] hover:text-[#6a69d9] bg-[#EEEDFD] hover:bg-[#E0DFFA]'
+                          : 'text-[#7C7BEB] hover:text-[#6a69d9] bg-[#EEEDFD] hover:bg-[#E0DFFA] hover:shadow-sm'
                       }`}
                     >
                       {impersonatingId === tenant.id ? (
                         <>
-                          <span className="animate-spin h-3 w-3 border-2 border-[#7C7BEB] border-t-transparent rounded-full"></span>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           در حال ورود...
                         </>
                       ) : (
@@ -183,10 +204,12 @@ export default function AdminTenantsPage() {
           </table>
         </div>
         {filteredTenants.length === 0 && (
-          <div className="p-10 text-center">
-            <div className="text-3xl mb-2">🏪</div>
-            <p className="text-gray-400 text-xs">
-              {searchTerm ? 'نتیجه‌ای یافت نشد' : 'هنوز هیچ فروشگاهی ثبت‌نام نکرده است'}
+          <div className="p-12 text-center">
+            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Store className="w-8 h-8 text-gray-300" />
+            </div>
+            <p className="text-gray-500 text-sm font-medium">
+              {searchTerm ? 'نتیجه‌ای برای جستجوی شما یافت نشد' : 'هنوز هیچ فروشگاهی ثبت‌نام نکرده است'}
             </p>
           </div>
         )}

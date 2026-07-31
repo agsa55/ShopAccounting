@@ -67,6 +67,11 @@ interface Stats {
 }
 
 // ─── کمک‌تابع‌ها ────────────────────────────────────────────────
+function toFaNum(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return ''
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+}
+
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {}
   const token = localStorage.getItem('token')
@@ -85,9 +90,9 @@ function formatRelativeTime(iso: string): string {
   const diffDay = Math.floor(diffHr / 24)
 
   if (diffMin < 1) return 'همین حالا'
-  if (diffMin < 60) return `${diffMin} دقیقه پیش`
-  if (diffHr < 24) return `${diffHr} ساعت پیش`
-  if (diffDay < 7) return `${diffDay} روز پیش`
+  if (diffMin < 60) return `${toFaNum(diffMin)} دقیقه پیش`
+  if (diffHr < 24) return `${toFaNum(diffHr)} ساعت پیش`
+  if (diffDay < 7) return `${toFaNum(diffDay)} روز پیش`
 
   try {
     return new Intl.DateTimeFormat('fa-IR', {
@@ -246,7 +251,6 @@ export function TicketsPage() {
       const trulyOnline = isOnline && navigator.onLine
 
       // ★ v6.4: بارگذاری از کش در حالت آفلاین
-          // ★ v6.4: بارگذاری از کش در حالت آفلاین
       if (!trulyOnline) {
         try {
           const cachedTickets = await getCachedTickets()
@@ -351,7 +355,6 @@ export function TicketsPage() {
   }, [])
 
   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
-   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
   const handleSubmitTicket = async () => {
     if (form.subject.trim().length < 5) {
       toast({ title: 'توجه', description: 'موضوع حداقل باید ۵ کاراکتر باشد', variant: 'destructive' })
@@ -448,9 +451,6 @@ export function TicketsPage() {
         setCategoryFilter('all')
         setPriorityFilter('all')
         setPage(1)
-        
-        // نکته: به دلیل تغییر state فیلترها، useEffect به صورت خودکار loadTickets را 
-        // با فیلترهای جدید اجرا می‌کند و لیست به‌روز را از سرور می‌گیرد.
       } else {
         toast({
           title: 'خطا',
@@ -550,7 +550,7 @@ export function TicketsPage() {
                 }`}
               >
                 <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded text-[10px] font-bold ${s.bg} ${s.color}`}>
-                  {s.count}
+                  {toFaNum(s.count)}
                 </span>
                 <span className={`text-[11px] ${isActive ? 'text-emerald-700 font-medium' : 'text-gray-600'}`}>
                   {s.label}
@@ -695,20 +695,20 @@ export function TicketsPage() {
             ))}
           </div>
 
-          {/* ★★★ نمای جدولی برای دسکتاپ (حفظ شده) */}
+          {/* ★★★ نمای جدولی برای دسکتاپ (با فونت بزرگ‌تر و اعداد فارسی) */}
           <Card className="hidden md:block overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-100 border-b border-gray-200">
-                      <th className="text-right px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">شماره تیکت</th>
-                      <th className="text-right px-3 py-2 text-[11px] font-bold text-gray-600">موضوع</th>
-                      <th className="text-center px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">دسته</th>
-                      <th className="text-center px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">اولویت</th>
-                      <th className="text-center px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">وضعیت</th>
-                      <th className="text-center px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">پیام‌ها</th>
-                      <th className="text-center px-3 py-2 text-[11px] font-bold text-gray-600 whitespace-nowrap">تاریخ</th>
+                      <th className="text-right px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">شماره تیکت</th>
+                      <th className="text-right px-3 py-2 text-xs font-bold text-gray-600">موضوع</th>
+                      <th className="text-center px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">دسته</th>
+                      <th className="text-center px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">اولویت</th>
+                      <th className="text-center px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">وضعیت</th>
+                      <th className="text-center px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">پیام‌ها</th>
+                      <th className="text-center px-3 py-2 text-xs font-bold text-gray-600 whitespace-nowrap">تاریخ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -728,40 +728,40 @@ export function TicketsPage() {
                               {t.unreadCount > 0 && (
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
                               )}
-                              <span className="text-[11px] text-gray-500 font-mono" dir="ltr">
-                                {t.ticketNumber}
+                              <span className="text-sm text-gray-500 font-mono" dir="ltr">
+                                {toFaNum(t.ticketNumber)}
                               </span>
                               {t._isOffline && <CloudOff className="w-3 h-3 text-amber-500" />}
                             </div>
                           </td>
                           <td className="px-3 py-2.5 max-w-xs">
-                            <p className="text-xs font-medium text-gray-900 group-hover:text-emerald-700 truncate">
+                            <p className="text-sm font-medium text-gray-900 group-hover:text-emerald-700 truncate">
                               {t.subject}
-                              {t.rating && <span className="text-[10px] text-amber-500 mr-1">★{t.rating}</span>}
+                              {t.rating && <span className="text-xs text-amber-500 mr-1">★{toFaNum(t.rating)}</span>}
                             </p>
                           </td>
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <span className="text-[10px] text-gray-500">{t.categoryLabel}</span>
+                            <span className="text-xs text-gray-500">{t.categoryLabel}</span>
                           </td>
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <span className={`inline-block text-[10px] px-2 py-0.5 rounded ${priCfg.bg} ${priCfg.color}`}>
+                            <span className={`inline-block text-xs px-2 py-0.5 rounded ${priCfg.bg} ${priCfg.color}`}>
                               {priCfg.label}
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <span className={`inline-flex items-center gap-0.5 text-[10px] px-2 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
-                              <StatusIcon className="w-2.5 h-2.5" />
+                            <span className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded ${statusCfg.bg} ${statusCfg.color}`}>
+                              <StatusIcon className="w-3 h-3" />
                               {statusCfg.label}
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <span className="text-[10px] text-gray-500 inline-flex items-center gap-0.5">
-                              <MessageCircle className="w-3 h-3" />
-                              {t.messageCount}
+                            <span className="text-xs text-gray-500 inline-flex items-center gap-0.5">
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              {toFaNum(t.messageCount)}
                             </span>
                           </td>
                           <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                            <span className="text-[10px] text-gray-400">
+                            <span className="text-xs text-gray-400">
                               {formatRelativeTime(t.updatedAt)}
                             </span>
                           </td>
@@ -778,7 +778,7 @@ export function TicketsPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between gap-2 pt-2">
               <p className="text-xs text-gray-500">
-                نمایش {(page - 1) * 10 + 1} تا {Math.min(page * 10, total)} از {total} تیکت
+                نمایش {toFaNum((page - 1) * 10 + 1)} تا {toFaNum(Math.min(page * 10, total))} از {toFaNum(total)} تیکت
               </p>
               <div className="flex items-center gap-1">
                 <Button
@@ -790,7 +790,7 @@ export function TicketsPage() {
                   قبلی
                 </Button>
                 <span className="text-xs text-gray-600 px-2">
-                  صفحه {page} از {totalPages}
+                  صفحه {toFaNum(page)} از {toFaNum(totalPages)}
                 </span>
                 <Button
                   variant="outline"
@@ -837,7 +837,7 @@ export function TicketsPage() {
                 maxLength={500}
               />
               <p className="text-[10px] text-gray-400 mt-1">
-                {form.subject.length}/500 کاراکتر
+                {toFaNum(form.subject.length)}/500 کاراکتر
               </p>
             </div>
 
@@ -893,7 +893,7 @@ export function TicketsPage() {
                 maxLength={10000}
               />
               <p className="text-[10px] text-gray-400 mt-1">
-                {form.description.length}/10000 کاراکتر
+                {toFaNum(form.description.length)}/10000 کاراکتر
               </p>
             </div>
 
