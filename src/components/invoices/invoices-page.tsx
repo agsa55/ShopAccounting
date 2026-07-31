@@ -2073,27 +2073,27 @@ export default function InvoicesPage() {
               <div className="hidden md:block">
                 <Card>
                   <CardContent className="p-0">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto" dir="rtl">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-gray-50/80">
-                            <TableHead className="text-xs font-semibold">شماره</TableHead>
-                            <TableHead className="text-xs font-semibold">مشتری</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">شماره</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">مشتری</TableHead>
                             <TableHead className="text-xs font-semibold text-right">مبلغ کل</TableHead>
                             <TableHead className="text-xs font-semibold text-right hidden lg:table-cell">پرداخت شده</TableHead>
-                            <TableHead className="text-xs font-semibold hidden xl:table-cell">نوع پرداخت</TableHead>
-                            <TableHead className="text-xs font-semibold">وضعیت</TableHead>
-                            <TableHead className="text-xs font-semibold hidden lg:table-cell">تاریخ</TableHead>
-                            <TableHead className="text-xs font-semibold text-center">عملیات</TableHead>
+                            <TableHead className="text-right text-xs font-semibold hidden xl:table-cell">نوع پرداخت</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">وضعیت</TableHead>
+                            <TableHead className="text-right text-xs font-semibold hidden lg:table-cell">تاریخ</TableHead>
+                            <TableHead className="text-right text-xs font-semibold text-center">عملیات</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredInvoices.map((inv) => {
-                            const invNumber = inv.invoiceNumber || inv.number || '---'
-                            const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
-                            const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
-                            const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
-                            const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
+                         {filteredInvoices.map((inv) => {
+  const invNumber = toFaNum(inv.invoiceNumber || inv.number || '---')
+  const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
+  const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
+  const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
+  const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
 
                             return (
                             <TableRow

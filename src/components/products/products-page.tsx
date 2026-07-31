@@ -63,9 +63,68 @@ function toFaNum(n: number | string): string {
   return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
 }
 
+// ★ تبدیل اعداد به فرمت فارسی با جداکننده هزارگان (برای ورودی زنده)
+function formatToPersianWithCommas(value: string): string {
+  if (!value) return ''
+  // فقط اعداد (انگلیسی، فارسی و عربی) را نگه دار
+  const raw = value.replace(/[^\d\u06F0-\u06F9\u0660-\u0669]/g, '')
+  if (!raw) return ''
+  
+  // تبدیل به اعداد انگلیسی برای محاسبه
+  const eng = raw
+    .replace(/[\u06F0-\u06F9]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 0x0030))
+    .replace(/[\u0660-\u0669]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 0x0030))
+    
+  const num = parseInt(eng, 10)
+  if (isNaN(num)) return ''
+  
+  // فرمت با کامای انگلیسی و سپس تبدیل به فارسی
+  return toFaNum(num.toLocaleString('en-US'))
+}
+
+// ★ تبدیل مقدار فرمت‌شده فارسی به عدد استاندارد برای ذخیره در دیتابیس
+function parsePersianNumber(value: string): number {
+  if (!value) return 0
+  const raw = value.replace(/[^\d\u06F0-\u06F9\u0660-\u0669]/g, '')
+  if (!raw) return 0
+  const eng = raw
+    .replace(/[\u06F0-\u06F9]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 0x0030))
+    .replace(/[\u0660-\u0669]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 0x0030))
+  return parseFloat(eng) || 0
+}
+
+// ★ نمایش قیمت با اعداد فارسی، جداکننده و واحد ریال
+function formatPrice(price: number | string): string {
+  const num = typeof price === 'string' ? parseFloat(price) : price
+  if (isNaN(num)) return '۰ ریال'
+  return `${toFaNum(num.toLocaleString('en-US'))} ریال`
+}
+
 // ★ helper: نمایش نام واحد — فقط nameFa یا name، بدون هیچ عبارت اضافه
 function getUnitLabel(u: Unit): string {
   return u.nameFa || u.name
+}
+
+// ★ ترتیب دقیق واحدها طبق درخواست
+const PREFERRED_UNITS = [
+  'عدد', 'کیلوگرم', 'گرم', 'بسته', 'کارتن', 'بطری', 'جعبه',
+  'متر', 'سانتی متر', 'میلی متر', 'لیتر', 'میلی لیتر',
+  'حلقه', 'جفت', 'تن', 'جین', 'دسته', 'کیسه'
+]
+
+// ★ تابع مرتب‌سازی واحدها بر اساس ترتیب فوق
+function sortUnits(unitsList: Unit[]): Unit[] {
+  return [...unitsList].sort((a, b) => {
+    const nameA = a.nameFa || a.name
+    const nameB = b.nameFa || b.name
+    const indexA = PREFERRED_UNITS.indexOf(nameA)
+    const indexB = PREFERRED_UNITS.indexOf(nameB)
+    
+    if (indexA === -1 && indexB === -1) return 0
+    if (indexA === -1) return 1 // موارد ناآشنا به انتها بروند
+    if (indexB === -1) return -1
+    return indexA - indexB
+  })
 }
 
 // ══════════════════════════
@@ -135,6 +194,7 @@ interface AddForm {
   isActive: boolean
 }
 
+// ★ مقادیر پیش‌فرض اصلاح‌شده: مالیات ۰ و حداقل موجودی ۵
 const INITIAL_ADD_FORM: AddForm = {
   name: '',
   code: '',
@@ -144,8 +204,8 @@ const INITIAL_ADD_FORM: AddForm = {
   unitId: 'none',
   purchasePrice: '0',
   salePrice: '0',
-  taxRate: '9',
-  minStock: '0',
+  taxRate: '0',
+  minStock: '5',
   isActive: true,
 }
 
@@ -177,6 +237,7 @@ export default function ProductsPage() {
   const [generatingCode, setGeneratingCode] = useState(false)
 
   const [addForm, setAddForm] = useState<AddForm>(INITIAL_ADD_FORM)
+  // ★ مقادیر پیش‌فرض ادیت هم اصلاح شد
   const [editForm, setEditForm] = useState({
     id: '',
     name: '',
@@ -188,7 +249,7 @@ export default function ProductsPage() {
     purchasePrice: '0',
     salePrice: '0',
     taxRate: '0',
-    minStock: '0',
+    minStock: '5',
     isActive: true,
   })
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
@@ -573,11 +634,11 @@ export default function ProductsPage() {
       const body = {
         ...addForm,
         tenantId,
-        purchasePrice: parseFloat(addForm.purchasePrice) || 0,
-        salePrice: parseFloat(addForm.salePrice) || 0,
-        taxRate: parseFloat(addForm.taxRate) || 0,
+        purchasePrice: parsePersianNumber(addForm.purchasePrice),
+        salePrice: parsePersianNumber(addForm.salePrice),
+        taxRate: parsePersianNumber(addForm.taxRate),
         currentStock: 0,
-        minStock: parseFloat(addForm.minStock) || 0,
+        minStock: parsePersianNumber(addForm.minStock),
         categoryId: addForm.categoryId === 'none' ? null : addForm.categoryId,
         unitId: addForm.unitId === 'none' ? null : addForm.unitId,
         generateBarcode: addForm.generateBarcode && !addForm.barcode,
@@ -592,11 +653,11 @@ export default function ProductsPage() {
         name: addForm.name,
         categoryId: addForm.categoryId === 'none' ? null : addForm.categoryId,
         unitId: addForm.unitId === 'none' ? null : addForm.unitId,
-        purchasePrice: parseFloat(addForm.purchasePrice) || 0,
-        salePrice: parseFloat(addForm.salePrice) || 0,
-        taxRate: parseFloat(addForm.taxRate) || 0,
+        purchasePrice: parsePersianNumber(addForm.purchasePrice),
+        salePrice: parsePersianNumber(addForm.salePrice),
+        taxRate: parsePersianNumber(addForm.taxRate),
         currentStock: 0,
-        minStock: parseFloat(addForm.minStock) || 0,
+        minStock: parsePersianNumber(addForm.minStock),
         isActive: addForm.isActive,
         createdAt: new Date().toISOString(),
         _isOffline: true,
@@ -622,11 +683,11 @@ export default function ProductsPage() {
       const body = {
         ...addForm,
         tenantId,
-        purchasePrice: parseFloat(addForm.purchasePrice) || 0,
-        salePrice: parseFloat(addForm.salePrice) || 0,
-        taxRate: parseFloat(addForm.taxRate) || 0,
+        purchasePrice: parsePersianNumber(addForm.purchasePrice),
+        salePrice: parsePersianNumber(addForm.salePrice),
+        taxRate: parsePersianNumber(addForm.taxRate),
         currentStock: 0,
-        minStock: parseFloat(addForm.minStock) || 0,
+        minStock: parsePersianNumber(addForm.minStock),
         categoryId: addForm.categoryId === 'none' ? null : addForm.categoryId,
         unitId: addForm.unitId === 'none' ? null : addForm.unitId,
         generateBarcode: addForm.generateBarcode && !addForm.barcode,
@@ -688,10 +749,10 @@ export default function ProductsPage() {
         categoryId: editForm.categoryId === 'none' ? null : editForm.categoryId,
         unitId: editForm.unitId === 'none' ? null : editForm.unitId,
         unitLabel: editForm.unitLabel,
-        purchasePrice: parseFloat(editForm.purchasePrice) || 0,
-        salePrice: parseFloat(editForm.salePrice) || 0,
-        taxRate: parseFloat(editForm.taxRate) || 0,
-        minStock: parseFloat(editForm.minStock) || 0,
+        purchasePrice: parsePersianNumber(editForm.purchasePrice),
+        salePrice: parsePersianNumber(editForm.salePrice),
+        taxRate: parsePersianNumber(editForm.taxRate),
+        minStock: parsePersianNumber(editForm.minStock),
         isActive: editForm.isActive,
       }
       await addToSyncQueue('product', { method: 'PUT', url: '/api/products', body })
@@ -705,10 +766,10 @@ export default function ProductsPage() {
                 barcode: editForm.barcode || null,
                 categoryId: editForm.categoryId === 'none' ? null : editForm.categoryId,
                 unitId: editForm.unitId === 'none' ? null : editForm.unitId,
-                purchasePrice: parseFloat(editForm.purchasePrice) || 0,
-                salePrice: parseFloat(editForm.salePrice) || 0,
-                taxRate: parseFloat(editForm.taxRate) || 0,
-                minStock: parseFloat(editForm.minStock) || 0,
+                purchasePrice: parsePersianNumber(editForm.purchasePrice),
+                salePrice: parsePersianNumber(editForm.salePrice),
+                taxRate: parsePersianNumber(editForm.taxRate),
+                minStock: parsePersianNumber(editForm.minStock),
                 isActive: editForm.isActive,
                 _isOffline: true,
               }
@@ -740,10 +801,10 @@ export default function ProductsPage() {
           editForm.categoryId === 'none' ? null : editForm.categoryId,
         unitId: editForm.unitId === 'none' ? null : editForm.unitId,
         unitLabel: editForm.unitLabel,  // ★ ارسال واحد
-        purchasePrice: parseFloat(editForm.purchasePrice) || 0,
-        salePrice: parseFloat(editForm.salePrice) || 0,
-        taxRate: parseFloat(editForm.taxRate) || 0,
-        minStock: parseFloat(editForm.minStock) || 0,
+        purchasePrice: parsePersianNumber(editForm.purchasePrice),
+        salePrice: parsePersianNumber(editForm.salePrice),
+        taxRate: parsePersianNumber(editForm.taxRate),
+        minStock: parsePersianNumber(editForm.minStock),
         isActive: editForm.isActive,
       }
       const res = await fetch('/api/products', {
@@ -991,8 +1052,9 @@ export default function ProductsPage() {
                 <TableBody>
                   {products.map((product) => (
                     <TableRow key={product.id} className="hover:bg-emerald-50/50">
+                      {/* ★ کد به صورت فارسی */}
                       <TableCell className="text-xs font-mono" dir="ltr">
-                        {product.code}
+                        {toFaNum(product.code)}
                       </TableCell>
                     <TableCell className="text-xs font-medium">
   <div className="flex items-center gap-1.5">
@@ -1004,10 +1066,11 @@ export default function ProductsPage() {
     )}
   </div>
 </TableCell>
+                      {/* ★ بارکد به صورت فارسی */}
                       <TableCell className="text-xs" dir="ltr">
                         {product.barcode ? (
                           <span className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[11px]">
-                            {product.barcode}
+                            {toFaNum(product.barcode)}
                           </span>
                         ) : (
                           <span className="text-gray-400 text-[11px]">—</span>
@@ -1027,8 +1090,9 @@ export default function ProductsPage() {
                           {toFaNum(product.currentStock)}
                         </span>
                       </TableCell>
-                      <TableCell className="text-center text-xs" dir="ltr">
-                        {toFaNum(product.salePrice)}
+                      {/* ★ قیمت فروش با فرمت ریال و جداکننده */}
+                      <TableCell className="text-center text-xs font-medium text-gray-700" dir="rtl">
+                        {formatPrice(product.salePrice)}
                       </TableCell>
                       <TableCell className="text-center text-xs">
                         {product.unit
@@ -1086,8 +1150,9 @@ export default function ProductsPage() {
                       <p className="font-bold text-sm text-gray-900 truncate">
                         {product.name}
                       </p>
+                      {/* ★ کد به صورت فارسی */}
                       <p className="text-[10px] text-gray-400 font-mono mt-0.5" dir="ltr">
-                        {product.code}
+                        {toFaNum(product.code)}
                       </p>
                     </div>
                     <Badge
@@ -1106,14 +1171,14 @@ export default function ProductsPage() {
 )}
                   </div>
 
-                  {/* بارکد */}
+                  {/* ★ بارکد به صورت فارسی */}
                   {product.barcode && (
                     <div className="mb-2">
                       <span
                         className="font-mono text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded text-[10px]"
                         dir="ltr"
                       >
-                        {product.barcode}
+                        {toFaNum(product.barcode)}
                       </span>
                     </div>
                   )}
@@ -1146,10 +1211,11 @@ export default function ProductsPage() {
                         {toFaNum(product.currentStock)}
                       </span>
                     </div>
+                    {/* ★ قیمت فروش در کارت موبایل با فرمت ریال */}
                     <div className="flex items-center justify-between">
                       <span>قیمت فروش:</span>
                       <span className="text-gray-700 font-medium" dir="ltr">
-                        {toFaNum(product.salePrice)}
+                        {formatPrice(product.salePrice)}
                       </span>
                     </div>
                   </div>
@@ -1346,7 +1412,7 @@ export default function ProductsPage() {
               </Select>
             </div>
 
-            {/* ★★★ واحد — فقط نام، بدون پرانتز و سیمبول ★★★ */}
+            {/* ★★★ واحد — مرتب‌شده طبق ترتیب درخواستی ★★★ */}
             <div>
               <Label className="text-xs">واحد</Label>
               <Select
@@ -1358,7 +1424,7 @@ export default function ProductsPage() {
                 </SelectTrigger>
                 <SelectContent className="max-h-[200px] overflow-y-auto">
                   <SelectItem value="none">—</SelectItem>
-                  {units.map((u) => (
+                  {sortUnits(units).map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {getUnitLabel(u)}
                     </SelectItem>
@@ -1367,60 +1433,64 @@ export default function ProductsPage() {
               </Select>
             </div>
 
-            {/* قیمت خرید */}
+            {/* ★ قیمت خرید با فرمت زنده فارسی و جداکننده */}
             <div>
-              <Label className="text-xs">قیمت خرید (اختیاری)</Label>
+              <Label className="text-xs">قیمت خرید (ریال)</Label>
               <Input
-                type="number"
-                value={addForm.purchasePrice}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(addForm.purchasePrice)}
                 onChange={(e) =>
-                  setAddForm({ ...addForm, purchasePrice: e.target.value })
+                  setAddForm({ ...addForm, purchasePrice: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* قیمت فروش */}
+            {/* ★ قیمت فروش با فرمت زنده فارسی و جداکننده */}
             <div>
-              <Label className="text-xs">قیمت فروش (اختیاری)</Label>
+              <Label className="text-xs">قیمت فروش (ریال)</Label>
               <Input
-                type="number"
-                value={addForm.salePrice}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(addForm.salePrice)}
                 onChange={(e) =>
-                  setAddForm({ ...addForm, salePrice: e.target.value })
+                  setAddForm({ ...addForm, salePrice: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* مالیات */}
+            {/* ★ مالیات با فرمت زنده فارسی */}
             <div>
               <Label className="text-xs">درصد مالیات (اختیاری)</Label>
               <Input
-                type="number"
-                value={addForm.taxRate}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(addForm.taxRate)}
                 onChange={(e) =>
-                  setAddForm({ ...addForm, taxRate: e.target.value })
+                  setAddForm({ ...addForm, taxRate: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* حداقل موجودی */}
+            {/* ★ حداقل موجودی با فرمت زنده فارسی */}
             <div>
               <Label className="text-xs">حداقل موجودی هشدار</Label>
               <Input
-                type="number"
-                value={addForm.minStock}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(addForm.minStock)}
                 onChange={(e) =>
-                  setAddForm({ ...addForm, minStock: e.target.value })
+                  setAddForm({ ...addForm, minStock: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
-                placeholder="۰ = بدون هشدار"
+                placeholder="۵"
               />
             </div>
           </div>
@@ -1522,7 +1592,7 @@ export default function ProductsPage() {
               </Select>
             </div>
 
-            {/* ★★★ واحد — فقط نام، بدون پرانتز و سیمبول ★★★ */}
+            {/* ★★★ واحد — مرتب‌شده طبق ترتیب درخواستی ★★★ */}
             <div>
               <Label className="text-xs">واحد</Label>
               <Select
@@ -1534,7 +1604,7 @@ export default function ProductsPage() {
                 </SelectTrigger>
                 <SelectContent className="max-h-[200px] overflow-y-auto">
                   <SelectItem value="none">—</SelectItem>
-                  {units.map((u) => (
+                  {sortUnits(units).map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {getUnitLabel(u)}
                     </SelectItem>
@@ -1543,56 +1613,60 @@ export default function ProductsPage() {
               </Select>
             </div>
 
-            {/* قیمت خرید */}
+            {/* ★ قیمت خرید با فرمت زنده فارسی و جداکننده */}
             <div>
-              <Label className="text-xs">قیمت خرید</Label>
+              <Label className="text-xs">قیمت خرید (ریال)</Label>
               <Input
-                type="number"
-                value={editForm.purchasePrice}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(editForm.purchasePrice)}
                 onChange={(e) =>
-                  setEditForm({ ...editForm, purchasePrice: e.target.value })
+                  setEditForm({ ...editForm, purchasePrice: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* قیمت فروش */}
+            {/* ★ قیمت فروش با فرمت زنده فارسی و جداکننده */}
             <div>
-              <Label className="text-xs">قیمت فروش</Label>
+              <Label className="text-xs">قیمت فروش (ریال)</Label>
               <Input
-                type="number"
-                value={editForm.salePrice}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(editForm.salePrice)}
                 onChange={(e) =>
-                  setEditForm({ ...editForm, salePrice: e.target.value })
+                  setEditForm({ ...editForm, salePrice: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* درصد مالیات */}
+            {/* ★ درصد مالیات با فرمت زنده فارسی */}
             <div>
               <Label className="text-xs">درصد مالیات</Label>
               <Input
-                type="number"
-                value={editForm.taxRate}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(editForm.taxRate)}
                 onChange={(e) =>
-                  setEditForm({ ...editForm, taxRate: e.target.value })
+                  setEditForm({ ...editForm, taxRate: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"
               />
             </div>
 
-            {/* حداقل موجودی */}
+            {/* ★ حداقل موجودی با فرمت زنده فارسی */}
             <div>
               <Label className="text-xs">حداقل موجودی هشدار</Label>
               <Input
-                type="number"
-                value={editForm.minStock}
+                type="text"
+                inputMode="numeric"
+                value={formatToPersianWithCommas(editForm.minStock)}
                 onChange={(e) =>
-                  setEditForm({ ...editForm, minStock: e.target.value })
+                  setEditForm({ ...editForm, minStock: formatToPersianWithCommas(e.target.value) })
                 }
                 className="mt-1"
                 dir="ltr"

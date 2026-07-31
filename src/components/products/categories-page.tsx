@@ -47,6 +47,11 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
+// ============ Helpers ============
+function toFaNum(n: number | string): string {
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
+}
+
 // ============ Types ============
 
 interface Category {
@@ -634,18 +639,18 @@ export default function CategoriesPage() {
         <div className="flex items-center gap-3 sm:gap-5 lg:gap-6 text-[10px] sm:text-xs text-gray-500 flex-wrap">
           <span>
             مجموع:{' '}
-            <strong className="text-gray-900">{totalCategories}</strong>{' '}
+            <strong className="text-gray-900">{toFaNum(totalCategories)}</strong>{' '}
             <span className="hidden sm:inline">دسته‌بندی</span>
           </span>
           <span className="hidden sm:inline">
-            فعال: <strong className="text-emerald-600">{activeCategories}</strong>
+            فعال: <strong className="text-emerald-600">{toFaNum(activeCategories)}</strong>
           </span>
           <span className="hidden md:inline">
-            دسته اصلی: <strong className="text-blue-600">{rootCount}</strong>
+            دسته اصلی: <strong className="text-blue-600">{toFaNum(rootCount)}</strong>
           </span>
           <span className="hidden lg:inline text-gray-300">|</span>
           <span className="hidden lg:inline text-gray-400">
-            {filteredCategories.length} آیتم نمایش داده می‌شود
+            {toFaNum(filteredCategories.length)} آیتم نمایش داده می‌شود
           </span>
         </div>
       </div>
@@ -693,7 +698,7 @@ export default function CategoriesPage() {
       <div className="bg-white border-b border-gray-100 px-3 py-1.5 shrink-0 sm:hidden">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] text-gray-400">
-            {filteredCategories.length} دسته‌بندی
+            {toFaNum(filteredCategories.length)} دسته‌بندی
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -816,7 +821,7 @@ export default function CategoriesPage() {
                             )}
                             {nodeHasChildren && (
                               <Badge variant="secondary" className="text-[9px] bg-gray-100 text-gray-500 h-4 px-1 shrink-0">
-                                {cat.children!.length}
+                                {toFaNum(cat.children!.length)}
                               </Badge>
                             )}
                             {/* Show parent inline on tablet when column hidden */}
@@ -838,7 +843,7 @@ export default function CategoriesPage() {
                         {/* Product count */}
                         <TableCell className="py-2 text-center">
                           <Badge variant="outline" className="text-[10px] font-medium border-gray-200 whitespace-nowrap">
-                            {cat.productCount}
+                            {toFaNum(cat.productCount)}
                             <span className="hidden lg:inline"> محصول</span>
                           </Badge>
                         </TableCell>
@@ -858,23 +863,23 @@ export default function CategoriesPage() {
                           )}
                         </TableCell>
 
-                        {/* Actions */}
+                        {/* Actions - مشابه صفحه محصولات */}
                         <TableCell className="py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                              size="sm"
                               onClick={() => openEditDialog(cat)}
+                              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                               title="ویرایش"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                              size="sm"
                               onClick={() => openDeleteDialog(cat)}
+                              className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
                               title="حذف"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -943,21 +948,21 @@ export default function CategoriesPage() {
                           </Badge>
                         )}
 
-                        {/* Action buttons */}
+                        {/* Action buttons - مشابه صفحه محصولات */}
                         <div className="flex items-center gap-0.5 shrink-0">
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            size="sm"
                             onClick={() => openEditDialog(cat)}
+                            className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                            size="sm"
                             onClick={() => openDeleteDialog(cat)}
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
@@ -972,11 +977,11 @@ export default function CategoriesPage() {
                           </span>
                         )}
                         <span className="text-[10px] text-gray-400">
-                          {cat.productCount} محصول
+                          {toFaNum(cat.productCount)} محصول
                         </span>
                         {nodeHasChildren && (
                           <span className="text-[10px] text-blue-500">
-                            {cat.children!.length} زیردسته
+                            {toFaNum(cat.children!.length)} زیردسته
                           </span>
                         )}
                         {cat._isOffline && (
@@ -1199,7 +1204,7 @@ export default function CategoriesPage() {
                 {deletingCategory.parent?.name && (
                   <p className="text-xs text-gray-500 pr-6">والد: {deletingCategory.parent.name}</p>
                 )}
-                <p className="text-xs text-gray-500 pr-6">{deletingCategory.productCount} محصول</p>
+                <p className="text-xs text-gray-500 pr-6">{toFaNum(deletingCategory.productCount)} محصول</p>
               </div>
 
               {/* Children warning */}
@@ -1209,7 +1214,7 @@ export default function CategoriesPage() {
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="text-xs text-amber-700">
                       <p className="font-medium">
-                        این دسته‌بندی {deletingCategory.children!.length} زیردسته دارد.
+                        این دسته‌بندی {toFaNum(deletingCategory.children!.length)} زیردسته دارد.
                       </p>
                       <p className="mt-0.5">با حذف این دسته‌بندی، زیردسته‌ها تحت تأثیر قرار می‌گیرند.</p>
                     </div>
@@ -1224,7 +1229,7 @@ export default function CategoriesPage() {
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="text-xs text-amber-700">
                       <p className="font-medium">
-                        {deletingCategory.productCount} محصول در این دسته‌بندی وجود دارد.
+                        {toFaNum(deletingCategory.productCount)} محصول در این دسته‌بندی وجود دارد.
                       </p>
                       <p className="mt-0.5">قبل از حذف، محصولات را به دسته‌بندی دیگری منتقل کنید.</p>
                     </div>

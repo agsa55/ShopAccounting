@@ -593,6 +593,9 @@ export function PurchaseInvoicesPage() {
   const [loadingEditItems, setLoadingEditItems] = useState(false)
  const productSearchInputRef = useRef<HTMLInputElement>(null)
   const isProcessingProductScan = useRef(false)
+ 
+  const purchaseBarcodeBufferRef = useRef<string>('')
+  const purchaseBarcodeTimerRef = useRef<NodeJS.Timeout | null>(null)
   // ─── Delete State ─────────────────────────────────────────────────────────
   const [deletingInvoice, setDeletingInvoice] = useState<PurchaseInvoice | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -928,6 +931,144 @@ export function PurchaseInvoicesPage() {
     setProductSearch('')
     setProductSearchResults([])
   }, [cart])
+
+  // ══════════════════════════════════════════════════════════════
+  // ★ بارکدخوان هوشمند در سطح کل صفحه (فقط وقتی مودال خرید باز است)
+  // ══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    // فقط وقتی مودال باز است فعال باشد
+    if (!dialogOpen) return;
+
+    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+
+      // ۱. اگر فوکوس روی اینپوت جستجوی محصول است، اجازه دهیم handleProductSearchKeyDown کار کند
+      if (activeEl === productSearchInputRef.current) return;
+
+      // ۲. اگر فوکوس روی هر input/textarea/select دیگری در مودال است، کاری نکنیم
+      //    (تا تایپ در فیلدهای توضیحات، تاریخ و... مختل نشود)
+      if (activeEl) {
+        const tagName = activeEl.tagName.toLowerCase();
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          tagName === 'select' ||
+          activeEl.isContentEditable
+        ) {
+          return;
+        }
+      }
+
+      // ۳. پردازش کلید Enter
+      if (e.key === 'Enter') {
+        const barcode = purchaseBarcodeBufferRef.current.trim();
+        if (barcode.length >= 3) {
+          e.preventDefault();
+
+          try {
+            const tid = tenantId || useAppStore.getState().currentTenant?.id;
+            if (!tid) return;
+
+            const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+            const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+
+            // جستجو به عنوان بارکد
+            const resBarcode = await fetch(`/api/products/lookup?barcode=${encodeURIComponent(barcode)}&tenantId=${tid}`, { headers });
+            const dataBarcode = await resBarcode.json();
+
+            if (dataBarcode.success && dataBarcode.data) {
+              const product = Array.isArray(dataBarcode.data) ? dataBarcode.data[0] : dataBarcode.data;
+              if (product && product.id) {
+                handleAddProduct(product);
+                toast({
+                  title: '✓ افزودن به فاکتور',
+                  description: `${product.name} اضافه شد`,
+                });
+                purchaseBarcodeBufferRef.current = '';
+                if (purchaseBarcodeTimerRef.current) {
+                  clearTimeout(purchaseBarcodeTimerRef.current);
+                  purchaseBarcodeTimerRef.current = null;
+                }
+                return;
+              }
+            }
+
+            // جستجو به عنوان کد محصول
+            const resCode = await fetch(`/api/products/lookup?code=${encodeURIComponent(barcode)}&tenantId=${tid}`, { headers });
+            const dataCode = await resCode.json();
+
+            if (dataCode.success && dataCode.data) {
+              const product = Array.isArray(dataCode.data) ? dataCode.data[0] : dataCode.data;
+              if (product && product.id) {
+                handleAddProduct(product);
+                toast({
+                  title: '✓ افزودن به فاکتور',
+                  description: `${product.name} اضافه شد`,
+                });
+                purchaseBarcodeBufferRef.current = '';
+                if (purchaseBarcodeTimerRef.current) {
+                  clearTimeout(purchaseBarcodeTimerRef.current);
+                  purchaseBarcodeTimerRef.current = null;
+                }
+                return;
+              }
+            }
+
+            // اگر پیدا نشد
+            toast({
+              title: 'یافت نشد',
+              description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
+              variant: 'destructive',
+            });
+
+          } catch (err) {
+            console.error('[Purchase] Global barcode scan error:', err);
+          }
+
+          // پاک کردن بافر
+          purchaseBarcodeBufferRef.current = '';
+          if (purchaseBarcodeTimerRef.current) {
+            clearTimeout(purchaseBarcodeTimerRef.current);
+            purchaseBarcodeTimerRef.current = null;
+          }
+        }
+        return;
+      }
+
+      // ۴. کلید Escape: پاک کردن بافر
+      if (e.key === 'Escape') {
+        purchaseBarcodeBufferRef.current = '';
+        if (purchaseBarcodeTimerRef.current) {
+          clearTimeout(purchaseBarcodeTimerRef.current);
+          purchaseBarcodeTimerRef.current = null;
+        }
+        return;
+      }
+
+      // ۵. نادیده گرفتن کلیدهای کنترلی
+      if (e.key.length > 1) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      // ۶. اضافه کردن کاراکتر به بافر
+      purchaseBarcodeBufferRef.current += e.key;
+
+      // ۷. تایمر ۲ ثانیه‌ای برای پاکسازی خودکار
+      if (purchaseBarcodeTimerRef.current) {
+        clearTimeout(purchaseBarcodeTimerRef.current);
+      }
+      purchaseBarcodeTimerRef.current = setTimeout(() => {
+        purchaseBarcodeBufferRef.current = '';
+      }, 2000);
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+      if (purchaseBarcodeTimerRef.current) {
+        clearTimeout(purchaseBarcodeTimerRef.current);
+      }
+    };
+  }, [dialogOpen, tenantId, handleAddProduct, toast]);
 
     // ★ تابع جدید: مدیریت اسکن بارکد در جستجوی فاکتور خرید
   const handleProductSearchKeyDown = useCallback(
@@ -1745,9 +1886,9 @@ export function PurchaseInvoicesPage() {
                             key={inv.id}
                             className={`hover:bg-purple-50/50 transition-colors ${inv._isOffline ? 'bg-amber-50/40' : ''}`}
                           >
-                            <TableCell className="text-xs font-mono" dir="ltr">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {inv.number}
+                            <TableCell className=" text-xs font-mono" dir="rtl">
+                              <div className="flex items-center gap-1.5 flex-wrap" >
+                                {toFaNum(inv.number)}
                                 {inv._isOffline && (
                                   <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1">
                                     {inv._offlineAction === 'delete' ? 'حذف آفلاین' : 'آفلاین'}
@@ -1934,10 +2075,11 @@ export function PurchaseInvoicesPage() {
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
-                    ref={productSearchInputRef}
-                    placeholder="جستجو محصول / اسکن بارکد [Enter]"
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
+                  ref={productSearchInputRef}
+  placeholder="جستجو محصول / اسکن بارکد [Enter]"
+  value={productSearch}
+  onChange={e => setProductSearch(e.target.value)}
+
                     onKeyDown={handleProductSearchKeyDown}
                     className="pr-9 h-9 text-sm"
                     disabled={!isOnline && !productSearch}
@@ -2133,7 +2275,7 @@ export function PurchaseInvoicesPage() {
             )}
             {deletingInvoice && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs space-y-1">
-                <div className="flex justify-between"><span className="text-slate-500">شماره:</span><span className="font-mono">{deletingInvoice.number}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500" >شماره:</span><span className="font-mono">{deletingInvoice.number}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500" dir="rtl">مبلغ:</span><span className="font-bold">{formatNumber(deletingInvoice.totalAmount)} ریال</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">تامین‌کننده:</span><span>{deletingInvoice.supplier?.name || '—'}</span></div>
               </div>

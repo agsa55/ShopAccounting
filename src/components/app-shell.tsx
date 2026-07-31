@@ -1,10 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v9.6.0 ★★★
-// ★ PWA Install Button + دکمه نصب در هدر
-// ★ v9.6.0: اضافه شدن SubscriptionBanner برای نمایش هشدارهای اشتراک
-//   (هشدار ۷ روزه، دوره مهلت، حالت فقط خواندنی)
+// src/components/app-shell.tsx — v9.6.3 ★★★
+// ★ اصلاح دقیق RTL تاریخ هدر + کاهش فاصله بین بخش‌های (Groups) منوی کناری
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
@@ -20,7 +18,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, AlertTriangle, // ★ آیکون نصب PWA + آیکون هشدار
+  Download, AlertTriangle, ChevronLeft, Calendar,
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -307,7 +305,7 @@ const viewLabels: Record<string, string> = {
 
 const FULL_ACCESS_ROLES = new Set(['Admin', 'Manager', 'Owner', 'admin', 'manager', 'owner'])
 
-function isFullAccessRole(role: string | undefined): boolean {
+function isFullAccessRole(role: string | null | undefined): boolean {
   return !!role && FULL_ACCESS_ROLES.has(role)
 }
 
@@ -316,15 +314,15 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'مدیر سیستم', manager: 'مدیر', owner: 'مالک', cashier: 'صندوق‌دار',
 }
 
-function getRoleLabel(role: string | undefined): string {
+function getRoleLabel(role: string | null | undefined): string {
   if (!role) return 'کاربر'
   return ROLE_LABELS[role] || role
 }
 
 function checkAccess(
   view: AppView,
-  role: string | undefined,
-  permissions: string[] | undefined,
+  role: string | null | undefined,
+  permissions: string[] | null | undefined,
   planFeatures?: any
 ): boolean {
   if (!role) return false
@@ -392,10 +390,6 @@ function renderCurrentView(view: AppView) {
    ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
    ═══════════════════════════════════════════════════════════════ */
 
-/* ═══════════════════════════════════════════════════════════════
-   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
-   ═══════════════════════════════════════════════════════════════ */
-
 interface SubscriptionStatus {
   status: 'active' | 'warning' | 'grace_period' | 'read_only' | 'expired'
   daysRemaining: number
@@ -425,7 +419,6 @@ function SubscriptionBanner() {
 
         if (data.success && data.data) {
           setStatus(data.data)
-          // ✅ خط problematic حذف شد. state محلی همین کامپوننت برای نمایش بنر کاملاً کافی است.
         }
       } catch (err) {
         console.warn('[SubscriptionBanner] Fetch error:', err)
@@ -435,15 +428,12 @@ function SubscriptionBanner() {
     }
 
     fetchStatus()
-    // آپدیت هر ۵ دقیقه
     const interval = setInterval(fetchStatus, 5 * 60 * 1000)
     return () => clearInterval(interval)
   }, [])
 
-  // اگر در حال لودینگ یا وضعیت active است، چیزی نمایش نده
   if (loading || !status || status.status === 'active') return null
 
-  // تنظیمات بصری بر اساس وضعیت
   const config = {
     warning: {
       bg: 'bg-yellow-50',
@@ -507,6 +497,7 @@ function SubscriptionBanner() {
     </div>
   )
 }
+
 /* ═══════════════════════════════════════════════════════════════
    AppSidebar
    ═══════════════════════════════════════════════════════════════ */
@@ -520,14 +511,14 @@ function AppSidebar() {
   const notifications = useStore((s) => s.notifications) ?? []
   const planName = useStore((s) => s.planName)
 
-  const planFeatures = getFeaturesByPlanName(planName)
+  const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
   const { isDemo, status: demoStatus } = useDemoStatus()
   const isDemoActive = isDemo && !demoStatus?.isExpired
 
   const [daysRemaining, setDaysRemaining] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
-  const [realPlanName, setRealPlanName] = useState<string>('')
+  const [realPlanName, setRealPlanName] = useState<string | null>(null)
 
   useEffect(() => {
     async function checkSubscription() {
@@ -560,10 +551,8 @@ function AppSidebar() {
             cached_at: Date.now(),
           })
         } else {
-          console.warn('[AppSidebar] trial-check failed with success:false')
           const { getCachedPlan } = await import('@/lib/offline-db')
           const cachedPlan = await getCachedPlan()
-
           if (cachedPlan?.planName) {
             setRealPlanName(cachedPlan.planName)
             useStore.getState().setPlanName(cachedPlan.planName)
@@ -572,11 +561,9 @@ function AppSidebar() {
           }
         }
       } catch (err) {
-        console.warn('[AppSidebar] Fetch error, using cached plan:', err)
         try {
           const { getCachedPlan } = await import('@/lib/offline-db')
           const cachedPlan = await getCachedPlan()
-
           if (cachedPlan?.planName) {
             setRealPlanName(cachedPlan.planName)
             useStore.getState().setPlanName(cachedPlan.planName)
@@ -594,7 +581,7 @@ function AppSidebar() {
     return () => clearInterval(interval)
   }, [])
 
-  const effectivePlanName = realPlanName || planName
+  const effectivePlanName = (realPlanName || planName || 'simple') as string
   const effectiveFeatures = getFeaturesByPlanName(effectivePlanName)
   const unreadCount = notifications.filter(n => !n.isRead).length
 
@@ -637,11 +624,32 @@ function AppSidebar() {
     return parts[0]?.[0] || 'م'
   }, [user])
 
+  const formatRemainingTime = (days: number) => {
+    if (days === -1) return 'مادام‌العمر';
+    if (days <= 0) return 'منقضی شده';
+    const months = Math.floor(days / 30);
+    const remainingDays = days % 30;
+    
+    const mStr = months > 0 ? `${months.toLocaleString('fa-IR')} ماه` : '';
+    const dStr = remainingDays > 0 ? `${remainingDays.toLocaleString('fa-IR')} روز` : '';
+    
+    if (mStr && dStr) return `${mStr} و ${dStr}`;
+    return mStr || dStr;
+  };
+
+  const getPlanLabel = (name: string) => {
+    if (name === 'trial') return 'دوره آزمایشی';
+    if (name === 'simple') return 'پلن پایه';
+    if (name === 'professional') return 'پلن پیشرفته';
+    if (name === 'enterprise') return 'پلن حرفه‌ای';
+    return name;
+  };
+
   return (
     <Sidebar
       side="right"
       collapsible="icon"
-      className="border-l-2 border-gray-200 bg-gradient-to-b from-gray-50 to-white shadow-lg"
+      className="border-l border-slate-200 bg-slate-50/95 shadow-sm"
     >
       <SidebarHeader className="p-2">
         <SidebarMenu>
@@ -651,7 +659,7 @@ function AppSidebar() {
                 <Store className="size-4" />
               </div>
               <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
-                <span className="text-xs sm:text-sm font-semibold truncate">
+                <span className="text-xs sm:text-sm font-semibold truncate text-slate-800">
                   {storeName || 'فروشگاه'}
                 </span>
               </div>
@@ -680,64 +688,52 @@ function AppSidebar() {
               </a>
             </div>
           ) : (
-            <div className="space-y-1.5">
-              <SidebarPlanCard onClick={() => setCurrentView('settings-subscription' as AppView)} />
-              <a
-                href="/subscription/renew"
-                onClick={(e) => {
-                  e.preventDefault()
-                  setCurrentView('settings-subscription' as AppView)
-                }}
-                className="w-full text-[10px] py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors flex items-center justify-center gap-1 font-medium"
-              >
-                <RefreshCw className="w-2.5 h-2.5" />
-                تمدید / ارتقا اشتراک
-              </a>
-
-              {isDemo && demoStatus?.isExpired ? (
-                <p className="text-[9px] text-red-600 text-center font-medium">
-                  دوره آزمایشی پایان یافت — اشتراک تهیه کنید
-                </p>
-              ) : (
-                <>
-                  {!isExpired && daysRemaining > 0 && daysRemaining !== -1 && (
-                    <span className="text-[10px] text-gray-600 bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
-                      {daysRemaining >= 360 
-                        ? '۱ سال' 
-                        : daysRemaining > 30 
-                        ? `${Math.floor(daysRemaining / 30)} ماه و ${daysRemaining % 30} روز` 
-                        : `${daysRemaining} روز`}
-                      {' '}تا پایان اشتراک
-                    </span>
-                  )}
-                  {daysRemaining === -1 && (
-                    <p className="text-[9px] text-emerald-600 text-center font-medium flex items-center justify-center gap-0.5">
-                      <Sparkles className="w-2.5 h-2.5" />
-                      اشتراک مادام‌العمر
-                    </p>
-                  )}
-                  {isExpired && (
-                    <p className="text-[9px] text-red-600 text-center font-medium">
-                      اشتراک منقضی شده — تمدید کنید
-                    </p>
-                  )}
-                </>
-              )}
+            <div 
+              onClick={() => setCurrentView('settings-subscription' as AppView)}
+              className="cursor-pointer group p-2.5 bg-white border border-slate-200 rounded-xl hover:shadow-md hover:border-indigo-200 transition-all duration-200"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-6 h-6 rounded-md bg-indigo-50 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-800">
+                    {getPlanLabel(effectivePlanName)}
+                  </span>
+                </div>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${
+                  isExpired ? 'bg-red-100 text-red-700' : 
+                  daysRemaining <= 7 && daysRemaining > 0 ? 'bg-amber-100 text-amber-700' : 
+                  'bg-emerald-100 text-emerald-700'
+                }`}>
+                  {isExpired ? 'منقضی' : daysRemaining === -1 ? 'دائمی' : 'فعال'}
+                </span>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-600 font-medium">
+                  {daysRemaining === -1 ? 'بدون محدودیت زمانی' : 
+                   isExpired ? 'لطفاً اشتراک خود را تمدید کنید' :
+                   `مانده تا پایان: ${formatRemainingTime(daysRemaining)}`}
+                </span>
+                <ChevronLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:-translate-x-0.5 transition-all" />
+              </div>
             </div>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarSeparator />
+      <SidebarSeparator className="bg-slate-200" />
 
       <SidebarContent>
         {visibleGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel className="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-3 py-0.5 group-data-[collapsible=icon]:hidden">
+          // ★ اصلاح دقیق فاصله بین بخش‌ها: حذف پدینگ و مارجین اضافی
+          <SidebarGroup key={group.label} className="py-0 my-0">
+            <SidebarGroupLabel className="text-[10px] font-bold text-slate-400 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
               {group.label}
             </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
+            <SidebarGroupContent className="py-0">
+              <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => {
                   const isActive = baseView === (item.view as string)
                   const isItemDisabled = isDemo && item.disabledInDemo
@@ -758,10 +754,10 @@ function AppSidebar() {
                             ? 'opacity-50 cursor-not-allowed hover:bg-transparent'
                             : isActive
                               ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 font-semibold'
-                              : 'hover:bg-gray-100'
+                              : 'hover:bg-slate-100 text-slate-600'
                         }`}
                       >
-                        <item.icon className={`size-4 ${isActive && !isItemDisabled ? 'text-emerald-600' : ''}`} />
+                        <item.icon className={`size-4 ${isActive && !isItemDisabled ? 'text-emerald-600' : 'text-slate-400'}`} />
                         <span className="text-xs sm:text-sm">{item.label}</span>
 
                         {isItemDisabled && (
@@ -780,16 +776,16 @@ function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-2">
-        <SidebarSeparator />
+        <SidebarSeparator className="bg-slate-200" />
         <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
-          <Avatar className="size-7 sm:size-8 border border-emerald-200">
+          <Avatar className="size-7 sm:size-8 border border-emerald-200 bg-white">
             <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[10px] sm:text-xs font-semibold">
               {userInitials}
             </AvatarFallback>
           </Avatar>
           <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
-            <span className="text-[11px] sm:text-xs font-medium truncate">{userDisplayName}</span>
-            <span className="text-[9px] sm:text-[10px] text-muted-foreground">{getRoleLabel(user?.role)}</span>
+            <span className="text-[11px] sm:text-xs font-medium truncate text-slate-800">{userDisplayName}</span>
+            <span className="text-[9px] sm:text-[10px] text-slate-500">{getRoleLabel(user?.role)}</span>
           </div>
         </div>
       </SidebarFooter>
@@ -808,7 +804,6 @@ function PWAInstallButton() {
   const [installing, setInstalling] = useState(false)
   const [justInstalled, setJustInstalled] = useState(false)
 
-  // اگر نصب شده یا قابل نصب نیست، نمایش نده
   if (isInstalled || !canInstall) return null
 
   const handleInstall = async () => {
@@ -855,7 +850,6 @@ function PWAInstallButton() {
   )
 }
 
-
 /* ═══════════════════════════════════════════════════════════════
    ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
    ═══════════════════════════════════════════════════════════════ */
@@ -898,6 +892,7 @@ function SyncIndicator() {
     </Button>
   )
 }
+
 /* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
@@ -915,8 +910,6 @@ function AppHeader() {
 
   const handleLogout = async () => {
     try {
-      console.log('[AppHeader] 🚪 Starting logout process...')
-
       if ('serviceWorker' in navigator) {
         try {
           const registrations = await navigator.serviceWorker.getRegistrations()
@@ -996,20 +989,20 @@ function AppHeader() {
   }
 
   return (
-    <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b bg-white px-2 sm:px-3 md:px-4 shadow-sm sticky top-0 z-10">
-      <SidebarTrigger className="-mr-1 shrink-0 rotate-180" />
-      <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block" />
+    <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-slate-200 bg-slate-50/90 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-sm sticky top-0 z-10">
+      <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-600 hover:bg-slate-200" />
+      <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-slate-300" />
 
       <Breadcrumb className="flex-1 min-w-0 overflow-hidden">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="hidden md:inline-block">
-            <BreadcrumbPage className="text-[10px] md:text-xs text-muted-foreground truncate">
+            <BreadcrumbPage className="text-[10px] md:text-xs text-slate-500 truncate">
               {storeName || 'فروشگاه'}
             </BreadcrumbPage>
           </BreadcrumbItem>
-          <BreadcrumbSeparator className="hidden md:inline-block" />
+          <BreadcrumbSeparator className="hidden md:inline-block text-slate-400" />
           <BreadcrumbItem>
-            <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-medium truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
+            <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-slate-800 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
               {viewLabels[currentView] || currentView}
             </BreadcrumbPage>
           </BreadcrumbItem>
@@ -1018,17 +1011,37 @@ function AppHeader() {
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-        {/* ★ دکمه نصب PWA */}
-        <PWAInstallButton />
-         <SyncIndicator />
+       {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
+<div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
+  <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+  <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+    {(() => {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('fa-IR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const parts = formatter.formatToParts(now);
+      const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+      const day = parts.find(p => p.type === 'day')?.value || '';
+      const month = parts.find(p => p.type === 'month')?.value || '';
+      const year = parts.find(p => p.type === 'year')?.value || '';
+      return `${weekday} ${day} ${month} ${year}`;
+    })()}
+  </span>
+</div>
 
+        <PWAInstallButton />
+        <SyncIndicator />
         <OfflineModal />
 
         {/* ── Notifications ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0">
-              <Bell className="size-3.5 sm:size-4 text-gray-500" />
+            <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-slate-200 text-slate-600">
+              <Bell className="size-3.5 sm:size-4" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -left-0.5 flex size-3.5 sm:size-4 items-center justify-center rounded-full bg-red-500 text-[7px] sm:text-[9px] font-bold text-white leading-none">
                   {unreadCount > 9 ? '+۹' : unreadCount}
@@ -1036,9 +1049,9 @@ function AppHeader() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 sm:w-72 md:w-80 bg-white border border-gray-200 shadow-lg rounded-lg">
-            <DropdownMenuLabel className="flex items-center justify-between">
-              <span className="text-xs sm:text-sm">اعلان‌ها</span>
+          <DropdownMenuContent align="end" className="w-64 sm:w-72 md:w-80 bg-white border border-slate-200 shadow-lg rounded-lg">
+            <DropdownMenuLabel className="flex items-center justify-between text-slate-700">
+              <span className="text-xs sm:text-sm font-semibold">اعلان‌ها</span>
               {unreadCount > 0 && (
                 <button
                   onClick={() => markAllNotificationsRead()}
@@ -1050,7 +1063,7 @@ function AppHeader() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
-              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-muted-foreground">
+              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-slate-500">
                 اعلانی وجود ندارد
               </div>
             ) : (
@@ -1058,17 +1071,17 @@ function AppHeader() {
                 <DropdownMenuItem
                   key={notification.id}
                   onClick={() => markNotificationRead(notification.id)}
-                  className="flex flex-col items-start gap-1 p-2 sm:p-2.5 md:p-3 cursor-pointer"
+                  className="flex flex-col items-start gap-1 p-2 sm:p-2.5 md:p-3 cursor-pointer hover:bg-slate-50"
                 >
                   <div className="flex items-center gap-1.5 sm:gap-2 w-full">
                     {!notification.isRead && (
                       <div className="size-1.5 sm:size-2 rounded-full bg-emerald-500 shrink-0" />
                     )}
-                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate">
+                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate text-slate-800">
                       {notification.title}
                     </span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] md:text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                  <span className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 line-clamp-2 leading-relaxed">
                     {notification.message}
                   </span>
                 </DropdownMenuItem>
@@ -1080,27 +1093,26 @@ function AppHeader() {
         {/* ── User Menu ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0">
-              <Avatar className="size-6 md:size-7 border border-emerald-200">
+            <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0 hover:bg-slate-200">
+              <Avatar className="size-6 md:size-7 border border-emerald-200 bg-white">
                 <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
                   {user?.username?.charAt(0) || 'م'}
                 </AvatarFallback>
               </Avatar>
-              <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate">
+              <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-slate-700">
                 {user?.username || 'کاربر'}
               </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-48 sm:w-52 md:w-56 bg-white border border-gray-200 shadow-lg rounded-lg"
-            style={{ backgroundColor: 'white' }}
+            className="w-48 sm:w-52 md:w-56 bg-white border border-slate-200 shadow-lg rounded-lg"
           >
             <DropdownMenuLabel>
               <div className="flex flex-col gap-1">
-                <span className="text-xs sm:text-sm">{user?.username || 'کاربر'}</span>
-                <span className="text-[10px] sm:text-xs font-normal text-muted-foreground">
-                  {getRoleLabel(user?.role)} - {user?.username}
+                <span className="text-xs sm:text-sm font-semibold text-slate-800">{user?.username || 'کاربر'}</span>
+                <span className="text-[10px] sm:text-xs font-normal text-slate-500">
+                  {getRoleLabel(user?.role)} 
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -1108,6 +1120,7 @@ function AppHeader() {
             {canAccessSettings && (
               <DropdownMenuItem
                 onClick={() => useStore.getState().setCurrentView('settings')}
+                className="text-slate-700 hover:bg-slate-50"
               >
                 <Settings className="size-4 ms-2" />
                 تنظیمات
@@ -1116,6 +1129,7 @@ function AppHeader() {
             {canAccessSettings && (
               <DropdownMenuItem
                 onClick={() => useStore.getState().setCurrentView('settings-subscription' as AppView)}
+                className="text-slate-700 hover:bg-slate-50"
               >
                 <CreditCard className="size-4 ms-2" />
                 اشتراک و پلن
@@ -1145,7 +1159,7 @@ export default function AppShell() {
   const user = useStore((s) => s.user)
   const setCurrentView = useStore((s) => s.setCurrentView)
   const planName = useStore((s) => s.planName)
-  const planFeatures = getFeaturesByPlanName(planName)
+  const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
   useEffect(() => {
     if (!user) return
@@ -1162,16 +1176,12 @@ export default function AppShell() {
     }
   }, [user, currentView, setCurrentView, planFeatures])
 
-  // ★ Service Worker + Online/Offline + Sync
-   useEffect(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // ★ فعال‌سازی موتور همگام‌سازی موجود شما
     import('@/lib/sync-engine').then(({ syncEngine }) => {
       syncEngine.init()
     })
-
-    let domContentLoadedListener: (() => void) | null = null
 
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
@@ -1203,7 +1213,6 @@ export default function AppShell() {
         try {
           const { syncEngine } = await import('@/lib/sync-engine')
           await syncEngine.preloadData()
-          console.log('[AppShell] ✅ Preload data completed via sync-engine')
         } catch (err) {
           console.warn('[AppShell] ⚠️ Preload failed:', err)
         }
@@ -1214,11 +1223,9 @@ export default function AppShell() {
       window.removeEventListener('online', () => useStore.getState().setOnline(true))
       window.removeEventListener('offline', () => useStore.getState().setOnline(false))
       if (preloadTimer) clearTimeout(preloadTimer)
-      if (domContentLoadedListener) {
-        document.removeEventListener('DOMContentLoaded', domContentLoadedListener)
-      }
     }
   }, [])
+  
   const canViewCurrentPage = checkAccess(
     currentView,
     user?.role,
@@ -1235,16 +1242,15 @@ export default function AppShell() {
         <DemoBanner />
         <AppHeader />
         
-        {/* ★★★ v9.6.0: بنر هشدار اشتراک — بین هدر و محتوای اصلی */}
         <SubscriptionBanner />
 
         {isPosView ? (
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden bg-white">
             {canViewCurrentPage ? <PosPage /> : <DashboardPage />}
           </div>
         ) : (
-          <ScrollArea className="flex-1">
-            <main className="p-2 sm:p-3 md:p-4 lg:p-6 max-w-full overflow-x-hidden">
+          <ScrollArea className="flex-1 bg-white">
+            <main className="p-2 sm:p-3 md:p-4 lg:p-6 max-w-full overflow-x-hidden min-h-screen">
               {canViewCurrentPage
                 ? renderCurrentView(currentView)
                 : renderCurrentView('dashboard')}
