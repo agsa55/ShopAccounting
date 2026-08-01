@@ -1,5 +1,5 @@
 // ============================================================================
-// src/app/auth/login-page.tsx — Login Page (v3.0)
+// src/components/auth/login-page.tsx — Login Page (v3.0)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
 // ★★★ v3.0: 'trial' → 'simple' (رایگان حذف شد)
@@ -127,12 +127,23 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [resendCountdown])
 
-  function redirectAfterLogin(subDomain: string) {
+   function redirectAfterLogin(subDomain: string) {
+    // اگر در محیط لوکال هستیم
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       window.location.href = `/${subDomain}/dashboard`
     } else {
-      const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir'
-      window.location.href = `https://${subDomain}.${rootDomain}/dashboard`
+      // دریافت آدرس اصلی برنامه از متغیرهای محیطی یا آدرس فعلی مرورگر
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      
+      // ★★★ اگر آدرس اصلی شامل railway.app است، از روش Path-based استفاده می‌کنیم
+      // چون هنوز DNS ساب‌دامین‌ها تنظیم نشده است
+      if (appUrl.includes('railway.app')) {
+         window.location.href = `${appUrl}/${subDomain}/dashboard`
+      } else {
+         // در آینده که DNS ساب‌دامین‌ها تنظیم شد، این بخش فعال می‌شود:
+         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir'
+         window.location.href = `https://${subDomain}.${rootDomain}/dashboard`
+      }
     }
   }
 
