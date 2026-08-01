@@ -127,23 +127,27 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [resendCountdown])
 
-   function redirectAfterLogin(subDomain: string) {
-    // اگر در محیط لوکال هستیم
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+     function redirectAfterLogin(subDomain: string) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+    const hostname = window.location.hostname;
+    
+    // حالت ۱: محیط توسعه (کامپیوتر خودتان)
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
       window.location.href = `/${subDomain}/dashboard`
+      return
+    }
+    
+    // حالت ۲: محیط Production (Railway یا هر سرور دیگر)
+    // ⭐ همیشه از NEXT_PUBLIC_APP_URL استفاده کن، نه آدرس فعلی مرورگر
+    // این تضمین می‌کند که حتی اگر کاربر از طریق hosts file یا DNS اشتباه
+    // وارد شده باشد، به آدرس صحیح Railway هدایت شود
+    if (appUrl && appUrl !== 'http://localhost:3000') {
+      // حذف اسلش انتهایی اگر وجود داشت
+      const cleanAppUrl = appUrl.endsWith('/') ? appUrl.slice(0, -1) : appUrl;
+      window.location.href = `${cleanAppUrl}/${subDomain}/dashboard`
     } else {
-      // دریافت آدرس اصلی برنامه از متغیرهای محیطی یا آدرس فعلی مرورگر
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      
-      // ★★★ اگر آدرس اصلی شامل railway.app است، از روش Path-based استفاده می‌کنیم
-      // چون هنوز DNS ساب‌دامین‌ها تنظیم نشده است
-      if (appUrl.includes('railway.app')) {
-         window.location.href = `${appUrl}/${subDomain}/dashboard`
-      } else {
-         // در آینده که DNS ساب‌دامین‌ها تنظیم شد، این بخش فعال می‌شود:
-         const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir'
-         window.location.href = `https://${subDomain}.${rootDomain}/dashboard`
-      }
+      // fallback: مسیر نسبی
+      window.location.href = `/${subDomain}/dashboard`
     }
   }
 
