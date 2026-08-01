@@ -1,5 +1,5 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (Fixed Infinite Loop)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (Fixed Infinite Loop + Fixed Subdomain Detection + Fixed Dashboard Fallback)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -73,8 +73,25 @@ function addNoCacheHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
+// ★★★ تابع اصلاح‌شده تشخیص ساب‌دامین — فقط دامنه‌هایی که واقعاً زیرمجموعه‌ی
+//     ROOT_DOMAIN (مثلاً shopaccounting.ir) هستن رو تننت در نظر می‌گیره.
+//     این از تشخیص اشتباه روی دامنه‌های پلتفرمی مثل *.up.railway.app
+//     (که چند تا نقطه دارن ولی هیچ ربطی به ساب‌دامین تننت ندارن) جلوگیری می‌کنه.
+function extractTenantSubdomain(hostname: string): string | null {
+  const hostWithoutPort = hostname.split(':')[0];
+
+  if (!hostWithoutPort.endsWith(`.${ROOT_DOMAIN}`)) {
+    return null;
+  }
+
+  const subdomain = hostWithoutPort.slice(0, hostWithoutPort.length - ROOT_DOMAIN.length - 1);
+  if (!subdomain || subdomain === 'www') return null;
+
+  return subdomain;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// ★ Middleware اصلی (اصلاح‌شده برای جلوگیری از حلقه بی‌نهایت)
+// ★ میدل‌ور اصلی
 // ════════════════════════════════════════════════════════════════════════════
 export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -101,11 +118,8 @@ export default function proxy(request: NextRequest) {
   }
 
   // ── ۳. ★★★ نجات‌بخش: خروج زودهنگام برای صفحات عمومی (لندینگ و Auth) ─────
-  // این بخش حیاتی است. اگر کاربر در صفحه اصلی یا لاگین است، میدل‌ور نباید 
-  // سعی کند او را بر اساس کوکی به مسیر دیگری بفرستد. این کار حلقه بی‌نهایت را می‌شکند.
   if (pathname === '/' || pathname.startsWith('/auth/')) {
     const response = NextResponse.next();
-    // پاک کردن اجباری کوکی tenant-slug در صفحات عمومی برای اطمینان از عدم تداخل
     response.cookies.set('tenant-slug', '', { path: '/', maxAge: 0 });
     response.cookies.set('tenant-view', '', { path: '/', maxAge: 0 });
     return response;
@@ -117,15 +131,12 @@ export default function proxy(request: NextRequest) {
   let rewriteUrl: URL | null = null;
   const hostname = request.headers.get('host') || '';
 
-  // الف) تشخیص از طریق ساب‌دامین
-  if (hostname !== 'localhost:3000' && hostname !== 'localhost:3001' && hostname !== ROOT_DOMAIN && hostname !== `www.${ROOT_DOMAIN}`) {
-    const parts = hostname.split('.');
-    if (parts.length >= 3) {
-      const subdomain = parts[0];
-      if (subdomain && subdomain !== 'www') {
-        if (subdomain === 'admin') return NextResponse.next();
-        tenantSlugFromUrl = subdomain;
-      }
+  // الف) تشخیص از طریق ساب‌دامین — ★ فقط اگر واقعاً زیر ROOT_DOMAIN باشد
+  if (!isLocalhost(request)) {
+    const subdomain = extractTenantSubdomain(hostname);
+    if (subdomain) {
+      if (subdomain === 'admin') return NextResponse.next();
+      tenantSlugFromUrl = subdomain;
     }
   }
 
@@ -186,7 +197,7 @@ export default function proxy(request: NextRequest) {
     return response;
   }
 
-  // ── ۶. مدیریت صفحات Tenant ────────────────────────────────────────────────
+  // ── ۶. مدیریت صفحات Tenant (فقط وقتی واقعاً یک تننت واقعی تشخیص داده شده) ──
   if (effectiveTenantSlug) {
     const response = rewriteUrl ? NextResponse.rewrite(rewriteUrl) : NextResponse.next();
     setTenantCookies(response, effectiveTenantSlug, tenantView || undefined);
@@ -195,7 +206,7 @@ export default function proxy(request: NextRequest) {
 
   // ── ۷. محافظت از پنل ادمین ────────────────────────────────────────────────
   if (pathname.startsWith('/admin/')) {
-    if (pathname === '/admin/login') return NextResponse.next(); // اجازه ورود به صفحه لاگین ادمین
+    if (pathname === '/admin/login') return NextResponse.next();
 
     const token = request.cookies.get('token')?.value;
     if (!token) {
@@ -209,7 +220,7 @@ export default function proxy(request: NextRequest) {
       if (decoded.userType !== 'admin' && decoded.role !== 'SuperAdmin') {
         return NextResponse.redirect(new URL('/', request.url));
       }
-      
+
       const response = NextResponse.next();
       response.headers.set('x-authorization', `Bearer ${token}`);
       return response;
@@ -218,10 +229,13 @@ export default function proxy(request: NextRequest) {
     }
   }
 
-  // ── ۸. فال‌بک نهایی برای هر مسیر دیگری (مثل /dashboard) ───────────────────
-  const fallbackResponse = NextResponse.next();
-  // نکته: اینجا کوکی tenant-slug را پاک نمی‌کنیم تا فرانت‌اند (React) بتواند 
-  // از طریق آن بفهمد کاربر متعلق به کدام فروشگاه است و داده‌ها را لود کند.
+  // ── ۸. ★★★ فال‌بک نهایی برای مسیرهای SPA (مثل /dashboard, /pos, /products) ──
+  //     این مسیرها صفحه‌ی واقعی نیستند — همگی توسط HomePage (روت `/`) و
+  //     Zustand (`currentView`) مدیریت می‌شوند. پس باید محتوای `/` را serve
+  //     کنیم اما آدرس مرورگر را همان‌طور (مثلاً `/dashboard`) نگه داریم، تا
+  //     HomePage بتواند از روی window.location.pathname تشخیص بدهد کاربر
+  //     قصد ورود به کدام بخش را دارد.
+  const fallbackResponse = NextResponse.rewrite(new URL('/', request.url));
   addNoCacheHeaders(fallbackResponse);
   return fallbackResponse;
 }
