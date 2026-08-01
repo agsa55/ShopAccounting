@@ -123,8 +123,8 @@ export default function LoginPage() {
   // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
  function redirectAfterLogin(subDomain: string) {
    console.log('[DEBUG] redirectAfterLogin اجرا شد با', subDomain)
-  document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
-  setCurrentView('dashboard');
+ document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
+  window.location.replace('/dashboard');
   console.log('[DEBUG] setCurrentView(dashboard) صدا زده شد')
 
 }
