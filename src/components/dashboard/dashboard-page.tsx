@@ -249,7 +249,7 @@ export default function DashboardPage() {
 
     // ─── حالت آنلاین: درخواست از سرور ────────────────────────────
     try {
-      const res = await authFetch('/api/dashboard/stats', { cache: 'no-store' })
+const res = await authFetch('/api/dashboard', { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 401) {
           setError('نشست منقضی شده')
