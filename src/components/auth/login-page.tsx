@@ -1,8 +1,6 @@
 // ============================================================================
-// src/components/auth/login-page.tsx — Login Page (v3.0)
+// src/components/auth/login-page.tsx — Login Page (v3.0 - Fixed Redirect)
 // ShopAccounting — Unified Single Database Architecture
-// ============================================================================
-// ★★★ v3.0: 'trial' → 'simple' (رایگان حذف شد)
 // ============================================================================
 
 'use client'
@@ -73,7 +71,6 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState<'password' | 'otp'>('password')
   const [otpSent, setOtpSent] = useState(false)
-  // ★★★ v3.37.4: نمایش کد تست در محیط توسعه
   const [devOtpCode, setDevOtpCode] = useState('')
   const [resendCountdown, setResendCountdown] = useState(0)
 
@@ -86,9 +83,6 @@ export default function LoginPage() {
   const setPlanName = useAppStore((s) => s.setPlanName)
 
   useEffect(() => {
-    // ★★★ v3.1: پاک‌سازی توکن قبلی هنگام ورود به صفحه لاگین
-    // این کار از نمایش داده‌های فروشگاه قبلی جلوگیری می‌کنه
-    // مخصوصاً در حالت localhost که کوکی‌ها مشترک هستن
     localStorage.removeItem('token')
     localStorage.removeItem('refreshToken')
     localStorage.removeItem('user')
@@ -97,7 +91,6 @@ export default function LoginPage() {
     localStorage.removeItem('planName')
     localStorage.removeItem('shop-accounting-store')
     
-    // پاک‌سازی state در store
     useAppStore.setState({
       isAuthenticated: false,
       user: null,
@@ -127,28 +120,19 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [resendCountdown])
 
-     function redirectAfterLogin(subDomain: string) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-    const hostname = window.location.hostname;
+  // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
+  function redirectAfterLogin(subDomain: string) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const cleanAppUrl = appUrl.endsWith('/') ? appUrl.slice(0, -1) : appUrl;
     
-    // حالت ۱: محیط توسعه (کامپیوتر خودتان)
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      window.location.href = `/${subDomain}/dashboard`
-      return
-    }
-    
-    // حالت ۲: محیط Production (Railway یا هر سرور دیگر)
-    // ⭐ همیشه از NEXT_PUBLIC_APP_URL استفاده کن، نه آدرس فعلی مرورگر
-    // این تضمین می‌کند که حتی اگر کاربر از طریق hosts file یا DNS اشتباه
-    // وارد شده باشد، به آدرس صحیح Railway هدایت شود
-    if (appUrl && appUrl !== 'http://localhost:3000') {
-      // حذف اسلش انتهایی اگر وجود داشت
-      const cleanAppUrl = appUrl.endsWith('/') ? appUrl.slice(0, -1) : appUrl;
-      window.location.href = `${cleanAppUrl}/${subDomain}/dashboard`
-    } else {
-      // fallback: مسیر نسبی
-      window.location.href = `/${subDomain}/dashboard`
-    }
+    // ★★★ تنظیم کوکی برای اینکه Middleware بداند کاربر متعلق به کدام فروشگاه است
+    // این خط حیاتی‌ترین بخش برای کار کردن سیستم روی یک دامنه واحد (مثل Railway) است
+    document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
+
+    // هدایت به داشبورد
+    // نکته: اگر پروژه شما پوشه‌ای به نام src/app/[tenant]/dashboard ندارد، 
+    // این خط باعث ۴۰۴ می‌شود. در آن صورت، خط پایین را به: window.location.href = `${cleanAppUrl}/dashboard`; تغییر دهید.
+    window.location.href = `${cleanAppUrl}/${subDomain}/dashboard`;
   }
 
   function handleGoToLanding() { window.location.href = '/' }
@@ -248,14 +232,12 @@ export default function LoginPage() {
       if (data.success) {
         setOtpSent(true)
         setResendCountdown(60)
-        // ★★★ v3.37.4: نمایش کد تست اگر در محیط توسعه هستیم
         if (data.data?._debugCode) {
           setDevOtpCode(data.data._debugCode)
         } else {
           setDevOtpCode('')
         }
       } else {
-        // ★ اگر خطا داشت ولی کد تست برگرداند (محیط dev)
         if (data._debugCode) {
           setOtpSent(true)
           setResendCountdown(60)
@@ -467,7 +449,6 @@ export default function LoginPage() {
                 کد تأیید به شماره <span className="font-medium text-gray-700" dir="ltr">{mobile}</span> ارسال شد
               </div>
 
-              {/* ★★★ v3.37.4: نمایش کد تست در محیط توسعه (وقتی IPPanel در دسترس نیست) */}
               {devOtpCode && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
                   <p className="text-[11px] text-amber-700 font-bold mb-1">
@@ -535,7 +516,6 @@ export default function LoginPage() {
             </form>
           )}
 
-          {/* ★★★ v3.0: 'trial' → 'simple' */}
           <div className="mt-6 pt-5 border-t border-gray-100 text-center">
             <p className="text-sm text-gray-500">
               ثبت‌نام نکرده‌اید؟{' '}
