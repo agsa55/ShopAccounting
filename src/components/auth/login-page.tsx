@@ -122,19 +122,13 @@ export default function LoginPage() {
 
   // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
    function redirectAfterLogin(subDomain: string) {
-    // ۱. تنظیم کوکی برای شناسایی فروشگاه (حیاتی برای محیط Railway)
-    // این کار باعث می‌شود Middleware و APIها بدانند کاربر متعلق به کدام فروشگاه است
+    // ۱. تنظیم کوکی برای شناسایی فروشگاه توسط Middleware
     document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
 
-    // ۲. هدایت به داشبورد اصلی
-    // نکته حیاتی: چون پوشه‌ای به نام [tenant] در src/app وجود ندارد، 
-    // وجود نام فروشگاه در آدرس (مثل /daram2/dashboard) باعث خطای ۴۰۴ می‌شود.
-    // بنابراین فقط به /dashboard هدایت می‌کنیم. سیستم از طریق کوکی و localStorage
-    // که در خطوط قبلی ذخیره شده‌اند، فروشگاه صحیح را شناسایی و نمایش می‌دهد.
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-    const cleanAppUrl = appUrl.endsWith('/') ? appUrl.slice(0, -1) : appUrl;
-    
-    window.location.href = `${cleanAppUrl}/dashboard`;
+    // ۲. هدایت مطلق به داشبورد با استفاده از مسیر نسبی (Relative Path)
+    // استفاده از '/dashboard' تضمین می‌کند که مرورگر در همین دامنه فعلی (Railway) می‌ماند
+    // و هرگز سعی نمی‌کند به shopaccounting.ir برود.
+    window.location.href = '/dashboard';
   }
 
   function handleGoToLanding() { window.location.href = '/' }
