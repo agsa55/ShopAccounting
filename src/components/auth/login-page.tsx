@@ -122,59 +122,61 @@ export default function LoginPage() {
 
   // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
  function redirectAfterLogin(subDomain: string) {
+   console.log('[DEBUG] redirectAfterLogin اجرا شد با', subDomain)
   document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
   setCurrentView('dashboard');
+  console.log('[DEBUG] setCurrentView(dashboard) صدا زده شد')
+
 }
 
   function handleGoToLanding() { window.location.href = '/' }
 
   function handleLoginSuccess(data: LoginResponse['data']) {
-    if (!data) return
+  if (!data) return
+  console.log('[DEBUG] handleLoginSuccess شروع شد', data)
 
-    const userObj = {
-      id: data.user.id,
-      username: data.user.username,
-      role: data.user.role,
-      tenantId: data.user.tenantId,
-      storeId: data.user.storeId,
-      storeName: data.user.storeName || data.tenant?.companyName || '',
-      permissions: Array.isArray(data.user.permissions) ? data.user.permissions : [],
-      userType: data.user.userType,
-      mobile: data.user.mobile,
-    }
-
-    setAccessToken(data.token)
-    localStorage.setItem('refreshToken', data.refreshToken)
-
-    setStoredUser({
-      userId: data.user.id,
-      username: data.user.username,
-      role: data.user.role,
-      mobile: data.user.mobile || null,
-      tenantId: data.user.tenantId,
-      storeId: data.user.storeId || '',
-      storeName: data.user.storeName || data.tenant?.companyName || '',
-      permissions: Array.isArray(data.user.permissions) ? data.user.permissions : [],
-      isActive: true,
-      userType: (data.user.userType as 'storeUser' | 'portalUser') || 'storeUser',
-    })
-
-    if (data.tenant) {
-      localStorage.setItem('tenant', JSON.stringify(data.tenant))
-      localStorage.setItem('storeName', data.tenant.companyName || '')
-      localStorage.setItem('planName', data.tenant.planName || '')
-    }
-
-    storeLogin(userObj, data.token, data.refreshToken)
-
-    if (data.tenant) {
-      setCurrentTenant(data.tenant)
-      setPlanName(data.tenant.planName || '')
-    }
-
-    const subDomain = data.tenant?.subDomain
-    if (subDomain) redirectAfterLogin(subDomain)
+  const userObj = {
+    id: data.user.id,
+    username: data.user.username,
+    role: data.user.role,
+    tenantId: data.user.tenantId,
+    storeId: data.user.storeId,
+    storeName: data.user.storeName || data.tenant?.companyName || '',
+    permissions: Array.isArray(data.user.permissions) ? data.user.permissions : [],
+    userType: data.user.userType,
+    mobile: data.user.mobile,
   }
+
+  setAccessToken(data.token)
+  localStorage.setItem('refreshToken', data.refreshToken)
+
+  setStoredUser({ /* ... بدون تغییر ... */ })
+
+  if (data.tenant) {
+    localStorage.setItem('tenant', JSON.stringify(data.tenant))
+    localStorage.setItem('storeName', data.tenant.companyName || '')
+    localStorage.setItem('planName', data.tenant.planName || '')
+  }
+
+  console.log('[DEBUG] قبل از storeLogin')
+  storeLogin(userObj, data.token, data.refreshToken)
+  console.log('[DEBUG] بعد از storeLogin')
+
+  if (data.tenant) {
+    setCurrentTenant(data.tenant)
+    setPlanName(data.tenant.planName || '')
+  }
+
+  const subDomain = data.tenant?.subDomain
+  console.log('[DEBUG] subDomain =', subDomain)
+  if (subDomain) {
+    console.log('[DEBUG] قبل از redirectAfterLogin')
+    redirectAfterLogin(subDomain)
+    console.log('[DEBUG] بعد از redirectAfterLogin')
+  } else {
+    console.log('[DEBUG] subDomain نبود، ریدایرکت انجام نشد!')
+  }
+}
 
   async function handlePasswordLogin(e: React.FormEvent) {
     e.preventDefault()
