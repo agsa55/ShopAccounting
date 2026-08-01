@@ -121,18 +121,20 @@ export default function LoginPage() {
   }, [resendCountdown])
 
   // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
-  function redirectAfterLogin(subDomain: string) {
+   function redirectAfterLogin(subDomain: string) {
+    // ۱. تنظیم کوکی برای شناسایی فروشگاه (حیاتی برای محیط Railway)
+    // این کار باعث می‌شود Middleware و APIها بدانند کاربر متعلق به کدام فروشگاه است
+    document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
+
+    // ۲. هدایت به داشبورد اصلی
+    // نکته حیاتی: چون پوشه‌ای به نام [tenant] در src/app وجود ندارد، 
+    // وجود نام فروشگاه در آدرس (مثل /daram2/dashboard) باعث خطای ۴۰۴ می‌شود.
+    // بنابراین فقط به /dashboard هدایت می‌کنیم. سیستم از طریق کوکی و localStorage
+    // که در خطوط قبلی ذخیره شده‌اند، فروشگاه صحیح را شناسایی و نمایش می‌دهد.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
     const cleanAppUrl = appUrl.endsWith('/') ? appUrl.slice(0, -1) : appUrl;
     
-    // ★★★ تنظیم کوکی برای اینکه Middleware بداند کاربر متعلق به کدام فروشگاه است
-    // این خط حیاتی‌ترین بخش برای کار کردن سیستم روی یک دامنه واحد (مثل Railway) است
-    document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
-
-    // هدایت به داشبورد
-    // نکته: اگر پروژه شما پوشه‌ای به نام src/app/[tenant]/dashboard ندارد، 
-    // این خط باعث ۴۰۴ می‌شود. در آن صورت، خط پایین را به: window.location.href = `${cleanAppUrl}/dashboard`; تغییر دهید.
-  window.location.href = `${cleanAppUrl}/dashboard`;
+    window.location.href = `${cleanAppUrl}/dashboard`;
   }
 
   function handleGoToLanding() { window.location.href = '/' }
