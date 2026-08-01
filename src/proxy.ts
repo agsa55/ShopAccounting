@@ -241,10 +241,11 @@ export default function proxy(request: NextRequest) {
     }
   }
 
-  const isApiRoute = pathname.startsWith('/api/');
+   const isApiRoute = pathname.startsWith('/api/');
   let effectiveTenantSlug: string | null = tenantSlugFromUrl;
 
-  if (!effectiveTenantSlug && isApiRoute) {
+  // ✅ کد جدید (حیاتی برای Railway: کوکی را برای همه صفحات چک می‌کند)
+  if (!effectiveTenantSlug) {
     effectiveTenantSlug = request.cookies.get('tenant-slug')?.value || null;
   }
 
