@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAppStore as useStore } from '@/lib/store'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -415,6 +416,7 @@ const tickerItems = [
 ]
 
 export default function LandingPage() {
+  const router = useRouter()
   const setCurrentView       = useStore((s) => s.setCurrentView)
   const setSelectedPlanId    = useStore((s) => s.setSelectedPlanId)
   const setSelectedBillingCycle = useStore((s) => s.setSelectedBillingCycle)
@@ -466,10 +468,10 @@ export default function LandingPage() {
   }, [])
 
   const handlePlanSelect = (tierName: string) => {
-    if (setSelectedPlanId)        setSelectedPlanId(tierName)
-    if (setSelectedBillingCycle)  setSelectedBillingCycle(globalBilling)
-    setCurrentView('register')
-  }
+  if (setSelectedPlanId)        setSelectedPlanId(tierName)
+  if (setSelectedBillingCycle)  setSelectedBillingCycle(globalBilling)
+  router.push(`/auth/register?plan=${tierName}&cycle=${globalBilling}`)
+}
 
   const handleStartDemo = () => {
     if (typeof window !== 'undefined') window.location.href = '/demo/phone'
@@ -553,7 +555,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             {/* دکمه ورود — همیشه نمایش داده می‌شود */}
             <button
-              onClick={() => setCurrentView('login')}
+        onClick={() => router.push('/auth/login')}
               className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 hover:text-violet-700 border border-gray-200 hover:border-violet-300 hover:bg-violet-50 rounded-xl transition-all"
             >
               <LogIn className="w-4 h-4" />
@@ -1094,7 +1096,7 @@ export default function LandingPage() {
               شروع تست ۳ روزه رایگان
             </button>
             <button
-              onClick={() => setCurrentView('login')}
+            onClick={() => router.push('/auth/login')}
               className="px-8 sm:px-10 py-4 border border-white/20 text-white hover:bg-white/10 rounded-2xl font-bold text-base sm:text-lg transition-all flex items-center justify-center gap-3 backdrop-blur-sm"
             >
               <LogIn className="w-5 h-5" />
