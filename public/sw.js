@@ -1,5 +1,5 @@
 // public/sw.js
-// ShopAccounting PWA Service Worker v1.0.0
+// ShopAccounting PWA Service Worker v1.0.1 (Fixed: catch handler always returns Response)
 
 const CACHE_NAME = 'shopaccounting-v1';
 const STATIC_CACHE = 'shopaccounting-static-v1';
@@ -28,7 +28,7 @@ const NO_CACHE_PATTERNS = [
 // ─── Install Event ───────────────────────────────────────────
 self.addEventListener('install', (event) => {
   console.log('[SW] Installing...');
-  
+
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       console.log('[SW] Caching static assets');
@@ -50,7 +50,7 @@ self.addEventListener('install', (event) => {
 // ─── Activate Event ──────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating...');
-  
+
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
@@ -137,25 +137,37 @@ self.addEventListener('fetch', (event) => {
           return cached;
         }
         // اگر cache نداشت از network بگیر
-        return fetch(request).then((response) => {
-          if (response.ok) {
-            const responseClone = response.clone();
-            caches.open(STATIC_CACHE).then((cache) => {
-              cache.put(request, responseClone);
-            });
-          }
-          return response;
-        }).catch(() => {
-          // صفحه آفلاین برای navigation
-          if (request.destination === 'document') {
-            return caches.match('/').then((homePage) => {
-              return homePage || new Response('آفلاین هستید', {
-                status: 503,
-                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        return fetch(request)
+          .then((response) => {
+            if (response.ok) {
+              const responseClone = response.clone();
+              caches.open(STATIC_CACHE).then((cache) => {
+                cache.put(request, responseClone);
               });
+            }
+            return response;
+          })
+          .catch(() => {
+            // صفحه آفلاین برای navigation
+            if (request.destination === 'document') {
+              return caches.match('/').then((homePage) => {
+                return (
+                  homePage ||
+                  new Response('آفلاین هستید', {
+                    status: 503,
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                  })
+                );
+              });
+            }
+            // ★★★ اصلاح اصلی: برای هر درخواست دیگه (فونت، عکس، chunk و ...)
+            // هم باید حتماً یک Response واقعی برگردونیم، وگرنه مرورگر خطای
+            // "Failed to convert value to 'Response'" می‌ده
+            return new Response('', {
+              status: 504,
+              statusText: 'Offline',
             });
-          }
-        });
+          });
       })
     );
   }
@@ -164,7 +176,7 @@ self.addEventListener('fetch', (event) => {
 // ─── Push Notifications (آینده) ──────────────────────────────
 self.addEventListener('push', (event) => {
   if (!event.data) return;
-  
+
   const data = event.data.json();
   const options = {
     body: data.body || '',
