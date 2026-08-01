@@ -126,11 +126,11 @@ export default function LoginPage() {
     document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
 
     // ۲. هدایت مطلق به داشبورد با استفاده از مسیر نسبی (Relative Path)
-    // استفاده از '/dashboard' تضمین می‌کند که مرورگر در همین دامنه فعلی (Railway) می‌ماند
-    // و هرگز سعی نمی‌کند به shopaccounting.ir برود.
-    window.location.href = '/dashboard';
+    // استفاده از replace به جای href باعث می‌شود کش ریدایرکت مرورگر دور زده شود
+    // و مرورگر مجبور شود دقیقاً به مسیر '/dashboard' در همین دامنه فعلی برود.
+    window.location.replace('/dashboard');
   }
-
+  
   function handleGoToLanding() { window.location.href = '/' }
 
   function handleLoginSuccess(data: LoginResponse['data']) {
