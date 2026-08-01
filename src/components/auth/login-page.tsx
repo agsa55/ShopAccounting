@@ -132,7 +132,7 @@ export default function LoginPage() {
     // هدایت به داشبورد
     // نکته: اگر پروژه شما پوشه‌ای به نام src/app/[tenant]/dashboard ندارد، 
     // این خط باعث ۴۰۴ می‌شود. در آن صورت، خط پایین را به: window.location.href = `${cleanAppUrl}/dashboard`; تغییر دهید.
-    window.location.href = `${cleanAppUrl}/${subDomain}/dashboard`;
+  window.location.href = `${cleanAppUrl}/dashboard`;
   }
 
   function handleGoToLanding() { window.location.href = '/' }
