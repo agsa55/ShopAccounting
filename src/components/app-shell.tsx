@@ -1,17 +1,28 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v9.6.3 ★★★
-// ★ اصلاح دقیق RTL تاریخ هدر + کاهش فاصله بین بخش‌های (Groups) منوی کناری
+// src/components/app-shell.tsx — v9.7.0 ★★★
+// ★ v9.6.3: اصلاح دقیق RTL تاریخ هدر + کاهش فاصله بین بخش‌های منوی کناری
+// ★ v9.7.0: اتصال هوشمند — جایگزینی navigator.onLine با پینگ واقعی API
+//           + نشانگر وضعیت اتصال در هدر + preload هوشمند
 // ============================================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useStore, type AppView } from '@/lib/store'
 import { resolvePlan, getFeaturesByPlanName } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
 
 // ★ PWA
 import { usePWAInstall } from '@/components/pwa-register'
+
+// ★ v9.7.0: ماژول تشخیص اتصال هوشمند
+import {
+  startConnectivityMonitor,
+  onConnectivityChange,
+  isOnline as isApiOnline,
+  getConnectivityState,
+  type ConnectivityState,
+} from '@/lib/connectivity'
 
 import {
   LayoutDashboard, ShoppingCart, Package, Grid3x3, Users, FileText,
@@ -727,7 +738,6 @@ function AppSidebar() {
 
       <SidebarContent>
         {visibleGroups.map((group) => (
-          // ★ اصلاح دقیق فاصله بین بخش‌ها: حذف پدینگ و مارجین اضافی
           <SidebarGroup key={group.label} className="py-0 my-0">
             <SidebarGroupLabel className="text-[10px] font-bold text-slate-400 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
               {group.label}
@@ -894,6 +904,68 @@ function SyncIndicator() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ★ v9.7.0: ConnectionBadge — نشانگر وضعیت اتصال هوشمند
+   ═══════════════════════════════════════════════════════════════
+   ★ بر اساس پینگ واقعی /api/health تصمیم می‌گیرد.
+   ★ در محیط لوکال بدون اینترنت → "آنلاین" (چون API در دسترس است)
+   ★ وقتی سرور واقعاً قطع باشد → "آفلاین"
+   ═══════════════════════════════════════════════════════════════ */
+
+function ConnectionBadge() {
+  const [state, setState] = useState<ConnectivityState>(getConnectivityState())
+
+  useEffect(() => {
+    startConnectivityMonitor()
+    const unsub = onConnectivityChange(setState)
+    return unsub
+  }, [])
+
+  const config = {
+    online: {
+      label: 'آنلاین',
+      dot: 'bg-emerald-500',
+      bg: 'bg-emerald-50/80 border-emerald-200',
+      text: 'text-emerald-700',
+      icon: Wifi,
+    },
+    degraded: {
+      label: 'کند',
+      dot: 'bg-amber-500',
+      bg: 'bg-amber-50/80 border-amber-200',
+      text: 'text-amber-700',
+      icon: AlertTriangle,
+    },
+    offline: {
+      label: 'آفلاین',
+      dot: 'bg-red-500',
+      bg: 'bg-red-50/80 border-red-200',
+      text: 'text-red-700',
+      icon: WifiOff,
+    },
+  }[state.status]
+
+  const IconComponent = config.icon
+
+  return (
+    <div
+      dir="rtl"
+      className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg border ${config.bg} transition-colors duration-300`}
+      title={
+        `سرور: ${state.isApiReachable ? 'متصل' : 'قطع'}` +
+        ` | اینترنت: ${state.isInternetAvailable ? 'متصل' : 'قطع'}` +
+        ` | زمان پاسخ: ${state.responseTimeMs}ms`
+      }
+    >
+      <IconComponent className={`w-3 h-3 ${config.text} shrink-0`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${state.status !== 'online' ? 'animate-pulse' : ''}`} />
+      <span className={`text-[10px] font-medium ${config.text} whitespace-nowrap`}>
+        {config.label}
+      </span>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
 
@@ -1033,6 +1105,9 @@ function AppHeader() {
   </span>
 </div>
 
+        {/* ★ v9.7.0: نشانگر وضعیت اتصال هوشمند */}
+        <ConnectionBadge />
+
         <PWAInstallButton />
         <SyncIndicator />
         <OfflineModal />
@@ -1161,6 +1236,9 @@ export default function AppShell() {
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
+  // ★ v9.7.0: ref برای جلوگیری از preload تکراری هنگام بازگشت از آفلاین
+  const hasPreloadedRef = useRef(false)
+
   useEffect(() => {
     if (!user) return
     const canAccess = checkAccess(currentView, user.role, user.permissions, planFeatures)
@@ -1179,10 +1257,12 @@ export default function AppShell() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // ── Sync Engine ──────────────────────────────────────────────
     import('@/lib/sync-engine').then(({ syncEngine }) => {
       syncEngine.init()
     })
 
+    // ── Service Worker Listener ──────────────────────────────────
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
       try {
@@ -1199,16 +1279,52 @@ export default function AppShell() {
       }
     }
 
+    // ── ★ v9.7.0: اتصال هوشمند — جایگزین navigator.onLine ──────
+    // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op است)
+    startConnectivityMonitor()
+
+    // تنظیم اولیه store بر اساس وضعیت واقعی API
+    const initialState = getConnectivityState()
+    useStore.getState().setOnline(initialState.isApiReachable)
+
+    // گوش دادن به تغییرات connectivity → به‌روزرسانی store
+    const unsubConnectivity = onConnectivityChange((state) => {
+      useStore.getState().setOnline(state.isApiReachable)
+
+      // ★ v9.7.0: preload هنگام بازگشت از آفلاین (فقط یک‌بار)
+      if (state.isApiReachable && !hasPreloadedRef.current) {
+        hasPreloadedRef.current = true
+        setTimeout(async () => {
+          try {
+            const { syncEngine } = await import('@/lib/sync-engine')
+            await syncEngine.preloadData()
+            console.log('[AppShell] ✅ Preload after reconnect completed')
+          } catch (err) {
+            console.warn('[AppShell] ⚠️ Preload after reconnect failed:', err)
+          }
+        }, 1500)
+      }
+    })
+
+    // ── حفظ backward compat: event‌های مرورگر ───────────────────
+    // ★ این listener‌ها به‌عنوان سیگنال کمکی نگه داشته شده‌اند.
+    //   مقدار نهایی توسط onConnectivityChange تعیین می‌شود (پینگ واقعی API).
+    const handleBrowserOnline = () => useStore.getState().setOnline(true)
+    const handleBrowserOffline = () => useStore.getState().setOnline(false)
+
     const initialOnline = navigator.onLine
     useStore.getState().setOnline(initialOnline)
 
-    window.addEventListener('online', () => useStore.getState().setOnline(true))
-    window.addEventListener('offline', () => useStore.getState().setOnline(false))
+    window.addEventListener('online', handleBrowserOnline)
+    window.addEventListener('offline', handleBrowserOffline)
 
     listenToSW()
 
+    // ── Preload اولیه ────────────────────────────────────────────
+    // ★ v9.7.0: بر اساس isApiOnline() به‌جای navigator.onLine
     let preloadTimer: NodeJS.Timeout | null = null
-    if (initialOnline) {
+    if (isApiOnline()) {
+      hasPreloadedRef.current = true
       preloadTimer = setTimeout(async () => {
         try {
           const { syncEngine } = await import('@/lib/sync-engine')
@@ -1220,8 +1336,11 @@ export default function AppShell() {
     }
 
     return () => {
-      window.removeEventListener('online', () => useStore.getState().setOnline(true))
-      window.removeEventListener('offline', () => useStore.getState().setOnline(false))
+      // ★ v9.7.0: cleanup connectivity listener
+      unsubConnectivity()
+
+      window.removeEventListener('online', handleBrowserOnline)
+      window.removeEventListener('offline', handleBrowserOffline)
       if (preloadTimer) clearTimeout(preloadTimer)
     }
   }, [])

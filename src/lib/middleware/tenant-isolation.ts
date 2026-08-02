@@ -1,7 +1,13 @@
 // ============================================================================
-// src/lib/middleware/tenant-isolation.ts — Tenant Isolation Middleware (v3.36.4 ★★★)
+// src/lib/middleware/tenant-isolation.ts — Tenant Isolation Middleware (v4.0 ★★★)
 // ----------------------------------------------------------------------------
-// ★★★ v3.36.4: پشتیبانی کامل از توکن‌های پورتال مشتری
+// ★★★ v4.0: اصلاحات امنیتی بحرانی:
+//   ★ جایگزینی decodeJwtPayload (بدون verify) با jwt.verify واقعی
+//   ★ جلوگیری از دسترسی با JWT جعلی (Tenant Spoofing)
+//   ★ افزودن fallback با JWT_REFRESH_SECRET
+//   ★ Fail-closed: اگر secret نباشد، درخواست رد می‌شود
+//
+// ★★★ v3.36.4 (حفظ شد): پشتیبانی کامل از توکن‌های پورتال مشتری
 //   - اگر payload.type === 'portal' باشد، کاربر به‌عنوان مشتری شناخته می‌شود
 //   - نقش 'Customer' به او داده می‌شود
 //   - برای مسیرهای عمومی (pos برای پرداخت آنلاین، customers خودش) دسترسی داده می‌شود
@@ -16,6 +22,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { checkSubscriptionStatus } from '@/lib/plan-limits'
+
+// ★★★ v4.0: import واقعی jsonwebtoken برای verify امضا
+import jwt from 'jsonwebtoken'
 
 export interface TenantContext {
   user: any
@@ -104,14 +113,47 @@ function extractToken(req: NextRequest): string | null {
   return null
 }
 
-function decodeJwtPayload(token: string): any {
+// ★★★ v4.0: تابع verify واقعی JWT (جایگزین decodeJwtPayload ناامن)
+// ─────────────────────────────────────────────────────────────────────────────
+// قبلاً فقط payload را decode می‌کرد بدون بررسی امضا:
+//   const payload = Buffer.from(parts[1], 'base64url').toString('utf-8')
+//   return JSON.parse(payload)
+// این یعنی هر کسی می‌توانست JWT جعلی بسازد و به داده هر tenant دسترسی پیدا کند!
+//
+// حالا با jwt.verify امضا را بررسی می‌کند.
+// اگر secret موجود نباشد، درخواست رد می‌شود (fail-closed).
+// ─────────────────────────────────────────────────────────────────────────────
+function verifyJwtToken(token: string): { valid: boolean; payload: any; error?: string } {
+  const secret = process.env.JWT_ACCESS_SECRET
+
+  if (!secret) {
+    console.error('[TenantIsolation] ★ CRITICAL: JWT_ACCESS_SECRET is not set!')
+    return { valid: false, payload: null, error: 'JWT secret configured نشده است' }
+  }
+
   try {
-    const parts = token.split('.')
-    if (parts.length !== 3) return null
-    const payload = Buffer.from(parts[1], 'base64url').toString('utf-8')
-    return JSON.parse(payload)
-  } catch {
-    return null
+    const payload = jwt.verify(token, secret) as any
+    return { valid: true, payload }
+  } catch (err: any) {
+    // ★ اگر verify با ACCESS_SECRET ناموفق بود، با REFRESH_SECRET هم امتحان کن
+    // (برخی توکن‌ها ممکن است با secret دیگری امضا شده باشند)
+    const refreshSecret = process.env.JWT_REFRESH_SECRET
+    if (refreshSecret && refreshSecret !== secret) {
+      try {
+        const payload = jwt.verify(token, refreshSecret) as any
+        return { valid: true, payload }
+      } catch {
+        // هر دو ناموفق — ادامه به خطا
+      }
+    }
+
+    const errorMessage = err?.name === 'TokenExpiredError'
+      ? 'توکن منقضی شده است'
+      : err?.name === 'JsonWebTokenError'
+        ? 'توکن نامعتبر است'
+        : 'خطا در اعتبارسنجی توکن'
+
+    return { valid: false, payload: null, error: errorMessage }
   }
 }
 
@@ -121,9 +163,14 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
     return NextResponse.json({ success: false, error: 'توکن احراز هویت الزامی است' }, { status: 401 })
   }
 
-  const payload = decodeJwtPayload(token)
-  if (!payload) {
-    return NextResponse.json({ success: false, error: 'توکن نامعتبر است' }, { status: 401 })
+  // ★★★ v4.0: verify واقعی JWT (نه فقط decode)
+  const { valid, payload, error } = verifyJwtToken(token)
+
+  if (!valid || !payload) {
+    return NextResponse.json(
+      { success: false, error: error || 'توکن نامعتبر است', code: 'INVALID_TOKEN' },
+      { status: 401 }
+    )
   }
 
   const userId = payload.userId || payload.sub || payload.id

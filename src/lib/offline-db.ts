@@ -1,11 +1,13 @@
 'use client'
 
 /**
- * Offline DB — ShopAccounting v6.2
+ * Offline DB — ShopAccounting v6.5
  * ذخیره‌سازی واقعی با IndexedDB (پایدار بین session‌ها)
  * ★ v6.1: اضافه شدن cache پلن و فاکتورها
  * ★ v6.2: اضافه شدن cache انبارها برای POS آفلاین
  * ★ v6.3: اضافه شدن cache اقساط و طرح‌های قسطی
+ * ★ v6.4: اضافه شدن cache تیکت‌ها و پیام‌ها
+ * ★ v6.5: FIX — حذف ساخت تکراری meta store + افزودن offlineOperations store
  */
 
 export interface SyncQueueItem {
@@ -26,13 +28,14 @@ export interface CacheStats {
   invoices: number
   installmentPlans: number
   installmentSchedules: number
-  tickets: number          // ★ v6.4: اضافه شد
+  tickets: number
   syncQueue: number
   lastSync: number | null
 }
 
 const DB_NAME = 'ShopAccountingOffline'
-const DB_VERSION =4  // ★ v6.4: از 2 به 3 تغییر کرد
+// ★ FIX: کامنت اصلاح شد — نسخه واقعی ۴ است (نه ۳)
+const DB_VERSION = 4
 const STORES = {
   syncQueue: 'syncQueue',
   products: 'products',
@@ -41,8 +44,8 @@ const STORES = {
   invoices: 'invoices',
   installmentPlans: 'installmentPlans',
   installmentSchedules: 'installmentSchedules',
-  tickets: 'tickets',                 // ★ v6.4: جدید
-  ticketMessages: 'ticketMessages',   // ★ v6.4: جدید
+  tickets: 'tickets',
+  ticketMessages: 'ticketMessages',
   offlineOperations: 'offlineOperations',
   meta: 'meta',
 } as const
@@ -110,24 +113,29 @@ async function getDB(): Promise<IDBDatabase> {
       }
 
       // ★ v6.4: tickets store
-if (!db.objectStoreNames.contains(STORES.tickets)) {
-  const store = db.createObjectStore(STORES.tickets, { keyPath: 'id' })
-  store.createIndex('status', 'status')
-  store.createIndex('updatedAt', 'updatedAt')
-}
+      if (!db.objectStoreNames.contains(STORES.tickets)) {
+        const store = db.createObjectStore(STORES.tickets, { keyPath: 'id' })
+        store.createIndex('status', 'status')
+        store.createIndex('updatedAt', 'updatedAt')
+      }
 
-// ★ v6.4: ticketMessages store
-if (!db.objectStoreNames.contains(STORES.ticketMessages)) {
-  const store = db.createObjectStore(STORES.ticketMessages, { keyPath: 'id' })
-  store.createIndex('ticketId', 'ticketId')
-  store.createIndex('createdAt', 'createdAt')
-}
+      // ★ v6.4: ticketMessages store
+      if (!db.objectStoreNames.contains(STORES.ticketMessages)) {
+        const store = db.createObjectStore(STORES.ticketMessages, { keyPath: 'id' })
+        store.createIndex('ticketId', 'ticketId')
+        store.createIndex('createdAt', 'createdAt')
+      }
 
-// meta store (این خط از قبل وجود دارد - تغییر ندهید)
-if (!db.objectStoreNames.contains(STORES.meta)) {
-  db.createObjectStore(STORES.meta, { keyPath: 'key' })
-}
-      // meta store (برای lastSync، plan، warehouses و غیره)
+      // ★ FIX v6.5: offlineOperations store — قبلاً در STORES تعریف شده بود
+      //   ولی هرگز در onupgradeneeded ساخته نمی‌شد → خطای运行时 هنگام addOfflineOperation
+      if (!db.objectStoreNames.contains(STORES.offlineOperations)) {
+        const store = db.createObjectStore(STORES.offlineOperations, { keyPath: 'id' })
+        store.createIndex('type', 'type')
+        store.createIndex('status', 'status')
+        store.createIndex('createdAt', 'createdAt')
+      }
+
+      // ★ FIX v6.5: فقط یک‌بار meta store ساخته شود (قبلاً دوبار بود)
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: 'key' })
       }
@@ -384,7 +392,6 @@ export async function cacheInstallmentPlans(plans: any[]): Promise<void> {
     for (const plan of plans) {
       await idbPut(STORES.installmentPlans, plan)
     }
-    // fallback localStorage
     localStorage.setItem('cached_installment_plans', JSON.stringify({
       plans,
       cachedAt: new Date().toISOString(),
@@ -403,7 +410,6 @@ export async function cacheInstallmentPlans(plans: any[]): Promise<void> {
 
 export async function getCachedInstallmentPlans(): Promise<any[]> {
   try {
-    // ۱. IndexedDB
     const plans = await idbGetAll<any>(STORES.installmentPlans)
     if (plans.length > 0) {
       console.log('[OfflineDB] Installment plans loaded from IndexedDB')
@@ -413,7 +419,6 @@ export async function getCachedInstallmentPlans(): Promise<any[]> {
     console.warn('[OfflineDB] Error reading plans from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_installment_plans')
     if (cached) {
@@ -436,7 +441,6 @@ export async function cacheInstallmentSchedules(schedules: any[]): Promise<void>
     for (const schedule of schedules) {
       await idbPut(STORES.installmentSchedules, schedule)
     }
-    // fallback localStorage
     localStorage.setItem('cached_installment_schedules', JSON.stringify({
       schedules,
       cachedAt: new Date().toISOString(),
@@ -455,7 +459,6 @@ export async function cacheInstallmentSchedules(schedules: any[]): Promise<void>
 
 export async function getCachedInstallmentSchedules(): Promise<any[]> {
   try {
-    // ۱. IndexedDB
     const schedules = await idbGetAll<any>(STORES.installmentSchedules)
     if (schedules.length > 0) {
       console.log('[OfflineDB] Schedules loaded from IndexedDB')
@@ -465,7 +468,6 @@ export async function getCachedInstallmentSchedules(): Promise<any[]> {
     console.warn('[OfflineDB] Error reading schedules from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_installment_schedules')
     if (cached) {
@@ -507,7 +509,6 @@ export async function cacheInstallmentSummary(summary: CachedInstallmentSummary)
 
 export async function getCachedInstallmentSummary(): Promise<CachedInstallmentSummary | null> {
   try {
-    // ۱. IndexedDB
     const record = await idbGet<{ key: string; value: CachedInstallmentSummary }>(STORES.meta, 'installment_summary')
     if (record?.value) {
       console.log('[OfflineDB] Summary loaded from IndexedDB')
@@ -517,7 +518,6 @@ export async function getCachedInstallmentSummary(): Promise<CachedInstallmentSu
     console.warn('[OfflineDB] Error reading summary from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_installment_summary')
     if (cached) {
@@ -543,15 +543,11 @@ export interface CachedPlanData {
 
 export async function cachePlan(planData: CachedPlanData): Promise<void> {
   try {
-    // ۱. ذخیره در IndexedDB
     await idbPut(STORES.meta, { key: 'plan', value: planData })
     console.log('[OfflineDB] ✅ Plan cached:', planData.planName)
-
-    // ۲. ذخیره هم در localStorage برای fallback
     localStorage.setItem('cached_plan', JSON.stringify(planData))
   } catch (err) {
     console.error('[OfflineDB] cachePlan error:', err)
-    // اگه IndexedDB fail شد، حداقل localStorage رو تلاش کن
     try {
       localStorage.setItem('cached_plan', JSON.stringify(planData))
     } catch {}
@@ -560,7 +556,6 @@ export async function cachePlan(planData: CachedPlanData): Promise<void> {
 
 export async function getCachedPlan(): Promise<CachedPlanData | null> {
   try {
-    // ۱. سعی از IndexedDB
     const record = await idbGet<{ key: string; value: CachedPlanData }>(STORES.meta, 'plan')
     if (record?.value) {
       console.log('[OfflineDB] Plan loaded from IndexedDB:', record.value.planName)
@@ -570,7 +565,6 @@ export async function getCachedPlan(): Promise<CachedPlanData | null> {
     console.warn('[OfflineDB] Error reading plan from IndexedDB:', err)
   }
 
-  // ۲. Fallback به localStorage
   try {
     const cached = localStorage.getItem('cached_plan')
     if (cached) {
@@ -587,13 +581,11 @@ export async function getCachedPlan(): Promise<CachedPlanData | null> {
 
 export async function clearCachedPlan(): Promise<void> {
   try {
-    // ۱. حذف از IndexedDB
     await idbDelete(STORES.meta, 'plan')
   } catch (err) {
     console.warn('[OfflineDB] Error deleting plan from IndexedDB:', err)
   }
 
-  // ۲. حذف از localStorage
   try {
     localStorage.removeItem('cached_plan')
   } catch {}
@@ -629,20 +621,17 @@ export async function cacheInvoicesPage(
       page,
     }
 
-    // ۱. IndexedDB
     await idbPut(STORES.meta, {
       key: `invoices-${status}-${page}`,
       value: data,
     })
 
-    // ۲. localStorage (fallback)
     const cacheKey = `invoices-cache-${status}-${page}`
     localStorage.setItem(cacheKey, JSON.stringify(data))
 
     console.log(`[OfflineDB] ✅ ${invoices.length} فاکتور cached`)
   } catch (err) {
     console.error('[OfflineDB] cacheInvoicesPage error:', err)
-    // حداقل localStorage رو تلاش کن
     try {
       const cacheKey = `invoices-cache-${status}-${page}`
       localStorage.setItem(cacheKey, JSON.stringify({
@@ -662,7 +651,6 @@ export async function getCachedInvoicesPage(
   page: number
 ): Promise<CachedInvoiceData | null> {
   try {
-    // ۱. IndexedDB
     const record = await idbGet<{ key: string; value: CachedInvoiceData }>(
       STORES.meta,
       `invoices-${status}-${page}`
@@ -675,7 +663,6 @@ export async function getCachedInvoicesPage(
     console.warn('[OfflineDB] Error reading invoices from IndexedDB:', err)
   }
 
-  // ۲. localStorage (fallback)
   try {
     const cacheKey = `invoices-cache-${status}-${page}`
     const cached = localStorage.getItem(cacheKey)
@@ -693,7 +680,6 @@ export async function getCachedInvoicesPage(
 
 export async function clearInvoicesCache(): Promise<void> {
   try {
-    // IndexedDB
     const allMeta = await idbGetAll<any>(STORES.meta)
     for (const item of allMeta) {
       if (item.key?.startsWith('invoices-')) {
@@ -702,7 +688,6 @@ export async function clearInvoicesCache(): Promise<void> {
     }
   } catch {}
 
-  // localStorage
   const keys = Object.keys(localStorage)
   for (const key of keys) {
     if (key.startsWith('invoices-cache-')) {
@@ -721,7 +706,6 @@ export async function cacheWarehousesMeta(warehouses: any[]): Promise<void> {
       key: 'warehouses',
       value: warehouses,
     })
-    // fallback localStorage
     localStorage.setItem('cached_warehouses', JSON.stringify({
       warehouses,
       cachedAt: new Date().toISOString(),
@@ -740,7 +724,6 @@ export async function cacheWarehousesMeta(warehouses: any[]): Promise<void> {
 
 export async function getCachedWarehouses(): Promise<any[]> {
   try {
-    // ۱. IndexedDB
     const record = await idbGet<{ key: string; value: any[] }>(STORES.meta, 'warehouses')
     if (record?.value && Array.isArray(record.value)) {
       console.log('[OfflineDB] Warehouses loaded from IndexedDB')
@@ -750,7 +733,6 @@ export async function getCachedWarehouses(): Promise<any[]> {
     console.warn('[OfflineDB] Error reading warehouses from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_warehouses')
     if (cached) {
@@ -792,7 +774,7 @@ export async function getCacheStats(): Promise<CacheStats> {
         idbCount(STORES.invoices),
         idbCount(STORES.installmentPlans),
         idbCount(STORES.installmentSchedules),
-        idbCount(STORES.tickets),        // ★ v6.4: جدید
+        idbCount(STORES.tickets),
         idbCount(STORES.syncQueue),
         getLastSyncTimestamp(),
       ])
@@ -810,13 +792,15 @@ export async function clearAllCache(): Promise<void> {
     idbClear(STORES.invoices),
     idbClear(STORES.installmentPlans),
     idbClear(STORES.installmentSchedules),
-    idbClear(STORES.tickets),              // ★ v6.4: جدید
-    idbClear(STORES.ticketMessages),       // ★ v6.4: جدید
+    idbClear(STORES.tickets),
+    idbClear(STORES.ticketMessages),
+    idbClear(STORES.offlineOperations),   // ★ FIX v6.5: قبلاً پاک نمی‌شد
     idbClear(STORES.syncQueue),
     idbClear(STORES.meta),
   ])
   await clearCachedPlan()
 }
+
 // ─── Helpers ─────────────────────────────────────────────────────
 
 export function isOfflineId(id: string): boolean {
@@ -843,7 +827,6 @@ export async function cacheTickets(tickets: any[]): Promise<void> {
     for (const t of tickets) {
       await idbPut(STORES.tickets, t)
     }
-    // fallback localStorage
     localStorage.setItem('cached_tickets', JSON.stringify({
       tickets,
       cachedAt: new Date().toISOString(),
@@ -862,7 +845,6 @@ export async function cacheTickets(tickets: any[]): Promise<void> {
 
 export async function getCachedTickets(): Promise<any[]> {
   try {
-    // ۱. IndexedDB
     const tickets = await idbGetAll<any>(STORES.tickets)
     if (tickets.length > 0) {
       console.log('[OfflineDB] Tickets loaded from IndexedDB')
@@ -872,7 +854,6 @@ export async function getCachedTickets(): Promise<any[]> {
     console.warn('[OfflineDB] Error reading tickets from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_tickets')
     if (cached) {
@@ -893,14 +874,12 @@ export async function getCachedTickets(): Promise<any[]> {
 
 export async function cacheTicketMessages(ticketId: string, messages: any[]): Promise<void> {
   try {
-    // حذف پیام‌های قبلی این تیکت برای جلوگیری از تکرار
     const allMsgs = await idbGetAll<any>(STORES.ticketMessages)
     for (const msg of allMsgs) {
       if (msg.ticketId === ticketId) {
         await idbDelete(STORES.ticketMessages, msg.id)
       }
     }
-    // افزودن پیام‌های جدید
     for (const m of messages) {
       await idbPut(STORES.ticketMessages, m)
     }
@@ -941,7 +920,6 @@ export async function cacheTicketStats(stats: any): Promise<void> {
 
 export async function getCachedTicketStats(): Promise<any | null> {
   try {
-    // ۱. IndexedDB
     const record = await idbGet<{ key: string; value: any }>(STORES.meta, 'ticket_stats')
     if (record?.value) {
       console.log('[OfflineDB] Ticket stats loaded from IndexedDB')
@@ -951,7 +929,6 @@ export async function getCachedTicketStats(): Promise<any | null> {
     console.warn('[OfflineDB] Error reading ticket stats from IndexedDB:', err)
   }
 
-  // ۲. localStorage fallback
   try {
     const cached = localStorage.getItem('cached_ticket_stats')
     if (cached) {

@@ -1,11 +1,12 @@
 /**
- * Sync Engine — ShopAccounting v5.3
+ * Sync Engine — ShopAccounting v5.4
  *
  * موتور همگام‌سازی آفلاین/آنلاین
  * ارسال صف همگام‌سازی به سرور هنگام اتصال
  *
  * ★ v5.3: اصلاح preloadData — واکشی صحیح محصولات، مشتریان، دسته‌بندی‌ها، انبارها و فاکتورها
- *         + اضافه شدن cache انبارها برای POS آفلاین
+ * ★ v5.4: FIX — جایگزینی navigator.onLine با isOnline() از connectivity module
+ *          حالا بر اساس پینگ واقعی API تصمیم می‌گیرد، نه اتصال اینترنت مرورگر
  *
  * فایل: src/lib/sync-engine.ts
  */
@@ -28,6 +29,8 @@ import {
   type SyncQueueItem,
 } from '@/lib/offline-db'
 import { useAppStore } from '@/lib/store'
+// ★ FIX v5.4: import ماژول تشخیص اتصال هوشمند
+import { isOnline, startConnectivityMonitor, onConnectivityChange } from '@/lib/connectivity'
 
 // ═══════════════════════════════════════════════════════════════
 // تایپ‌ها
@@ -49,10 +52,12 @@ class SyncEngineClass {
   private maxRetries = 3
   private initialized = false
   private syncInterval: NodeJS.Timeout | null = null
+  // ★ FIX v5.4: نگهداری reference برای cleanup
+  private unsubscribeConnectivity: (() => void) | null = null
 
   /**
    * راه‌اندازی اولیه موتور همگام‌سازی
-   * ★ v5.2: متد جدید برای PWA
+   * ★ v5.4: استفاده از connectivity module به‌جای navigator.onLine
    */
   init(): void {
     if (this.initialized) {
@@ -63,18 +68,34 @@ class SyncEngineClass {
     this.initialized = true
     console.log('[SyncEngine] Initialized')
 
-    // همگام‌سازی خودکار هر 5 دقیقه
+    // ★ FIX v5.4: شروع مانیتورینگ اتصال (اگر قبلاً شروع نشده)
+    startConnectivityMonitor()
+
     if (typeof window !== 'undefined') {
+      // همگام‌سازی خودکار هر ۵ دقیقه
       this.syncInterval = setInterval(() => {
-        if (navigator.onLine) {
+        // ★ FIX v5.4: قبلاً navigator.onLine بود → حالا isOnline()
+        //   isOnline() بر اساس پینگ واقعی /api/health تصمیم می‌گیرد
+        if (isOnline()) {
           this.sync().catch(() => {})
         }
       }, 5 * 60 * 1000)
 
-      // همگام‌سازی وقتی آنلاین می‌شویم
+      // ★ FIX v5.4: گوش دادن به تغییرات connectivity به‌جای فقط event مرورگر
+      //   قبلاً: window.addEventListener('online', ...)
+      //   حالا: هر وقت API واقعاً در دسترس قرار بگیرد، sync اجرا می‌شود
+      this.unsubscribeConnectivity = onConnectivityChange((state) => {
+        if (state.isApiReachable) {
+          console.log('[SyncEngine] API reachable → syncing...')
+          this.sync().catch(() => {})
+        }
+      })
+
+      // حفظ backward compat: event مرورگر هم نگه می‌داریم (سیگنال کمکی)
       window.addEventListener('online', () => {
-        console.log('[SyncEngine] Device is online, syncing...')
-        this.sync().catch(() => {})
+        console.log('[SyncEngine] Browser online event → will recheck via connectivity')
+        // ★ دیگر مستقیماً sync نمی‌کنیم — connectivity module خودش بررسی می‌کند
+        // و اگر API واقعاً در دسترس باشد، listener بالا sync را trigger می‌کند
       })
     }
   }
@@ -86,6 +107,11 @@ class SyncEngineClass {
     if (this.syncInterval) {
       clearInterval(this.syncInterval)
       this.syncInterval = null
+    }
+    // ★ FIX v5.4: cleanup listener
+    if (this.unsubscribeConnectivity) {
+      this.unsubscribeConnectivity()
+      this.unsubscribeConnectivity = null
     }
     this.initialized = false
     console.log('[SyncEngine] Stopped')
@@ -101,6 +127,16 @@ class SyncEngineClass {
         succeeded: 0,
         failed: 0,
         errors: ['همگام‌سازی قبلی هنوز در حال اجراست'],
+      }
+    }
+
+    // ★ FIX v5.4: بررسی واقعی قبل از شروع
+    if (!isOnline()) {
+      return {
+        processed: 0,
+        succeeded: 0,
+        failed: 0,
+        errors: ['سرور در دسترس نیست — همگام‌سازی لغو شد'],
       }
     }
 
@@ -200,8 +236,15 @@ class SyncEngineClass {
   /**
    * پیش‌بارگذاری داده‌ها از سرور و ذخیره در کش
    * ★ v5.3: اصلاح کامل — واکشی صحیح همه داده‌ها برای آفلاین
+   * ★ v5.4: بررسی isOnline() قبل از شروع preload
    */
   async preloadData(tenantId?: string): Promise<void> {
+    // ★ FIX v5.4: اگر سرور در دسترس نیست، preload بی‌معنی است
+    if (!isOnline()) {
+      console.log('[SyncEngine] Server not reachable — preload skipped')
+      return
+    }
+
     try {
       const token = typeof window !== 'undefined'
         ? localStorage.getItem('token')
@@ -230,7 +273,6 @@ class SyncEngineClass {
         )
         if (res.ok) {
           const data = await res.json()
-          // ★ ساختار صحیح: data.data آرایه محصولاته
           const products = Array.isArray(data.data)
             ? data.data
             : Array.isArray(data.data?.products)
@@ -275,7 +317,6 @@ class SyncEngineClass {
         )
         if (res.ok) {
           const data = await res.json()
-          // ★ ساختار: data.data یا data.data.categories
           const categories = Array.isArray(data.data)
             ? data.data
             : Array.isArray(data.data?.categories)
@@ -327,9 +368,7 @@ class SyncEngineClass {
           const total = data.total || data.data?.total || invoices.length
 
           if (invoices.length > 0) {
-            // ذخیره در invoices store (برای جستجو)
             await cacheInvoices(invoices)
-            // ذخیره در meta store (برای صفحه‌بندی)
             await cacheInvoicesPage(invoices, totalPages, total, 'all', 1)
             console.log(`[SyncEngine] ✅ ${invoices.length} فاکتور cached`)
           }
@@ -364,7 +403,6 @@ class SyncEngineClass {
    */
   async reset(): Promise<void> {
     await clearAllCache()
-    // ★ بروزرسانی store بعد از پاکسازی
     useAppStore.getState().setPendingSyncCount(0)
   }
 }

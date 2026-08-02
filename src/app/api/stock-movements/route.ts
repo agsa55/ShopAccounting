@@ -1,6 +1,9 @@
 // ============================================================================
-// src/app/api/stock-movements/route.ts — GET / POST
+// src/app/api/stock-movements/route.ts — GET / POST (v2.1 ★★★ TypeScript Fix)
 // انتقال بین انبارها + مشاهده حرکت‌های کالا
+// ----------------------------------------------------------------------------
+// ★★★ v2.1: رفع خطاهای TypeScript — افزودن type parameter به Map
+// ★★★ v2.0: اصلاحات Transaction Safety
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -49,8 +52,13 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       }) : [],
     ])
 
-    const productMap = new Map(products.map((p: any) => [p.id, p]))
-    const warehouseMap = new Map(warehouses.map((w: any) => [w.id, w]))
+    // ★★★ v2.1: افزودن type parameter به Map (رفع خطای TS2339)
+    const productMap = new Map<string, { id: string; name: string; code: string | null }>(
+      products.map((p: any) => [p.id, p])
+    )
+    const warehouseMap = new Map<string, { id: string; name: string }>(
+      warehouses.map((w: any) => [w.id, w])
+    )
 
     const result = movements.map((m: any) => {
       const product = productMap.get(m.productId)
@@ -72,6 +80,7 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/stock-movements — انتقال بین انبارها
+//  ★★★ v2.0: تمام بررسی‌ها + عملیات داخل یک Transaction
 //  Body: { tenantId, productId, fromWarehouseId, toWarehouseId, quantity, description }
 // ═══════════════════════════════════════════════════════════════
 
@@ -82,7 +91,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     const body = await req.json()
     const { productId, fromWarehouseId, toWarehouseId, quantity, description } = body
 
-    // ★ اعتبارسنجی
+    // ★ اعتبارسنجی اولیه (بدون نیاز به DB)
     if (!productId || !fromWarehouseId || !toWarehouseId) {
       return NextResponse.json({ success: false, error: 'محصول، انبار مبدأ و مقصد الزامی هستند' }, { status: 400 })
     }
@@ -94,22 +103,23 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       return NextResponse.json({ success: false, error: 'تعداد باید بیشتر از صفر باشد' }, { status: 400 })
     }
 
-    // ★ بررسی انبارها
-    const [fromWh, toWh] = await Promise.all([
-      tenantDb.warehouse.findFirst({ where: { id: fromWarehouseId, tenantId, isActive: true } }),
-      tenantDb.warehouse.findFirst({ where: { id: toWarehouseId, tenantId, isActive: true } }),
-    ])
-    if (!fromWh) return NextResponse.json({ success: false, error: 'انبار مبدأ یافت نشد' }, { status: 400 })
-    if (!toWh) return NextResponse.json({ success: false, error: 'انبار مقصد یافت نشد' }, { status: 400 })
-
-    // ★ بررسی محصول
-    const product = await tenantDb.product.findFirst({ where: { id: productId, tenantId } })
-    if (!product) return NextResponse.json({ success: false, error: 'محصول یافت نشد' }, { status: 400 })
-
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
+    // ★★★ v2.0: تمام بررسی‌ها + عملیات داخل Transaction (جلوگیری از Race Condition)
     const result = await txClient.$transaction(async (tx: any) => {
-      // ★ بررسی موجودی در انبار مبدأ
+      // ★ بررسی انبارها (داخل transaction)
+      const [fromWh, toWh] = await Promise.all([
+        tx.warehouse.findFirst({ where: { id: fromWarehouseId, tenantId, isActive: true } }),
+        tx.warehouse.findFirst({ where: { id: toWarehouseId, tenantId, isActive: true } }),
+      ])
+      if (!fromWh) throw new Error('انبار مبدأ یافت نشد یا غیرفعال است')
+      if (!toWh) throw new Error('انبار مقصد یافت نشد یا غیرفعال است')
+
+      // ★ بررسی محصول (داخل transaction)
+      const product = await tx.product.findFirst({ where: { id: productId, tenantId } })
+      if (!product) throw new Error('محصول یافت نشد')
+
+      // ★ بررسی موجودی در انبار مبدأ (داخل transaction — بدون race condition)
       const fromStockLevel = await tx.stockLevel.findUnique({
         where: { warehouseId_productId: { warehouseId: fromWarehouseId, productId } },
       })
@@ -156,8 +166,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         })
       }
 
-      // ★ ثبت دو حرکت کالا (خروج از مبدأ + ورود به مقصد)
-      // ★ یک رکورد با fromWarehouseId و toWarehouseId (مطابق schema)
+      // ★ ثبت حرکت کالا (یک رکورد با fromWarehouseId و toWarehouseId مطابق schema)
       const movement = await tx.stockMovement.create({
         data: {
           tenantId,

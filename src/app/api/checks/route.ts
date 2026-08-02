@@ -1,7 +1,12 @@
-// src/app/api/checks/route.ts — v8.8
+// src/app/api/checks/route.ts — v9.0 ★★★ Transaction Safety
 // ============================================================================
 // مدیریت چک‌ها (دریافتی و پرداختنی)
 // ----------------------------------------------------------------------------
+// ★★★ v9.0: اصلاحات Transaction Safety:
+//   ★ DELETE: ابطال سند + حذف چک داخل یک Transaction
+//   ★ PUT (edit): ویرایش + ابطال سند قدیم + صدور سند جدید داخل Transaction
+//   ★ حفظ تمام منطق v8.8 بدون تغییر
+//
 // این API امکان ثبت، وصول، برگشت و حذف چک‌ها را فراهم می‌کند.
 // هر چک به‌صورت خودکار سند حسابداری ایجاد می‌کند:
 //   - چک دریافتی: Dr. چک‌های دریافتنی / Cr. فروش یا بدهکاران
@@ -124,11 +129,9 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       let counterpartAccountId: string | null = null
 
       if (type === 'receivable') {
-        // چک دریافتی: Dr. 1350 چک‌های دریافتنی / Cr. 4100 فروش یا 1310 بدهکاران
         checkAccountId = findAccountByCode('1350')?.id || null
         counterpartAccountId = (customerId ? findAccountByCode('1310') : findAccountByCode('4100'))?.id || null
       } else {
-        // چک پرداختنی: Dr. 5100 هزینه یا 2010 بستانکاران / Cr. 2050 چک‌های پرداختنی
         checkAccountId = findAccountByCode('2050')?.id || null
         counterpartAccountId = (customerId ? findAccountByCode('2010') : findAccountByCode('5100'))?.id || null
       }
@@ -140,14 +143,12 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         const lines: any[] = []
 
         if (type === 'receivable') {
-          // Dr. چک‌های دریافتنی
           lines.push({
             accountId: checkAccountId,
             debit: amount,
             credit: 0,
             description: `بدهکار: چک دریافتی ${checkNumber} - ${bankName}`,
           })
-          // Cr. فروش یا بدهکاران
           lines.push({
             accountId: counterpartAccountId,
             debit: 0,
@@ -155,14 +156,12 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             description: `بستانکار: بابت چک دریافتی ${checkNumber}`,
           })
         } else {
-          // Dr. هزینه یا بستانکاران
           lines.push({
             accountId: counterpartAccountId,
             debit: amount,
             credit: 0,
             description: `بدهکار: بابت چک پرداختنی ${checkNumber}`,
           })
-          // Cr. چک‌های پرداختنی
           lines.push({
             accountId: checkAccountId,
             debit: 0,
@@ -171,8 +170,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           })
         }
 
-        const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
-        const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
+        const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
+        const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
 
         const journalEntry = await tx.journalEntry.create({
           data: {
@@ -214,14 +213,14 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PATCH /api/checks — تغییر وضعیت چک (وصول/برگشت/سپرده)
-//  Body: { id, status: 'cleared' | 'bounced' | 'deposited' }
+//  PUT /api/checks — ویرایش چک یا تغییر وضعیت
+//  ★★★ v9.0: ویرایش چک + ابطال سند قدیم + صدور سند جدید داخل Transaction
 // ═══════════════════════════════════════════════════════════════
-// ★★★ v8.8: PUT برای ویرایش چک یا تغییر وضعیت
 export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant.tenantDb
     const tenantId = tenant.tenantId
+    const userId = tenant.user?.id
     const body = await req.json()
 
     // ★ اگه action: 'edit' هست، ویرایش چک
@@ -237,17 +236,94 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         )
       }
 
-      await tenantDb.check.update({
-        where: { id: check.id },
-        data: {
-          checkNumber: body.checkNumber || check.checkNumber,
-          bankName: body.bankName || check.bankName,
-          branchName: body.branchName || null,
-          amount: body.amount ? parseFloat(body.amount) : check.amount,
-          dueDate: body.dueDate ? new Date(body.dueDate) : check.dueDate,
-          payeeName: body.payeeName || null,
-          description: body.description || null,
-        },
+      // ★★★ v9.0: ویرایش + ابطال سند قدیم + صدور سند جدید داخل Transaction
+      const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
+
+      await txClient.$transaction(async (tx: any) => {
+        // ۱. به‌روزرسانی چک
+        await tx.check.update({
+          where: { id: check.id },
+          data: {
+            checkNumber: body.checkNumber || check.checkNumber,
+            bankName: body.bankName || check.bankName,
+            branchName: body.branchName || null,
+            amount: body.amount ? parseFloat(body.amount) : check.amount,
+            dueDate: body.dueDate ? new Date(body.dueDate) : check.dueDate,
+            payeeName: body.payeeName || null,
+            description: body.description || null,
+          },
+        })
+
+        // ۲. ابطال سند قدیم (اگر وجود دارد)
+        if (check.journalEntryId) {
+          await tx.journalEntry.update({
+            where: { id: check.journalEntryId },
+            data: {
+              status: 'cancelled',
+              isCancelled: true,
+              cancelledAt: new Date(),
+              cancelReason: `ویرایش چک ${check.checkNumber}`,
+              description: `ابطال شده — ویرایش چک ${check.checkNumber}`,
+            },
+          }).catch((err: any) => console.warn('[Checks PUT edit] Failed to cancel old JE:', err?.message))
+        }
+
+        // ۳. صدور سند جدید با مقادیر به‌روز (فقط اگر چک هنوز pending است)
+        if (check.status === 'pending') {
+          const newAmount = body.amount ? parseFloat(body.amount) : check.amount
+          const accounts = await tx.account.findMany({ where: { tenantId } })
+          const findAccountByCode = (code: string) => accounts.find((a: any) => a.code === code) || null
+
+          let checkAccountId: string | null = null
+          let counterpartAccountId: string | null = null
+
+          if (check.type === 'receivable') {
+            checkAccountId = findAccountByCode('1350')?.id || null
+            counterpartAccountId = (check.customerId ? findAccountByCode('1310') : findAccountByCode('4100'))?.id || null
+          } else {
+            checkAccountId = findAccountByCode('2050')?.id || null
+            counterpartAccountId = (check.customerId ? findAccountByCode('2010') : findAccountByCode('5100'))?.id || null
+          }
+
+          if (checkAccountId && counterpartAccountId) {
+            const jeCount = await tx.journalEntry.count({ where: { tenantId } })
+            const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+
+            const lines: any[] = []
+
+            if (check.type === 'receivable') {
+              lines.push({ accountId: checkAccountId, debit: newAmount, credit: 0, description: `بدهکار: چک دریافتی ${body.checkNumber || check.checkNumber}` })
+              lines.push({ accountId: counterpartAccountId, debit: 0, credit: newAmount, description: `بستانکار: بابت چک دریافتی` })
+            } else {
+              lines.push({ accountId: counterpartAccountId, debit: newAmount, credit: 0, description: `بدهکار: بابت چک پرداختنی` })
+              lines.push({ accountId: checkAccountId, debit: 0, credit: newAmount, description: `بستانکار: چک پرداختنی ${body.checkNumber || check.checkNumber}` })
+            }
+
+            const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
+            const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
+
+            const newJE = await tx.journalEntry.create({
+              data: {
+                number: jeNumber,
+                date: new Date(),
+                description: `سند خودکار (ویرایش) بابت چک ${body.checkNumber || check.checkNumber}`,
+                status: 'posted',
+                sourceType: 'check',
+                sourceId: check.id,
+                totalDebit,
+                totalCredit,
+                createdBy: userId || null,
+                tenantId,
+                lines: { create: lines },
+              },
+            })
+
+            await tx.check.update({
+              where: { id: check.id },
+              data: { journalEntryId: newJE.id },
+            })
+          }
+        }
       })
 
       return NextResponse.json({
@@ -328,7 +404,6 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
 
         if (check.type === 'receivable') {
           if (status === 'cleared') {
-            // وصول چک دریافتی: Dr. بانک / Cr. چک‌های دریافتنی
             if (bankAccount && checkRecvAccount) {
               lines.push({
                 accountId: bankAccount.id,
@@ -344,7 +419,6 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
               })
             }
           } else if (status === 'bounced') {
-            // برگشت چک دریافتی: Dr. بدهکاران / Cr. چک‌های دریافتنی
             const receivableAccount = findAccountByCode('1310')
             if (receivableAccount && checkRecvAccount) {
               lines.push({
@@ -362,9 +436,7 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
             }
           }
         } else {
-          // payable
           if (status === 'cleared') {
-            // پرداخت چک پرداختنی: Dr. چک‌های پرداختنی / Cr. بانک
             if (checkPayAccount && bankAccount) {
               lines.push({
                 accountId: checkPayAccount.id,
@@ -380,7 +452,6 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
               })
             }
           } else if (status === 'bounced') {
-            // برگشت چک پرداختنی: Dr. چک‌های پرداختنی / Cr. بستانکاران
             const payableAccount = findAccountByCode('2010')
             if (checkPayAccount && payableAccount) {
               lines.push({
@@ -447,6 +518,7 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
 
 // ═══════════════════════════════════════════════════════════════
 //  DELETE /api/checks — حذف چک
+//  ★★★ v9.0: ابطال سند + حذف چک داخل یک Transaction
 //  Query: id
 // ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -474,15 +546,38 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
       )
     }
 
-    // ابطال سند مربوطه (اگه وجود داره)
-    if (check.journalEntryId) {
-      await tenantDb.journalEntry.update({
-        where: { id: check.journalEntryId },
-        data: { status: 'cancelled', description: `ابطال شده — حذف چک ${check.checkNumber}` },
-      }).catch(() => {})
-    }
+    // ★★★ v9.0: ابطال سند + حذف چک داخل یک Transaction
+    const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
-    await tenantDb.check.delete({ where: { id } })
+    await txClient.$transaction(async (tx: any) => {
+      // ۱. ابطال سند مربوطه (اگه وجود داره)
+      if (check.journalEntryId) {
+        await tx.journalEntry.update({
+          where: { id: check.journalEntryId },
+          data: {
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date(),
+            cancelReason: `حذف چک ${check.checkNumber}`,
+            description: `ابطال شده — حذف چک ${check.checkNumber}`,
+          },
+        }).catch((err: any) => console.warn('[Checks DELETE] Failed to cancel JE:', err?.message))
+      }
+
+      // ۲. ابطال سندهای تغییر وضعیت مرتبط (sourceType: 'check_status')
+      await tx.journalEntry.updateMany({
+        where: { sourceType: 'check_status', sourceId: check.id, tenantId },
+        data: {
+          status: 'cancelled',
+          isCancelled: true,
+          cancelledAt: new Date(),
+          cancelReason: `حذف چک ${check.checkNumber}`,
+        },
+      }).catch((err: any) => console.warn('[Checks DELETE] Failed to cancel status JEs:', err?.message))
+
+      // ۳. حذف چک
+      await tx.check.delete({ where: { id } })
+    })
 
     return NextResponse.json({
       success: true,

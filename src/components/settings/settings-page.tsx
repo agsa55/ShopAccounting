@@ -4380,6 +4380,103 @@ function InitialBalanceTab() {
       setSubmitting(false)
     }
   }
+  // ─────────────────────────────────────────────────────
+  // ★ v9.9: ثبت نهایی سند پیش‌نویسِ موجود (بدون نیاز به آیتم جدید)
+  //   وقتی ویزارد یک پیش‌نویس ساخته، کاربر با این دکمه آن را قطعی می‌کند
+  // ─────────────────────────────────────────────────────
+  const handleFinalizeDraft = async () => {
+    if (savedItems.length === 0) {
+      toast({
+        title: 'خطا',
+        description: 'سندی برای ثبت نهایی وجود ندارد',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const token = typeof window !== 'undefined'
+        ? localStorage.getItem('token')
+        : null
+
+      // ★ همان آیتم‌های ثبت‌شده را با postToJournal:true ارسال می‌کنیم
+      const draftItems = savedItems.map((b: any) => ({
+        type: b.type,
+        title: b.title,
+        amount: b.amount,
+        productId: b.productId || undefined,
+        quantity: b.quantity || undefined,
+        description: b.description || undefined,
+      }))
+
+      const res = await fetch('/api/initial-balance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          items: draftItems,
+          postToJournal: true,
+        }),
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        toast({
+          title: 'سند افتتاحیه صادر شد ✓',
+          description: data.message || 'سند قطعی افتتاحیه با موفقیت ثبت شد',
+        })
+        await loadData()
+      } else {
+        toast({
+          title: 'خطا',
+          description: data.error || 'ثبت نهایی ناموفق بود',
+          variant: 'destructive',
+        })
+      }
+    } catch {
+      toast({
+        title: 'خطا',
+        description: 'ارتباط با سرور برقرار نشد',
+        variant: 'destructive',
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // ─────────────────────────────────────────────────────
+  // ★ v9.9: ویرایش سند پیش‌نویس
+  //   آیتم‌های ثبت‌شده را به لیست ویرایش (pending) منتقل می‌کند
+  //   تا کاربر بتواند آن‌ها را تغییر دهد یا حذف کند
+  // ─────────────────────────────────────────────────────
+  const handleEditDraft = () => {
+    if (savedItems.length === 0) return
+
+    const editable = savedItems.map((b: any) => ({
+      type: b.type,
+      title: b.title,
+      amount: Number(b.amount) || 0,
+      productId: b.productId || null,
+      quantity: b.quantity != null ? Number(b.quantity) : null,
+      description: b.description || null,
+      Product: b.Product || null,
+    }))
+
+    setPendingItems(editable)
+    // ★ savedItems را خالی می‌کنیم تا هنگام ثبت، آیتم‌ها تکراری نشوند
+    //   (API هنگام ثبت، سند قبلی را حذف و سند جدید می‌سازد)
+    setSavedItems([])
+    setSummary(null)
+
+    toast({
+      title: 'حالت ویرایش',
+      description: 'آیتم‌های سند برای ویرایش بارگذاری شدند. تغییرات را اعمال و سپس ثبت کنید.',
+    })
+  }
+
 
   // ─────────────────────────────────────────────────────
   // helpers
@@ -4472,16 +4569,50 @@ function InitialBalanceTab() {
                   {savedItems.length} آیتم
                 </Badge>
               </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs border-red-200 text-red-600 hover:bg-red-50 gap-1 shrink-0"
-                onClick={() => setDeleteDialogOpen(true)}
-                disabled={submitting}
-              >
-                <Trash2 className="w-3 h-3" />
-                حذف
-              </Button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                {/* ★ v9.9: ویرایش — فقط برای سند پیش‌نویس */}
+                {!summary?.isPosted && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 gap-1"
+                    onClick={handleEditDraft}
+                    disabled={submitting}
+                  >
+                    <Pencil className="w-3 h-3" />
+                    ویرایش
+                  </Button>
+                )}
+
+                {/* ★ v9.9: ثبت نهایی — فقط برای سند پیش‌نویس */}
+                {!summary?.isPosted && (
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                    onClick={handleFinalizeDraft}
+                    disabled={submitting}
+                  >
+                    {submitting ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3 h-3" />
+                    )}
+                    ثبت نهایی
+                  </Button>
+                )}
+
+                {/* حذف — همیشه نمایش داده می‌شود */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs border-red-200 text-red-600 hover:bg-red-50 gap-1"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={submitting}
+                >
+                  <Trash2 className="w-3 h-3" />
+                  حذف
+                </Button>
+              </div>
             </div>
             {summary?.journalEntryId && (
               <p className="text-[10px] text-gray-500 font-mono mt-1">

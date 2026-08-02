@@ -57,6 +57,37 @@ export const GET = withTenantAndPermission('settings')(async (req: NextRequest, 
 })
 
 // ═══════════════════════════════════════════════════════════════
+// ★ v8.8.8: تضمین وجود حساب‌های مورد نیاز سند افتتاحیه
+//   بدون این، اگر tenant (مثلاً پلن پایه) هرگز صفحه حساب‌ها را باز
+//   نکرده باشد، حساب‌ها seed نشده و سند افتتاحیه صادر نمی‌شود.
+// ═══════════════════════════════════════════════════════════════
+async function ensureOpeningBalanceAccounts(tx: any, tenantId: string) {
+  const required = [
+    { code: '1010', name: 'صندوق فروشگاه', type: 'cash', level: 2 },
+    { code: '1100', name: 'بانک', type: 'bank', level: 1 },
+    { code: '1200', name: 'موجودی کالا', type: 'inventory', level: 1 },
+    { code: '1400', name: 'تجهیزات', type: 'asset', level: 1 },
+    { code: '2100', name: 'وام بانکی', type: 'liability', level: 1 },
+    { code: '3000', name: 'سرمایه', type: 'equity', level: 1 },
+  ]
+  for (const acc of required) {
+    try {
+      const existing = await tx.account.findFirst({
+        where: { code: acc.code, tenantId },
+      })
+      if (!existing) {
+        await tx.account.create({
+          data: { ...acc, isActive: true, tenantId },
+        })
+        console.log(`[InitialBalance] Seeded missing account ${acc.code}`)
+      }
+    } catch (err: any) {
+      console.warn('[InitialBalance] seed account failed:', acc.code, err?.message)
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  POST /api/initial-balance — ثبت موجودی‌های اولیه + سند افتتاحیه
 // ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('settings')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -132,6 +163,7 @@ export const POST = withTenantAndPermission('settings')(async (req: NextRequest,
 
       if (postToJournal && createdBalances.length > 0) {
         console.log('[InitialBalance POST] Creating journal entry...')
+         await ensureOpeningBalanceAccounts(tx, tenantId)
 
         const accounts = await tx.account.findMany({ where: { tenantId } })
         const findAccountByCode = (code: string) => accounts.find(a => a.code === code)

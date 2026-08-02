@@ -499,7 +499,7 @@ const saveBalance = async (): Promise<boolean> => {
       amount: Number(b.amount), // ★ اطمینان از number بودن
       description: b.description?.trim() || '',
     })),
-    postToJournal: true, // ★ هم ذخیره هم سند
+    postToJournal: false, // ★ ذخیره به‌صورت پیش‌نویس (ثبت نهایی در تب راه‌اندازیِ تنظیمات)
   }
 
   console.log('[SetupWizard] saveBalance - request:', {
@@ -528,11 +528,13 @@ const saveBalance = async (): Promise<boolean> => {
     const data = await res.json()
     console.log('[SetupWizard] saveBalance - response:', data)
 
-    if (data.success) {
-      setBalIsPosted(true)
+     if (data.success) {
+      // ★ v2.1: سند به‌صورت پیش‌نویس ذخیره شد (postToJournal: false)
+      //   ثبت نهایی و صدور سند در «تنظیمات ← راه‌اندازی» انجام می‌شود
+      setBalIsPosted(false)
       toast({
-        title: '✅ سند افتتاحیه ثبت شد',
-        description: data.message || `${balItems.length} آیتم با موفقیت ثبت شد`,
+        title: '✅ پیش‌نویس سند افتتاحیه ذخیره شد',
+        description: 'برای بررسی، ویرایش یا ثبت نهایی و صدور سند، به تنظیمات ← راه‌اندازی مراجعه کنید.',
       })
       return true
     }
@@ -972,16 +974,20 @@ const handleNext = async () => {
                 <Wallet className="w-4 h-4 text-violet-600"/>
                 <h3 className="text-sm font-bold text-gray-900">موجودی‌های اولیه</h3>
                 <Badge className="text-[9px] bg-gray-100 text-gray-600">اختیاری</Badge>
-                {balIsPosted&&(
-                  <Badge className="text-[9px] bg-emerald-100 text-emerald-700">سند صادر شده</Badge>
-                )}
+                                {balIsPosted ? (
+                  <Badge className="text-[9px] bg-emerald-100 text-emerald-700">سند صادر شده ✓</Badge>
+                ) : balItems.length > 0 ? (
+                  <Badge className="text-[9px] bg-amber-100 text-amber-700">پیش‌نویس</Badge>
+                ) : null}
               </div>
 
               <Alert className="border-amber-200 bg-amber-50 py-2">
                 <Info className="h-3.5 w-3.5 text-amber-600"/>
                 <AlertDescription className="text-[11px] text-amber-800 mr-2">
-                  <strong>این مرحله اختیاری است.</strong> اگر رد کنید، بعداً از
-                  <span className="font-medium"> تنظیمات → راه‌اندازی</span> می‌توانید سند افتتاحیه ثبت کنید.
+                                   <strong>این مرحله اختیاری است.</strong> موجودی‌های واردشده به‌صورت
+                  <span className="font-medium"> پیش‌نویس</span> ذخیره می‌شوند. برای
+                  <span className="font-medium"> ثبت نهایی و صدور سند قطعی</span>، بعداً به
+                  <span className="font-medium"> تنظیمات ← راه‌اندازی</span> مراجعه کنید.
                 </AlertDescription>
               </Alert>
 
@@ -1121,7 +1127,7 @@ const handleNext = async () => {
                 {[
                   {done:fyDone,label:'سال مالی',sub:fyExisting.find((y:any)=>y.isActive)?.name||fyName||'ثبت شد'},
                   {done:whDone||warehouses.length>0,label:'انبار',sub:`${warehouses.length||1} انبار`},
-                  {done:balIsPosted,label:'سند افتتاحیه',sub:balIsPosted?`${balItems.length} آیتم ثبت شد`:'می‌توانید بعداً ثبت کنید'},
+                                  {done:balIsPosted||balItems.length>0,label:'سند افتتاحیه',sub:balIsPosted?`${balItems.length} آیتم — سند صادر شد`:balItems.length>0?`${balItems.length} آیتم — پیش‌نویس (ثبت نهایی در تنظیمات)`:'می‌توانید بعداً ثبت کنید'},
                 ].map((s,i)=>(
                   <div key={i} className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
                     s.done?'border-emerald-200 bg-emerald-50':'border-gray-200 bg-gray-50'

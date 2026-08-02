@@ -1,6 +1,9 @@
 // ============================================================================
-// src/components/dashboard/dashboard-page.tsx — Dashboard Page (v8.8.8 ★★★)
-// ★ تغییر: KPI Cards و Low Stock Alert — کوچیک‌تر
+// src/components/dashboard/dashboard-page.tsx — Dashboard Page (v8.9.0 ★★★)
+// ★ v8.9.0: نمودار روند فروش و آخرین فاکتورها → عرض کامل
+//           نمودار دسته + پرفروش‌ها → دو ستون مرتب
+//           آخرین فاکتورها → جدول حرفه‌ای با ستون تاریخ
+//           ★ رفع باگ: KPI «فروش ماه» و «سود ماه» مقادیر اشتباه نشان می‌دادند
 // ============================================================================
 
 'use client'
@@ -169,10 +172,6 @@ const lineChartConfig: ChartConfig = { sales: { label: 'فروش', color: '#10b9
 const PIE_COLORS = ['#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ec4899']
 
 // ═══════════════════════════════════════════════════════════════
-//  ★ KPI Card — کوچیک‌تر (فقط این تغییر)
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
 //  ★ KPI Card — فشرده‌تر
 // ═══════════════════════════════════════════════════════════════
 
@@ -249,7 +248,7 @@ export default function DashboardPage() {
 
     // ─── حالت آنلاین: درخواست از سرور ────────────────────────────
     try {
-const res = await authFetch('/api/dashboard', { cache: 'no-store' })
+      const res = await authFetch('/api/dashboard', { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 401) {
           setError('نشست منقضی شده')
@@ -394,12 +393,7 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
         </div>
       </div>
 
-      {/* ★★★ هشدار موجودی کم — کوچیک‌تر (فقط این تغییر) */}
-          {/* ★★★ هشدار موجودی کم — خیلی فشرده */}
-            {/* هشدار موجودی بحرانی */}
-          {/* هشدار موجودی بحرانی */}
-           {/* هشدار موجودی بحرانی */}
-            {/* هشدار موجودی بحرانی */}
+      {/* هشدار موجودی بحرانی */}
       {lowStockProducts.length > 0 && (
         <div
           className="border border-red-300 rounded-lg bg-gradient-to-l from-red-50 to-white cursor-pointer hover:shadow-md transition-shadow"
@@ -429,12 +423,11 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
         </div>
       )}
 
-      {/* KPI کارت‌ها */}
-          {/* KPI کارت‌ها — گرادیان رنگی */}
+      {/* KPI کارت‌ها — گرادیان رنگی */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <KpiCard
           label="فروش امروز"
-        value={formatCurrency(stats.todaySales)}
+          value={formatCurrency(stats.todaySales)}
           sublabel={`${formatNumber(stats.todayInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-emerald-500 to-emerald-600"
           icon={
@@ -446,7 +439,7 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
         />
         <KpiCard
           label="فروش ماه"
-        value={formatCurrency(stats.todaySales)}
+          value={formatCurrency(stats.monthSales)}
           sublabel={`${formatNumber(stats.monthInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-blue-500 to-blue-600"
           icon={
@@ -458,7 +451,7 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
         />
         <KpiCard
           label="سود ماه"
-        value={formatCurrency(stats.todaySales)}
+          value={formatCurrency(stats.monthlyProfit)}
           sublabel={stats.monthlyProfit >= 0 ? 'سودآور' : 'زیان'}
           gradient="bg-gradient-to-br from-purple-500 to-purple-600"
           icon={
@@ -481,7 +474,7 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
           onClick={() => setCurrentView('products')}
         />
       </div>
-      
+
       {/* ★ هشدار اقساط سررسید (اگه هست) */}
       {overdueInstallments.length > 0 && plan.features.canAccessInstallments && (
         <Card
@@ -507,168 +500,206 @@ const res = await authFetch('/api/dashboard', { cache: 'no-store' })
         </Card>
       )}
 
-      {/* ★ نمودار فروش + دسته‌بندی */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {/* نمودار روند فروش */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">روند فروش</CardTitle>
-              <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-md">
-                <button
-                  className={`px-2 py-0.5 text-[10px] rounded ${salesRange === '7d' ? 'bg-white text-emerald-700 font-bold shadow-sm' : 'text-gray-500'}`}
-                  onClick={() => setSalesRange('7d')}
-                >۷ روز</button>
-                <button
-                  className={`px-2 py-0.5 text-[10px] rounded ${salesRange === '30d' ? 'bg-white text-emerald-700 font-bold shadow-sm' : 'text-gray-500'}`}
-                  onClick={() => setSalesRange('30d')}
-                >۳۰ روز</button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={salesRange === '7d' ? dailySales : dailySales30} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} interval={salesRange === '30d' ? 'preserveStartEnd' : 0} />
-                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={10} tickFormatter={(v) => formatCompact(v)} width={50} />
-                <Tooltip content={({ active, payload }) => {
-                  if (active && payload?.length) {
-                    return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p className="font-bold">{formatCurrency(payload[0].value as number)}</p></div>
-                  }
-                  return null
-                }} />
-                <Line type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={2.5} dot={salesRange === '7d' ? { fill: '#10b981', r: 3 } : false} activeDot={{ r: 5 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* نمودار دسته‌بندی */}
-        {categorySales.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">فروش بر اساس دسته</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={categorySales} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} label={({ name, value }) => `${name} ${value}%`} labelLine={false}>
-                    {categorySales.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={({ active, payload }) => {
-                    if (active && payload?.length) {
-                      return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p>{payload[0].payload.name}</p><p className="font-bold">{payload[0].value}%</p></div>
-                    }
-                    return null
-                  }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-
-      {/* ★ پرفروش‌ترین محصولات */}
-      {topProducts.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
+      {/* ★★★ v8.9.0: نمودار روند فروش — عرض کامل */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
             <CardTitle className="text-sm flex items-center gap-1.5">
-              <Package className="w-4 h-4 text-emerald-600" />
-              پرفروش‌ترین محصولات
+              <TrendingUp className="w-4 h-4 text-emerald-600" />
+              روند فروش
             </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={topProducts.map(p => ({ name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name, totalSales: p.totalSales, totalQuantity: p.totalQuantity }))} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" tickLine={false} axisLine={false} fontSize={9} tickFormatter={(v) => formatCompact(v)} />
-                <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} fontSize={9} width={80} />
-                <Tooltip content={({ active, payload }) => {
-                  if (active && payload?.length) {
-                    return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p className="font-bold">{formatCurrency(payload[0].value as number)}</p><p>{formatNumber(payload[0].payload.totalQuantity)} عدد</p></div>
-                  }
-                  return null
-                }} />
-                <Bar dataKey="totalSales" fill="#10b981" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+            <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-md">
+              <button
+                className={`px-2 py-0.5 text-[10px] rounded transition-colors ${salesRange === '7d' ? 'bg-white text-emerald-700 font-bold shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setSalesRange('7d')}
+              >۷ روز</button>
+              <button
+                className={`px-2 py-0.5 text-[10px] rounded transition-colors ${salesRange === '30d' ? 'bg-white text-emerald-700 font-bold shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                onClick={() => setSalesRange('30d')}
+              >۳۰ روز</button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={salesRange === '7d' ? dailySales : dailySales30} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} interval={salesRange === '30d' ? 'preserveStartEnd' : 0} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={10} tickFormatter={(v) => formatCompact(v)} width={50} />
+              <Tooltip content={({ active, payload }) => {
+                if (active && payload?.length) {
+                  return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p className="font-bold">{formatCurrency(payload[0].value as number)}</p></div>
+                }
+                return null
+              }} />
+              <Line type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={2.5} dot={salesRange === '7d' ? { fill: '#10b981', r: 3 } : false} activeDot={{ r: 5 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* ★★★ v8.9.0: نمودار دسته‌بندی + پرفروش‌ها — دو ستون مرتب */}
+      {(categorySales.length > 0 || topProducts.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {/* نمودار دسته‌بندی */}
+          {categorySales.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">فروش بر اساس دسته</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={categorySales} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} label={({ name, value }) => `${name} ${value}%`} labelLine={false}>
+                      {categorySales.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip content={({ active, payload }) => {
+                      if (active && payload?.length) {
+                        return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p>{payload[0].payload.name}</p><p className="font-bold">{payload[0].value}%</p></div>
+                      }
+                      return null
+                    }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* پرفروش‌ترین محصولات */}
+          {topProducts.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-1.5">
+                  <Package className="w-4 h-4 text-emerald-600" />
+                  پرفروش‌ترین محصولات
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={topProducts.map(p => ({ name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name, totalSales: p.totalSales, totalQuantity: p.totalQuantity }))} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tickLine={false} axisLine={false} fontSize={9} tickFormatter={(v) => formatCompact(v)} />
+                    <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} fontSize={9} width={80} />
+                    <Tooltip content={({ active, payload }) => {
+                      if (active && payload?.length) {
+                        return <div className="bg-white p-2 border border-gray-200 rounded shadow text-xs"><p className="font-bold">{formatCurrency(payload[0].value as number)}</p><p>{formatNumber(payload[0].payload.totalQuantity)} عدد</p></div>
+                      }
+                      return null
+                    }} />
+                    <Bar dataKey="totalSales" fill="#10b981" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
-      {/* ★ آخرین فاکتورها + محصولات کم‌موجود */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* آخرین فاکتورها */}
+      {/* ★★★ v8.9.0: آخرین فاکتورها — عرض کامل + جدول حرفه‌ای */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <FileText className="w-4 h-4 text-emerald-600" />
+              آخرین فاکتورها
+            </CardTitle>
+            <Button variant="ghost" size="sm" className="text-emerald-600 gap-1 text-[10px] h-6" onClick={() => setCurrentView('invoices')}>
+              همه فاکتورها <ArrowLeft className="size-3" />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 pb-2">
+          {recentInvoices.length === 0 ? (
+            <p className="py-8 text-center text-xs text-gray-400">فاکتوری ثبت نشده</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50/60">
+                    <th className="text-right px-3 py-2 font-bold text-gray-500 whitespace-nowrap">شماره</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">مشتری</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500 whitespace-nowrap hidden sm:table-cell">تاریخ</th>
+                    <th className="text-left px-3 py-2 font-bold text-gray-500 whitespace-nowrap">مبلغ</th>
+                    <th className="text-center px-3 py-2 font-bold text-gray-500 whitespace-nowrap">وضعیت</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentInvoices.slice(0, 6).map((inv) => (
+                    <tr
+                      key={inv.id}
+                      className="border-b border-gray-50 last:border-0 hover:bg-emerald-50/30 transition-colors cursor-pointer"
+                      onClick={() => setCurrentView('invoices')}
+                    >
+                      <td className="px-3 py-2 font-mono text-gray-500 whitespace-nowrap">{inv.number}</td>
+                      <td className="px-3 py-2 truncate max-w-[200px]">{inv.customerName || 'فروش عمومی'}</td>
+                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap hidden sm:table-cell">
+                        {formatRelativeTime(inv.invoiceDate)}
+                      </td>
+                      <td className="px-3 py-2 font-mono font-bold text-left whitespace-nowrap">{formatCurrency(inv.totalAmount)}</td>
+                      <td className="px-3 py-2 text-center">{getStatusBadge(inv.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ★★★ v8.9.0: محصولات کم‌موجود — عرض کامل */}
+      {lowStockProducts.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">آخرین فاکتورها</CardTitle>
-              <Button variant="ghost" size="sm" className="text-emerald-600 gap-1 text-[10px] h-6" onClick={() => setCurrentView('invoices')}>
-                همه <ArrowLeft className="size-3" />
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                موجودی بحرانی
+              </CardTitle>
+              <Button variant="ghost" size="sm" className="text-emerald-600 gap-1 text-[10px] h-6" onClick={() => setCurrentView('products')}>
+                همه محصولات <ArrowLeft className="size-3" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="p-0 pb-2">
-            {recentInvoices.length === 0 ? (
-              <p className="py-6 text-center text-xs text-gray-400">فاکتوری ثبت نشده</p>
-            ) : (
-              <div className="px-3 space-y-1">
-                {recentInvoices.slice(0, 5).map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-gray-500 shrink-0">{inv.number}</span>
-                      <span className="truncate">{inv.customerName || 'فروش عمومی'}</span>
-                    </div>
-                   <div className="flex items-center gap-2 shrink-0">
-  <span className="font-mono font-bold text-[10px]">{formatCurrency(inv.totalAmount)}</span>
-  {getStatusBadge(inv.status)}
-</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50/60">
+                    <th className="text-right px-3 py-2 font-bold text-gray-500 whitespace-nowrap">کد</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500">نام محصول</th>
+                    <th className="text-right px-3 py-2 font-bold text-gray-500 whitespace-nowrap hidden sm:table-cell">دسته</th>
+                    <th className="text-center px-3 py-2 font-bold text-gray-500 whitespace-nowrap">موجودی</th>
+                    <th className="text-center px-3 py-2 font-bold text-gray-500 whitespace-nowrap">حداقل</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lowStockProducts.slice(0, 6).map((p) => (
+                    <tr
+                      key={p.id}
+                      className="border-b border-gray-50 last:border-0 hover:bg-red-50/30 transition-colors cursor-pointer"
+                      onClick={() => setCurrentView('products')}
+                    >
+                      <td className="px-3 py-2 font-mono text-gray-400 whitespace-nowrap">{p.code}</td>
+                      <td className="px-3 py-2 truncate max-w-[240px]">{p.name}</td>
+                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap hidden sm:table-cell">{p.category || '—'}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="font-mono font-bold text-red-600">{formatNumber(p.currentStock)}</span>
+                        <span className="text-[9px] text-gray-400 mr-1">{p.unit}</span>
+                      </td>
+                      <td className="px-3 py-2 text-center font-mono text-gray-400">{formatNumber(p.minStock)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {lowStockProducts.length > 6 && (
+                <p className="text-[10px] text-gray-400 text-center pt-2 pb-1">
+                  و {formatNumber(lowStockProducts.length - 6)} محصول دیگر
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
-
-        {/* محصولات کم‌موجود */}
-        {lowStockProducts.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-red-500" />
-                  موجودی بحرانی
-                </CardTitle>
-                <Button variant="ghost" size="sm" className="text-emerald-600 gap-1 text-[10px] h-6" onClick={() => setCurrentView('products')}>
-                  همه <ArrowLeft className="size-3" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0 pb-2">
-              <div className="px-3 space-y-1">
-                {lowStockProducts.slice(0, 5).map((p) => (
-                  <div key={p.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0 text-xs">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-gray-400 text-[10px] shrink-0">{p.code}</span>
-                      <span className="truncate">{p.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="font-mono font-bold text-red-600">{formatNumber(p.currentStock)}</span>
-                      <span className="text-[9px] text-gray-400">{p.unit}</span>
-                    </div>
-                  </div>
-                ))}
-                {lowStockProducts.length > 5 && (
-                  <p className="text-[10px] text-gray-400 text-center pt-1">
-                    و {formatNumber(lowStockProducts.length - 5)} محصول دیگر
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      )}
 
       {/* ★★★ ویزارد راه‌اندازی — فقط در حالت آنلاین */}
       {isOnline && (

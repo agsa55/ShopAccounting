@@ -1,7 +1,7 @@
 'use client'
 
 // ============================================================================
-// src/components/fetch-interceptor-loader.tsx — v6.0 ★★★ Offline-First
+// src/components/fetch-interceptor-loader.tsx — v7.0 ★★★ Offline-First
 // ShopAccounting — Client-side Fetch Interceptor + Offline Support
 // ----------------------------------------------------------------------------
 // ★ v6.0: Offline-First کامل:
@@ -9,6 +9,12 @@
 //   ۲. GET: Network First → Fallback to IndexedDB
 //   ۳. POST/PUT/DELETE: آفلاین → صف sync
 //   ۴. Auto-sync on reconnect
+// ★ v7.0: اصلاحات:
+//   ★ استثنا کردن /api/health از interception (جلوگیری از بن‌بست آفلاین)
+//   ★ افزودن connectivity module به‌عنوان منبع اصلی تشخیص آنلاین
+//   ★ حفظ backward compat با navigator.onLine
+//   ★ نکته: کوکی tenant-slug حالا httpOnly است → getCookie آن را نمی‌خواند
+//     ولی مشکلی نیست چون proxy سمت سرور خودش کوکی را می‌خواند
 // ============================================================================
 
 import { useEffect } from 'react'
@@ -22,6 +28,30 @@ import {
   getSyncQueueCount,
 } from '@/lib/offline-db'
 
+// ★ v7.0: ماژول تشخیص اتصال هوشمند
+import {
+  startConnectivityMonitor,
+  onConnectivityChange,
+  isOnline as isApiOnline,
+  getConnectivityState,
+} from '@/lib/connectivity'
+
+// ★ v7.0: مسیرهایی که هرگز نباید intercept شوند
+// این مسیرها باید همیشه به سرور واقعی بروند، حتی در حالت آفلاین.
+// در غیر این صورت، بن‌بست آفلاین رخ می‌دهد:
+//   connectivity پینگ → interceptor بلاک → cache خالی → "آفلاین" → تکرار
+const BYPASS_INTERCEPT_PATHS = [
+  '/api/health',
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/refresh',
+  '/api/auth/verify',
+]
+
+function shouldBypassIntercept(url: string): boolean {
+  return BYPASS_INTERCEPT_PATHS.some((p) => url.includes(p))
+}
+
 export function FetchInterceptorLoader() {
   const router = useRouter()
   const { setOnline, setPendingSyncCount, isOnline } = useAppStore()
@@ -32,7 +62,7 @@ export function FetchInterceptorLoader() {
     if (typeof window === 'undefined') return
 
     const handleOnline = async () => {
-      console.log('[FetchInterceptor] 🟢 آنلاین شد')
+      console.log('[FetchInterceptor] 🟢 آنلاین شد (browser event)')
       setOnline(true)
       
       // ★ شروع همگام‌سازی خودکار
@@ -46,7 +76,7 @@ export function FetchInterceptorLoader() {
     }
 
     const handleOffline = async () => {
-      console.log('[FetchInterceptor] 🔴 آفلاین شد')
+      console.log('[FetchInterceptor] 🔴 آفلاین شد (browser event)')
       setOnline(false)
       
       // ★ بروزرسانی تعداد آیتم‌های در صف
@@ -56,13 +86,40 @@ export function FetchInterceptorLoader() {
       } catch {}
     }
 
-    // ★ تشخیص وضعیت اولیه
-    setOnline(navigator.onLine)
+    // ★ v7.0: شروع مانیتورینگ اتصال هوشمند
+    startConnectivityMonitor()
 
+    // ★ v7.0: تنظیم اولیه بر اساس وضعیت واقعی API (نه navigator.onLine)
+    const initialState = getConnectivityState()
+    setOnline(initialState.isApiReachable)
+
+    // ★ v7.0: گوش دادن به تغییرات connectivity — منبع اصلی
+    const unsubConnectivity = onConnectivityChange((state) => {
+      setOnline(state.isApiReachable)
+
+      if (state.isApiReachable) {
+        console.log('[FetchInterceptor] 🟢 API در دسترس است (connectivity check)')
+        // همگام‌سازی خودکار هنگام بازگشت اتصال
+        import('@/lib/sync-engine')
+          .then(({ syncEngine }) => syncEngine.sync())
+          .catch((err) => console.error('[FetchInterceptor] خطا در همگام‌سازی:', err))
+      } else {
+        console.log('[FetchInterceptor] 🔴 API در دسترس نیست (connectivity check)')
+        getSyncQueueCount()
+          .then((count) => setPendingSyncCount(count))
+          .catch(() => {})
+      }
+    })
+
+    // ── حفظ backward compat: event‌های مرورگر ──────────────────
+    // ★ این listener‌ها به‌عنوان سیگنال کمکی نگه داشته شده‌اند.
+    //   مقدار نهایی توسط onConnectivityChange تعیین می‌شود.
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
     return () => {
+      // ★ v7.0: cleanup connectivity listener
+      unsubConnectivity()
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
@@ -83,6 +140,13 @@ export function FetchInterceptorLoader() {
       const url = typeof input === 'string' ? input : (input as URL).toString()
       const isApiRoute = url.includes('/api/') || url.startsWith('/api/')
 
+      // ★ v7.0: مسیرهای حساس هرگز intercept نشوند
+      // بدون این استثنا، پینگ /api/health توسط interceptor بلاک می‌شود
+      // و سیستم در بن‌بست آفلاین گیر می‌کند.
+      if (shouldBypassIntercept(url)) {
+        return originalFetch(input as any, init)
+      }
+
       // ★ ۱. آماده‌سازی headers
       const headers = new Headers(init?.headers || {})
 
@@ -91,6 +155,10 @@ export function FetchInterceptorLoader() {
         headers.set('Authorization', `Bearer ${token}`)
       }
 
+      // ★ v7.0 نکته: کوکی tenant-slug حالا httpOnly است (از proxy v2.0)
+      //   بنابراین getCookie('tenant-slug') همیشه null برمی‌گرداند.
+      //   این مشکلی نیست چون proxy سمت سرور خودش کوکی را می‌خواند
+      //   و x-tenant-slug را ست می‌کند. ولی کد را برای backward compat نگه می‌داریم.
       const tenantSlug = getCookie('tenant-slug')
       if (tenantSlug && !headers.has('X-Tenant-Slug')) {
         headers.set('X-Tenant-Slug', tenantSlug)
@@ -101,7 +169,9 @@ export function FetchInterceptorLoader() {
 
       // ─── ★★★ Offline Handling ★★★ ─────────────────────────────
 
-      const currentOnline = useAppStore.getState().isOnline
+      // ★ v7.0: استفاده از isApiOnline() به‌جای فقط store
+      //   isApiOnline() بر اساس آخرین پینگ واقعی /api/health تصمیم می‌گیرد
+      const currentOnline = isApiOnline() && useAppStore.getState().isOnline
 
       if (!currentOnline && isApiRoute) {
         console.log(`[FetchInterceptor] 🔴 آفلاین — درخواست: ${method} ${url}`)

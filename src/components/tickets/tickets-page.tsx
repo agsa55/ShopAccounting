@@ -1,11 +1,12 @@
 'use client'
 
 // ============================================================================
-// src/components/tickets/tickets-page.tsx — v8.6 + v6.4 (آفلاین کامل)
+// src/components/tickets/tickets-page.tsx — v9.7.0 (آفلاین هوشمند)
 // ----------------------------------------------------------------------------
 // صفحه تیکت‌های پشتیبانی — لیست + فیلتر + ایجاد تیکت جدید + پشتیبانی آفلاین
 // ★ v6.4: پشتیبانی کامل آفلاین (نمایش، ایجاد، کش کردن)
 // ★ v6.4: کارت موبایل رسپانسیو + ذخیره داده تیکت در sessionStorage
+// ★ v9.7.0: جایگزینی navigator.onLine با isApiOnline() از connectivity module
 // ============================================================================
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore, type AppView } from '@/lib/store'
@@ -30,6 +31,13 @@ import {
   setLastSyncTimestamp, getLastSyncTimestamp
 } from '@/lib/offline-db'
 import { Skeleton } from '@/components/ui/skeleton'
+
+// ★ v9.7.0: ماژول تشخیص اتصال هوشمند
+import {
+  isOnline as isApiOnline,
+  onConnectivityChange,
+  startConnectivityMonitor,
+} from '@/lib/connectivity'
 
 // ─── تایپ‌ها ────────────────────────────────────────────────────
 interface Ticket {
@@ -229,14 +237,27 @@ export function TicketsPage() {
 
   const { toast } = useToast()
 
-  // ─── تشخیص وضعیت آنلاین/آفلاین ──────────────────────────────
+  // ─── ★ v9.7.0: تشخیص وضعیت آنلاین/آفلاین (هوشمند) ──────────
   useEffect(() => {
+    // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op)
+    startConnectivityMonitor()
+
+    // تنظیم اولیه بر اساس وضعیت واقعی API
+    setIsOnline(isApiOnline())
+
+    // listener اصلی: connectivity module
+    const unsubConnectivity = onConnectivityChange((state) => {
+      setIsOnline(state.isApiReachable)
+    })
+
+    // حفظ backward compat: event‌های مرورگر
     const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-    setIsOnline(navigator.onLine)
+
     return () => {
+      unsubConnectivity()
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
@@ -248,7 +269,8 @@ export function TicketsPage() {
       if (!silent) setLoading(true)
       else setRefreshing(true)
 
-      const trulyOnline = isOnline && navigator.onLine
+      // ★ v9.7.0: بررسی واقعی API به‌جای navigator.onLine
+      const trulyOnline = isApiOnline()
 
       // ★ v6.4: بارگذاری از کش در حالت آفلاین
       if (!trulyOnline) {
@@ -321,13 +343,15 @@ export function TicketsPage() {
         setRefreshing(false)
       }
     },
-    [page, statusFilter, categoryFilter, priorityFilter, search, toast, isOnline]
+    // ★ v9.7.0: حذف isOnline از dependency — از isApiOnline() استفاده می‌شود
+    [page, statusFilter, categoryFilter, priorityFilter, search, toast]
   )
 
   useEffect(() => {
     loadTickets()
     const interval = setInterval(() => {
-      if (isOnline) loadTickets(true)
+      // ★ v9.7.0: بررسی واقعی API
+      if (isApiOnline()) loadTickets(true)
     }, 60000)
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,7 +390,8 @@ export function TicketsPage() {
     }
 
     setSubmitting(true)
-    const trulyOnline = isOnline && navigator.onLine
+    // ★ v9.7.0: بررسی واقعی API
+    const trulyOnline = isApiOnline()
 
     // ★ v6.4: ایجاد تیکت به صورت محلی در حالت آفلاین
     if (!trulyOnline) {

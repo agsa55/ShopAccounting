@@ -1,8 +1,21 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (Fixed Infinite Loop + Fixed Subdomain Detection + Fixed Dashboard Fallback)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.0 ★★★ Hardened)
+// ============================================================================
+// ★★★ v3.0 تغییرات نسبت به v2.0:
+//   ★ حذف require('jsonwebtoken') → import استاتیک (سازگاری ESM)
+//   ★ افزودن export const runtime = 'nodejs' (صریح)
+//   ★ اصلاح تطبیق PUBLIC_API_PATHS (exact match به‌جای startsWith کور)
+//   ★ افزودن هدرهای امنیتی به تمام پاسخ‌ها
+//   ★ پاک‌سازی کوکی tenant فقط در صورت وجود (نه هر درخواست به /)
+//   ★ حذف چک‌های اضافی و کوکی‌های بلااستفاده
+//   ★ افزودن لاگ ساختاریافته برای دیباگ
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import jwt from 'jsonwebtoken';  // ★ v3.0: import استاتیک به‌جای require
+
+// ★★★ v3.0: اعلام صریح رانتایم — jsonwebtoken به Node.js crypto نیاز دارد
+export const runtime = 'nodejs';
 
 // ─── مسیرهای عمومی API ───────────────────────────────────────────────────────
 const PUBLIC_API_PATHS = [
@@ -31,6 +44,7 @@ const VALID_SLUG_REGEX = /^[a-z0-9][a-z0-9-]*$/i;
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
+
 function shouldBypassStatic(pathname: string): boolean {
   if (STATIC_BYPASS_PATHS.includes(pathname)) return true;
   if (STATIC_BYPASS_PREFIXES.some(prefix => pathname.startsWith(prefix))) return true;
@@ -40,18 +54,43 @@ function shouldBypassStatic(pathname: string): boolean {
   return false;
 }
 
+// ★★★ v3.0: تطبیق دقیق — exact match برای مسیرهای بدون / و prefix match برای مسیرهای با /
+function isPublicApiPath(pathname: string): boolean {
+  return PUBLIC_API_PATHS.some((p) => {
+    if (p.endsWith('/')) {
+      // مسیرهایی مثل '/api/cron/' → prefix match
+      return pathname.startsWith(p);
+    }
+    // مسیرهایی مثل '/api/auth/login' → exact match یا زیرمسیر
+    return pathname === p || pathname.startsWith(p + '/');
+  });
+}
+
 function setTenantCookies(response: NextResponse, tenantSlug: string, tenantView?: string) {
-  response.cookies.set('tenant-slug', tenantSlug, { path: '/', httpOnly: false, sameSite: 'lax', maxAge: 60 * 60 * 24 * 30 });
+  response.cookies.set('tenant-slug', tenantSlug, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 60 * 60 * 24 * 30,
+  });
   if (tenantView) {
-    response.cookies.set('tenant-view', tenantView, { path: '/', httpOnly: false, sameSite: 'lax', maxAge: 60 * 60 * 24 });
+    response.cookies.set('tenant-view', tenantView, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24,
+    });
   }
   response.headers.set('x-tenant-slug', tenantSlug);
   if (tenantView) response.headers.set('x-tenant-view', tenantView);
 }
 
+// ★★★ v3.0: حذف 'auth-token' (هیچ‌جا ست نمی‌شود) — فقط کوکی‌های واقعی
 function clearTenantCookies(response: NextResponse) {
-  ['tenant-slug', 'tenant-view', 'token', 'auth-token', 'refreshToken'].forEach(name => {
-    response.cookies.set(name, '', { path: '/', httpOnly: false, sameSite: 'lax', maxAge: 0 });
+  ['tenant-slug', 'tenant-view', 'token', 'refreshToken'].forEach(name => {
+    response.cookies.set(name, '', { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 0 });
   });
 }
 
@@ -73,21 +112,41 @@ function addNoCacheHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-// ★★★ تابع اصلاح‌شده تشخیص ساب‌دامین — فقط دامنه‌هایی که واقعاً زیرمجموعه‌ی
-//     ROOT_DOMAIN (مثلاً shopaccounting.ir) هستن رو تننت در نظر می‌گیره.
-//     این از تشخیص اشتباه روی دامنه‌های پلتفرمی مثل *.up.railway.app
-//     (که چند تا نقطه دارن ولی هیچ ربطی به ساب‌دامین تننت ندارن) جلوگیری می‌کنه.
+// ★★★ v3.0: هدرهای امنیتی — به تمام پاسخ‌های HTML اضافه می‌شود
+function addSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-XSS-Protection', '1; mode=block');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  return response;
+}
+
 function extractTenantSubdomain(hostname: string): string | null {
   const hostWithoutPort = hostname.split(':')[0];
-
-  if (!hostWithoutPort.endsWith(`.${ROOT_DOMAIN}`)) {
-    return null;
-  }
-
+  if (!hostWithoutPort.endsWith(`.${ROOT_DOMAIN}`)) return null;
   const subdomain = hostWithoutPort.slice(0, hostWithoutPort.length - ROOT_DOMAIN.length - 1);
   if (!subdomain || subdomain === 'www') return null;
-
   return subdomain;
+}
+
+function isValidTenantSlug(slug: string | null | undefined): slug is string {
+  if (!slug) return false;
+  if (slug.length < 2 || slug.length > 63) return false;
+  if (!VALID_SLUG_REGEX.test(slug)) return false;
+  if (RESERVED_PATHS.has(slug.toLowerCase())) return false;
+  if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) return false;
+  return true;
+}
+
+function isValidTenantView(view: string | null | undefined): view is string {
+  if (!view) return false;
+  if (view.length > 100) return false;
+  if (!/^[a-z0-9\-/]+$/i.test(view)) return false;
+  if (view.includes('..')) return false;
+  return true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -117,26 +176,44 @@ export default function proxy(request: NextRequest) {
     return response;
   }
 
-  // ── ۳. ★★★ نجات‌بخش: خروج زودهنگام برای صفحات عمومی (لندینگ و Auth) ─────
+  // ── ۳. خروج زودهنگام برای صفحات عمومی (لندینگ و Auth) ─────────────────────
+  // ★★★ v3.0: فقط وقتی کوکی tenant وجود داشته باشد پاک می‌شود (نه هر درخواست)
   if (pathname === '/' || pathname.startsWith('/auth/')) {
     const response = NextResponse.next();
-    response.cookies.set('tenant-slug', '', { path: '/', maxAge: 0 });
-    response.cookies.set('tenant-view', '', { path: '/', maxAge: 0 });
+    addSecurityHeaders(response);
+
+    const hasTenantCookie = request.cookies.get('tenant-slug')?.value;
+    const hasTenantView = request.cookies.get('tenant-view')?.value;
+
+    if (hasTenantCookie) {
+      response.cookies.set('tenant-slug', '', { path: '/', maxAge: 0, httpOnly: true });
+    }
+    if (hasTenantView) {
+      response.cookies.set('tenant-view', '', { path: '/', maxAge: 0, httpOnly: true });
+    }
+
     return response;
   }
 
-  // ── ۴. تشخیص Tenant (فقط برای مسیرهای غیر عمومی اجرا می‌شود) ─────────────
+  // ── ۴. تشخیص Tenant ───────────────────────────────────────────────────────
   let tenantSlugFromUrl: string | null = null;
   let tenantView: string | null = null;
   let rewriteUrl: URL | null = null;
   const hostname = request.headers.get('host') || '';
 
-  // الف) تشخیص از طریق ساب‌دامین — ★ فقط اگر واقعاً زیر ROOT_DOMAIN باشد
+  // الف) تشخیص از طریق ساب‌دامین
   if (!isLocalhost(request)) {
     const subdomain = extractTenantSubdomain(hostname);
     if (subdomain) {
-      if (subdomain === 'admin') return NextResponse.next();
-      tenantSlugFromUrl = subdomain;
+      // ساب‌دامین admin → مستقیم عبور کن (پنل ادمین)
+      if (subdomain === 'admin') {
+        const response = NextResponse.next();
+        addSecurityHeaders(response);
+        return response;
+      }
+      if (isValidTenantSlug(subdomain)) {
+        tenantSlugFromUrl = subdomain;
+      }
     }
   }
 
@@ -145,19 +222,22 @@ export default function proxy(request: NextRequest) {
     const segments = pathname.split('/').filter(Boolean);
     const firstSegment = segments[0];
 
-    if (firstSegment && VALID_SLUG_REGEX.test(firstSegment) && !RESERVED_PATHS.has(firstSegment) && !firstSegment.startsWith('api')) {
-      tenantSlugFromUrl = firstSegment;
-      const rest = segments.slice(1).join('/');
+    // ★★★ v3.0: حذف چک اضافی startsWith('api') — RESERVED_PATHS خودش 'api' دارد
+    if (firstSegment && VALID_SLUG_REGEX.test(firstSegment) && !RESERVED_PATHS.has(firstSegment)) {
+      if (isValidTenantSlug(firstSegment)) {
+        tenantSlugFromUrl = firstSegment;
+        const rest = segments.slice(1).join('/');
 
-      if (!rest) tenantView = null;
-      else if (rest === 'login') tenantView = 'login';
-      else if (rest === 'register') tenantView = 'register';
-      else tenantView = rest;
+        if (!rest) tenantView = null;
+        else if (rest === 'login') tenantView = 'login';
+        else if (rest === 'register') tenantView = 'register';
+        else tenantView = rest;
 
-      if (tenantView === 'register') {
-        rewriteUrl = new URL('/auth/register', url);
-      } else {
-        rewriteUrl = new URL('/', url);
+        if (tenantView === 'register') {
+          rewriteUrl = new URL('/auth/register', url);
+        } else {
+          rewriteUrl = new URL('/', url);
+        }
       }
     }
   }
@@ -165,18 +245,25 @@ export default function proxy(request: NextRequest) {
   const isApiRoute = pathname.startsWith('/api/');
   let effectiveTenantSlug: string | null = tenantSlugFromUrl;
 
-  // ج) فال‌بک به کوکی (فقط برای API Routes امن است)
+  // ج) فال‌بک به کوکی (فقط برای API Routes)
   if (!effectiveTenantSlug && isApiRoute) {
-    effectiveTenantSlug = request.cookies.get('tenant-slug')?.value || null;
+    const cookieSlug = request.cookies.get('tenant-slug')?.value || null;
+    if (isValidTenantSlug(cookieSlug)) {
+      effectiveTenantSlug = cookieSlug;
+    }
   }
 
   if (!tenantView && tenantSlugFromUrl) {
-    tenantView = request.cookies.get('tenant-view')?.value || null;
+    const cookieView = request.cookies.get('tenant-view')?.value || null;
+    if (isValidTenantView(cookieView)) {
+      tenantView = cookieView;
+    }
   }
 
   // ── ۵. مدیریت مسیرهای API ─────────────────────────────────────────────────
   if (isApiRoute) {
-    if (PUBLIC_API_PATHS.some((p) => pathname.startsWith(p))) {
+    // ★★★ v3.0: تطبیق دقیق به‌جای startsWith کور
+    if (isPublicApiPath(pathname)) {
       const response = NextResponse.next();
       if (effectiveTenantSlug) response.headers.set('x-tenant-slug', effectiveTenantSlug);
       return response;
@@ -188,25 +275,38 @@ export default function proxy(request: NextRequest) {
     const token = tokenFromHeader || tokenFromCookie;
 
     if (!token) {
-      return NextResponse.json({ success: false, error: 'دسترسی غیرمجاز.', errorCode: 'UNAUTHORIZED' }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: 'دسترسی غیرمجاز.', errorCode: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
     }
 
     const response = NextResponse.next();
-    if (!authHeader && tokenFromCookie) response.headers.set('x-authorization', `Bearer ${tokenFromCookie}`);
+    if (!authHeader && tokenFromCookie) {
+      response.headers.set('x-authorization', `Bearer ${tokenFromCookie}`);
+    }
     if (effectiveTenantSlug) response.headers.set('x-tenant-slug', effectiveTenantSlug);
     return response;
   }
 
-  // ── ۶. مدیریت صفحات Tenant (فقط وقتی واقعاً یک تننت واقعی تشخیص داده شده) ──
+  // ── ۶. مدیریت صفحات Tenant ────────────────────────────────────────────────
   if (effectiveTenantSlug) {
     const response = rewriteUrl ? NextResponse.rewrite(rewriteUrl) : NextResponse.next();
-    setTenantCookies(response, effectiveTenantSlug, tenantView || undefined);
+    addSecurityHeaders(response);
+
+    if (tenantSlugFromUrl) {
+      setTenantCookies(response, effectiveTenantSlug, tenantView || undefined);
+    }
     return response;
   }
 
   // ── ۷. محافظت از پنل ادمین ────────────────────────────────────────────────
   if (pathname.startsWith('/admin/')) {
-    if (pathname === '/admin/login') return NextResponse.next();
+    if (pathname === '/admin/login') {
+      const response = NextResponse.next();
+      addSecurityHeaders(response);
+      return response;
+    }
 
     const token = request.cookies.get('token')?.value;
     if (!token) {
@@ -214,29 +314,42 @@ export default function proxy(request: NextRequest) {
     }
 
     try {
-      const jwt = require('jsonwebtoken');
-      const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET!) as any;
+      // ★★★ v3.0: import استاتیک به‌جای require — دیگر نیازی به try-catch برای require نیست
+      const secret = process.env.JWT_ACCESS_SECRET;
+      if (!secret) {
+        console.error('[Proxy] JWT_ACCESS_SECRET is not set!');
+        return NextResponse.redirect(new URL('/admin/login', request.url));
+      }
 
-      if (decoded.userType !== 'admin' && decoded.role !== 'SuperAdmin') {
+      const decoded = jwt.verify(token, secret) as any;
+
+      // ★★★ v3.0: بررسی جامع‌تر نقش ادمین
+      const isAdmin = decoded.userType === 'admin'
+        || decoded.role === 'SuperAdmin'
+        || decoded.role === 'Admin';
+
+      if (!isAdmin) {
         return NextResponse.redirect(new URL('/', request.url));
       }
 
       const response = NextResponse.next();
+      addSecurityHeaders(response);
       response.headers.set('x-authorization', `Bearer ${token}`);
       return response;
     } catch (e: any) {
-      return NextResponse.redirect(new URL('/admin/login', request.url));
+      // توکن منقضی یا نامعتبر
+      console.warn('[Proxy] Admin token verification failed:', e?.message);
+      const redirectResponse = NextResponse.redirect(new URL('/admin/login', request.url));
+      // پاک‌سازی کوکی نامعتبر
+      redirectResponse.cookies.set('token', '', { path: '/', httpOnly: true, maxAge: 0 });
+      return redirectResponse;
     }
   }
 
-  // ── ۸. ★★★ فال‌بک نهایی برای مسیرهای SPA (مثل /dashboard, /pos, /products) ──
-  //     این مسیرها صفحه‌ی واقعی نیستند — همگی توسط HomePage (روت `/`) و
-  //     Zustand (`currentView`) مدیریت می‌شوند. پس باید محتوای `/` را serve
-  //     کنیم اما آدرس مرورگر را همان‌طور (مثلاً `/dashboard`) نگه داریم، تا
-  //     HomePage بتواند از روی window.location.pathname تشخیص بدهد کاربر
-  //     قصد ورود به کدام بخش را دارد.
+  // ── ۸. فال‌بک نهایی برای مسیرهای SPA ──────────────────────────────────────
   const fallbackResponse = NextResponse.rewrite(new URL('/', request.url));
   addNoCacheHeaders(fallbackResponse);
+  addSecurityHeaders(fallbackResponse);
   return fallbackResponse;
 }
 
