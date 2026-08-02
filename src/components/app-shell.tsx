@@ -1106,7 +1106,7 @@ function AppHeader() {
 </div>
 
         {/* ★ v9.7.0: نشانگر وضعیت اتصال هوشمند */}
-        <ConnectionBadge />
+
 
         <PWAInstallButton />
         <SyncIndicator />

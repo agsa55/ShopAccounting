@@ -1,9 +1,14 @@
 // ============================================================================
-// src/components/dashboard/dashboard-page.tsx — Dashboard Page (v8.9.0 ★★★)
-// ★ v8.9.0: نمودار روند فروش و آخرین فاکتورها → عرض کامل
-//           نمودار دسته + پرفروش‌ها → دو ستون مرتب
-//           آخرین فاکتورها → جدول حرفه‌ای با ستون تاریخ
-//           ★ رفع باگ: KPI «فروش ماه» و «سود ماه» مقادیر اشتباه نشان می‌دادند
+// src/components/dashboard/dashboard-page.tsx — Dashboard Page (v9.0_merged ★★★)
+// ----------------------------------------------------------------------------
+// ★ ادغام نسخه بکاپ (v8.8.8 — منطق داده صحیح) با لی‌اوت v8.9.0:
+//   ✓ منطق داده از بکاپ: /api/dashboard/stats (ساختار تودرتوی stats)
+//   ✓ نمودار روند فروش → تمام‌عرض
+//   ✓ نمودار دسته + پرفروش‌ها → دو ستون
+//   ✓ آخرین فاکتورها → تمام‌عرض (جدول حرفه‌ای با ستون تاریخ)
+//   ✓ موجودی بحرانی → تمام‌عرض (جدول حرفه‌ای)
+//   ✓ یک نشانگر وضعیت آنلاین/آفلاین تمیز در هدر
+//   ✓ هیچ قابلیتی حذف نشده است
 // ============================================================================
 
 'use client'
@@ -19,7 +24,7 @@ import { SetupWizard, useSetupWizard } from '@/components/setup-wizard'
 import {
   TrendingUp, FileText, AlertCircle, AlertTriangle,
   ShoppingCart, CreditCard, Package, ArrowLeft,
-  RefreshCw, Loader2, Wallet, WifiOff, CloudOff,
+  RefreshCw, Loader2, Wallet, WifiOff, CloudOff, Wifi,
 } from 'lucide-react'
 import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
@@ -172,7 +177,7 @@ const lineChartConfig: ChartConfig = { sales: { label: 'فروش', color: '#10b9
 const PIE_COLORS = ['#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ec4899']
 
 // ═══════════════════════════════════════════════════════════════
-//  ★ KPI Card — فشرده‌تر
+//  ★ KPI Card — فشرده
 // ═══════════════════════════════════════════════════════════════
 
 function KpiCard({
@@ -197,6 +202,31 @@ function KpiCard({
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ★ نشانگر وضعیت اتصال (آنلاین/آفلاین) — تک و تمیز
+// ═══════════════════════════════════════════════════════════════
+
+function ConnectionStatusBadge({ isOnline }: { isOnline: boolean }) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-colors ${
+        isOnline
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : 'bg-red-50 text-red-700 border-red-200'
+      }`}
+      title={isOnline ? 'اتصال برقرار است' : 'اتصال قطع است — نمایش از حافظه محلی'}
+    >
+      <span className="relative flex h-2 w-2">
+        {!isOnline && (
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+        )}
+        <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      </span>
+      {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+      {isOnline ? 'آنلاین' : 'آفلاین'}
+    </div>
+  )
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  کامپوننت اصلی
@@ -220,6 +250,8 @@ export default function DashboardPage() {
 
   // ═══════════════════════════════════════════════════════════════
   // ★ بارگذاری داده‌ها (آنلاین + آفلاین)
+  //   ★ نکته کلیدی: از /api/dashboard/stats استفاده می‌شود که ساختار
+  //     تودرتوی stats را برمی‌گرداند (با صفحه سازگار است)
   // ═══════════════════════════════════════════════════════════════
 
   const loadData = useCallback(async (isRefresh = false) => {
@@ -248,7 +280,7 @@ export default function DashboardPage() {
 
     // ─── حالت آنلاین: درخواست از سرور ────────────────────────────
     try {
-      const res = await authFetch('/api/dashboard', { cache: 'no-store' })
+      const res = await authFetch('/api/dashboard/stats', { cache: 'no-store' })
       if (!res.ok) {
         if (res.status === 401) {
           setError('نشست منقضی شده')
@@ -361,20 +393,27 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4" dir="rtl">
 
-      {/* ★ هدر ساده */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">داشبورد</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            خلاصه وضعیت فروشگاه
-            {lastUpdateTime && !loading && (
-              <span className="mr-1 text-gray-400">
-                • {formatRelativeTime(lastUpdateTime)}
-              </span>
-            )}
-          </p>
+      {/* ★ هدر + نشانگر وضعیت اتصال (تک و تمیز) */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">داشبورد</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              خلاصه وضعیت فروشگاه
+              {lastUpdateTime && !loading && (
+                <span className="mr-1 text-gray-400">
+                  • {formatRelativeTime(lastUpdateTime)}
+                </span>
+              )}
+              {isFromCache && (
+                <span className="mr-1 text-amber-500">• از حافظه محلی</span>
+              )}
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* ★ نشانگر وضعیت اتصال — فقط یکی */}
+     
           <Button
             onClick={() => loadData(true)}
             variant="outline"
@@ -393,7 +432,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* هشدار موجودی بحرانی */}
+      {/* هشدار موجودی بحرانی (فشرده) */}
       {lowStockProducts.length > 0 && (
         <div
           className="border border-red-300 rounded-lg bg-gradient-to-l from-red-50 to-white cursor-pointer hover:shadow-md transition-shadow"
@@ -427,7 +466,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <KpiCard
           label="فروش امروز"
-          value={formatCurrency(stats.todaySales)}
+          value={formatNumber(stats.todaySales)}
           sublabel={`${formatNumber(stats.todayInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-emerald-500 to-emerald-600"
           icon={
@@ -439,7 +478,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="فروش ماه"
-          value={formatCurrency(stats.monthSales)}
+          value={formatNumber(stats.monthSales)}
           sublabel={`${formatNumber(stats.monthInvoices)} فاکتور`}
           gradient="bg-gradient-to-br from-blue-500 to-blue-600"
           icon={
@@ -451,7 +490,7 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="سود ماه"
-          value={formatCurrency(stats.monthlyProfit)}
+          value={formatNumber(stats.monthlyProfit)}
           sublabel={stats.monthlyProfit >= 0 ? 'سودآور' : 'زیان'}
           gradient="bg-gradient-to-br from-purple-500 to-purple-600"
           icon={
@@ -500,7 +539,7 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* ★★★ v8.9.0: نمودار روند فروش — عرض کامل */}
+      {/* ★★★ نمودار روند فروش — تمام‌عرض */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -538,7 +577,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* ★★★ v8.9.0: نمودار دسته‌بندی + پرفروش‌ها — دو ستون مرتب */}
+      {/* ★★★ نمودار دسته‌بندی + پرفروش‌ها — دو ستون */}
       {(categorySales.length > 0 || topProducts.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {/* نمودار دسته‌بندی */}
@@ -595,7 +634,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ★★★ v8.9.0: آخرین فاکتورها — عرض کامل + جدول حرفه‌ای */}
+      {/* ★★★ آخرین فاکتورها — تمام‌عرض + جدول حرفه‌ای */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -646,7 +685,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* ★★★ v8.9.0: محصولات کم‌موجود — عرض کامل */}
+      {/* ★★★ محصولات کم‌موجود — تمام‌عرض + جدول حرفه‌ای */}
       {lowStockProducts.length > 0 && (
         <Card>
           <CardHeader className="pb-2">

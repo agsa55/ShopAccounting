@@ -1,34 +1,27 @@
-// src/app/api/payments/online/create/route.ts — v8.7
 // ============================================================================
-// ایجاد پرداخت آنلاین با درگاه اختصاصی فروشگاه (زرین‌پال یا ای‌دی‌پی)
-// ----------------------------------------------------------------------------
-// این endpoint:
-//   ۱. درگاه فعال فروشگاه را از PaymentGateway پیدا می‌کند
-//   ۲. بر اساس نوع درگاه (zarinpal | idpay) درخواست ایجاد تراکنش می‌دهد
-//   ۳. رکورد OnlinePayment ایجاد می‌کند
-//   ۴. URL درگاه را برای هدایت کاربر برمی‌گرداند
-//
-// ★ جایگزین درگاه اشتراکی تسهیم فردا (متوقف شده) شد
+// src/app/api/payments/online/create/route.ts — v9.0 ★★★
+// ShopAccounting — ایجاد پرداخت آنلاین با درگاه اختصاصی فروشگاه
 // ============================================================================
+// ★★★ v9.0: یکپارچه‌سازی کامل پرداخت آنلاین (جایگزین endpoint تسهیم)
+//   ✓ استفاده از درگاه اختصاصی فروشگاه (زرین‌پال یا ای‌دی‌پی)
+//   ✓ پشتیبانی کامل از پرداخت قسط‌به‌قسط (installmentId)
+//   ✓ اعتبارسنجی کاربر پورتال (امنیت — مشتری فقط فاکتور خودش را پرداخت کند)
+//   ✓ سازگار با verify (ذخیره gatewayId)
+//   ✓ حذف کامل وابستگی به تسهیم کنسل‌شده
+// ============================================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 
-// ═══════════════════════════════════════════════════════════════
-//  POST /api/payments/online/create
-//  Body: {
-//    invoiceId,              // آی‌دی فاکتور
-//    amount?,                // مبلغ (پیش‌فرض: remainingAmount فاکتور)
-//    description?,           // توضیحات
-//  }
-// ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
+  console.log('[Online Payment Create v9.0] Handler started, tenantId:', tenant?.tenantId)
   try {
     const tenantDb = tenant.tenantDb
     const tenantId = tenant.tenantId
 
     const body = await req.json()
-    const { invoiceId, amount, description } = body
+    const { invoiceId, installmentId, amount, description } = body
 
     if (!invoiceId) {
       return NextResponse.json(
@@ -37,7 +30,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    // ★ پیدا کردن فاکتور
+    // ─── ۱. پیدا کردن فاکتور ─────────────────────────────────────
     const invoice: any = await tenantDb.invoice.findFirst({
       where: { id: invoiceId, tenantId },
     })
@@ -49,15 +42,100 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    const paymentAmount = amount || invoice.remainingAmount || invoice.totalAmount
-    if (paymentAmount <= 0) {
-      return NextResponse.json(
-        { success: false, error: 'مبلغ پرداخت باید بزرگتر از صفر باشد' },
-        { status: 400 }
-      )
+    // ─── ۲. اعتبارسنجی کاربر پورتال (امنیت) ─────────────────────
+    // ★ مشتری فقط می‌تواند فاکتور خودش را پرداخت کند
+    if (tenant.isPortalUser) {
+      const portalCustomerId = tenant.customerId
+      if (!portalCustomerId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه مشتری در توکن پورتال یافت نشد', code: 'NO_CUSTOMER_ID' },
+          { status: 403 }
+        )
+      }
+      if (invoice.customerId !== portalCustomerId) {
+        console.warn('[Online Payment Create] Portal user tried to pay another customer invoice:', {
+          portalCustomerId,
+          invoiceCustomerId: invoice.customerId,
+          invoiceId,
+        })
+        return NextResponse.json(
+          { success: false, error: 'این فاکتور متعلق به شما نیست', code: 'NOT_YOUR_INVOICE' },
+          { status: 403 }
+        )
+      }
+      if (tenant.user?.isBlacklisted) {
+        return NextResponse.json(
+          { success: false, error: 'حساب شما مسدود شده است. با فروشگاه تماس بگیرید.', code: 'CUSTOMER_BLACKLISTED' },
+          { status: 403 }
+        )
+      }
     }
 
-    // ★ پیدا کردن درگاه فعال فروشگاه
+    // ─── ۳. محاسبه مبلغ (قسط خاص یا کل باقی‌مانده) ───────────────
+    let paymentAmount = 0
+    let paymentDescription = description || `پرداخت فاکتور ${invoice.number}`
+    let installmentSchedule: any = null
+
+    if (installmentId) {
+      // ★ پرداخت یک قسط خاص
+      installmentSchedule = await tenantDb.installmentSchedule.findFirst({
+        where: {
+          id: installmentId,
+          tenantId,
+          plan: { invoiceId },
+        },
+        include: {
+          plan: { select: { id: true, installmentAmount: true } },
+        },
+      })
+
+      if (!installmentSchedule) {
+        return NextResponse.json(
+          { success: false, error: 'قسط یافت نشد یا به این فاکتور تعلق ندارد' },
+          { status: 404 }
+        )
+      }
+
+      const schedStatus = (installmentSchedule.status || '').toLowerCase()
+      if (schedStatus === 'paid' || schedStatus === 'completed') {
+        return NextResponse.json(
+          { success: false, error: 'این قسط قبلاً پرداخت شده است' },
+          { status: 400 }
+        )
+      }
+
+      const fullAmount = Number(installmentSchedule.amount) || 0
+      const alreadyPaid = Number(installmentSchedule.paidAmount) || 0
+      paymentAmount = fullAmount - alreadyPaid
+
+      if (paymentAmount <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'مبلغ باقی‌مانده این قسط صفر است' },
+          { status: 400 }
+        )
+      }
+
+      paymentDescription = `پرداخت قسط ${installmentSchedule.installmentNumber} از فاکتور ${invoice.number}`
+
+      console.log('[Online Payment Create] Installment payment:', {
+        installmentId,
+        installmentNumber: installmentSchedule.installmentNumber,
+        fullAmount,
+        alreadyPaid,
+        amountToPay: paymentAmount,
+      })
+    } else {
+      // ★ پرداخت کل باقی‌مانده فاکتور
+      paymentAmount = amount || Number(invoice.remainingAmount) || Number(invoice.totalAmount) || 0
+      if (paymentAmount <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'مبلغ پرداخت باید بزرگتر از صفر باشد' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // ─── ۴. پیدا کردن درگاه فعال فروشگاه (اختصاصی) ──────────────
     const gateway: any = await tenantDb.paymentGateway.findFirst({
       where: { tenantId, isActive: true },
     })
@@ -80,27 +158,46 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    // ★ ایجاد رکورد OnlinePayment
+    // ─── ۵. بررسی پشتیبانی فیلد installmentId (runtime detection) ──
+    const isInstallmentIdSupported = (() => {
+      try {
+        const fieldsRaw = (tenantDb.onlinePayment as any).fields as unknown
+        const fields = (fieldsRaw || {}) as Record<string, unknown>
+        return 'installmentId' in fields
+      } catch {
+        return false
+      }
+    })()
+
+    // ─── ۶. ایجاد رکورد OnlinePayment ────────────────────────────
+    const paymentData: any = {
+      tenantId,
+      invoiceId,
+      customerId: invoice.customerId || null,
+      amount: paymentAmount,
+      status: 'pending',
+      gatewayType: gateway.type,
+      gatewayId: gateway.id,   // ★ کلید سازگاری با verify
+      description: paymentDescription,
+    }
+
+    if (installmentId && isInstallmentIdSupported) {
+      paymentData.installmentId = installmentId
+    } else if (installmentId && !isInstallmentIdSupported) {
+      console.warn('[Online Payment Create] installmentId field not in Prisma Client. Run: npx prisma generate')
+      paymentData.description = `${paymentData.description} [installmentId: ${installmentId}]`
+    }
+
     const onlinePayment = await tenantDb.onlinePayment.create({
-      data: {
-        tenantId,
-        invoiceId,
-        customerId: invoice.customerId || null,
-        amount: paymentAmount,
-        status: 'pending',
-        gatewayType: gateway.type,
-        gatewayId: gateway.id,
-        description: description || `پرداخت آنلاین فاکتور ${invoice.number}`,
-      },
+      data: paymentData,
     })
 
-    // ★ ساخت callback URL (به‌صورت public — نیاز به توکن نداره چون درگاه برمی‌گرده)
+    // ─── ۷. ساخت callback URL (تمیز — بدون placeholder) ──────────
     const callbackUrl = gateway.callbackUrl ||
       `${process.env.NEXT_PUBLIC_APP_URL || ''}/api/payments/online/verify`
+    const callbackWithParams = `${callbackUrl}?tenantId=${tenantId}&paymentId=${onlinePayment.id}`
 
-    const callbackWithParams = `${callbackUrl}?authority={authority}&status={status}&tenantId=${tenantId}&paymentId=${onlinePayment.id}`
-
-    // ★ بر اساس نوع درگاه، درخواست ایجاد تراکنش
+    // ─── ۸. درخواست به درگاه (زرین‌پال یا ای‌دی‌پی) ──────────────
     let gatewayUrl: string | null = null
     let authority: string | null = null
 
@@ -118,8 +215,8 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         },
         body: JSON.stringify({
           merchant_id: gateway.merchantId,
-          amount: Math.round(paymentAmount),  // زرین‌پال ریالی
-          description: description || `پرداخت فاکتور ${invoice.number}`,
+          amount: Math.round(paymentAmount),
+          description: paymentDescription,
           callback_url: callbackWithParams,
         }),
       })
@@ -127,7 +224,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       const zarinpalData = await zarinpalRes.json()
 
       if (!zarinpalData?.data || zarinpalData?.data?.code !== 100) {
-        console.error('[Online Payment] Zarinpal request failed:', zarinpalData)
+        console.error('[Online Payment Create] Zarinpal request failed:', zarinpalData)
         await tenantDb.onlinePayment.update({
           where: { id: onlinePayment.id },
           data: { status: 'failed' },
@@ -143,11 +240,9 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       }
 
       authority = zarinpalData.data.authority
-      const startPayUrl = gateway.sandbox
+      gatewayUrl = gateway.sandbox
         ? `https://sandbox.zarinpal.com/pg/StartPay/${authority}`
         : `https://www.zarinpal.com/pg/StartPay/${authority}`
-
-      gatewayUrl = startPayUrl
     } else if (gateway.type === 'idpay') {
       // ─── ای‌دی‌پی ──────────────────────────────────────────
       if (!gateway.apiKey) {
@@ -175,10 +270,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         body: JSON.stringify({
           order_id: onlinePayment.id,
           amount: Math.round(paymentAmount),
-          name: undefined,
-          phone: undefined,
-          mail: undefined,
-          desc: description || `پرداخت فاکتور ${invoice.number}`,
+          desc: paymentDescription,
           callback: callbackWithParams,
         }),
       })
@@ -186,7 +278,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       const idpayData = await idpayRes.json()
 
       if (!idpayData?.link || idpayData?.error_code) {
-        console.error('[Online Payment] IDPay request failed:', idpayData)
+        console.error('[Online Payment Create] IDPay request failed:', idpayData)
         await tenantDb.onlinePayment.update({
           where: { id: onlinePayment.id },
           data: { status: 'failed' },
@@ -210,7 +302,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    // ★ به‌روزرسانی رکورد با authority و gatewayUrl
+    // ─── ۹. به‌روزرسانی رکورد با authority و gatewayUrl ──────────
     await tenantDb.onlinePayment.update({
       where: { id: onlinePayment.id },
       data: {
@@ -219,15 +311,21 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       },
     })
 
+    console.log('[Online Payment Create v9.0] Payment URL generated:', gatewayUrl)
+
     return NextResponse.json({
       success: true,
       data: {
         paymentId: onlinePayment.id,
+        paymentUrl: gatewayUrl,
         gatewayUrl,
         gatewayType: gateway.type,
         amount: paymentAmount,
+        installmentId: installmentId || null,
       },
-      message: 'کاربر به درگاه پرداخت هدایت می‌شود',
+      message: installmentId
+        ? `کاربر به درگاه پرداخت برای قسط ${installmentSchedule?.installmentNumber || ''} هدایت می‌شود`
+        : 'کاربر به درگاه پرداخت هدایت می‌شود',
     })
   } catch (error: any) {
     console.error('[Online Payment Create] Error:', error?.message || error)

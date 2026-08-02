@@ -1,14 +1,10 @@
 // ============================================================================
-// src/components/invoices/online-payment-button.tsx — v3.33 ★★★
+// src/components/invoices/online-payment-button.tsx — v9.0 ★★★
 // ShopAccounting — Online Payment Button
 // ============================================================================
-// ★★★ v3.33: دکمه پرداخت آنلاین فاکتور
-//
-// این کامپوننت یک دکمه است که کاربر را به درگاه پرداخت هدایت می‌کند.
-//
-// نحوه استفاده:
-//   import { OnlinePaymentButton } from '@/components/invoices/online-payment-button'
-//   <OnlinePaymentButton invoiceId={invoice.id} amount={invoice.remainingAmount} />
+// ★★★ v9.0:
+//   ✓ تغییر endpoint به /api/payments/online/create (درگاه اختصاصی فروشگاه)
+//   ✓ پشتیبانی از portal_token (مشتری) و token (فروشگاه‌دار)
 // ============================================================================
 
 'use client'
@@ -23,7 +19,6 @@ interface OnlinePaymentButtonProps {
   variant?: 'default' | 'outline' | 'ghost' | 'secondary' | 'destructive'
   size?: 'default' | 'sm' | 'lg' | 'icon'
   className?: string
-  /** اگر true، فقط آیکون نمایش داده شود */
   iconOnly?: boolean
 }
 
@@ -42,8 +37,13 @@ export function OnlinePaymentButton({
     setLoading(true)
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch('/api/payments/online/request', {
+      // ★ v9.0: پشتیبانی از توکن پورتال (مشتری) و توکن اصلی (فروشگاه‌دار)
+      const token = typeof window !== 'undefined'
+        ? (localStorage.getItem('portal_token') || localStorage.getItem('token'))
+        : null
+
+      // ★ v9.0: تغییر endpoint به create (درگاه اختصاصی فروشگاه)
+      const res = await fetch('/api/payments/online/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -54,9 +54,10 @@ export function OnlinePaymentButton({
 
       const data = await res.json()
 
-      if (data.success && data.data.paymentUrl) {
+      const paymentUrl = data.data?.paymentUrl || data.data?.gatewayUrl
+      if (data.success && paymentUrl) {
         // ★ هدایت کاربر به درگاه پرداخت
-        window.location.href = data.data.paymentUrl
+        window.location.href = paymentUrl
       } else {
         alert(data.error || 'خطا در ایجاد لینک پرداخت')
       }

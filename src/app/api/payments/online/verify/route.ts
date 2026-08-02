@@ -1,17 +1,13 @@
-// src/app/api/payments/online/verify/route.ts — v8.8 ★★★ COMPLETE FIX
+// src/app/api/payments/online/verify/route.ts — v9.0 ★★★
 // ============================================================================
 // Verify/Callback برای پرداخت آنلاین (زرین‌پال و ای‌دی‌پی)
 // ----------------------------------------------------------------------------
-// ★★★ v8.8 تغییرات بحرانی:
-//   ★ پشتیبانی کامل از پرداخت اقساط — به‌روزرسانی InstallmentSchedule
-//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای manual lookup
-//   ★ استفاده از bankAccountId (1100) به‌عنوان صندوق برای پرداخت آنلاین
-//   ★ استفاده از tradeReceivableId (1310) برای تسویه طلب مشتری
-//   ★ تاریخ JE = تاریخ پرداخت واقعی (paidAt)
-//   ★ به‌روزرسانی totalPaidAmount و paidInstallments در InstallmentPlan
-//   ★ به‌روزرسانی nextDueDate در InstallmentPlan
-//   ★ به‌روزرسانی Customer.lastPurchaseAt هنگام تسویه کامل
-//   ★ حذف رکوردهای یتیم OnlinePayment در صورت خطا
+// ★★★ v9.0 تغییرات:
+//   ★ رفع خطای تایپ‌اسکریپت (مقایسه string با number در idpay)
+//   ★ رفع scope متغیر isCredit
+//   ★ پرداخت قسط هدف‌گذاری‌شده (installmentId) به‌جای FIFO کور
+//   ★ محاسبه دقیق nextDueDate با استعلام مجدد
+// ★★★ v8.8 (حفظ شد): پشتیبانی اقساط، getStandardAccountIds، تاریخ JE
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -95,8 +91,9 @@ export async function GET(req: NextRequest) {
     }
 
     // ★ بررسی لغو پرداخت
+    // ★ v9.0: رفع خطا — idpayStatus همیشه string است، مقایسه با number حذف شد
     const isZarinpalCancelled = gateway.type === 'zarinpal' && zarinpalStatus !== 'OK'
-    const isIdpayCancelled = gateway.type === 'idpay' && idpayStatus !== '10' && idpayStatus !== 10
+    const isIdpayCancelled = gateway.type === 'idpay' && idpayStatus !== '10'
 
     if (isZarinpalCancelled || isIdpayCancelled) {
       console.log('[Verify] Payment cancelled by user')
@@ -196,7 +193,6 @@ export async function GET(req: NextRequest) {
     const accIds = await getStandardAccountIds(tenantId)
 
     // ★★★ v8.8: برای پرداخت آنلاین از bankAccountId (1100) استفاده می‌کنیم
-    //   (نه cashAccountId 1010) چون پول به بانک می‌رود نه صندوق
     const bankAccountId = accIds.bankAccountId || accIds.cashAccountId
     const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
     const salesAccountId = accIds.salesAccountId
@@ -248,57 +244,85 @@ export async function GET(req: NextRequest) {
           },
         })
 
+        // ★ v9.0: تعریف isCredit در scope فاکتور (برای استفاده در بخش ۴ و ۵)
+        //   قبلاً داخل try تعریف می‌شد و در بخش ۵ خارج از scope بود (خطا)
+        const isCredit = invoice.paymentType === 'credit' || invoice.paymentType === 'installment'
+
         // ═══════════════════════════════════════════════════════════════
-        // ★★★ v8.8: هندل InstallmentSchedule برای فاکتور اقساطی
+        // ★★★ v9.0: هندل InstallmentSchedule — هدف‌گذاری قسط خاص یا FIFO
         // ═══════════════════════════════════════════════════════════════
         if (invoice.paymentType === 'installment' && invoice.installmentPlan) {
           const plan = invoice.installmentPlan
-          let remainingPayment = onlinePayment.amount
+          let remainingPayment = Number(onlinePayment.amount) || 0
           let newlyPaidInstallments = 0
-          let nextDueDate: Date | null = null
 
-          // ★ به‌روزرسانی schedules به ترتیب (FIFO)
-          for (const schedule of plan.schedules) {
-            if (remainingPayment <= 0) break
-            if (schedule.status === 'paid') continue
+          // ★ v9.0: اگر قسط خاصی هدف‌گذاری شده (installmentId)، فقط همان را پرداخت کن
+          const targetInstallmentId = onlinePayment.installmentId
 
-            const scheduleRemaining = schedule.amount - schedule.paidAmount
-            if (scheduleRemaining <= 0) continue
+          if (targetInstallmentId) {
+            // ─── پرداخت قسط خاص (هدف‌گذاری‌شده) ─────────────────
+            const targetSchedule = plan.schedules.find((s: any) => s.id === targetInstallmentId)
 
-            const paymentForThisSchedule = Math.min(remainingPayment, scheduleRemaining)
-            const newPaidForSchedule = schedule.paidAmount + paymentForThisSchedule
-            const newScheduleStatus = newPaidForSchedule >= schedule.amount ? 'paid' : 'partial'
+            if (targetSchedule && targetSchedule.status !== 'paid') {
+              const scheduleRemaining = Number(targetSchedule.amount) - Number(targetSchedule.paidAmount || 0)
 
-            await tx.installmentSchedule.update({
-              where: { id: schedule.id },
-              data: {
-                paidAmount: newPaidForSchedule,
-                status: newScheduleStatus,
-                paidAt: newScheduleStatus === 'paid' ? now : schedule.paidAt,
-                paymentRef: refId || onlinePayment.authority,
-                paymentType: 'online',
-              },
-            })
+              if (scheduleRemaining > 0) {
+                const paymentForThis = Math.min(remainingPayment, scheduleRemaining)
+                const newPaidForSchedule = Number(targetSchedule.paidAmount || 0) + paymentForThis
+                const newScheduleStatus = newPaidForSchedule >= Number(targetSchedule.amount) ? 'paid' : 'partial'
 
-            if (newScheduleStatus === 'paid') {
-              newlyPaidInstallments++
+                await tx.installmentSchedule.update({
+                  where: { id: targetSchedule.id },
+                  data: {
+                    paidAmount: newPaidForSchedule,
+                    status: newScheduleStatus,
+                    paidAt: newScheduleStatus === 'paid' ? now : targetSchedule.paidAt,
+                    paymentRef: refId || onlinePayment.authority,
+                    paymentType: 'online',
+                  },
+                })
+
+                if (newScheduleStatus === 'paid') newlyPaidInstallments++
+                remainingPayment -= paymentForThis
+
+                console.log(`[Verify] Targeted installment ${targetSchedule.installmentNumber} paid`)
+              }
             }
+          } else {
+            // ─── پرداخت FIFO (به ترتیب اقساط) ───────────────────
+            for (const schedule of plan.schedules) {
+              if (remainingPayment <= 0) break
+              if (schedule.status === 'paid') continue
 
-            remainingPayment -= paymentForThisSchedule
+              const scheduleRemaining = Number(schedule.amount) - Number(schedule.paidAmount || 0)
+              if (scheduleRemaining <= 0) continue
 
-            // ★ محاسبه nextDueDate (اولین schedule که هنوز paid نیست)
-            if (newScheduleStatus !== 'paid' && !nextDueDate) {
-              nextDueDate = schedule.dueDate
+              const paymentForThisSchedule = Math.min(remainingPayment, scheduleRemaining)
+              const newPaidForSchedule = Number(schedule.paidAmount || 0) + paymentForThisSchedule
+              const newScheduleStatus = newPaidForSchedule >= Number(schedule.amount) ? 'paid' : 'partial'
+
+              await tx.installmentSchedule.update({
+                where: { id: schedule.id },
+                data: {
+                  paidAmount: newPaidForSchedule,
+                  status: newScheduleStatus,
+                  paidAt: newScheduleStatus === 'paid' ? now : schedule.paidAt,
+                  paymentRef: refId || onlinePayment.authority,
+                  paymentType: 'online',
+                },
+              })
+
+              if (newScheduleStatus === 'paid') newlyPaidInstallments++
+              remainingPayment -= paymentForThisSchedule
             }
           }
 
-          // ★ اگر هنوز schedule باقی مانده، nextDueDate را از آن بگیر
-          if (!nextDueDate) {
-            const unpaidSchedule = plan.schedules.find(
-              (s: any) => s.status !== 'paid' && s.id !== plan.schedules[plan.schedules.length - 1].id
-            )
-            // ★ اگر همه paid شدند، nextDueDate را null کن
-          }
+          // ★ v9.0: محاسبه دقیق nextDueDate — استعلام اولین قسط غیر paid (پس از به‌روزرسانی)
+          const firstUnpaidSchedule = await tx.installmentSchedule.findFirst({
+            where: { planId: plan.id, status: { not: 'paid' } },
+            orderBy: { installmentNumber: 'asc' },
+          })
+          const nextDueDate = firstUnpaidSchedule?.dueDate || null
 
           // ★ به‌روزرسانی InstallmentPlan
           await tx.installmentPlan.update({
@@ -306,19 +330,19 @@ export async function GET(req: NextRequest) {
             data: {
               paidInstallments: plan.paidInstallments + newlyPaidInstallments,
               totalPaidAmount: plan.totalPaidAmount + onlinePayment.amount,
-              nextDueDate: nextDueDate || null,
+              nextDueDate: nextDueDate,
               status: newRemaining <= 0 ? 'completed' : 'active',
             },
           })
 
-          console.log(`[Verify] Installment schedule updated — paid ${newlyPaidInstallments} new installments`)
+          console.log(`[Verify] Installment updated — targeted: ${!!targetInstallmentId}, newly paid: ${newlyPaidInstallments}`)
         }
 
         // ═══════════════════════════════════════════════════════════════
         // ۴. سند حسابداری — Dr بانک / Cr مطالبات (نسیه/قسطی)
         // ═══════════════════════════════════════════════════════════════
         try {
-          const isCredit = invoice.paymentType === 'credit' || invoice.paymentType === 'installment'
+          // ★ v9.0: isCredit اکنون در scope بالاتر تعریف شده (حذف از اینجا)
 
           if (bankAccountId && (!isCredit || receivablesAccountId)) {
             const jeCount = await tx.journalEntry.count({ where: { tenantId } })
@@ -341,8 +365,6 @@ export async function GET(req: NextRequest) {
                 description: `بستانکار: تسویه بدهکی مشتری — فاکتور ${invoice.number}`,
               })
             } else if (!isCredit && salesAccountId) {
-              // ★ برای فاکتور نقدی که بعداً پرداخت آنلاین شده:
-              //   (احتمالاً نادر، ولی برای کامل بودن)
               lines.push({
                 accountId: salesAccountId,
                 debit: 0,
@@ -357,7 +379,6 @@ export async function GET(req: NextRequest) {
             await tx.journalEntry.create({
               data: {
                 number: jeNumber,
-                // ★★★ v8.8: تاریخ JE = تاریخ پرداخت واقعی
                 date: now,
                 description: `سند خودکار — دریافت آنلاین فاکتور ${invoice.number}`,
                 status: 'posted',
@@ -380,13 +401,13 @@ export async function GET(req: NextRequest) {
           console.warn('[Verify] Journal entry failed (non-blocking):', jeErr?.message)
         }
 
-        // ۵. در صورت نسیه، کاهش طلب از مشتری
+        // ۵. در صورت نسیه/قسطی، کاهش طلب از مشتری
+        // ★ v9.0: isCredit اکنون در scope است (خطای قبلی رفع شد)
         if (isCredit && invoice.customerId) {
           await tx.customer.update({
             where: { id: invoice.customerId },
             data: {
               currentBalance: { decrement: onlinePayment.amount },
-              // ★★★ v8.8: به‌روزرسانی lastPurchaseAt (تسویه)
               ...(newRemaining <= 0 ? { lastPurchaseAt: now } : {}),
             },
           }).catch(() => {})
