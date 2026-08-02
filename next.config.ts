@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
   // ★ بسته‌هایی که نباید توسط Next.js bundle شوند
   serverExternalPackages: ["mssql", "tedious", "bcryptjs", "bcrypt"],
 
+  // ★ v3.1: رفع هشدار NFT (file tracing) برای Prisma Client
+  //   مسیر client مطابق لاگ شما: ./src/generated/client/index.js
+  //   این باعث می‌شود Turbopack فقط فایل‌های لازم را trace کند، نه کل پروژه را
+  outputFileTracingIncludes: {
+    "/api/**": ["./src/generated/client/**/*"],
+  },
+
   // ⭐ PWA & Service Worker headers
   async headers() {
     return [

@@ -1,24 +1,25 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.0 ★★★ Hardened)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.1 ★★★ Next.js 16 Fix)
 // ============================================================================
-// ★★★ v3.0 تغییرات نسبت به v2.0:
-//   ★ حذف require('jsonwebtoken') → import استاتیک (سازگاری ESM)
-//   ★ افزودن export const runtime = 'nodejs' (صریح)
-//   ★ اصلاح تطبیق PUBLIC_API_PATHS (exact match به‌جای startsWith کور)
-//   ★ افزودن هدرهای امنیتی به تمام پاسخ‌ها
-//   ★ پاک‌سازی کوکی tenant فقط در صورت وجود (نه هر درخواست به /)
-//   ★ حذف چک‌های اضافی و کوکی‌های بلااستفاده
-//   ★ افزودن لاگ ساختاریافته برای دیباگ
+// ★★★ v3.1 تغییرات نسبت به v3.0:
+//   ★ حذف export const runtime = 'nodejs'
+//     → در Next.js 16 فایل Proxy اجازه Route segment config ندارد
+//     → Proxy همیشه روی Node.js اجرا می‌شود (نیازی به اعلام صریح نیست)
+//     → این خط عامل خطای بیلد بود:
+//       "Route segment config is not allowed in Proxy file"
+//   ★ jsonwebtoken بدون اعلام runtime هم روی Node.js به‌درستی کار می‌کند
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';  // ★ v3.0: import استاتیک به‌جای require
 
-// ★★★ v3.0: اعلام صریح رانتایم — jsonwebtoken به Node.js crypto نیاز دارد
-export const runtime = 'nodejs';
+// ★ v3.1: حذف export const runtime = 'nodejs'
+//   در Next.js 16، Proxy همیشه روی Node.js اجرا می‌شود و اعلام runtime
+//   نه‌تنها لازم نیست، بلکه غیرمجاز است و بیلد را می‌شکند.
 
 // ─── مسیرهای عمومی API ───────────────────────────────────────────────────────
 const PUBLIC_API_PATHS = [
+   '/api/health', 
   '/api/auth/login', '/api/auth/verify', '/api/auth/refresh',
   '/api/auth/send-otp', '/api/auth/verify-otp', '/api/auth/otp/send', '/api/auth/otp/verify',
   '/api/tenants/register', '/api/tenants/verify-otp', '/api/tenants/check-subdomain',
