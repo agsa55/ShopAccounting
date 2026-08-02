@@ -1,12 +1,16 @@
 // ============================================================================
-// src/lib/moidian/index.ts — توابع راهنمای اصلی برای اتصال سامانه مودیان
+// src/lib/moidian/index.ts — توابع راهنمای اصلی برای اتصال سامانه مودیان (v9.9)
 // ============================================================================
 // ★★★ این نسخه اعتبارسنجی کلید خصوصی را کاملاً حذف کرده است.
 //   اعتبارسنجی واقعی هنگام استفاده از کلید (signing.ts) انجام می‌شود.
+//
+// ★★★ v9.9 تغییرات:
+//   ★ جلوگیری از ذخیره credentials با کلید fallback در production (امنیت)
+//   ★ تعیین داینامیک سال مالی از تاریخ فاکتور (به‌جای hardcoded '1403')
 // ============================================================================
 
 import { db } from '@/lib/db'
-import { getAccessToken, submitInvoice, queryInvoiceStatus, cancelInvoice, testConnection, type MoidianCredentials, type MoidianToken } from './client'
+import { getAccessToken, submitInvoice, queryInvoiceStatus, cancelInvoice, testConnection, type MoidianCredentials, type MoidianToken, type MoidianInvoicePayload } from './client'
 import { mapInvoiceToMoidian, validateMoidianPayload } from './invoice-mapper'
 import { encrypt, decrypt, isUsingFallbackKey, maskSensitive } from './crypto'
 
@@ -190,6 +194,16 @@ export async function saveMoidianSettings(
   input: MoidianSettingsInput
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // ★ v9.9: جلوگیری از ذخیره credentials با کلید fallback در production
+    //   در محیط production اگر MOIDIAN_ENCRYPTION_KEY تنظیم نشده باشد،
+    //   از ذخیره اطلاعات حساس مالیاتی جلوگیری می‌شود (امنیت).
+    if (process.env.NODE_ENV === 'production' && isUsingFallbackKey()) {
+      return {
+        success: false,
+        error: 'کلید رمزنگاری MOIDIAN_ENCRYPTION_KEY تنظیم نشده است. برای امنیت اطلاعات مالیاتی مشتریان، ابتدا یک کلید ۳۲ بایتی (۶۴ کاراکتر hex) در فایل .env تنظیم کنید. (تولید کلید: openssl rand -hex 32)',
+      }
+    }
+
     // ★ اعتبارسنجی اولیه
     if (!input.fiscalId || input.fiscalId.length !== 11) {
       return { success: false, error: 'شناسه مالیاتی باید ۱۱ رقم باشد' }
@@ -338,7 +352,21 @@ export async function submitInvoiceToMoidian(
       phone: tenant.ownerMobile || storeSetting?.phone || undefined,
     }
 
-    const payload = mapInvoiceToMoidian(invoice as any, seller)
+    // ★ v9.9: تعیین داینامیک سال مالی از تاریخ فاکتور (به‌جای hardcoded '1403')
+    //   سال شمسی فاکتور استخراج شده و به mapper ارسال می‌شود تا در سال‌های بعد
+    //   (مثلاً ۱۴۰۴) فاکتورها با سال مالی صحیح ارسال شوند و رد نشوند.
+    let fiscalYear = '1403'
+    try {
+      const invoiceDate = new Date(invoice.invoiceDate)
+      if (!isNaN(invoiceDate.getTime())) {
+        const jy = new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric' }).format(invoiceDate)
+        fiscalYear = jy.replace(/\D/g, '') || '1403'
+      }
+    } catch {
+      console.warn('[Moidian] Could not derive fiscal year from invoice date, using default 1403')
+    }
+
+    const payload = mapInvoiceToMoidian(invoice as any, seller, fiscalYear)
 
     const validation = validateMoidianPayload(payload)
     if (!validation.valid) {
