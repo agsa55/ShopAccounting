@@ -61,7 +61,7 @@ import ProductsPage from '@/components/products/products-page'
 import CategoriesPage from '@/components/products/categories-page'
 import CustomersPage from '@/components/customers/customers-page'
 import InvoicesPage from '@/components/invoices/invoices-page'
-import InvoiceDetail from '@/components/invoices/invoice-detail'
+
 import InstallmentsPage from '@/components/installments/installments-page'
 import JournalEntriesPage from '@/components/accounting/journal-entries-page'
 import JournalEntryDetail from '@/components/accounting/journal-entry-detail'
@@ -240,7 +240,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'کالا و انبار',
     items: [
-      { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
+      { label: 'کالاها', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
       { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
     ],
@@ -281,7 +281,7 @@ const MANAGER_ONLY_KEYS = ['settings']
 const viewLabels: Record<string, string> = {
   dashboard: 'داشبورد',
   pos: 'صندوق فروش',
-  products: 'محصولات',
+  products: 'کالاها',
   categories: 'دسته‌بندی‌ها',
   customers: 'مشتریان',
   invoices: 'فاکتورها',
@@ -370,7 +370,7 @@ function renderCurrentView(view: AppView) {
     case 'invoices-hub':          return <InvoicesHub />
     case 'invoices':              return <InvoicesHub />
     case 'purchase-invoices':     return <InvoicesHub />
-    case 'invoice-detail':        return <InvoiceDetail />
+  
     case 'installments':          return <InstallmentsPage />
     case 'accounting':            return <JournalEntriesPage />
     case 'journal-entry-detail':  return <JournalEntryDetail />

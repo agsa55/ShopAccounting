@@ -1,9 +1,10 @@
 // src/components/purchases/purchase-invoices-page.tsx
 // ============================================================================
-// ★ v8.8.10: رسپانسیو کامل (موبایل + تبلت + دسکتاپ) + آفلاین بهبودیافته
+// ★ v8.9.0: رفع باگ غیرفعال بودن فیلدها + Portal برای DatePicker + Sync Fix
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@/lib/store'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -100,7 +101,8 @@ const MAX_RETRY = 3
 // Persian/Jalali Date Utilities
 // ============================================================================
 
-function toFaNum(n: number | string): string {
+function toFaNum(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return '۰'
   return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
 }
 
@@ -173,8 +175,17 @@ function daysInJalaliMonth(jy: number, jm: number): number {
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
   try {
-    const d = new Date(iso); if (isNaN(d.getTime())) return null
-    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    // ★ اصلاح باگ: parse مستقیم رشته برای جلوگیری از مشکل Timezone
+    // استفاده از new Date(iso) باعث می‌شد در برخی مناطق زمانی یک روز عقب‌تر محاسبه شود
+    const cleanIso = iso.substring(0, 10)
+    const parts = cleanIso.split('-')
+    if (parts.length !== 3) return null
+    const gy = parseInt(parts[0], 10)
+    const gm = parseInt(parts[1], 10)
+    const gd = parseInt(parts[2], 10)
+    if (isNaN(gy) || isNaN(gm) || isNaN(gd)) return null
+    if (gm < 1 || gm > 12 || gd < 1 || gd > 31) return null
+    const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
     return { jy, jm, jd }
   } catch { return null }
 }
@@ -190,7 +201,12 @@ function formatDateToJalali(iso: string): string {
   return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2,'۰')}/${toFaNum(j.jd).padStart(2,'۰')}`
 }
 
-function formatNumber(n: number): string { return (n || 0).toLocaleString('fa-IR') }
+function formatNumber(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return '۰'
+  const num = typeof n === 'string' ? parseFloat(n.replace(/[^\d.-]/g, '')) : n
+  if (isNaN(num)) return '۰'
+  return toFaNum(num.toLocaleString('en-US'))
+}
 
 // ============================================================================
 // Storage Helpers
@@ -219,7 +235,7 @@ function saveToStorage<T>(key: string, value: T): void {
 const DEFAULT_UNITS = ['عدد','کیلوگرم','گرم','متر','سانتی‌متر','لیتر','میلی‌لیتر','جفت','دوجین','کیس','بسته']
 
 // ============================================================================
-// Persian DatePicker
+// PersianDatePicker (با Portal برای جلوگیری از بریده شدن در مودال)
 // ============================================================================
 
 const LILAC = {
@@ -246,7 +262,8 @@ interface PersianDatePickerProps {
 
 function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تاریخ', label, minDate, maxDate }: PersianDatePickerProps) {
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [popupPos, setPopupPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 })
 
   const displayText = useMemo(() => {
     if (!value) return ''
@@ -254,10 +271,15 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
     return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2,'۰')}/${toFaNum(j.jd).padStart(2,'۰')}`
   }, [value])
 
-  const todayJalali = useMemo(() => {
+   const todayJalali = useMemo(() => {
+    // ★ اصلاح باگ: ساخت ISO به صورت دستی برای جلوگیری از مشکل UTC در toISOString
     const now = new Date()
-    const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
-    return { jy, jm, jd, iso: now.toISOString().split('T')[0] }
+    const gy = now.getFullYear()
+    const gm = now.getMonth() + 1
+    const gd = now.getDate()
+    const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+    const iso = `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
+    return { jy, jm, jd, iso }
   }, [])
 
   const initial = useMemo(() => {
@@ -272,15 +294,6 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
     const j = value ? isoToJalali(value) : null
     if (j) { setViewYear(j.jy); setViewMonth(j.jm) }
   }, [value])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
 
   const daysCount = daysInJalaliMonth(viewYear, viewMonth)
   const firstDayOffset = useMemo(() => {
@@ -308,18 +321,33 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
   const goPrevYear = () => setViewYear(y => y - 1)
   const goNextYear = () => setViewYear(y => y + 1)
   const pickToday = () => { onChange(todayJalali.iso); setOpen(false) }
+  
   const handleDayClick = (jd: number) => {
     if (isDayDisabled(jd)) return
     onChange(jalaliToISO(viewYear, viewMonth, jd))
     setOpen(false)
   }
 
+  const handleToggle = () => {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      const rightPos = window.innerWidth - rect.right
+      const maxRight = window.innerWidth - 270
+      setPopupPos({
+        top: rect.bottom + 4,
+        right: Math.max(10, Math.min(rightPos, maxRight > 0 ? maxRight : 10)),
+      })
+    }
+    setOpen(o => !o)
+  }
+
   return (
-    <div ref={containerRef} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       {label && <p style={{ fontSize: 10, color: LILAC.textMuted, marginBottom: 3, fontWeight: 500 }}>{label}</p>}
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={handleToggle}
         style={{
           width: '100%', height: 36, padding: '0 10px', borderRadius: 6,
           border: `1px solid ${LILAC.border}`, backgroundColor: LILAC.popupBg,
@@ -335,11 +363,14 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
         </span>
       </button>
 
-      {open && (
+      {open && typeof document !== 'undefined' && createPortal(
         <>
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99998 }} onClick={() => setOpen(false)} />
           <div dir="rtl" style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 9999,
+            position: 'fixed',
+            top: popupPos.top,
+            right: popupPos.right,
+            zIndex: 99999,
             width: 260, backgroundColor: LILAC.popupBgSolid, border: `1px solid ${LILAC.border}`,
             borderRadius: 10, boxShadow: '0 8px 24px -4px rgba(124,58,237,0.18)', padding: 10, overflow: 'hidden',
           }}>
@@ -403,7 +434,8 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
               </button>
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   )
@@ -471,10 +503,9 @@ function MobileInvoiceCard({
   return (
     <Card className={`border shadow-none ${isCancelled ? 'opacity-60' : ''} ${inv._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200 bg-white'}`}>
       <CardContent className="p-3">
-        {/* ردیف ۱: شماره + وضعیت */}
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-            <span className="font-mono font-bold text-sm text-gray-900">{inv.number}</span>
+            <span className="font-mono font-bold text-sm text-gray-900">{toFaNum(inv.number)}</span>
             {inv._isOffline && !isOfflineDelete && (
               <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1">آفلاین</Badge>
             )}
@@ -484,15 +515,13 @@ function MobileInvoiceCard({
           {statusBadge()}
         </div>
 
-        {/* ردیف ۲: تامین‌کننده + تاریخ */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <span className="text-xs text-gray-600 truncate flex-1">{inv.supplier?.name || <span className="text-gray-400">بدون تامین‌کننده</span>}</span>
           <span className="text-[10px] text-gray-400 shrink-0">{formatDateToJalali(inv.invoiceDate)}</span>
         </div>
 
-        {/* ردیف ۳: مبالغ */}
         <div className="grid grid-cols-3 gap-1.5 mb-2.5">
-                  <div className="bg-gray-50 rounded p-1.5 text-center">
+          <div className="bg-gray-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">مبلغ کل</p>
             <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">
               {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal" dir="rtl">ریال</span>
@@ -510,42 +539,17 @@ function MobileInvoiceCard({
           </div>
         </div>
 
-        {/* ردیف ۴: دکمه‌ها */}
         <div className="flex items-center justify-end gap-0.5 pt-2 border-t border-gray-100">
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 hover:bg-emerald-50 hover:text-emerald-600"
-            onClick={() => onPrint(inv)}
-            disabled={inv._isOffline}
-            title="چاپ"
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-emerald-50 hover:text-emerald-600" onClick={() => onPrint(inv)} disabled={inv._isOffline} title="چاپ">
             <Printer className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-emerald-600'}`} />
           </Button>
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600"
-            onClick={() => onEdit(inv)}
-            disabled={isCancelled || isOfflineDelete}
-            title="ویرایش"
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600" onClick={() => onEdit(inv)} disabled={isCancelled || isOfflineDelete} title="ویرایش">
             <Edit2 className="w-3.5 h-3.5 text-blue-600" />
           </Button>
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600"
-            onClick={() => onReturn(inv)}
-            disabled={isCancelled || isReturn || inv._isOffline}
-            title="برگشتی"
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600" onClick={() => onReturn(inv)} disabled={isCancelled || isReturn || inv._isOffline} title="برگشتی">
             <RotateCcw className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-amber-600'}`} />
           </Button>
-          <Button
-            variant="ghost" size="icon"
-            className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
-            onClick={() => onDelete(inv)}
-            disabled={isCancelled && !inv._isOffline}
-            title="حذف"
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-600" onClick={() => onDelete(inv)} disabled={isCancelled && !inv._isOffline} title="حذف">
             <Trash2 className="w-3.5 h-3.5 text-red-600" />
           </Button>
         </div>
@@ -563,7 +567,6 @@ export function PurchaseInvoicesPage() {
   const setCurrentView = useAppStore(s => s.setCurrentView)
   const isOnline = useAppStore(s => s.isOnline)
 
-  // ─── Data State ───────────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -571,13 +574,11 @@ export function PurchaseInvoicesPage() {
   const [search, setSearch] = useState('')
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
-  // ─── آفلاین State ─────────────────────────────────────────────────────────
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null)
   const syncInProgress = useRef(false)
 
-  // ─── Dialog State ─────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [supplierId, setSupplierId] = useState<string>('')
@@ -591,21 +592,19 @@ export function PurchaseInvoicesPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   const [editingOfflineId, setEditingOfflineId] = useState<string | null>(null)
   const [loadingEditItems, setLoadingEditItems] = useState(false)
- const productSearchInputRef = useRef<HTMLInputElement>(null)
+  const productSearchInputRef = useRef<HTMLInputElement>(null)
   const isProcessingProductScan = useRef(false)
  
   const purchaseBarcodeBufferRef = useRef<string>('')
   const purchaseBarcodeTimerRef = useRef<NodeJS.Timeout | null>(null)
-  // ─── Delete State ─────────────────────────────────────────────────────────
+  
   const [deletingInvoice, setDeletingInvoice] = useState<PurchaseInvoice | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // ─── Print State ──────────────────────────────────────────────────────────
   const [printModalOpen, setPrintModalOpen] = useState(false)
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null)
   const [printInvoiceNumber, setPrintInvoiceNumber] = useState<string>('')
 
-  // ─── Return State ─────────────────────────────────────────────────────────
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnInvoice, setReturnInvoice] = useState<PurchaseInvoice | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{
@@ -616,7 +615,6 @@ export function PurchaseInvoicesPage() {
   }>>([])
   const [returnSubmitting, setReturnSubmitting] = useState(false)
 
-  // ─── Service Dialog State ─────────────────────────────────────────────────
   const [serviceDialogOpen, setServiceDialogOpen] = useState(false)
   const [serviceSubmitting, setServiceSubmitting] = useState(false)
   const [serviceCategory, setServiceCategory] = useState<'repair' | 'service'>('repair')
@@ -629,7 +627,8 @@ export function PurchaseInvoicesPage() {
   }>>([])
 
   const { toast } = useToast()
-    // ══════════════════════════════════════════════════════════════════════════
+
+  // ══════════════════════════════════════════════════════════════════════════
   // ★ مدیریت صف همگام‌سازی
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -690,103 +689,102 @@ export function PurchaseInvoicesPage() {
   // ★ بارگذاری داده‌ها
   // ══════════════════════════════════════════════════════════════════════════
 
- const loadData = useCallback(async (showLoader = true) => {
-  if (showLoader) setLoading(true)
-  const tid = tenantId || useAppStore.getState().currentTenant?.id
-  if (!tid) { setLoading(false); return }
+  const loadData = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true)
+    const tid = tenantId || useAppStore.getState().currentTenant?.id
+    if (!tid) { setLoading(false); return }
 
-  // ★ لایه دفاعی اضافه: بررسی مستقیم navigator.onLine برای جلوگیری از خطای Fetch در لحظه قطع شدن شبکه
-  const trulyOnline = isOnline && navigator.onLine
+    const trulyOnline = isOnline && navigator.onLine
 
-  if (!trulyOnline) {
-    const cachedInvoices = loadOfflineInvoices()
-    const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
-    const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
-    setInvoices(cachedInvoices)
-    setSuppliers(cachedSuppliers)
-    setWarehouses(cachedWarehouses)
-    const defaultWh = cachedWarehouses.find(w => w.isDefault)
-    if (defaultWh) setWarehouseId(defaultWh.id)
-    const queue = loadSyncQueue()
-    setSyncQueue(queue)
-    setLoading(false)
-    if (cachedInvoices.length === 0 && cachedSuppliers.length === 0) {
-      toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه محلی یافت نشد. لطفاً یک‌بار آنلاین وارد شوید.' })
-    }
-    return
-  }
-
-  try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }
-    
-    const [invRes, supRes, whRes] = await Promise.all([
-      fetch(`/api/purchase-invoices?tenantId=${tid}`, { headers }),
-      fetch(`/api/suppliers?tenantId=${tid}&activeOnly=true`, { headers }),
-      fetch(`/api/warehouses?tenantId=${tid}`, { headers }),
-    ])
-
-    const [invData, supData, whData] = await Promise.all([
-      invRes.json(), supRes.json(), whRes.json(),
-    ])
-
-    let serverInvoices: PurchaseInvoice[] = []
-    if (invData.success) serverInvoices = invData.data || []
-    
-    let serverSuppliers: Supplier[] = []
-    if (supData.success) {
-      serverSuppliers = supData.data || []
-      saveToStorage(STORAGE_KEYS.SUPPLIERS, serverSuppliers)
-    }
-    
-    let serverWarehouses: Warehouse[] = []
-    if (whData.success) {
-      serverWarehouses = whData.data || []
-      saveToStorage(STORAGE_KEYS.WAREHOUSES, serverWarehouses)
-      const defaultWh = serverWarehouses.find(w => w.isDefault)
-      if (defaultWh) setWarehouseId(defaultWh.id)
-    }
-    
-    setSuppliers(serverSuppliers)
-    setWarehouses(serverWarehouses)
-    
-    const offlineInvoices = loadOfflineInvoices()
-    const merged = mergeInvoices(serverInvoices, offlineInvoices)
-    setInvoices(merged)
-    
-    saveOfflineInvoices([
-      ...offlineInvoices.filter(o => o._isOffline),
-      ...serverInvoices,
-    ])
-    
-    const now = new Date().toISOString()
-    saveToStorage(STORAGE_KEYS.LAST_SYNC, now)
-    setLastSyncTime(now)
-    
-    const queue = loadSyncQueue()
-    setSyncQueue(queue)
-  } catch (err: any) {
-    // ★ اگر خطا به خاطر قطعی شبکه بود، به جای console.error ترسناک، یک warning ملایم می‌دهیم
-    // و به صورت خودکار به حالت آفلاین سوئیچ می‌کنیم
-    if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
-      console.warn('[PurchaseInvoicesPage] شبکه در دسترس نیست، سوئیچ خودکار به حالت آفلاین')
+    if (!trulyOnline) {
       const cachedInvoices = loadOfflineInvoices()
       const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
       const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
       setInvoices(cachedInvoices)
       setSuppliers(cachedSuppliers)
       setWarehouses(cachedWarehouses)
-    } else {
-      console.error('Error loading data:', err)
+      const defaultWh = cachedWarehouses.find(w => w.isDefault)
+      if (defaultWh) setWarehouseId(defaultWh.id)
+      else if (cachedWarehouses.length > 0) setWarehouseId(cachedWarehouses[0].id)
+      
+      const queue = loadSyncQueue()
+      setSyncQueue(queue)
+      setLoading(false)
+      if (cachedInvoices.length === 0 && cachedSuppliers.length === 0) {
+        toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه محلی یافت نشد. لطفاً یک‌بار آنلاین وارد شوید.' })
+      }
+      return
     }
-  } finally {
-    // ★ اطمینان از اینکه لودینگ تحت هر شرایطی متوقف می‌شود
-    setLoading(false)
-  }
-}, [tenantId, isOnline, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }
+      
+      const [invRes, supRes, whRes] = await Promise.all([
+        fetch(`/api/purchase-invoices?tenantId=${tid}`, { headers }),
+        fetch(`/api/suppliers?tenantId=${tid}&activeOnly=true`, { headers }),
+        fetch(`/api/warehouses?tenantId=${tid}`, { headers }),
+      ])
+
+      const [invData, supData, whData] = await Promise.all([
+        invRes.json(), supRes.json(), whRes.json(),
+      ])
+
+      let serverInvoices: PurchaseInvoice[] = []
+      if (invData.success) serverInvoices = invData.data || []
+      
+      let serverSuppliers: Supplier[] = []
+      if (supData.success) {
+        serverSuppliers = supData.data || []
+        saveToStorage(STORAGE_KEYS.SUPPLIERS, serverSuppliers)
+      }
+      
+      let serverWarehouses: Warehouse[] = []
+      if (whData.success) {
+        serverWarehouses = whData.data || []
+        saveToStorage(STORAGE_KEYS.WAREHOUSES, serverWarehouses)
+        const defaultWh = serverWarehouses.find(w => w.isDefault)
+        if (defaultWh) setWarehouseId(defaultWh.id)
+        else if (serverWarehouses.length > 0) setWarehouseId(serverWarehouses[0].id)
+      }
+      
+      setSuppliers(serverSuppliers)
+      setWarehouses(serverWarehouses)
+      
+      const offlineInvoices = loadOfflineInvoices()
+      const merged = mergeInvoices(serverInvoices, offlineInvoices)
+      setInvoices(merged)
+      
+      saveOfflineInvoices([
+        ...offlineInvoices.filter(o => o._isOffline),
+        ...serverInvoices,
+      ])
+      
+      const now = new Date().toISOString()
+      saveToStorage(STORAGE_KEYS.LAST_SYNC, now)
+      setLastSyncTime(now)
+      
+      const queue = loadSyncQueue()
+      setSyncQueue(queue)
+    } catch (err: any) {
+      if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
+        console.warn('[PurchaseInvoicesPage] شبکه در دسترس نیست، سوئیچ خودکار به حالت آفلاین')
+        const cachedInvoices = loadOfflineInvoices()
+        const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
+        const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
+        setInvoices(cachedInvoices)
+        setSuppliers(cachedSuppliers)
+        setWarehouses(cachedWarehouses)
+      } else {
+        console.error('Error loading data:', err)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [tenantId, isOnline, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -829,7 +827,15 @@ export function PurchaseInvoicesPage() {
             const offlineInvs = loadOfflineInvoices()
             const updated = offlineInvs.map(inv =>
               inv._offlineId === item.offlineId
-                ? { ...inv, id: data.data.id, _isOffline: false, _syncStatus: undefined, _offlineId: undefined }
+                ? { ...inv, id: data.data.id, _isOffline: false, _syncStatus: undefined, _offlineId: undefined, _offlineAction: undefined }
+                : inv
+            )
+            saveOfflineInvoices(updated)
+          } else if (item.action === 'update') {
+            const offlineInvs = loadOfflineInvoices()
+            const updated = offlineInvs.map(inv =>
+              (inv.id === item.serverId || inv._offlineId === item.offlineId)
+                ? { ...inv, _isOffline: false, _syncStatus: undefined, _offlineId: undefined, _offlineAction: undefined }
                 : inv
             )
             saveOfflineInvoices(updated)
@@ -932,209 +938,125 @@ export function PurchaseInvoicesPage() {
     setProductSearchResults([])
   }, [cart])
 
-  // ══════════════════════════════════════════════════════════════
-  // ★ بارکدخوان هوشمند در سطح کل صفحه (فقط وقتی مودال خرید باز است)
-  // ══════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★ بارکدخوان هوشمند
+  // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
-    // فقط وقتی مودال باز است فعال باشد
     if (!dialogOpen) return;
 
     const handleGlobalKeyDown = async (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement | null;
-
-      // ۱. اگر فوکوس روی اینپوت جستجوی محصول است، اجازه دهیم handleProductSearchKeyDown کار کند
       if (activeEl === productSearchInputRef.current) return;
-
-      // ۲. اگر فوکوس روی هر input/textarea/select دیگری در مودال است، کاری نکنیم
-      //    (تا تایپ در فیلدهای توضیحات، تاریخ و... مختل نشود)
       if (activeEl) {
         const tagName = activeEl.tagName.toLowerCase();
-        if (
-          tagName === 'input' ||
-          tagName === 'textarea' ||
-          tagName === 'select' ||
-          activeEl.isContentEditable
-        ) {
-          return;
-        }
+        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || activeEl.isContentEditable) return;
       }
 
-      // ۳. پردازش کلید Enter
       if (e.key === 'Enter') {
         const barcode = purchaseBarcodeBufferRef.current.trim();
         if (barcode.length >= 3) {
           e.preventDefault();
-
           try {
             const tid = tenantId || useAppStore.getState().currentTenant?.id;
             if (!tid) return;
-
             const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
             const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
-            // جستجو به عنوان بارکد
             const resBarcode = await fetch(`/api/products/lookup?barcode=${encodeURIComponent(barcode)}&tenantId=${tid}`, { headers });
             const dataBarcode = await resBarcode.json();
-
             if (dataBarcode.success && dataBarcode.data) {
               const product = Array.isArray(dataBarcode.data) ? dataBarcode.data[0] : dataBarcode.data;
               if (product && product.id) {
                 handleAddProduct(product);
-                toast({
-                  title: '✓ افزودن به فاکتور',
-                  description: `${product.name} اضافه شد`,
-                });
+                toast({ title: '✓ افزودن به فاکتور', description: `${product.name} اضافه شد` });
                 purchaseBarcodeBufferRef.current = '';
-                if (purchaseBarcodeTimerRef.current) {
-                  clearTimeout(purchaseBarcodeTimerRef.current);
-                  purchaseBarcodeTimerRef.current = null;
-                }
+                if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
                 return;
               }
             }
 
-            // جستجو به عنوان کد محصول
             const resCode = await fetch(`/api/products/lookup?code=${encodeURIComponent(barcode)}&tenantId=${tid}`, { headers });
             const dataCode = await resCode.json();
-
             if (dataCode.success && dataCode.data) {
               const product = Array.isArray(dataCode.data) ? dataCode.data[0] : dataCode.data;
               if (product && product.id) {
                 handleAddProduct(product);
-                toast({
-                  title: '✓ افزودن به فاکتور',
-                  description: `${product.name} اضافه شد`,
-                });
+                toast({ title: '✓ افزودن به فاکتور', description: `${product.name} اضافه شد` });
                 purchaseBarcodeBufferRef.current = '';
-                if (purchaseBarcodeTimerRef.current) {
-                  clearTimeout(purchaseBarcodeTimerRef.current);
-                  purchaseBarcodeTimerRef.current = null;
-                }
+                if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
                 return;
               }
             }
-
-            // اگر پیدا نشد
-            toast({
-              title: 'یافت نشد',
-              description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
-              variant: 'destructive',
-            });
-
-          } catch (err) {
-            console.error('[Purchase] Global barcode scan error:', err);
-          }
-
-          // پاک کردن بافر
+            toast({ title: 'یافت نشد', description: `محصولی با بارکد/کد "${barcode}" یافت نشد`, variant: 'destructive' });
+          } catch (err) { console.error('[Purchase] Global barcode scan error:', err); }
           purchaseBarcodeBufferRef.current = '';
-          if (purchaseBarcodeTimerRef.current) {
-            clearTimeout(purchaseBarcodeTimerRef.current);
-            purchaseBarcodeTimerRef.current = null;
-          }
+          if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
         }
         return;
       }
 
-      // ۴. کلید Escape: پاک کردن بافر
       if (e.key === 'Escape') {
         purchaseBarcodeBufferRef.current = '';
-        if (purchaseBarcodeTimerRef.current) {
-          clearTimeout(purchaseBarcodeTimerRef.current);
-          purchaseBarcodeTimerRef.current = null;
-        }
+        if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
         return;
       }
 
-      // ۵. نادیده گرفتن کلیدهای کنترلی
       if (e.key.length > 1) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      // ۶. اضافه کردن کاراکتر به بافر
       purchaseBarcodeBufferRef.current += e.key;
-
-      // ۷. تایمر ۲ ثانیه‌ای برای پاکسازی خودکار
-      if (purchaseBarcodeTimerRef.current) {
-        clearTimeout(purchaseBarcodeTimerRef.current);
-      }
-      purchaseBarcodeTimerRef.current = setTimeout(() => {
-        purchaseBarcodeBufferRef.current = '';
-      }, 2000);
+      if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
+      purchaseBarcodeTimerRef.current = setTimeout(() => { purchaseBarcodeBufferRef.current = ''; }, 2000);
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
-      if (purchaseBarcodeTimerRef.current) {
-        clearTimeout(purchaseBarcodeTimerRef.current);
-      }
+      if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
     };
   }, [dialogOpen, tenantId, handleAddProduct, toast]);
 
-    // ★ تابع جدید: مدیریت اسکن بارکد در جستجوی فاکتور خرید
   const handleProductSearchKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-
         if (isProcessingProductScan.current) return;
-
         const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '');
         if (!q) return;
-
         isProcessingProductScan.current = true;
-
         try {
           const tid = tenantId || useAppStore.getState().currentTenant?.id;
           const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
           const headers = { ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
-          // ۱. جستجو به عنوان بارکد
           const resBarcode = await fetch(`/api/products/lookup?barcode=${encodeURIComponent(q)}&tenantId=${tid}`, { headers });
           const dataBarcode = await resBarcode.json();
-
           if (dataBarcode.success && dataBarcode.data) {
             const product = Array.isArray(dataBarcode.data) ? dataBarcode.data[0] : dataBarcode.data;
             if (product && product.id) {
               handleAddProduct(product);
-              setProductSearch('');
-              setProductSearchResults([]);
+              setProductSearch(''); setProductSearchResults([]);
               if (productSearchInputRef.current) productSearchInputRef.current.value = '';
               return;
             }
           }
 
-          // ۲. جستجو به عنوان کد محصول (اگر بارکد پیدا نشد)
           const resCode = await fetch(`/api/products/lookup?code=${encodeURIComponent(q)}&tenantId=${tid}`, { headers });
           const dataCode = await resCode.json();
-
           if (dataCode.success && dataCode.data) {
             const product = Array.isArray(dataCode.data) ? dataCode.data[0] : dataCode.data;
             if (product && product.id) {
               handleAddProduct(product);
-              setProductSearch('');
-              setProductSearchResults([]);
+              setProductSearch(''); setProductSearchResults([]);
               if (productSearchInputRef.current) productSearchInputRef.current.value = '';
               return;
             }
           }
-
-          // ۳. اگر هیچکدام پیدا نشد
-          toast({
-            title: 'یافت نشد',
-            description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
-            variant: 'destructive',
-          });
-
-        } catch (error) {
-          console.error('Barcode scan error in purchase:', error);
-        } finally {
-          setTimeout(() => {
-            isProcessingProductScan.current = false;
-          }, 500);
-          // حفظ فوکوس روی اینپوت برای اسکن بعدی
-          if (productSearchInputRef.current) {
-            productSearchInputRef.current.focus();
-          }
+          toast({ title: 'یافت نشد', description: `محصولی با بارکد/کد "${q}" یافت نشد.`, variant: 'destructive' });
+        } catch (error) { console.error('Barcode scan error in purchase:', error); } 
+        finally {
+          setTimeout(() => { isProcessingProductScan.current = false; }, 500);
+          if (productSearchInputRef.current) productSearchInputRef.current.focus();
         }
       }
     },
@@ -1170,7 +1092,7 @@ export function PurchaseInvoicesPage() {
       toast({ title: 'خطا', description: 'سبد خرید خالی است', variant: 'destructive' })
       return
     }
-    if (!warehouseId) {
+    if (!warehouseId || warehouseId === 'none') {
       toast({ title: 'خطا', description: 'انتخاب انبار الزامی است', variant: 'destructive' })
       return
     }
@@ -1180,8 +1102,8 @@ export function PurchaseInvoicesPage() {
 
     const payload = {
       tenantId: tid,
-      supplierId: supplierId || undefined,
-      warehouseId,
+      supplierId: supplierId === 'none' ? undefined : (supplierId || undefined),
+      warehouseId: warehouseId === 'none' ? undefined : warehouseId,
       paymentType,
       description,
       invoiceDate,
@@ -1194,7 +1116,7 @@ export function PurchaseInvoicesPage() {
         const offlineInvs = loadOfflineInvoices()
         const updated = offlineInvs.map(inv =>
           inv.id === editingInvoiceId
-            ? { ...inv, ...payload, _isOffline: true, _syncStatus: 'pending' as const, _offlineAction: 'update' as const, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
+            ? { ...inv, ...payload, _isOffline: true, _syncStatus: 'pending' as const, _offlineAction: 'update' as const, _offlineId: editingInvoiceId, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
             : inv
         )
         saveOfflineInvoices(updated)
@@ -1220,8 +1142,8 @@ export function PurchaseInvoicesPage() {
           paymentType,
           totalAmount: totals.total,
           paidAmount: 0,
-          supplierId: supplierId || null,
-          warehouseId,
+          supplierId: supplierId === 'none' ? null : (supplierId || null),
+          warehouseId: warehouseId === 'none' ? null : warehouseId,
           supplier: suppliers.find(s => s.id === supplierId) || null,
           warehouse: warehouses.find(w => w.id === warehouseId) || null,
           items: cart,
@@ -1276,8 +1198,8 @@ export function PurchaseInvoicesPage() {
         paymentType,
         totalAmount: totals.total,
         paidAmount: 0,
-        supplierId: supplierId || null,
-        warehouseId,
+        supplierId: supplierId === 'none' ? null : (supplierId || null),
+        warehouseId: warehouseId === 'none' ? null : warehouseId,
         supplier: suppliers.find(s => s.id === supplierId) || null,
         warehouse: warehouses.find(w => w.id === warehouseId) || null,
         items: cart,
@@ -1369,7 +1291,13 @@ export function PurchaseInvoicesPage() {
     setDescription(inv.description || '')
     setSupplierId(inv.supplierId || '')
     setWarehouseId(inv.warehouseId || '')
-    if (inv.invoiceDate) setInvoiceDate(new Date(inv.invoiceDate).toISOString().split('T')[0])
+    
+    if (inv.invoiceDate) {
+      const d = inv.invoiceDate.substring(0, 10)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) setInvoiceDate(d)
+      else setInvoiceDate(new Date(inv.invoiceDate).toISOString().split('T')[0])
+    }
+    
     setCart([])
     setLoadingEditItems(true)
     setDialogOpen(true)
@@ -1438,6 +1366,8 @@ export function PurchaseInvoicesPage() {
     setLoadingEditItems(false)
     const defaultWh = warehouses.find(w => w.isDefault)
     if (defaultWh) setWarehouseId(defaultWh.id)
+    else if (warehouses.length > 0) setWarehouseId(warehouses[0].id)
+    else setWarehouseId('')
   }, [warehouses])
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1638,7 +1568,7 @@ export function PurchaseInvoicesPage() {
 
   const filteredInvoices = useMemo(() =>
     invoices.filter(inv =>
-      inv.number.includes(search) || (inv.supplier?.name || '').includes(search)
+      (inv.number || '').includes(search) || (inv.supplier?.name || '').includes(search)
     ), [invoices, search])
 
   const pendingSyncCount = syncQueue.filter(q => q.retryCount < MAX_RETRY).length
@@ -1654,7 +1584,6 @@ export function PurchaseInvoicesPage() {
       {/* ─── Header ─────────────────────────────────────────────────────── */}
       <header className="bg-white border-b border-gray-200 px-3 sm:px-5 lg:px-6 py-3 shrink-0">
         <div className="flex items-center justify-between gap-2">
-          {/* عنوان */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
               <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
@@ -1667,9 +1596,7 @@ export function PurchaseInvoicesPage() {
             </div>
           </div>
 
-          {/* دکمه‌های هدر */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
-            {/* آفلاین badge */}
             {!isOnline && (
               <Badge variant="outline" className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5">
                 <WifiOff className="w-2.5 h-2.5" />
@@ -1677,7 +1604,6 @@ export function PurchaseInvoicesPage() {
               </Badge>
             )}
 
-            {/* pending sync badge */}
             {pendingSyncCount > 0 && (
               <Badge
                 variant="outline"
@@ -1690,7 +1616,6 @@ export function PurchaseInvoicesPage() {
               </Badge>
             )}
 
-            {/* failed sync */}
             {failedSyncCount > 0 && (
               <Badge variant="outline" className="gap-1 text-[10px] border-red-300 text-red-700 bg-red-50 px-1.5">
                 <AlertTriangle className="w-2.5 h-2.5" />
@@ -1698,7 +1623,6 @@ export function PurchaseInvoicesPage() {
               </Badge>
             )}
 
-            {/* جستجو موبایل */}
             <Button
               variant="outline" size="icon"
               className="h-8 w-8 sm:hidden border-gray-200"
@@ -1707,7 +1631,6 @@ export function PurchaseInvoicesPage() {
               <Search className="w-3.5 h-3.5" />
             </Button>
 
-            {/* sync دستی */}
             {isOnline && pendingSyncCount > 0 && !isSyncing && (
               <Button
                 variant="outline" size="sm"
@@ -1729,6 +1652,7 @@ export function PurchaseInvoicesPage() {
                 setInvoiceDate(new Date().toISOString().split('T')[0])
                 const defaultWh = warehouses.find(w => w.isDefault)
                 if (defaultWh) setWarehouseId(defaultWh.id)
+                else if (warehouses.length > 0) setWarehouseId(warehouses[0].id)
                 setDialogOpen(true)
               }}
               size="sm"
@@ -1751,7 +1675,6 @@ export function PurchaseInvoicesPage() {
           </div>
         </div>
 
-        {/* جستجوی کشویی موبایل */}
         {mobileSearchOpen && (
           <div className="mt-2 sm:hidden">
             <div className="relative">
@@ -1771,7 +1694,6 @@ export function PurchaseInvoicesPage() {
         )}
       </header>
 
-      {/* ─── نوار وضعیت آفلاین ──────────────────────────────────────────── */}
       {!isOnline && (
         <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-3 sm:px-5 py-2 shrink-0">
           <CloudOff className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1788,7 +1710,6 @@ export function PurchaseInvoicesPage() {
         </div>
       )}
 
-      {/* نوار sync آنلاین */}
       {isOnline && pendingSyncCount > 0 && (
         <div className="flex items-center gap-2 bg-blue-50 border-b border-blue-200 px-3 sm:px-5 py-2 shrink-0">
           <Upload className="w-4 h-4 text-blue-600 shrink-0" />
@@ -1807,7 +1728,6 @@ export function PurchaseInvoicesPage() {
         </div>
       )}
 
-      {/* ─── Search (Desktop) ────────────────────────────────────────────── */}
       <div className="px-3 sm:px-5 lg:px-6 pt-3 shrink-0">
         <div className="relative hidden sm:block">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1825,17 +1745,13 @@ export function PurchaseInvoicesPage() {
         </div>
       </div>
 
-      {/* ─── Content ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto px-3 sm:px-5 lg:px-6 py-3">
-
-        {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-purple-500 mb-3" />
           </div>
         )}
 
-        {/* Empty */}
         {!loading && filteredInvoices.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20">
             <ShoppingCart className="w-12 h-12 mb-3 text-gray-300" />
@@ -1848,7 +1764,6 @@ export function PurchaseInvoicesPage() {
 
         {!loading && filteredInvoices.length > 0 && (
           <>
-            {/* ══ نمای موبایل - کارت ══ */}
             <div className="md:hidden space-y-2">
               {filteredInvoices.map(inv => (
                 <MobileInvoiceCard
@@ -1862,7 +1777,6 @@ export function PurchaseInvoicesPage() {
               ))}
             </div>
 
-            {/* ══ نمای تبلت/دسکتاپ - جدول ══ */}
             <div className="hidden md:block">
               <Card>
                 <CardContent className="p-0">
@@ -1897,8 +1811,8 @@ export function PurchaseInvoicesPage() {
                                 {inv._syncStatus === 'syncing' && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
                                 {inv._retryCount !== undefined && inv._retryCount >= MAX_RETRY && (
                                  <span title="sync ناموفق" className="inline-flex">
-  <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-</span>
+                                    <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                                 </span>
                                 )}
                               </div>
                             </TableCell>
@@ -1909,7 +1823,7 @@ export function PurchaseInvoicesPage() {
                               </span>
                             </TableCell>
                             <TableCell className="text-xs hidden lg:table-cell">{inv.warehouse?.name || '—'}</TableCell>
-                                                      <TableCell className="text-xs font-bold" dir="rtl">
+                            <TableCell className="text-xs font-bold" dir="rtl">
                               {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal" dir="rtl">ریال</span>
                             </TableCell>
                             <TableCell className="text-center hidden xl:table-cell">
@@ -2033,33 +1947,32 @@ export function PurchaseInvoicesPage() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 min-h-0">
-
-                {/* اطلاعات پایه */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                   <div>
                     <Label className="text-[10px]">تامین‌کننده</Label>
                     <Select value={supplierId || 'none'} onValueChange={setSupplierId}>
                       <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">بدون</SelectItem>
+                      <SelectContent className="z-[99999]">
+                        <SelectItem value="none">بدون تامین‌کننده</SelectItem>
                         {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Label className="text-[10px]">انبار <span className="text-red-500">*</span></Label>
-                    <Select value={warehouseId} onValueChange={setWarehouseId}>
+                    <Select value={warehouseId || 'none'} onValueChange={setWarehouseId}>
                       <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[99999]">
+                        <SelectItem value="none">انتخاب کنید...</SelectItem>
                         {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Label className="text-[10px]">پرداخت</Label>
-                    <Select value={paymentType} onValueChange={setPaymentType}>
+                    <Select value={paymentType || 'cash'} onValueChange={setPaymentType}>
                       <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[99999]">
                         <SelectItem value="cash">نقدی</SelectItem>
                         <SelectItem value="credit">نسیه</SelectItem>
                       </SelectContent>
@@ -2070,16 +1983,13 @@ export function PurchaseInvoicesPage() {
                   </div>
                 </div>
 
-                {/* جستجوی محصول */}
-                              {/* جستجوی محصول */}
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
-                  ref={productSearchInputRef}
-  placeholder="جستجو محصول / اسکن بارکد [Enter]"
-  value={productSearch}
-  onChange={e => setProductSearch(e.target.value)}
-
+                    ref={productSearchInputRef}
+                    placeholder="جستجو محصول / اسکن بارکد [Enter]"
+                    value={productSearch}
+                    onChange={e => setProductSearch(e.target.value)}
                     onKeyDown={handleProductSearchKeyDown}
                     className="pr-9 h-9 text-sm"
                     disabled={!isOnline && !productSearch}
@@ -2088,7 +1998,7 @@ export function PurchaseInvoicesPage() {
                     <p className="text-[10px] text-amber-500 mt-1">⚠ جستجوی محصول در حالت آفلاین ممکن نیست.</p>
                   )}
                   {productSearchResults.length > 0 && (
-                    <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div className="absolute z-[99999] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                       {productSearchResults.map(p => (
                         <button key={p.id} onClick={() => handleAddProduct(p)}
                           className="w-full text-right p-2 hover:bg-emerald-50 border-b border-gray-100 last:border-0 text-xs">
@@ -2101,7 +2011,7 @@ export function PurchaseInvoicesPage() {
                     </div>
                   )}
                 </div>
-                {/* افزودن ردیف دستی (آفلاین) */}
+                
                 {!isOnline && (
                   <Button
                     variant="outline" size="sm"
@@ -2113,7 +2023,6 @@ export function PurchaseInvoicesPage() {
                   </Button>
                 )}
 
-                {/* جدول کالاها */}
                 {loadingEditItems ? (
                   <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2">
                     <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
@@ -2237,9 +2146,6 @@ export function PurchaseInvoicesPage() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          دیالوگ تأیید حذف
-      ══════════════════════════════════════════════════════════════════════ */}
       <Dialog open={!!deletingInvoice} onOpenChange={open => !open && setDeletingInvoice(null)}>
         <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl" dir="rtl">
           <DialogHeader>
@@ -2248,7 +2154,7 @@ export function PurchaseInvoicesPage() {
               {deletingInvoice?._isOffline ? 'حذف فاکتور آفلاین' : 'لغو فاکتور خرید'}
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              آیا از {deletingInvoice?._isOffline ? 'حذف' : 'لغو'} فاکتور «{deletingInvoice?.number}» مطمئن هستید؟
+              آیا از {deletingInvoice?._isOffline ? 'حذف' : 'لغو'} فاکتور «{toFaNum(deletingInvoice?.number)}» مطمئن هستید؟
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
@@ -2275,7 +2181,7 @@ export function PurchaseInvoicesPage() {
             )}
             {deletingInvoice && (
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs space-y-1">
-                <div className="flex justify-between"><span className="text-slate-500" >شماره:</span><span className="font-mono">{deletingInvoice.number}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500" >شماره:</span><span className="font-mono">{toFaNum(deletingInvoice.number)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500" dir="rtl">مبلغ:</span><span className="font-bold">{formatNumber(deletingInvoice.totalAmount)} ریال</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">تامین‌کننده:</span><span>{deletingInvoice.supplier?.name || '—'}</span></div>
               </div>
@@ -2284,16 +2190,13 @@ export function PurchaseInvoicesPage() {
           <DialogFooter className="flex-row gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setDeletingInvoice(null)} disabled={deleting}>انصراف</Button>
             <Button onClick={handleDeleteInvoice} disabled={deleting} className="flex-1 bg-red-600 hover:bg-red-700 gap-1.5">
-  {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-  {deletingInvoice?._isOffline ? 'حذف' : !isOnline ? 'علامت‌گذاری برای حذف' : 'بله، لغو کن'}
-</Button>
+              {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              {deletingInvoice?._isOffline ? 'حذف' : !isOnline ? 'علامت‌گذاری برای حذف' : 'بله، لغو کن'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          مودال چاپ
-      ══════════════════════════════════════════════════════════════════════ */}
       <PurchaseInvoicePrintModal
         invoiceId={printInvoiceId}
         invoiceNumber={printInvoiceNumber}
@@ -2302,9 +2205,6 @@ export function PurchaseInvoicesPage() {
         storeName={useAppStore.getState().storeName || 'فروشگاه'}
       />
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          دیالوگ برگشتی فاکتور خرید
-      ══════════════════════════════════════════════════════════════════════ */}
       <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
         <DialogContent className="w-[calc(100%-0.5rem)] sm:w-full sm:max-w-3xl max-h-[92vh] overflow-y-auto rounded-xl" dir="rtl">
           <DialogHeader>
@@ -2313,7 +2213,7 @@ export function PurchaseInvoicesPage() {
               ثبت برگشتی فاکتور خرید
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              {returnInvoice && `فاکتور ${returnInvoice.number} — انتخاب کالاهای مرجوعی`}
+              {returnInvoice && `فاکتور ${toFaNum(returnInvoice.number)} — انتخاب کالاهای مرجوعی`}
             </DialogDescription>
           </DialogHeader>
 
@@ -2325,7 +2225,6 @@ export function PurchaseInvoicesPage() {
               </div>
             ) : (
               <>
-                {/* موبایل - کارت */}
                 <div className="sm:hidden space-y-2">
                   {returnItems.map((item, index) => {
                     const itemReturnAmount = item.lineTotal > 0 && item.originalQuantity > 0
@@ -2342,15 +2241,15 @@ export function PurchaseInvoicesPage() {
                           <div className="grid grid-cols-3 gap-1.5 text-[10px]">
                             <div className="text-center bg-gray-50 rounded p-1">
                               <p className="text-gray-400">خرید</p>
-                              <p className="font-bold">{item.originalQuantity.toLocaleString('fa-IR')}</p>
+                              <p className="font-bold">{formatNumber(item.originalQuantity)}</p>
                             </div>
                             <div className="text-center bg-emerald-50 rounded p-1">
                               <p className="text-gray-400">موجودی</p>
-                              <p className={`font-bold ${item.currentStock === 0 ? 'text-red-600' : 'text-emerald-600'}`}>{item.currentStock.toLocaleString('fa-IR')}</p>
+                              <p className={`font-bold ${item.currentStock === 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatNumber(item.currentStock)}</p>
                             </div>
                             <div className="text-center bg-amber-50 rounded p-1">
                               <p className="text-gray-400">حداکثر</p>
-                              <p className="font-bold text-amber-600">{item.maxQuantity.toLocaleString('fa-IR')}</p>
+                              <p className="font-bold text-amber-600">{formatNumber(item.maxQuantity)}</p>
                             </div>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
@@ -2370,7 +2269,7 @@ export function PurchaseInvoicesPage() {
                             </div>
                           </div>
                           {itemReturnAmount > 0 && (
-                            <p className="text-xs text-amber-700 font-bold text-left" dir="rtl">مبلغ: {itemReturnAmount.toLocaleString('fa-IR')} ریال</p>
+                            <p className="text-xs text-amber-700 font-bold text-left" dir="rtl">مبلغ: {formatNumber(itemReturnAmount)} ریال</p>
                           )}
                         </CardContent>
                       </Card>
@@ -2378,7 +2277,6 @@ export function PurchaseInvoicesPage() {
                   })}
                 </div>
 
-                {/* دسکتاپ - جدول */}
                 <div className="hidden sm:block border border-gray-200 rounded-lg overflow-auto max-h-96">
                   <table className="w-full text-xs border-collapse">
                     <thead className="sticky top-0 z-10 bg-gray-100">
@@ -2401,10 +2299,10 @@ export function PurchaseInvoicesPage() {
                               {isDisabled && <span className="mr-1 text-[9px] bg-red-100 text-red-600 px-1 py-0.5 rounded">موجودی ندارد</span>}
                             </td>
                             <td className="p-2 text-center text-[9px]">{item.unitLabel}</td>
-                            <td className="p-2 text-center">{item.originalQuantity.toLocaleString('fa-IR')}</td>
+                            <td className="p-2 text-center">{formatNumber(item.originalQuantity)}</td>
                             <td className="p-2 text-center">
                               <span className={`font-bold ${item.currentStock === 0 ? 'text-red-600' : item.currentStock < item.originalQuantity ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                {item.currentStock.toLocaleString('fa-IR')}
+                                {formatNumber(item.currentStock)}
                               </span>
                             </td>
                             <td className="p-2">
@@ -2413,10 +2311,10 @@ export function PurchaseInvoicesPage() {
                                 min={0} max={item.maxQuantity} disabled={isDisabled} step="0.01"
                                 className={`h-8 text-xs w-20 text-center ${isDisabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                               />
-                              {!isDisabled && <p className="text-[9px] text-gray-400 mt-0.5">حداکثر: {item.maxQuantity.toLocaleString('fa-IR')}</p>}
+                              {!isDisabled && <p className="text-[9px] text-gray-400 mt-0.5">حداکثر: {formatNumber(item.maxQuantity)}</p>}
                             </td>
                             <td className="p-2 text-center font-medium text-amber-700">
-                              {itemReturnAmount > 0 ? itemReturnAmount.toLocaleString('fa-IR') : '—'}
+                              {itemReturnAmount > 0 ? formatNumber(itemReturnAmount) : '—'}
                             </td>
                             <td className="p-2">
                               <Input value={item.returnReason}
@@ -2458,9 +2356,6 @@ export function PurchaseInvoicesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          دیالوگ فاکتور خدمات/تعمیرات
-      ══════════════════════════════════════════════════════════════════════ */}
       {serviceDialogOpen && (
         <>
           <div onClick={() => setServiceDialogOpen(false)} className="fixed inset-0 bg-black/50 z-[9998]" />
@@ -2481,8 +2376,6 @@ export function PurchaseInvoicesPage() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 min-h-0">
-
-                {/* نوع فاکتور */}
                 <div>
                   <Label className="text-xs font-bold">نوع فاکتور *</Label>
                   <div className="grid grid-cols-2 gap-2 mt-2">
@@ -2505,7 +2398,6 @@ export function PurchaseInvoicesPage() {
                   </div>
                 </div>
 
-                {/* اطلاعات پایه */}
                 <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -2542,7 +2434,6 @@ export function PurchaseInvoicesPage() {
                   </div>
                 </div>
 
-                {/* آیتم‌های خدمت */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-bold text-gray-700">
@@ -2566,7 +2457,7 @@ export function PurchaseInvoicesPage() {
                         <div key={index} className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
                           <div className="flex items-center gap-2">
                             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold shrink-0">
-                              {(index + 1).toLocaleString('fa-IR')}
+                              {toFaNum(index + 1)}
                             </span>
                             <Input
                               value={item.serviceName}
@@ -2610,7 +2501,7 @@ export function PurchaseInvoicesPage() {
                           </div>
 
                           <div className="text-[10px] text-gray-600 text-left bg-gray-50 rounded px-2 py-0.5" dir="rtl">
-                            جمع: <span className="font-bold">{((item.quantity * item.unitPrice) - item.discountAmount + item.taxAmount).toLocaleString('fa-IR')}</span> ریال
+                            جمع: <span className="font-bold">{formatNumber((item.quantity * item.unitPrice) - item.discountAmount + item.taxAmount)}</span> ریال
                           </div>
                         </div>
                       ))}
@@ -2618,7 +2509,6 @@ export function PurchaseInvoicesPage() {
                   )}
                 </div>
 
-                {/* توضیحات */}
                 <div>
                   <Label className="text-xs">توضیحات کلی (اختیاری)</Label>
                   <Textarea
@@ -2629,11 +2519,10 @@ export function PurchaseInvoicesPage() {
                   />
                 </div>
 
-                {/* جمع کل */}
                 <div className="bg-blue-600 text-white rounded-lg p-3 flex justify-between items-center">
                   <span className="text-xs sm:text-sm">مبلغ قابل پرداخت:</span>
                   <span className="font-bold text-sm sm:text-base" dir="rtl">
-                    {serviceItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice - i.discountAmount + i.taxAmount), 0).toLocaleString('fa-IR')} ریال
+                    {formatNumber(serviceItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice - i.discountAmount + i.taxAmount), 0))} ریال
                   </span>
                 </div>
               </div>
@@ -2648,7 +2537,6 @@ export function PurchaseInvoicesPage() {
           </div>
         </>
       )}
-
     </div>
   )
 }

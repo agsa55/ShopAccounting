@@ -1,6 +1,7 @@
 // ============================================================================
-// src/components/reports/profit-loss-report.tsx — v9.2 ★★★
+// src/components/reports/profit-loss-report.tsx — v9.4 ★★★
 // سازگار با API v8.7 و v9.1 و v9.2
+// ★ v9.4: اضافه شدن "ریال" در سمت چپ تمام مبالغ
 // ============================================================================
 
 'use client'
@@ -24,30 +25,20 @@ import {
 // ============================================================================
 
 interface PnLData {
-  // version markers
   _version?: string
   _dataSource?: string
-
-  // فروش
   grossSales: number
   salesReturns: number
   discounts: number
   netSales: number
   taxAmount: number
-
-  // COGS — v9.1 فیلدهای جدید
   cogs: number
-  cogsFromSales?: number      // v9.1: cogsDr
-  cogsFromReturns?: number    // v9.1: cogsCr
-  // v8.7 فیلدهای قدیمی (برای سازگاری)
+  cogsFromSales?: number
+  cogsFromReturns?: number
   cogsFromInvoices?: number
   cogsFromFallback?: number
-
-  // سود
   grossProfit: number
   grossMargin: number
-
-  // هزینه‌ها
   operatingExpenses: { name: string; amount: number; code?: string; accountCode?: string }[]
   totalOperatingExpenses: number
   paymentGatewayFees?: {
@@ -56,8 +47,6 @@ interface PnLData {
     total: number
     percentage: number
   }
-
-  // سایر
   otherIncome: number
   otherExpenses: number
   operatingProfit: number
@@ -65,13 +54,9 @@ interface PnLData {
   incomeTax: number
   netProfit: number
   netMargin: number
-
-  // آمار
   invoiceCount: number
   returnCount?: number
   averageInvoiceValue: number
-
-  // تفکیک
   monthlyBreakdown: {
     month: string
     revenue: number
@@ -107,6 +92,11 @@ interface PnLData {
 
 function formatNumberFa(n: number): string {
   return Math.abs(n || 0).toLocaleString('fa-IR')
+}
+
+// ★ v9.4: فرمت مبلغ با واحد ریال در انتها
+function formatCurrency(n: number): string {
+  return `${Math.abs(n || 0).toLocaleString('fa-IR')} ریال`
 }
 
 function toFaNum(n: number | string): string {
@@ -188,11 +178,19 @@ function daysInJalaliMonth(jy: number, jm: number): number {
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
   try {
-    const d = new Date(iso); if (isNaN(d.getTime())) return null
-    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    // ★ parsing دستی برای جلوگیری از باگ timezone
+    const parts = iso.split('-')
+    if (parts.length !== 3) return null
+    const gy = parseInt(parts[0], 10)
+    const gm = parseInt(parts[1], 10)
+    const gd = parseInt(parts[2], 10)
+    if (isNaN(gy) || isNaN(gm) || isNaN(gd)) return null
+    const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
     return { jy, jm, jd }
   } catch { return null }
 }
+
+
 function jalaliToISO(jy: number, jm: number, jd: number): string {
   const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd)
   return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
@@ -210,7 +208,23 @@ function formatMonthLabel(monthKey: string): string {
   if (mi < 0 || mi > 11) return monthKey
   return `${JALALI_MONTHS[mi]} ${toFaNum(y)}`
 }
-function todayGregorianISO(): string { return new Date().toISOString().split('T')[0] }
+
+function todayGregorianISO(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function daysAgoISO(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 function getAuthHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {}
   const token = localStorage.getItem('token')
@@ -223,7 +237,7 @@ function getDefaultDateRange(): { from: string; to: string } {
   return { from: firstOfMonth, to: todayGregorianISO() }
 }
 
-// ★ helper: استخراج COGS از هر نسخه API
+// ★ helper: استخراج بهای تمام شده از هر نسخه API
 function extractCogsInfo(data: PnLData): {
   cogsNet: number
   cogsFromSales: number
@@ -233,7 +247,6 @@ function extractCogsInfo(data: PnLData): {
   const isJEBased = data._dataSource === 'journal_entry'
 
   if (data.cogsFromSales !== undefined && data.cogsFromReturns !== undefined) {
-    // v9.1 / v9.2
     return {
       cogsNet: data.cogs,
       cogsFromSales: data.cogsFromSales,
@@ -241,7 +254,6 @@ function extractCogsInfo(data: PnLData): {
       isJEBased,
     }
   } else {
-    // v8.7 fallback
     return {
       cogsNet: data.cogs,
       cogsFromSales: data.cogsFromInvoices || data.cogs,
@@ -288,10 +300,14 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
     return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2, '۰')}/${toFaNum(j.jd).padStart(2, '۰')}`
   }, [value])
 
+  // ★ اصلاح‌شده: استفاده از timezone محلی برای iso امروز
   const todayJalali = useMemo(() => {
     const now = new Date()
     const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
-    return { jy, jm, jd, iso: now.toISOString().split('T')[0] }
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return { jy, jm, jd, iso: `${year}-${month}-${day}` }
   }, [])
 
   const initial = useMemo(() => {
@@ -456,46 +472,46 @@ function PersianDateRangePicker({ value, onChange, size = 'md' }: DateRangePicke
 }
 
 // ============================================================================
-//  StatCard
+//  StatCard — نسخه گرادیان (مثل صفحه گزارش)
 // ============================================================================
 
 interface StatCardProps {
   label: string; value: number; icon: React.ReactNode
-  color: 'emerald' | 'blue' | 'amber' | 'red' | 'gray'
+  color: 'emerald' | 'blue' | 'amber' | 'red' | 'gray' | 'purple' | 'teal' | 'pink' | 'indigo'
   suffix?: string; hint?: string
 }
 
 function StatCard({ label, value, icon, color, suffix, hint }: StatCardProps) {
-  const colorMap = {
-    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    blue: 'bg-blue-50 text-blue-700 border-blue-200',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
-    gray: 'bg-gray-50 text-gray-700 border-gray-200',
+  const colorMap: Record<string, { gradient: string; iconBg: string }> = {
+    emerald: { gradient: 'from-emerald-500 to-emerald-600', iconBg: 'bg-white/20' },
+    blue: { gradient: 'from-blue-500 to-blue-600', iconBg: 'bg-white/20' },
+    amber: { gradient: 'from-amber-500 to-amber-600', iconBg: 'bg-white/20' },
+    red: { gradient: 'from-red-500 to-red-600', iconBg: 'bg-white/20' },
+    purple: { gradient: 'from-purple-500 to-purple-600', iconBg: 'bg-white/20' },
+    gray: { gradient: 'from-gray-500 to-gray-600', iconBg: 'bg-white/20' },
+    teal: { gradient: 'from-teal-500 to-teal-600', iconBg: 'bg-white/20' },
+    pink: { gradient: 'from-pink-500 to-pink-600', iconBg: 'bg-white/20' },
+    indigo: { gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20' },
   }
-  const iconColorMap = {
-    emerald: 'text-emerald-600 bg-emerald-100',
-    blue: 'text-blue-600 bg-blue-100',
-    amber: 'text-amber-600 bg-amber-100',
-    red: 'text-red-600 bg-red-100',
-    gray: 'text-gray-600 bg-gray-100',
-  }
+  const c = colorMap[color]
   return (
-    <Card className={`border-2 ${colorMap[color]}`}>
-      <CardContent className="p-3 sm:p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] sm:text-xs font-medium text-gray-500 mb-1 truncate">{label}</p>
-            <p className="text-base sm:text-lg font-bold" dir="ltr">
-              {formatNumberFa(value)}
-              {suffix && <span className="text-[10px] font-normal text-gray-400 mr-1">{suffix}</span>}
-            </p>
-            {hint && <p className="text-[9px] sm:text-[10px] text-gray-400 mt-0.5">{hint}</p>}
-          </div>
-          <div className={`p-1.5 sm:p-2 rounded-lg ${iconColorMap[color]} shrink-0`}>{icon}</div>
+    <div className={`bg-gradient-to-br ${c.gradient} rounded-xl p-2.5 sm:p-3 text-white shadow-sm`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">{label}</p>
+          <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">
+            {formatNumberFa(value)}
+          </p>
+          <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">
+            {suffix}
+          </p>
+          {hint && <p className="text-[9px] sm:text-[10px] text-white/60 mt-0.5 truncate">{hint}</p>}
         </div>
-      </CardContent>
-    </Card>
+        <div className={`w-7 h-7 rounded-lg ${c.iconBg} backdrop-blur-sm flex items-center justify-center shrink-0`}>
+          {icon}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -550,7 +566,6 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
   const isProfit = data ? data.netProfit >= 0 : true
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
 
-  // ★ استخراج COGS سازگار با همه نسخه‌ها
   const cogsInfo = data ? extractCogsInfo(data) : null
 
   const handleExportExcel = () => {
@@ -561,7 +576,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
       ['کم: بازگشت از فروش', -data.salesReturns],
       ['کم: تخفیفات', -data.discounts],
       ['درآمد خالص فروش', data.netSales],
-      ['بهای تمام شده (COGS)', -data.cogs],
+      ['بهای تمام شده کالای فروش رفته', -data.cogs],
       ['سود ناخالص', data.grossProfit],
       ['هزینه‌های عملیاتی', -data.totalOperatingExpenses],
       ...data.operatingExpenses.map(e => [`  - ${e.name}`, -e.amount] as [string, number]),
@@ -593,7 +608,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
       <div className="flex flex-col items-center justify-center py-12">
         <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-2" />
         <p className="text-sm text-gray-500">در حال محاسبه گزارش سود و زیان...</p>
-        <p className="text-xs text-gray-400 mt-1">COGS از اسناد حسابداری استخراج می‌شود</p>
+        <p className="text-xs text-gray-400 mt-1">بهای تمام شده از اسناد حسابداری استخراج می‌شود</p>
       </div>
     )
   }
@@ -609,7 +624,6 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
     )
   }
 
-  // ★ اصلاح EmptyState — فقط وقتی واقعاً هیچ داده‌ای نیست
   if (!data || (data.invoiceCount === 0 && data.netSales === 0 && data.cogs === 0)) {
     return (
       <div className="space-y-3">
@@ -651,7 +665,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
         <div className="flex items-center gap-1.5 mr-auto">
           <Button variant="outline" size="sm" onClick={handleExportExcel} className="h-9 text-xs">
             <Download className="w-3.5 h-3.5 ml-1" />
-            Excel
+            اکسل
           </Button>
           <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 text-xs">
             <Printer className="w-3.5 h-3.5 ml-1" />
@@ -660,32 +674,32 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards — نسخه گرادیان */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard
           label="درآمد خالص فروش" value={data.netSales}
-          icon={<TrendingUp className="w-4 h-4" />} color="emerald" suffix="ریال"
+          icon={<TrendingUp className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="ریال"
           hint={`${toFaNum(data.invoiceCount)} فاکتور`}
         />
         <StatCard
           label="سود ناخالص" value={data.grossProfit}
-          icon={<Coins className="w-4 h-4" />} color="blue" suffix="ریال"
-          hint={`حاشیه: ${toFaNum(data.grossMargin.toFixed(1))}٪`}
+          icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="ریال"
+          hint={`درصد سود: ${toFaNum(data.grossMargin.toFixed(1))}٪`}
         />
         <StatCard
           label="سود عملیاتی" value={data.operatingProfit}
-          icon={<FileText className="w-4 h-4" />} color="amber" suffix="ریال"
+          icon={<FileText className="w-3.5 h-3.5 text-white" />} color="amber" suffix="ریال"
         />
         <StatCard
           label={isProfit ? 'سود خالص' : 'زیان خالص'}
           value={Math.abs(data.netProfit)}
-          icon={isProfit ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+          icon={isProfit ? <TrendingUp className="w-3.5 h-3.5 text-white" /> : <TrendingDown className="w-3.5 h-3.5 text-white" />}
           color={isProfit ? 'emerald' : 'red'} suffix="ریال"
-          hint={`حاشیه: ${toFaNum(data.netMargin.toFixed(1))}٪`}
+          hint={`درصد سود: ${toFaNum(data.netMargin.toFixed(1))}٪`}
         />
       </div>
 
-      {/* ★ COGS breakdown banner — سازگار با همه نسخه‌ها */}
+      {/* ★ جزئیات بهای تمام شده — سازگار با همه نسخه‌ها */}
       {cogsInfo && (
         <Card className="border-blue-200 bg-blue-50/50">
           <CardContent className="p-3 sm:p-4">
@@ -693,7 +707,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-blue-600" />
                 <span className="text-xs sm:text-sm font-bold text-blue-900">
-                  جزئیات بهای تمام شده (COGS)
+                  جزئیات بهای تمام شده کالای فروش رفته
                   {cogsInfo.isJEBased && (
                     <span className="text-[10px] font-normal text-blue-600 mr-2">از اسناد حسابداری</span>
                   )}
@@ -701,23 +715,26 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
               </div>
               <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">COGS فروش:</span>
-                  <span className="font-bold text-emerald-700" dir="ltr">
-                    {formatNumberFa(cogsInfo.cogsFromSales)}
+                  <span className="text-gray-500">بهای تمام شده فروش:</span>
+                  {/* ★ v9.4: اضافه شدن "ریال" */}
+                  <span className="font-bold text-emerald-700" dir="rtl">
+                    {formatCurrency(cogsInfo.cogsFromSales)}
                   </span>
                 </div>
                 {cogsInfo.cogsFromReturns > 0 && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-gray-500">کم: COGS برگشتی:</span>
-                    <span className="font-bold text-amber-700" dir="ltr">
-                      ({formatNumberFa(cogsInfo.cogsFromReturns)})
+                    <span className="text-gray-500">کم: بهای تمام شده برگشتی:</span>
+                    {/* ★ v9.4: اضافه شدن "ریال" */}
+                    <span className="font-bold text-amber-700" dir="rtl">
+                      ({formatCurrency(cogsInfo.cogsFromReturns)})
                     </span>
                   </div>
                 )}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">COGS خالص:</span>
-                  <span className="font-bold text-blue-700" dir="ltr">
-                    {formatNumberFa(cogsInfo.cogsNet)}
+                  <span className="text-gray-500">بهای تمام شده خالص:</span>
+                  {/* ★ v9.4: اضافه شدن "ریال" */}
+                  <span className="font-bold text-blue-700" dir="rtl">
+                    {formatCurrency(cogsInfo.cogsNet)}
                   </span>
                 </div>
               </div>
@@ -783,12 +800,12 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
               )}
               <PnLRow label="درآمد خالص فروش" value={data.netSales} color="emerald" bold highlight="emerald" />
 
-              {/* ۲. COGS */}
+              {/* ۲. بهای تمام شده */}
               <div className="py-2 border-b-2 border-gray-200 mt-3">
                 <p className="text-xs font-bold text-gray-700">۲. بهای تمام شده کالای فروش رفته</p>
               </div>
               <PnLRow
-                label={`از انبار (میانگین وزنی)${cogsInfo?.isJEBased ? ' — از JE' : ''}`}
+                label={`از انبار (میانگین وزنی)${cogsInfo?.isJEBased ? ' — از اسناد حسابداری' : ''}`}
                 value={data.cogs} color="gray" indent
               />
               <PnLRow label="سود ناخالص" value={data.grossProfit} color="blue" bold highlight="blue" />
@@ -828,7 +845,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
                   {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
                 </span>
                 <span className={`text-base sm:text-lg font-bold ${isProfit ? 'text-emerald-700' : 'text-red-700'}`} dir="ltr">
-                  {formatNumberFa(Math.abs(data.netProfit))}
+                  {formatCurrency(Math.abs(data.netProfit))}
                 </span>
               </div>
             </div>
@@ -867,7 +884,8 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
                         <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
                         <span className="text-gray-700">{cat.categoryName}</span>
                       </div>
-                      <span className="font-bold text-emerald-700" dir="ltr">{formatNumberFa(cat.grossProfit)}</span>
+                      {/* ★ v9.4: اضافه شدن "ریال" */}
+                      <span className="font-bold text-emerald-700" dir="ltr">{formatCurrency(cat.grossProfit)}</span>
                     </div>
                   ))}
                 </div>
@@ -895,9 +913,9 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
                     <th className="py-2 px-2 text-right text-gray-600">نام محصول</th>
                     <th className="py-2 px-2 text-center text-gray-600">تعداد</th>
                     <th className="py-2 px-2 text-left text-gray-600">فروش</th>
-                    <th className="py-2 px-2 text-left text-gray-600">COGS</th>
+                    <th className="py-2 px-2 text-left text-gray-600">بهای تمام شده</th>
                     <th className="py-2 px-2 text-left text-gray-600">سود</th>
-                    <th className="py-2 px-2 text-center text-gray-600">حاشیه</th>
+                    <th className="py-2 px-2 text-center text-gray-600">درصد سود</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -910,9 +928,10 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
                       </td>
                       <td className="py-2 px-2 font-medium text-gray-800">{p.productName}</td>
                       <td className="py-2 px-2 text-center" dir="ltr">{toFaNum(p.quantity)}</td>
-                      <td className="py-2 px-2 text-left text-emerald-700" dir="ltr">{formatNumberFa(p.revenue)}</td>
-                      <td className="py-2 px-2 text-left text-red-500" dir="ltr">{formatNumberFa(p.cogs)}</td>
-                      <td className="py-2 px-2 text-left font-bold text-blue-700" dir="ltr">{formatNumberFa(p.grossProfit)}</td>
+                      {/* ★ v9.4: اضافه شدن "ریال" */}
+                      <td className="py-2 px-2 text-left text-emerald-700" dir="rtl">{formatCurrency(p.revenue)}</td>
+                      <td className="py-2 px-2 text-left text-red-500" dir="rtl">{formatCurrency(p.cogs)}</td>
+                      <td className="py-2 px-2 text-left font-bold text-blue-700" dir="rtl">{formatCurrency(p.grossProfit)}</td>
                       <td className="py-2 px-2 text-center">
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                           {toFaNum(p.margin)}٪
@@ -940,6 +959,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
 
 // ============================================================================
 //  PnLRow — ردیف استاندارد صورت سود و زیان
+//  ★ v9.4: اضافه شدن "ریال" در سمت چپ تمام مبالغ
 // ============================================================================
 
 function PnLRow({
@@ -968,14 +988,14 @@ function PnLRow({
         {label}
       </span>
       <span className={`text-xs sm:text-sm ${bold ? 'font-bold' : 'font-medium'} ${textColor}`} dir="ltr">
-        {negative ? `(${formatNumberFa(value)})` : formatNumberFa(value)}
+        {negative ? `(${formatCurrency(value)})` : formatCurrency(value)}
       </span>
     </div>
   )
 }
 
 // ============================================================================
-//  Print HTML
+//  Print HTML — ★ v9.4: اضافه شدن "ریال"
 // ============================================================================
 
 function generatePrintHtml(data: PnLData, periodText: string): string {
@@ -1006,21 +1026,21 @@ function generatePrintHtml(data: PnLData, periodText: string): string {
 <p class="period">${periodText} • تعداد فاکتور: ${data.invoiceCount}</p>
 <table>
   <tr class="section"><td colspan="2">۱. درآمد فروش</td></tr>
-  <tr><td class="indent">فروش کالا و خدمات</td><td>${formatNumberFa(data.grossSales)}</td></tr>
-  ${data.salesReturns > 0 ? `<tr><td class="indent">کم: بازگشت از فروش</td><td class="negative">(${formatNumberFa(data.salesReturns)})</td></tr>` : ''}
-  ${data.discounts > 0 ? `<tr><td class="indent">کم: تخفیفات</td><td class="negative">(${formatNumberFa(data.discounts)})</td></tr>` : ''}
-  <tr class="subtotal"><td>درآمد خالص فروش</td><td>${formatNumberFa(data.netSales)}</td></tr>
+  <tr><td class="indent">فروش کالا و خدمات</td><td>${formatCurrency(data.grossSales)}</td></tr>
+  ${data.salesReturns > 0 ? `<tr><td class="indent">کم: بازگشت از فروش</td><td class="negative">(${formatCurrency(data.salesReturns)})</td></tr>` : ''}
+  ${data.discounts > 0 ? `<tr><td class="indent">کم: تخفیفات</td><td class="negative">(${formatCurrency(data.discounts)})</td></tr>` : ''}
+  <tr class="subtotal"><td>درآمد خالص فروش</td><td>${formatCurrency(data.netSales)}</td></tr>
   <tr class="section"><td colspan="2">۲. بهای تمام شده</td></tr>
-  <tr><td class="indent">بهای تمام شده کالای فروش رفته</td><td class="negative">(${formatNumberFa(data.cogs)})</td></tr>
-  <tr class="subtotal"><td>سود ناخالص</td><td>${formatNumberFa(data.grossProfit)}</td></tr>
+  <tr><td class="indent">بهای تمام شده کالای فروش رفته</td><td class="negative">(${formatCurrency(data.cogs)})</td></tr>
+  <tr class="subtotal"><td>سود ناخالص</td><td>${formatCurrency(data.grossProfit)}</td></tr>
   <tr class="section"><td colspan="2">۳. هزینه‌های عملیاتی</td></tr>
-  ${data.operatingExpenses.map(e => `<tr><td class="indent">${e.name}</td><td class="negative">(${formatNumberFa(e.amount)})</td></tr>`).join('')}
-  <tr class="subtotal"><td>سود عملیاتی</td><td>${formatNumberFa(data.operatingProfit)}</td></tr>
+  ${data.operatingExpenses.map(e => `<tr><td class="indent">${e.name}</td><td class="negative">(${formatCurrency(e.amount)})</td></tr>`).join('')}
+  <tr class="subtotal"><td>سود عملیاتی</td><td>${formatCurrency(data.operatingProfit)}</td></tr>
   <tr class="section"><td colspan="2">۴. سایر</td></tr>
-  <tr><td class="indent">سایر درآمدها</td><td>${formatNumberFa(data.otherIncome)}</td></tr>
-  <tr><td class="indent">سایر هزینه‌ها</td><td class="negative">(${formatNumberFa(data.otherExpenses)})</td></tr>
-  <tr class="subtotal"><td>سود قبل از مالیات</td><td>${formatNumberFa(data.profitBeforeTax)}</td></tr>
-  <tr class="total"><td>${isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}</td><td>${formatNumberFa(Math.abs(data.netProfit))}</td></tr>
+  <tr><td class="indent">سایر درآمدها</td><td>${formatCurrency(data.otherIncome)}</td></tr>
+  <tr><td class="indent">سایر هزینه‌ها</td><td class="negative">(${formatCurrency(data.otherExpenses)})</td></tr>
+  <tr class="subtotal"><td>سود قبل از مالیات</td><td>${formatCurrency(data.profitBeforeTax)}</td></tr>
+  <tr class="total"><td>${isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}</td><td>${formatCurrency(Math.abs(data.netProfit))}</td></tr>
 </table>
 <br><p style="color:#9ca3af;font-size:9px;">ShopAccounting — ${data._version || ''} — منبع: ${data._dataSource === 'journal_entry' ? 'اسناد حسابداری' : 'فاکتورها'}</p>
 </body>
