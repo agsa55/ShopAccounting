@@ -2,19 +2,14 @@
 // src/components/settings/payment-gateway-tab.tsx — v8.2 ★★★
 // ShopAccounting — Settings: Payment Gateway Tab (تسهیم فردایی)
 // ----------------------------------------------------------------------------
-// ★★★ v8.2 تغییرات:
-//   ✓ نمایش درصد کارمزد پلتفرم و کارمزد تخمینی زرین‌پال
-//   ✓ نمایش مثال محاسبه تسهیم برای مبلغ نمونه
-//   ✓ راهنمای کامل تسهیم فردایی
-//   ✓ دکمه تست اتصال به درگاه (در صورت نیاز)
-//   ✓ اعتبارسنجی پیشرفته شبا
-//   ✓ نمایش آخرین پرداخت‌های موفق با مبالغ تسویه
+// ★★★ v10.1 اصلاحات:
+//   ✓ حذف tenantId از query parameters (استفاده از middleware)
+//   ✓ رفع خطای Unknown argument `tenantId`
 // ============================================================================
 
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAppStore } from '@/lib/store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -34,35 +29,6 @@ import {
   TrendingDown,
   ExternalLink,
 } from 'lucide-react'
-
-// ═══════════════════════════════════════════════════════════════
-//  Helper: resolveTenantId (مشابه سایر تب‌ها)
-// ═══════════════════════════════════════════════════════════════
-
-function resolveTenantId(
-  currentTenant: any,
-  storeTenantId?: string | null,
-  userTenantId?: string | null
-): string {
-  if (currentTenant && typeof currentTenant === 'object' && currentTenant.id) return currentTenant.id
-  if (currentTenant && typeof currentTenant === 'string') return currentTenant
-  if (storeTenantId && typeof storeTenantId === 'string' && storeTenantId.trim()) return storeTenantId.trim()
-  if (userTenantId && typeof userTenantId === 'string' && userTenantId.trim()) return userTenantId.trim()
-  return ''
-}
-
-function getTenantIdFromStore(): string {
-  const state = useAppStore.getState()
-  return resolveTenantId(state.currentTenant, state.tenantId, state.user?.tenantId)
-}
-
-function formatRial(num: number): string {
-  return num.toLocaleString('fa-IR') + ' ریال'
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Collapsible Section (راهنما)
-// ═══════════════════════════════════════════════════════════════
 
 function CollapsibleSection({
   title,
@@ -91,10 +57,6 @@ function CollapsibleSection({
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Tashim Calculator (ماشین حساب تسهیم)
-// ═══════════════════════════════════════════════════════════════
-
 function TashimCalculator({
   platformRate,
   gatewayRate,
@@ -102,7 +64,7 @@ function TashimCalculator({
   platformRate: number
   gatewayRate: number
 }) {
-  const [sampleAmount, setSampleAmount] = useState('1000000') // ۱۰۰,۰۰۰ تومان
+  const [sampleAmount, setSampleAmount] = useState('1000000')
 
   const amount = parseInt(sampleAmount.replace(/\D/g, '')) || 0
   const platformFee = Math.round((amount * platformRate) / 100)
@@ -164,20 +126,13 @@ function TashimCalculator({
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Recent Payments Preview (آخرین پرداخت‌ها)
-// ═══════════════════════════════════════════════════════════════
-
-function RecentPaymentsPreview({ tenantId }: { tenantId: string }) {
+function RecentPaymentsPreview() {
   const [payments, setPayments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!tenantId) {
-      setLoading(false)
-      return
-    }
-    fetch(`/api/payments/online?tenantId=${tenantId}&limit=5&status=paid&summary=false`)
+    // ★★★ حذف tenantId از URL
+    fetch('/api/payments/online?limit=5&status=paid&summary=false')
       .then(r => r.json())
       .then(data => {
         if (data.success && data.data?.payments) {
@@ -186,7 +141,7 @@ function RecentPaymentsPreview({ tenantId }: { tenantId: string }) {
       })
       .catch(err => console.error('[RecentPayments] Error:', err))
       .finally(() => setLoading(false))
-  }, [tenantId])
+  }, [])
 
   if (loading) {
     return (
@@ -234,9 +189,9 @@ function RecentPaymentsPreview({ tenantId }: { tenantId: string }) {
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  PaymentGatewayTab — کامپوننت اصلی
-// ═══════════════════════════════════════════════════════════════
+function formatRial(num: number): string {
+  return num.toLocaleString('fa-IR') + ' ریال'
+}
 
 export function PaymentGatewayTab() {
   const [guideOpen, setGuideOpen] = useState(true)
@@ -252,14 +207,9 @@ export function PaymentGatewayTab() {
   const [error, setError] = useState<string | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
 
-  // ★ لود تنظیمات فعلی
+  // ★ لود تنظیمات فعلی — بدون tenantId
   useEffect(() => {
-    const tid = getTenantIdFromStore()
-    if (!tid) {
-      setLoading(false)
-      return
-    }
-    fetch(`/api/store-settings?tenantId=${tid}`)
+    fetch('/api/store-settings')
       .then(r => r.json())
       .then(data => {
         if (data.success && data.data) {
@@ -277,7 +227,6 @@ export function PaymentGatewayTab() {
       .finally(() => setLoading(false))
   }, [])
 
-  // ★ اعتبارسنجی شبا در لحظه
   const validateIban = (iban: string): string | null => {
     const cleaned = iban.replace(/\s/g, '').toUpperCase()
     if (!cleaned) return 'شماره شبا الزامی است'
@@ -305,15 +254,12 @@ export function PaymentGatewayTab() {
     setSaving(true)
     setSaved(false)
     try {
-      const tid = getTenantIdFromStore()
       const res = await fetch('/api/store-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId: tid,
           bankIban: bankIban.replace(/\s/g, '').toUpperCase(),
           bankName: bankName.trim() || undefined,
-          // ★ v8.2: ذخیره تنظیمات کارمزد (اگر API پشتیبانی کند)
           platformCommissionRate: platformRate,
           gatewayFeeRate: gatewayRate,
         }),
@@ -343,7 +289,6 @@ export function PaymentGatewayTab() {
 
   return (
     <div className="space-y-3">
-      {/* ★ راهنمای تسهیم فردایی */}
       <CollapsibleSection title="راهنمای تسهیم فردایی زرین‌پال" open={guideOpen} onToggle={() => setGuideOpen(!guideOpen)}>
         <div className="text-sm text-gray-600 pr-2 space-y-3">
           <p>
@@ -378,12 +323,10 @@ export function PaymentGatewayTab() {
         </div>
       </CollapsibleSection>
 
-      {/* ★ ماشین حساب تسهیم */}
       <CollapsibleSection title="ماشین حساب تسهیم (نمونه محاسبه)" open={calcOpen} onToggle={() => setCalcOpen(!calcOpen)}>
         <TashimCalculator platformRate={platformRate} gatewayRate={gatewayRate} />
       </CollapsibleSection>
 
-      {/* ★ فرم تنظیمات حساب واریز */}
       <Card className="border-gray-200">
         <CardHeader className="p-3">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -499,13 +442,12 @@ export function PaymentGatewayTab() {
         </CardContent>
       </Card>
 
-      {/* ★ آخرین پرداخت‌ها */}
       <CollapsibleSection
         title="آخرین پرداخت‌های آنلاین"
         open={recentOpen}
         onToggle={() => setRecentOpen(!recentOpen)}
       >
-        <RecentPaymentsPreview tenantId={getTenantIdFromStore()} />
+        <RecentPaymentsPreview />
         {recentOpen && (
           <div className="mt-3 text-center">
             <a

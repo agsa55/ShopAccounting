@@ -215,7 +215,7 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
 
   const tenantId = resolveTenantId(currentTenant, tenantIdFromStore, userTenantId)
 
-  const fetchMissing = useCallback(async () => {
+   const fetchMissing = useCallback(async () => {
     if (!tenantId) {
       setLoading(false)
       return
@@ -223,7 +223,15 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/payments/online/missing-journals?tenantId=${tenantId}`)
+      // ★★★ اصلاح ۱: حذف tenantId از URL (Middleware خودش مدیریت می‌کند)
+      const res = await fetch('/api/payments/online/missing-journals')
+      
+      // ★★★ اصلاح ۲: جلوگیری از خطای Unexpected token '<' با بررسی وضعیت پاسخ
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(`خطای سرور (${res.status}): مسیر API ممکن است اشتباه باشد یا دسترسی ندارید.`)
+      }
+      
       const data = await res.json()
       if (data.success) {
         setMissingData(data.data)
@@ -232,12 +240,12 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
         setError(data.error || 'خطا در بارگذاری')
       }
     } catch (err: any) {
+      console.error('[RecoverJournals] Fetch error:', err)
       setError(err?.message || 'خطا در ارتباط با سرور')
     } finally {
       setLoading(false)
     }
   }, [tenantId])
-
   useEffect(() => {
     fetchMissing()
   }, [fetchMissing])
@@ -272,11 +280,17 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId,
+          // ★★★ حذف tenantId از body (Middleware مدیریت می‌کند)
           paymentIds: Array.from(selectedIds),
           dryRun: true,
         }),
       })
+      
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(`خطای سرور (${res.status}) در شبیه‌سازی`)
+      }
+
       const data = await res.json()
       if (data.success) {
         setDryRunResult(data.data)
@@ -291,7 +305,7 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
   }
 
   // ★ بازیابی واقعی
-  const handleRecover = async () => {
+   const handleRecover = async () => {
     if (!confirm(`آیا از بازیابی ${selectedIds.size.toLocaleString('fa-IR')} سند مطمئن هستید؟`)) {
       return
     }
@@ -303,16 +317,21 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId,
+          // ★★★ حذف tenantId از body
           paymentIds: Array.from(selectedIds),
           dryRun: false,
         }),
       })
+
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(`خطای سرور (${res.status}) در بازیابی`)
+      }
+
       const data = await res.json()
       if (data.success) {
         setRecoveryResult(data.data)
         setShowResultModal(true)
-        // ★ بارگذاری مجدد لیست
         await fetchMissing()
       } else {
         setError(data.error || 'خطا در بازیابی')

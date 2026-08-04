@@ -1,16 +1,13 @@
 'use client'
 // src/components/settings/pos-devices-tab.tsx
-// ShopAccounting v8.0 — POS Devices Management Tab
+// ShopAccounting v10.1 — POS Devices Management Tab
 // ============================================================================
-// ★★★ مدیریت دستگاه‌های POS (کارتخوان)
-//   - لیست دستگاه‌های ثبت‌شده
-//   - افزودن / ویرایش / حذف
-//   - تست اتصال (frontend-side با adapter)
-//   - تنظیم به‌عنوان فعال
+// ★★★ v10.1 اصلاحات:
+//   ✓ حذف tenantId از query parameters 
+//   ✓ رفع خطای Unknown argument `tenantId`
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
-import { useAppStore, useStore } from '@/lib/store'
 import { useToast } from '@/hooks/use-toast'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -34,31 +31,13 @@ import {
   createPosAdapter, checkBrowserSupport,
 } from '@/lib/pos-adapters'
 
-// ═══════════════════════════════════════════════════════════════
-//  Helper
-// ═══════════════════════════════════════════════════════════════
-
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return { 'Content-Type': 'application/json' }
   const token = localStorage.getItem('token')
   return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
 }
 
-function getTenantId(): string {
-  const state = useAppStore.getState()
-  const ct = state.currentTenant as any
-  if (ct && typeof ct === 'object' && ct.id) return ct.id
-  if (ct && typeof ct === 'string') return ct
-  if (state.tenantId) return state.tenantId
-  if (state.user?.tenantId) return state.user.tenantId
-  return ''
-}
-
 const formatPrice = (n: number) => (n || 0).toLocaleString('fa-IR')
-
-// ═══════════════════════════════════════════════════════════════
-//  Types
-// ═══════════════════════════════════════════════════════════════
 
 interface PosDevice {
   id: string
@@ -86,10 +65,6 @@ interface PosDevice {
   createdAt: string
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Form State
-// ═══════════════════════════════════════════════════════════════
-
 interface DeviceForm {
   name: string
   terminalType: TerminalType
@@ -99,13 +74,10 @@ interface DeviceForm {
   merchantId: string
   acceptorCode: string
   terminalSerial: string
-  // web-serial
   serialPort: string
   baudRate: number
-  // network-tcp
   ipAddress: string
   port: number | string
-  // network-http
   apiBaseUrl: string
   apiKey: string
   isActive: boolean
@@ -129,10 +101,6 @@ const emptyForm: DeviceForm = {
   isActive: true,
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Main Component
-// ═══════════════════════════════════════════════════════════════
-
 export function PosDevicesTab() {
   const { toast } = useToast()
   const [devices, setDevices] = useState<PosDevice[]>([])
@@ -145,11 +113,9 @@ export function PosDevicesTab() {
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({})
 
   const loadDevices = useCallback(async () => {
-    const tid = getTenantId()
-    if (!tid) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/pos-devices?tenantId=${tid}`, { headers: getAuthHeaders() })
+      const res = await fetch('/api/pos-devices', { headers: getAuthHeaders() })
       if (res.ok) {
         const data = await res.json()
         if (data.success) setDevices(data.data || [])
@@ -161,10 +127,6 @@ export function PosDevicesTab() {
   }, [])
 
   useEffect(() => { loadDevices() }, [loadDevices])
-
-  // ═══════════════════════════════════════════════════════════════
-  //  Actions
-  // ═══════════════════════════════════════════════════════════════
 
   const handleOpenAdd = () => {
     setForm(emptyForm)
@@ -200,11 +162,10 @@ export function PosDevicesTab() {
       return
     }
     setSaving(true)
-    const tid = getTenantId()
     try {
       const url = editingId
-        ? `/api/pos-devices?id=${editingId}&tenantId=${tid}`
-        : `/api/pos-devices?tenantId=${tid}`
+        ? `/api/pos-devices?id=${editingId}`
+        : '/api/pos-devices'
       const method = editingId ? 'PATCH' : 'POST'
       const res = await fetch(url, {
         method,
@@ -227,9 +188,8 @@ export function PosDevicesTab() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('آیا از حذف این دستگاه مطمئن هستید؟')) return
-    const tid = getTenantId()
     try {
-      const res = await fetch(`/api/pos-devices?id=${id}&tenantId=${tid}`, {
+      const res = await fetch(`/api/pos-devices?id=${id}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       })
@@ -246,9 +206,8 @@ export function PosDevicesTab() {
   }
 
   const handleSetActive = async (id: string) => {
-    const tid = getTenantId()
     try {
-      const res = await fetch(`/api/pos-devices?id=${id}&tenantId=${tid}`, {
+      const res = await fetch(`/api/pos-devices?id=${id}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
         body: JSON.stringify({ isActive: true }),
@@ -261,9 +220,6 @@ export function PosDevicesTab() {
     } catch {}
   }
 
-  /**
-   * ★ تست اتصال — این تست سمت frontend انجام می‌شه (adapter ساخته می‌شه)
-   */
   const handleTestConnection = async (device: PosDevice) => {
     setTestingId(device.id)
     try {
@@ -314,13 +270,8 @@ export function PosDevicesTab() {
     setTestingId(null)
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  Render
-  // ═══════════════════════════════════════════════════════════════
-
   return (
     <div className="space-y-3">
-      {/* Header */}
       <Card className="border-emerald-200 bg-gradient-to-l from-emerald-50/50 to-white">
         <CardContent className="p-3.5 flex items-center justify-between flex-wrap gap-2">
           <div>
@@ -339,7 +290,6 @@ export function PosDevicesTab() {
         </CardContent>
       </Card>
 
-      {/* Devices List */}
       {loading ? (
         <Card><CardContent className="p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto animate-spin text-gray-400" />
@@ -353,7 +303,7 @@ export function PosDevicesTab() {
             <p className="text-xs text-gray-500 mt-1">
               برای شروع، یک کارتخوان اضافه کنید. ساده‌ترین حالت «ورودی دستی» است که با هر کارتخوانی کار می‌کند.
             </p>
-            <Button onClick={handleOpenAdd} size="sm" className="mt-3" variant="outline">
+            <Button onClick={handleOpenAdd} size="sm" variant="outline">
               <Plus className="w-3.5 h-3.5 ml-1" />
               افزودن اولین کارتخوان
             </Button>
@@ -369,7 +319,6 @@ export function PosDevicesTab() {
               <Card key={device.id} className={`border ${device.isActive ? 'border-emerald-300 bg-emerald-50/30' : 'border-gray-200'}`}>
                 <CardContent className="p-3.5">
                   <div className="flex items-start justify-between gap-3 flex-wrap">
-                    {/* Left: Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="text-base">{typeInfo?.icon || '📟'}</span>
@@ -417,7 +366,6 @@ export function PosDevicesTab() {
                       )}
                     </div>
 
-                    {/* Right: Actions */}
                     <div className="flex items-center gap-1 shrink-0">
                       <Button
                         size="sm"
@@ -473,14 +421,13 @@ export function PosDevicesTab() {
         </div>
       )}
 
-      {/* Help Card */}
       <Card className="border-blue-200 bg-blue-50/30">
         <CardContent className="p-3.5">
           <div className="flex gap-2">
             <AlertCircle className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
             <div className="text-[11px] text-gray-700 space-y-1">
               <p className="font-medium">راهنمای انتخاب نوع اتصال:</p>
-              <ul className="list-disc list-inside space-y-0.5 text-gray-600">
+              <ul className="text-[11px] text-gray-600 leading-relaxed pr-3 list-disc space-y-0.5">
                 <li><b>ورودی دستی</b>: ساده‌ترین حالت — صندوق‌دار شماره پیرو را دستی وارد می‌کند. با همه کارتخوان‌ها کار می‌کند.</li>
                 <li><b>حالت کیبورد (HID)</b>: کارتخوان در حالت کیبورد تنظیم می‌شود و شماره پیرو را مستقیم تایپ می‌کند. رایج در ترمینال‌های ایرانی.</li>
                 <li><b>USB/سریال</b>: اتصال مستقیم به کارتخوان با Web Serial API (Chrome 89+).</li>
@@ -491,7 +438,6 @@ export function PosDevicesTab() {
         </CardContent>
       </Card>
 
-      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[600px] w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
@@ -505,7 +451,6 @@ export function PosDevicesTab() {
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            {/* Name */}
             <div className="space-y-1">
               <Label className="text-xs">نام دستگاه *</Label>
               <Input
@@ -516,7 +461,6 @@ export function PosDevicesTab() {
               />
             </div>
 
-            {/* Terminal Type */}
             <div className="space-y-1">
               <Label className="text-xs">نوع اتصال *</Label>
               <Select
@@ -543,7 +487,6 @@ export function PosDevicesTab() {
               )}
             </div>
 
-            {/* Brand */}
             <div className="space-y-1">
               <Label className="text-xs">برند کارتخوان</Label>
               <Select
@@ -561,7 +504,6 @@ export function PosDevicesTab() {
               </Select>
             </div>
 
-            {/* Bank Info */}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">نام بانک</Label>
@@ -604,7 +546,6 @@ export function PosDevicesTab() {
               </div>
             </div>
 
-            {/* Type-specific fields */}
             {form.terminalType === 'web-serial' && (
               <div className="grid grid-cols-2 gap-2 p-2 bg-blue-50/50 rounded-lg">
                 <div className="space-y-1">
@@ -692,7 +633,6 @@ export function PosDevicesTab() {
               </div>
             )}
 
-            {/* Active toggle */}
             <div className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg">
               <div>
                 <p className="text-xs font-medium">دستگاه فعال</p>
@@ -716,7 +656,6 @@ export function PosDevicesTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </div>
   )
 }

@@ -1006,3 +1006,474 @@ export async function updateOfflineOperation(id: string, updates: Partial<Offlin
     console.error('[OfflineDB] updateOfflineOperation error:', err)
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.6: Cache Journal Entries (برای تب حسابداری آفلاین)
+// ═══════════════════════════════════════════════════════════════
+
+export interface CachedJournalEntry {
+  id: string
+  entryNumber: string
+  date: string
+  description: string
+  totalDebit: number
+  totalCredit: number
+  status?: 'DRAFT' | 'POSTED' | 'CANCELLED'
+  isPosted?: boolean
+  sourceType?: string
+  isManual?: boolean
+  items?: Array<{
+    accountId: string
+    accountName: string
+    accountCode?: string
+    debit: number
+    credit: number
+    description?: string
+  }>
+  lines?: Array<{
+    accountId: string
+    accountName: string
+    accountCode?: string
+    debit: number
+    credit: number
+    description?: string
+  }>
+  referenceType?: string
+  referenceId?: string
+  // ★★★ فیلدهای آفلاین
+  _offline?: boolean           // آیا این سند در حالت آفلاین ساخته شده؟
+  _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
+  _createdAt?: number          // timestamp ساخت محلی
+  _lastError?: string
+}
+
+/**
+ * ذخیره اسناد حسابداری در IndexedDB (جایگزین localStorage)
+ */
+export async function cacheJournalEntries(entries: CachedJournalEntry[]): Promise<void> {
+  try {
+    // پاک کردن کش قدیمی و نوشتن جدید
+    await idbClear(STORES.meta) // پاک کردن همه meta cache
+    
+    // ذخیره در meta store با کلید journal-entries
+    await idbPut(STORES.meta, {
+      key: 'journal-entries',
+      value: entries,
+      cachedAt: Date.now(),
+    })
+    
+    // fallback به localStorage برای backward compat
+    try {
+      localStorage.setItem('cached_journal_entries', JSON.stringify({
+        entries,
+        cachedAt: Date.now(),
+      }))
+    } catch {}
+    
+    console.log(`[OfflineDB] ✅ ${entries.length} سند حسابداری cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheJournalEntries error:', err)
+  }
+}
+
+/**
+ * خواندن اسناد حسابداری از کش
+ */
+export async function getCachedJournalEntries(): Promise<CachedJournalEntry[]> {
+  try {
+    // اول IndexedDB
+    const record = await idbGet<{ key: string; value: CachedJournalEntry[] }>(
+      STORES.meta,
+      'journal-entries'
+    )
+    if (record?.value && Array.isArray(record.value)) {
+      console.log('[OfflineDB] Journal entries loaded from IndexedDB')
+      return record.value
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading journal entries from IndexedDB:', err)
+  }
+
+  // fallback به localStorage
+  try {
+    const cached = localStorage.getItem('cached_journal_entries')
+    if (cached) {
+      const data = JSON.parse(cached)
+      console.log('[OfflineDB] Journal entries loaded from localStorage')
+      return data.entries || []
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading journal entries from localStorage:', err)
+  }
+
+  return []
+}
+
+/**
+ * افزودن یک سند آفلاین به صف همگام‌سازی
+ */
+export async function addJournalToSyncQueue(
+  operation: 'create' | 'update' | 'delete',
+  entry: CachedJournalEntry
+): Promise<string> {
+  const item: SyncQueueItem = {
+    id: `sync-journal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: `journal_${operation}`,
+    method: operation === 'delete' ? 'DELETE' : operation === 'update' ? 'PUT' : 'POST',
+    url: operation === 'delete' || operation === 'update'
+      ? `/api/journal-entries/${entry.id}`
+      : '/api/journal-entries',
+    body: JSON.stringify({
+      ...entry,
+      // حذف فیلدهای آفلاین قبل از ارسال به سرور
+      _offline: undefined,
+      _syncStatus: undefined,
+      _createdAt: undefined,
+      _lastError: undefined,
+    }),
+    createdAt: Date.now(),
+    retryCount: 0,
+    lastError: null,
+  }
+  
+  try {
+    await idbPut(STORES.syncQueue, item)
+    console.log(`[OfflineDB] ✅ Journal ${operation} added to sync queue: ${entry.id}`)
+    return item.id
+  } catch (err) {
+    console.error('[OfflineDB] addJournalToSyncQueue error:', err)
+    throw err
+  }
+}
+
+/**
+ * حذف اسناد با ID آفلاین از کش پس از sync موفق
+ */
+export async function removeOfflineJournalFromCache(offlineId: string): Promise<void> {
+  try {
+    const entries = await getCachedJournalEntries()
+    const filtered = entries.filter(e => e.id !== offlineId)
+    await cacheJournalEntries(filtered)
+    console.log(`[OfflineDB] ✅ Offline journal removed from cache: ${offlineId}`)
+  } catch (err) {
+    console.error('[OfflineDB] removeOfflineJournalFromCache error:', err)
+  }
+}
+
+/**
+ * به‌روزرسانی وضعیت sync یک سند
+ */
+export async function updateJournalSyncStatus(
+  id: string,
+  status: 'pending' | 'syncing' | 'synced' | 'failed',
+  error?: string
+): Promise<void> {
+  try {
+    const entries = await getCachedJournalEntries()
+    const updated = entries.map(e =>
+      e.id === id
+        ? { ...e, _syncStatus: status, _lastError: error || undefined }  // ← اصلاح شد
+        : e
+    )
+    await cacheJournalEntries(updated)
+  } catch (err) {
+    console.error('[OfflineDB] updateJournalSyncStatus error:', err)
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.7: Cache Checks (برای تب چک‌ها آفلاین)
+// ═══════════════════════════════════════════════════════════════
+
+export interface CachedCheck {
+  id: string
+  type: 'receivable' | 'payable'
+  checkNumber: string
+  bankName: string
+  amount: number
+  dueDate: string
+  customerId?: string | null
+  payee?: string | null
+  status: 'pending' | 'deposited' | 'cleared' | 'bounced'
+  createdAt?: string
+  // ★★★ فیلدهای آفلاین
+  _offline?: boolean
+  _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
+  _createdAt?: number
+  _lastError?: string
+}
+
+/**
+ * ذخیره چک‌ها در IndexedDB
+ */
+export async function cacheChecks(checks: CachedCheck[]): Promise<void> {
+  try {
+    await idbPut(STORES.meta, {
+      key: 'checks',
+      value: checks,
+      cachedAt: Date.now(),
+    })
+    try {
+      localStorage.setItem('cached_checks', JSON.stringify({ checks, cachedAt: Date.now() }))
+    } catch {}
+    console.log(`[OfflineDB] ✅ ${checks.length} چک cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheChecks error:', err)
+  }
+}
+
+/**
+ * خواندن چک‌ها از کش
+ */
+export async function getCachedChecks(): Promise<CachedCheck[]> {
+  try {
+    const record = await idbGet<{ key: string; value: CachedCheck[] }>(STORES.meta, 'checks')
+    if (record?.value && Array.isArray(record.value)) {
+      return record.value
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading checks from IndexedDB:', err)
+  }
+  try {
+    const cached = localStorage.getItem('cached_checks')
+    if (cached) {
+      const data = JSON.parse(cached)
+      return data.checks || []
+    }
+  } catch {}
+  return []
+}
+
+/**
+ * افزودن عملیات چک به صف همگام‌سازی
+ */
+export async function addCheckToSyncQueue(
+  operation: 'create' | 'update' | 'delete' | 'status_change',
+  check: CachedCheck
+): Promise<string> {
+  const item: SyncQueueItem = {
+    id: `sync-check-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: `check_${operation}`,
+    method: operation === 'delete' ? 'DELETE' : operation === 'create' ? 'POST' : 'PATCH',
+    url: operation === 'create' 
+      ? '/api/checks' 
+      : `/api/checks/${check.id}`,
+    body: JSON.stringify({
+      ...check,
+      _offline: undefined,
+      _syncStatus: undefined,
+      _createdAt: undefined,
+      _lastError: undefined,
+    }),
+    createdAt: Date.now(),
+    retryCount: 0,
+    lastError: null,
+  }
+  
+  try {
+    await idbPut(STORES.syncQueue, item)
+    console.log(`[OfflineDB] ✅ Check ${operation} added to sync queue: ${check.id}`)
+    return item.id
+  } catch (err) {
+    console.error('[OfflineDB] addCheckToSyncQueue error:', err)
+    throw err
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.8: Cache Fixed Assets (برای تب دارایی‌های ثابت آفلاین)
+// ═══════════════════════════════════════════════════════════════
+
+export interface CachedFixedAsset {
+  id: string
+  name: string
+  code: string
+  category: string
+  purchasePrice: number
+  salvageValue: number
+  usefulLife: number
+  purchaseDate: string
+  description?: string | null
+  accumulatedDepreciation?: number
+  bookValue?: number
+  status?: 'active' | 'fully_depreciated' | 'sold'
+  // ★★★ فیلدهای آفلاین
+  _offline?: boolean
+  _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
+  _createdAt?: number
+  _lastError?: string
+}
+
+/**
+ * ذخیره دارایی‌های ثابت در IndexedDB
+ */
+export async function cacheFixedAssets(assets: CachedFixedAsset[]): Promise<void> {
+  try {
+    await idbPut(STORES.meta, {
+      key: 'fixed-assets',
+      value: assets,
+      cachedAt: Date.now(),
+    })
+    try {
+      localStorage.setItem('cached_fixed_assets', JSON.stringify({ assets, cachedAt: Date.now() }))
+    } catch {}
+    console.log(`[OfflineDB] ✅ ${assets.length} دارایی ثابت cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheFixedAssets error:', err)
+  }
+}
+
+/**
+ * خواندن دارایی‌های ثابت از کش
+ */
+export async function getCachedFixedAssets(): Promise<CachedFixedAsset[]> {
+  try {
+    const record = await idbGet<{ key: string; value: CachedFixedAsset[] }>(STORES.meta, 'fixed-assets')
+    if (record?.value && Array.isArray(record.value)) {
+      return record.value
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading fixed assets from IndexedDB:', err)
+  }
+  try {
+    const cached = localStorage.getItem('cached_fixed_assets')
+    if (cached) {
+      const data = JSON.parse(cached)
+      return data.assets || []
+    }
+  } catch {}
+  return []
+}
+
+/**
+ * افزودن عملیات دارایی ثابت به صف همگام‌سازی
+ */
+export async function addFixedAssetToSyncQueue(
+  operation: 'create' | 'update' | 'delete' | 'depreciate',
+  asset: CachedFixedAsset
+): Promise<string> {
+  const item: SyncQueueItem = {
+    id: `sync-asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: `asset_${operation}`,
+    method: operation === 'delete' ? 'DELETE' : operation === 'create' ? 'POST' : 'PATCH',
+    url: operation === 'create' 
+      ? '/api/fixed-assets' 
+      : operation === 'depreciate'
+        ? '/api/fixed-assets/depreciate'
+        : `/api/fixed-assets/${asset.id}`,
+    body: JSON.stringify({
+      ...asset,
+      _offline: undefined,
+      _syncStatus: undefined,
+      _createdAt: undefined,
+      _lastError: undefined,
+    }),
+    createdAt: Date.now(),
+    retryCount: 0,
+    lastError: null,
+  }
+  
+  try {
+    await idbPut(STORES.syncQueue, item)
+    console.log(`[OfflineDB] ✅ Fixed asset ${operation} added to sync queue: ${asset.id}`)
+    return item.id
+  } catch (err) {
+    console.error('[OfflineDB] addFixedAssetToSyncQueue error:', err)
+    throw err
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v6.9: Cache Accounts (برای تب چارت حساب‌ها آفلاین)
+// ═══════════════════════════════════════════════════════════════
+
+export interface CachedAccount {
+  id: string
+  code: string
+  name: string
+  type: string
+  parentId?: string | null
+  isActive: boolean
+  balance?: number
+  // ★★★ فیلدهای آفلاین
+  _offline?: boolean
+  _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
+  _createdAt?: number
+  _lastError?: string
+}
+
+/**
+ * ذخیره حساب‌ها در IndexedDB
+ */
+export async function cacheAccounts(accounts: CachedAccount[]): Promise<void> {
+  try {
+    await idbPut(STORES.meta, {
+      key: 'accounts',
+      value: accounts,
+      cachedAt: Date.now(),
+    })
+    try {
+      localStorage.setItem('cached_accounts', JSON.stringify(accounts))
+    } catch {}
+    console.log(`[OfflineDB] ✅ ${accounts.length} حساب cached`)
+  } catch (err) {
+    console.error('[OfflineDB] cacheAccounts error:', err)
+  }
+}
+
+/**
+ * خواندن حساب‌ها از کش
+ */
+export async function getCachedAccounts(): Promise<CachedAccount[]> {
+  try {
+    const record = await idbGet<{ key: string; value: CachedAccount[] }>(STORES.meta, 'accounts')
+    if (record?.value && Array.isArray(record.value)) {
+      return record.value
+    }
+  } catch (err) {
+    console.warn('[OfflineDB] Error reading accounts from IndexedDB:', err)
+  }
+  try {
+    const cached = localStorage.getItem('cached_accounts')
+    if (cached) {
+      return JSON.parse(cached)
+    }
+  } catch {}
+  return []
+}
+
+/**
+ * افزودن عملیات حساب به صف همگام‌سازی
+ */
+export async function addAccountToSyncQueue(
+  operation: 'create' | 'update' | 'delete',
+  account: CachedAccount
+): Promise<string> {
+  const item: SyncQueueItem = {
+    id: `sync-account-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: `account_${operation}`,
+    method: operation === 'delete' ? 'DELETE' : operation === 'create' ? 'POST' : 'PUT',
+    url: operation === 'delete' 
+      ? `/api/accounts?id=${account.id}` 
+      : '/api/accounts',
+    body: JSON.stringify({
+      ...account,
+      _offline: undefined,
+      _syncStatus: undefined,
+      _createdAt: undefined,
+      _lastError: undefined,
+    }),
+    createdAt: Date.now(),
+    retryCount: 0,
+    lastError: null,
+  }
+  
+  try {
+    await idbPut(STORES.syncQueue, item)
+    console.log(`[OfflineDB] ✅ Account ${operation} added to sync queue: ${account.id}`)
+    return item.id
+  } catch (err) {
+    console.error('[OfflineDB] addAccountToSyncQueue error:', err)
+    throw err
+  }
+}
