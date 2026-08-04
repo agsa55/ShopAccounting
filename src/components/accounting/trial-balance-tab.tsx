@@ -444,47 +444,56 @@ export function TrialBalanceTabV8() {
         </CardContent>
       </Card>
 
-      {/* ★ Summary Card */}
-      <Card className={
-        data.isBalanced
-          ? 'border-emerald-200 bg-emerald-50/50'
-          : 'border-red-200 bg-red-50/50'
-      }>
-        <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between py-4 gap-4">
-          <div className="flex items-center gap-3">
-            {data.isBalanced ? (
-              <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="h-6 w-6 text-red-500 shrink-0" />
-            )}
-            <div>
-              <p className="font-semibold text-sm">
-                {data.isBalanced ? 'تراز متعادل است' : 'تراز نامتعادل!'}
-              </p>
-              <p className="text-xs text-gray-600">
-                {data.isBalanced
-                  ? 'مجموع بدهکار با مجموع بستانکار برابر است'
-                  : `اختلاف: ${formatRial(Math.abs(data.difference))} ریال`
-                }
-              </p>
-            </div>
+   {/* ★ Summary Card — کوچک و رنگی */}
+<Card className={
+  data.isBalanced
+    ? 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white'
+    : 'border-red-200 bg-gradient-to-br from-red-50 to-white'
+}>
+  <CardContent className="p-2.5 sm:p-3">
+    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-4">
+      {/* وضعیت */}
+      <div className="flex items-center gap-2">
+        {data.isBalanced ? (
+          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           </div>
-          <div className="flex gap-4 sm:gap-6 text-sm w-full sm:w-auto justify-between sm:justify-end">
-            <div className="text-center">
-              <p className="text-gray-500 text-xs">حساب‌ها</p>
-              <p className="font-mono font-semibold">{data.accountCount.toLocaleString('fa-IR')}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-gray-500 text-xs">جمع بدهکار</p>
-              <p className="font-mono font-semibold text-red-600">{formatRial(data.grandDebit)}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-gray-500 text-xs">جمع بستانکار</p>
-              <p className="font-mono font-semibold text-emerald-600">{formatRial(data.grandCredit)}</p>
-            </div>
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+            <AlertCircle className="h-4 w-4 text-red-500" />
           </div>
-        </CardContent>
-      </Card>
+        )}
+        <div>
+          <p className={`font-bold text-xs sm:text-sm ${data.isBalanced ? 'text-emerald-800' : 'text-red-800'}`}>
+            {data.isBalanced ? 'تراز متعادل است ✓' : 'تراز نامتعادل!'}
+          </p>
+          <p className="text-[10px] text-gray-500">
+            {data.isBalanced
+              ? 'جمع بدهکار = جمع بستانکار'
+              : `اختلاف: ${formatRial(Math.abs(data.difference))} ریال`
+            }
+          </p>
+        </div>
+      </div>
+
+      {/* آمار */}
+      <div className="flex gap-3 sm:gap-4 text-xs w-full sm:w-auto justify-between sm:justify-end">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5 text-center min-w-[70px]">
+          <p className="text-[9px] text-blue-600 mb-0.5">حساب‌ها</p>
+          <p className="font-mono font-bold text-blue-700 text-xs sm:text-sm">{data.accountCount.toLocaleString('fa-IR')}</p>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 text-center min-w-[70px]">
+          <p className="text-[9px] text-red-600 mb-0.5">جمع بدهکار</p>
+          <p className="font-mono font-bold text-red-700 text-xs sm:text-sm">{formatRial(data.grandDebit)}</p>
+        </div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-center min-w-[70px]">
+          <p className="text-[9px] text-emerald-600 mb-0.5">جمع بستانکار</p>
+          <p className="font-mono font-bold text-emerald-700 text-xs sm:text-sm">{formatRial(data.grandCredit)}</p>
+        </div>
+      </div>
+    </div>
+  </CardContent>
+</Card>
 
       {/* ★ Empty state */}
       {isEmpty ? (

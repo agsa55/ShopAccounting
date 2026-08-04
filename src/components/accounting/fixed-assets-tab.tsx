@@ -65,10 +65,56 @@ function formatCurrency(price: number | undefined | null): string {
 }
 
 function formatDate(d: string): string {
+  if (!d) return '—'
   try {
-    return new Date(d).toLocaleDateString('fa-IR', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    })
+    // Parse دستی ISO string بدون استفاده از Date (بدون مشکل timezone)
+    // فرمت‌های مورد انتظار:
+    //   - 2026-08-03
+    //   - 2026-08-03T00:00:00
+    //   - 2026-08-03T00:00:00.000Z
+    //   - 2026-08-03T10:30:00+03:30
+    const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) {
+      const gy = parseInt(isoMatch[1], 10)
+      const gm = parseInt(isoMatch[2], 10)
+      const gd = parseInt(isoMatch[3], 10)
+      // اعتبارسنجی تاریخ
+      if (gy >= 1900 && gy <= 2200 && gm >= 1 && gm <= 12 && gd >= 1 && gd <= 31) {
+        const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+        return `${toFaNum(jy)}/${toFaNum(String(jm).padStart(2, '0'))}/${toFaNum(String(jd).padStart(2, '0'))}`
+      }
+    }
+
+    // Fallback: اگر فرمت ISO نبود، از Date استفاده کن (برای backward compatibility)
+    const fallback = new Date(d)
+    if (!isNaN(fallback.getTime())) {
+      return fallback.toLocaleDateString('fa-IR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+    }
+    return d
+  } catch {
+    return d
+  }
+}
+
+// ★ v9.4: فرمت طولانی تاریخ (مثلاً: ۱۳ مرداد ۱۴۰۵)
+function formatDateLong(d: string): string {
+  if (!d) return '—'
+  try {
+    const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) {
+      const gy = parseInt(isoMatch[1], 10)
+      const gm = parseInt(isoMatch[2], 10)
+      const gd = parseInt(isoMatch[3], 10)
+      if (gy >= 1900 && gy <= 2200 && gm >= 1 && gm <= 12 && gd >= 1 && gd <= 31) {
+        const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+        return `${toFaNum(gd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}`
+      }
+    }
+    return d
   } catch {
     return d
   }

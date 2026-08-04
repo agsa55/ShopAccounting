@@ -1,8 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/products/products-page.tsx (v9.2.0 - FINAL)
+// src/components/products/products-page.tsx (v9.3.0 - FINAL)
 // ★ ستون ارزش موجودی + آفلاین کامل + CustomSwitch + JWT Auth
+// ★ v9.3: رفع باگ‌های مودال ثبت/ویرایش کالا
+//   - تشخیص بارکد تکراری (فوری هنگام تایپ)
+//   - اجباری بودن دسته‌بندی و واحد
+//   - جلوگیری از بسته شدن مودال با کلیک بیرون
+//   - در حالت Create: مودال باز می‌ماند (برای ثبت چند کالا)
+//   - در حالت Edit: مودال بسته می‌شود
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -53,6 +59,7 @@ import {
   Upload,
   CloudOff,
   TrendingUp,
+  AlertCircle,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { BarcodePrintModal } from './barcode-print-modal'
@@ -312,6 +319,12 @@ export default function ProductsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [generatingCode, setGeneratingCode] = useState(false)
 
+  // ★ v9.3: state‌های جدید برای validation بارکد تکراری
+  const [addBarcodeError, setAddBarcodeError] = useState<string>('')
+  const [addBarcodeIsDuplicate, setAddBarcodeIsDuplicate] = useState(false)
+  const [editBarcodeError, setEditBarcodeError] = useState<string>('')
+  const [editBarcodeIsDuplicate, setEditBarcodeIsDuplicate] = useState(false)
+
   const [addForm, setAddForm] = useState<AddForm>(INITIAL_ADD_FORM)
   const [editForm, setEditForm] = useState({
     id: '',
@@ -330,6 +343,58 @@ export default function ProductsPage() {
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
+
+  // ══════════════════════════════════════════
+  // ★ v9.3: بررسی بارکد تکراری به صورت خودکار
+  // ══════════════════════════════════════════
+  useEffect(() => {
+    // بررسی بارکد در فرم ایجاد
+    if (!addForm.barcode || addForm.barcode.trim() === '') {
+      setAddBarcodeError('')
+      setAddBarcodeIsDuplicate(false)
+    } else if (addForm.generateBarcode) {
+      // بارکد تولیدشده خودکار نیازی به چک ندارد
+      setAddBarcodeError('')
+      setAddBarcodeIsDuplicate(false)
+    } else {
+      const trimmed = addForm.barcode.trim()
+      const duplicate = allProducts.find(
+        (p) => p.barcode && p.barcode.trim() === trimmed
+      )
+      if (duplicate) {
+        setAddBarcodeIsDuplicate(true)
+        setAddBarcodeError(
+          `⚠️ این بارکد قبلاً برای کالای «${duplicate.name}» استفاده شده است`
+        )
+      } else {
+        setAddBarcodeIsDuplicate(false)
+        setAddBarcodeError('')
+      }
+    }
+  }, [addForm.barcode, addForm.generateBarcode, allProducts])
+
+  useEffect(() => {
+    // بررسی بارکد در فرم ویرایش
+    if (!editForm.barcode || editForm.barcode.trim() === '') {
+      setEditBarcodeError('')
+      setEditBarcodeIsDuplicate(false)
+    } else {
+      const trimmed = editForm.barcode.trim()
+      // بررسی تکراری بودن (به جز خود کالا)
+      const duplicate = allProducts.find(
+        (p) => p.id !== editForm.id && p.barcode && p.barcode.trim() === trimmed
+      )
+      if (duplicate) {
+        setEditBarcodeIsDuplicate(true)
+        setEditBarcodeError(
+          `⚠️ این بارکد قبلاً برای کالای «${duplicate.name}» استفاده شده است`
+        )
+      } else {
+        setEditBarcodeIsDuplicate(false)
+        setEditBarcodeError('')
+      }
+    }
+  }, [editForm.barcode, editForm.id, allProducts])
 
   // ══════════════════════════════════════════
   // ★ Load Products
@@ -651,6 +716,8 @@ export default function ProductsPage() {
 
   const handleOpenAddDialog = useCallback(async () => {
     setAddForm(INITIAL_ADD_FORM)
+    setAddBarcodeError('')
+    setAddBarcodeIsDuplicate(false)
     setAddDialogOpen(true)
     await fetchNextCode()
   }, [fetchNextCode])
@@ -686,13 +753,45 @@ export default function ProductsPage() {
     }
   }
 
+  // ══════════════════════════════════════════
+  // ★ v9.3: handleAddProduct با validation کامل
+  // ══════════════════════════════════════════
   const handleAddProduct = async () => {
+    // ★ Validation 1: نام کالا
     if (!addForm.name.trim()) {
       toast({ title: 'خطا', description: 'نام کالا الزامی است', variant: 'destructive' })
       return
     }
+    // ★ Validation 2: کد کالا
     if (!addForm.code.trim()) {
       toast({ title: 'خطا', description: 'کد کالا الزامی است', variant: 'destructive' })
+      return
+    }
+    // ★ Validation 3: بارکد تکراری
+    if (addBarcodeIsDuplicate) {
+      toast({
+        title: 'خطا',
+        description: 'بارکد وارد شده تکراری است. لطفاً بارکد دیگری وارد کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+    // ★ Validation 4: دسته‌بندی اجباری
+    if (!addForm.categoryId || addForm.categoryId === 'none') {
+      toast({
+        title: 'خطا',
+        description: 'انتخاب دسته‌بندی کالا الزامی است',
+        variant: 'destructive',
+      })
+      return
+    }
+    // ★ Validation 5: واحد اجباری
+    if (!addForm.unitId || addForm.unitId === 'none') {
+      toast({
+        title: 'خطا',
+        description: 'انتخاب واحد کالا الزامی است',
+        variant: 'destructive',
+      })
       return
     }
 
@@ -737,12 +836,26 @@ export default function ProductsPage() {
         setProducts((prev) => [tempProduct, ...prev])
         setAllProducts((prev) => [tempProduct, ...prev])
         toast({
-          title: '📡 در صف ذخیره شد',
-          description: 'کالا پس از اتصال به سرور ثبت می‌شود',
+          title: '✓ در صف ذخیره شد',
+          description: `کالای «${addForm.name}» با موفقیت ثبت شد. می‌توانید کالای بعدی را وارد کنید.`,
           duration: 4000,
         })
-        setAddDialogOpen(false)
-        setAddForm(INITIAL_ADD_FORM)
+
+        // ★ v9.3: مودال را نمی‌بندیم! فقط فیلدهای منحصر به فرد را پاک می‌کنیم
+        // تا کاربر بتواند سریع کالای بعدی را ثبت کند
+        const newCode = `PRD-${(products.length + 2).toString().padStart(6, '0')}`
+        setAddForm((prev) => ({
+          ...prev,
+          name: '',
+          code: newCode,
+          barcode: '',
+          generateBarcode: false,
+          // دسته‌بندی، واحد، قیمت‌ها و حداقل موجودی حفظ می‌شوند
+        }))
+        setAddBarcodeError('')
+        setAddBarcodeIsDuplicate(false)
+        // دریافت کد جدید از سرور در پس‌زمینه
+        fetchNextCode()
       } catch (error: any) {
         toast({ title: 'خطا', description: error?.message, variant: 'destructive' })
       }
@@ -774,16 +887,28 @@ export default function ProductsPage() {
       const json = await res.json()
       if (json.success) {
         toast({
-          title: 'موفق',
+          title: '✓ کالا ایجاد شد',
           description: json.data.barcode
-            ? `کالا ایجاد شد. بارکد: ${json.data.barcode}`
-            : 'کالا با موفقیت ایجاد شد',
+            ? `کالای «${addForm.name}» با بارکد ${json.data.barcode} ثبت شد. می‌توانید کالای بعدی را وارد کنید.`
+            : `کالای «${addForm.name}» با موفقیت ثبت شد. می‌توانید کالای بعدی را وارد کنید.`,
         })
-        setAddDialogOpen(false)
-        setAddForm(INITIAL_ADD_FORM)
+
+        // ★ v9.3: مودال را نمی‌بندیم! فقط فیلدهای منحصر به فرد را پاک می‌کنیم
+        setAddForm((prev) => ({
+          ...prev,
+          name: '',
+          code: '',
+          barcode: '',
+          generateBarcode: false,
+          // دسته‌بندی، واحد، قیمت‌ها و حداقل موجودی حفظ می‌شوند
+        }))
+        setAddBarcodeError('')
+        setAddBarcodeIsDuplicate(false)
+        // بارگذاری مجدد لیست‌ها و دریافت کد جدید
         loadProducts(page, search)
         loadAllProducts()
         loadPlanLimits()
+        fetchNextCode()
       } else {
         toast({ title: 'خطا', description: json.error, variant: 'destructive' })
       }
@@ -792,10 +917,40 @@ export default function ProductsPage() {
     }
     setSubmitting(false)
   }
-
+    // ══════════════════════════════════════════
+  // ★ v9.3: handleEditProduct با validation کامل
+  // ══════════════════════════════════════════
   const handleEditProduct = async () => {
+    // ★ Validation 1: نام و کد
     if (!editForm.name.trim() || !editForm.code.trim()) {
       toast({ title: 'خطا', description: 'نام و کد کالا الزامی است', variant: 'destructive' })
+      return
+    }
+    // ★ Validation 2: بارکد تکراری
+    if (editBarcodeIsDuplicate) {
+      toast({
+        title: 'خطا',
+        description: 'بارکد وارد شده تکراری است. لطفاً بارکد دیگری وارد کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+    // ★ Validation 3: دسته‌بندی اجباری
+    if (!editForm.categoryId || editForm.categoryId === 'none') {
+      toast({
+        title: 'خطا',
+        description: 'انتخاب دسته‌بندی کالا الزامی است',
+        variant: 'destructive',
+      })
+      return
+    }
+    // ★ Validation 4: واحد اجباری
+    if (!editForm.unitId || editForm.unitId === 'none') {
+      toast({
+        title: 'خطا',
+        description: 'انتخاب واحد کالا الزامی است',
+        variant: 'destructive',
+      })
       return
     }
 
@@ -844,10 +999,11 @@ export default function ProductsPage() {
           )
         )
         toast({
-          title: '📡 در صف بروزرسانی قرار گرفت',
+          title: '✓ در صف بروزرسانی قرار گرفت',
           description: 'تغییرات پس از اتصال اعمال می‌شود',
           duration: 4000,
         })
+        // ★ v9.3: در حالت ویرایش، مودال بسته می‌شود
         setEditDialogOpen(false)
       } catch (error: any) {
         toast({ title: 'خطا', description: error?.message, variant: 'destructive' })
@@ -880,7 +1036,8 @@ export default function ProductsPage() {
       })
       const json = await res.json()
       if (json.success) {
-        toast({ title: 'موفق', description: 'کالا به‌روزرسانی شد' })
+        toast({ title: '✓ موفق', description: 'کالا به‌روزرسانی شد' })
+        // ★ v9.3: در حالت ویرایش، مودال بسته می‌شود
         setEditDialogOpen(false)
         loadProducts(page, search)
         loadAllProducts()
@@ -989,6 +1146,8 @@ export default function ProductsPage() {
       minStock: String(product.minStock),
       isActive: product.isActive,
     })
+    setEditBarcodeError('')
+    setEditBarcodeIsDuplicate(false)
     setEditDialogOpen(true)
   }
 
@@ -1004,10 +1163,9 @@ export default function ProductsPage() {
     [products]
   )
 
-  // ★ محاسبه مجموع ارزش کل موجودی انبار
-   // ★ محاسبه مجموع ارزش کل موجودی انبار (از همه کالاات — ثابت با تغییر صفحه)
+  // ★ محاسبه مجموع ارزش کل موجودی انبار (از همه کالاات — ثابت با تغییر صفحه)
   const totalInventoryValue = useMemo(() => {
-    return allProducts.reduce((sum, p) => 
+    return allProducts.reduce((sum, p) =>
       sum + calculateTotalValue(p.currentStock, p.salePrice), 0
     )
   }, [allProducts])
@@ -1017,12 +1175,12 @@ export default function ProductsPage() {
     return allProducts.reduce((sum, p) => sum + (p.currentStock || 0), 0)
   }, [allProducts])
 
-  // ★ تعداد کالااتی که موجودی دارند
+  // ★ تعداد کالاهایی که موجودی دارند
   const productsWithStockCount = useMemo(() => {
     return allProducts.filter(p => (p.currentStock || 0) > 0).length
   }, [allProducts])
-  
-    // ══════════════════════════════════════════════════════════════
+
+  // ══════════════════════════════════════════════════════════════
   // ★ Render
   // ══════════════════════════════════════════════════════════════
   return (
@@ -1281,9 +1439,9 @@ export default function ProductsPage() {
                       </TableCell>
                       {/* ★ ستون جدید: ارزش موجودی */}
                       <TableCell className="text-center bg-emerald-50/30">
-                        <StockValueBadge 
-                          currentStock={product.currentStock} 
-                          salePrice={product.salePrice} 
+                        <StockValueBadge
+                          currentStock={product.currentStock}
+                          salePrice={product.salePrice}
                         />
                       </TableCell>
                       <TableCell className="text-center text-xs">
@@ -1433,9 +1591,9 @@ export default function ProductsPage() {
                   </div>
 
                   {/* ★ بخش جدید: ارزش موجودی */}
-                  <StockValueCard 
-                    currentStock={product.currentStock} 
-                    salePrice={product.salePrice} 
+                  <StockValueCard
+                    currentStock={product.currentStock}
+                    salePrice={product.salePrice}
                   />
 
                   <div className="flex items-center justify-end gap-1 mt-2.5 pt-2 border-t border-gray-100">
@@ -1500,10 +1658,15 @@ export default function ProductsPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════ */}
-      {/* ★ Add Dialog                                              */}
+      {/* ★ Add Dialog - v9.3: با preventDefault برای بیرون        */}
       {/* ══════════════════════════════════════════════════════════ */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto" dir="rtl">
+        <DialogContent
+          className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto"
+          dir="rtl"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="text-sm sm:text-base">کالا جدید</DialogTitle>
             <DialogDescription className="text-[11px]">
@@ -1572,11 +1735,20 @@ export default function ProductsPage() {
                     generateBarcode: false,
                   })
                 }
-                className="mt-1"
+                className={`mt-1 ${addBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
                 dir="ltr"
                 placeholder="اسکن یا وارد کنید"
                 disabled={addForm.generateBarcode}
               />
+              {/* ★ v9.3: نمایش خطای بارکد تکراری */}
+              {addBarcodeIsDuplicate && (
+                <div className="flex items-center gap-1.5 mt-1.5 p-2 bg-red-50 border border-red-200 rounded-md">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <span className="text-[10px] text-red-700 font-medium">
+                    {addBarcodeError}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center gap-2 mt-2 p-2 bg-emerald-50 rounded-lg border border-emerald-200">
                 <Checkbox
                   id="generate-barcode"
@@ -1604,18 +1776,21 @@ export default function ProductsPage() {
             </div>
 
             <div>
-              <Label className="text-xs">دسته‌بندی</Label>
+              {/* ★ v9.3: دسته‌بندی اجباری با asterisk */}
+              <Label className="text-xs">
+                دسته‌بندی <span className="text-red-500">*</span>
+              </Label>
               <Select
                 value={addForm.categoryId}
                 onValueChange={(v) =>
                   setAddForm({ ...addForm, categoryId: v })
                 }
               >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue placeholder="انتخاب دسته" />
+                <SelectTrigger className={`mt-1 h-9 text-xs ${!addForm.categoryId || addForm.categoryId === 'none' ? 'border-dashed' : ''}`}>
+                  <SelectValue placeholder="انتخاب دسته (الزامی)" />
                 </SelectTrigger>
                 <SelectContent className="z-[99999]">
-                  <SelectItem value="none">بدون دسته</SelectItem>
+                  <SelectItem value="none">— انتخاب کنید —</SelectItem>
                   {categories.map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>
                       {cat.name}
@@ -1623,19 +1798,27 @@ export default function ProductsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {(!addForm.categoryId || addForm.categoryId === 'none') && (
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  انتخاب دسته‌بندی الزامی است
+                </p>
+              )}
             </div>
 
             <div>
-              <Label className="text-xs">واحد</Label>
+              {/* ★ v9.3: واحد اجباری با asterisk */}
+              <Label className="text-xs">
+                واحد <span className="text-red-500">*</span>
+              </Label>
               <Select
                 value={addForm.unitId}
                 onValueChange={(v) => setAddForm({ ...addForm, unitId: v })}
               >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue placeholder="انتخاب واحد" />
+                <SelectTrigger className={`mt-1 h-9 text-xs ${!addForm.unitId || addForm.unitId === 'none' ? 'border-dashed' : ''}`}>
+                  <SelectValue placeholder="انتخاب واحد (الزامی)" />
                 </SelectTrigger>
                 <SelectContent className="z-[99999] max-h-[200px] overflow-y-auto">
-                  <SelectItem value="none">—</SelectItem>
+                  <SelectItem value="none">— انتخاب کنید —</SelectItem>
                   {sortUnits(units).map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {getUnitLabel(u)}
@@ -1643,6 +1826,11 @@ export default function ProductsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {(!addForm.unitId || addForm.unitId === 'none') && (
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  انتخاب واحد الزامی است
+                </p>
+              )}
             </div>
 
             <div>
@@ -1726,25 +1914,32 @@ export default function ProductsPage() {
             </Button>
             <Button
               onClick={handleAddProduct}
-              disabled={submitting}
-              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+              disabled={submitting || addBarcodeIsDuplicate}
+              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} ${(submitting || addBarcodeIsDuplicate) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : !isOnline ? (
                 <CloudOff className="w-4 h-4" />
-              ) : null}
-              {!isOnline ? 'ذخیره آفلاین' : 'ایجاد کالا'}
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              {!isOnline ? 'ذخیره آفلاین و ادامه' : 'ایجاد کالا و ادامه'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* ══════════════════════════════════════════════════════════ */}
-      {/* ★ Edit Dialog                                             */}
-      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ★ Edit Dialog - v9.3: با preventDefault برای بیرون       */}
+
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto" dir="rtl">
+        <DialogContent
+          className="sm:max-w-[520px] w-[calc(100%-2rem)] max-h-[85vh] overflow-y-auto"
+          dir="rtl"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="text-sm sm:text-base">ویرایش کالا</DialogTitle>
             <DialogDescription className="text-[11px]">
@@ -1787,25 +1982,37 @@ export default function ProductsPage() {
                 onChange={(e) =>
                   setEditForm({ ...editForm, barcode: e.target.value })
                 }
-                className="mt-1"
+                className={`mt-1 ${editBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
                 dir="ltr"
                 placeholder="اسکن یا دستی وارد کنید"
               />
+              {/* ★ v9.3: نمایش خطای بارکد تکراری */}
+              {editBarcodeIsDuplicate && (
+                <div className="flex items-center gap-1.5 mt-1.5 p-2 bg-red-50 border border-red-200 rounded-md">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <span className="text-[10px] text-red-700 font-medium">
+                    {editBarcodeError}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div>
-              <Label className="text-xs">دسته‌بندی</Label>
+              {/* ★ v9.3: دسته‌بندی اجباری */}
+              <Label className="text-xs">
+                دسته‌بندی <span className="text-red-500">*</span>
+              </Label>
               <Select
                 value={editForm.categoryId}
                 onValueChange={(v) =>
                   setEditForm({ ...editForm, categoryId: v })
                 }
               >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue placeholder="انتخاب دسته" />
+                <SelectTrigger className={`mt-1 h-9 text-xs ${!editForm.categoryId || editForm.categoryId === 'none' ? 'border-dashed' : ''}`}>
+                  <SelectValue placeholder="انتخاب دسته (الزامی)" />
                 </SelectTrigger>
                 <SelectContent className="z-[99999]">
-                  <SelectItem value="none">بدون دسته</SelectItem>
+                  <SelectItem value="none">— انتخاب کنید —</SelectItem>
                   {categories.map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>
                       {cat.name}
@@ -1813,19 +2020,27 @@ export default function ProductsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {(!editForm.categoryId || editForm.categoryId === 'none') && (
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  انتخاب دسته‌بندی الزامی است
+                </p>
+              )}
             </div>
 
             <div>
-              <Label className="text-xs">واحد</Label>
+              {/* ★ v9.3: واحد اجباری */}
+              <Label className="text-xs">
+                واحد <span className="text-red-500">*</span>
+              </Label>
               <Select
                 value={editForm.unitId}
                 onValueChange={(v) => setEditForm({ ...editForm, unitId: v })}
               >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue placeholder="انتخاب واحد" />
+                <SelectTrigger className={`mt-1 h-9 text-xs ${!editForm.unitId || editForm.unitId === 'none' ? 'border-dashed' : ''}`}>
+                  <SelectValue placeholder="انتخاب واحد (الزامی)" />
                 </SelectTrigger>
                 <SelectContent className="z-[99999] max-h-[200px] overflow-y-auto">
-                  <SelectItem value="none">—</SelectItem>
+                  <SelectItem value="none">— انتخاب کنید —</SelectItem>
                   {sortUnits(units).map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {getUnitLabel(u)}
@@ -1833,6 +2048,11 @@ export default function ProductsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {(!editForm.unitId || editForm.unitId === 'none') && (
+                <p className="text-[10px] text-amber-600 mt-0.5">
+                  انتخاب واحد الزامی است
+                </p>
+              )}
             </div>
 
             <div>
@@ -1915,8 +2135,8 @@ export default function ProductsPage() {
             </Button>
             <Button
               onClick={handleEditProduct}
-              disabled={submitting}
-              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+              disabled={submitting || editBarcodeIsDuplicate}
+              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} ${(submitting || editBarcodeIsDuplicate) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
