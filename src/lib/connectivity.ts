@@ -1,14 +1,10 @@
 // ============================================================================
-// src/lib/connectivity.ts — تشخیص هوشمند وضعیت اتصال (v1.0)
+// src/lib/connectivity.ts — تشخیص هوشمند وضعیت اتصال (v1.1 ★★★ Cold Start Fix)
 // ============================================================================
-// ★ مشکل قبلی: سیستم فقط از navigator.onLine استفاده می‌کرد.
-//   این API مرورگر "اتصال به اینترنت" را بررسی می‌کند، نه "اتصال به سرور".
-//   در محیط لوکال بدون اینترنت، سرور و PostgreSQL کاملاً در دسترس‌اند
-//   ولی navigator.onLine = false بود → سیستم اشتباهاً آفلاین می‌شد.
-//
-// ★ راه‌حل: پینگ دوره‌ای به /api/health
-//   - API در دسترس است → آنلاین (حتی بدون اینترنت)
-//   - API در دسترس نیست → آفلاین (حتی با اینترنت)
+// ★ اصلاحات v1.1:
+//   ۱. افزایش تایم‌اوت به ۸ ثانیه برای تحمل Cold Start پلتفرم‌هایی مثل Railway
+//   ۲. هوشمندسازی تشخیص: اگر سرور پاسخ دهد (حتی 401/403)، یعنی در دسترس است (Reachable)
+//      فقط خطاهای شبکه یا 5xx به معنای قطع بودن است.
 // ============================================================================
 
 export type ConnectionStatus = 'online' | 'offline' | 'degraded'
@@ -30,7 +26,7 @@ export interface ConnectivityState {
 const HEALTH_ENDPOINT = '/api/health'
 const CHECK_INTERVAL_ONLINE_MS = 30_000    // وقتی آنلاین: هر ۳۰ ثانیه
 const CHECK_INTERVAL_OFFLINE_MS = 5_000    // وقتی آفلاین: هر ۵ ثانیه (تلاش سریع‌تر)
-const PING_TIMEOUT_MS = 5_000              // تایم‌اوت هر پینگ
+const PING_TIMEOUT_MS = 8_000              // ★★★ تایم‌اوت ۸ ثانیه برای تحمل Cold Start
 const DEGRADED_THRESHOLD_MS = 3_000        // بیشتر از این = کند
 
 // ─── State داخلی ─────────────────────────────────────────────────────────────
@@ -66,17 +62,19 @@ async function pingServer(): Promise<{
     clearTimeout(timeoutId)
     const responseTimeMs = Date.now() - start
 
-    if (!response.ok) {
+    // ★★★ اگر سرور پاسخ داد (حتی 401 یا 403)، یعنی در دسترس است (Reachable)
+    // فقط خطاهای سمت سرور (5xx) یا قطع شبکه را به عنوان غیرقابل دسترس در نظر می‌گیریم
+    if (response.status >= 500) {
       return { reachable: false, responseTimeMs, degraded: false }
     }
 
-    const data = await response.json()
+    const data = await response.json().catch(() => ({}))
     const degraded =
       data.database === 'disconnected' || responseTimeMs > DEGRADED_THRESHOLD_MS
 
     return { reachable: true, responseTimeMs, degraded }
   } catch {
-    // AbortError (تایم‌اوت) یا NetworkError (سرور خاموش)
+    // AbortError (تایم‌اوت ۸ ثانیه‌ای) یا NetworkError (سرور خاموش/قطع شبکه)
     return { reachable: false, responseTimeMs: Date.now() - start, degraded: false }
   }
 }

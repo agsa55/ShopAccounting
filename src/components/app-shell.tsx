@@ -938,6 +938,7 @@ function SyncIndicator() {
         {pendingCount}
       </span>
     </Button>
+    
   )
 }
 
