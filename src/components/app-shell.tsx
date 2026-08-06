@@ -859,29 +859,45 @@ function PWAInstallButton() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ SyncIndicator — نسخه اصلاح‌شده v9.7.1
+   ★ SyncIndicator — نسخه اصلاح‌شده v9.7.2 (جلوگیری از حلقه بی‌نهایت)
    ═══════════════════════════════════════════════════════════════ */
 function SyncIndicator() {
   const pendingCount = useStore((s) => s.pendingSyncCount)
   const isOnline = useStore((s) => s.isOnline)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false)
 
-  // ★ تلاش خودکار برای همگام‌سازی هنگام بارگذاری اگر آیتمی در صف باشد
+  // ★ تلاش خودکار برای همگام‌سازی هنگام بارگذاری اگر آیتمی در صف باشد (فقط یک بار)
   useEffect(() => {
-    if (pendingCount > 0 && isOnline && !isSyncing) {
+    if (pendingCount > 0 && isOnline && !isSyncing && !autoSyncAttempted) {
       setIsSyncing(true)
+      setAutoSyncAttempted(true) // ← جلوگیری از حلقه بی‌نهایت در صورت خطا
+      
       import('@/lib/sync-engine').then(async ({ syncEngine }) => {
         try {
-          await syncEngine.sync()
+          const result = await syncEngine.sync()
+          if (result.failed > 0) {
+            useStore.getState().addNotification({
+              title: '⚠️ خطا در همگام‌سازی',
+              message: `${result.failed} تغییر همگام‌سازی نشد. لطفاً به صورت دستی روی آیکون کلیک کنید.`,
+              type: 'warning',
+            })
+          }
         } catch (err) {
           console.warn('[SyncIndicator] Auto-sync failed:', err)
+          useStore.getState().addNotification({
+            title: '⚠️ خطا در همگام‌سازی',
+            message: 'ارتباط با سرور برقرار نشد. لطفاً دستی تلاش کنید.',
+            type: 'warning',
+          })
         } finally {
           setIsSyncing(false)
         }
       })
     }
-  }, [pendingCount, isOnline])
+  }, [pendingCount, isOnline, autoSyncAttempted])
 
+  // اگر آیتمی در صف نیست یا کاربر آفلاین است، آیکون نمایش داده نشود
   if (pendingCount === 0 || !isOnline) return null
 
   return (
