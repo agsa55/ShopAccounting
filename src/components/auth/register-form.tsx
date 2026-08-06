@@ -1,9 +1,13 @@
 'use client'
 
 // ============================================================================
-// src/components/auth/register-form.tsx (v9.1 ★★★)
+// src/components/auth/register-form.tsx (v9.2 ★★★)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
+// ★★★ v9.2: رفع خطای بیلد Next.js (Suspense Boundary)
+//   - جایگزینی useSearchParams با window.location.search در useEffect
+//   - این تغییر باعث می‌شود بیلد بدون خطا انجام شود و عملکرد کاملاً حفظ شود
+//
 // ★★★ v9.1: افزودن پشتیبانی کامل از پلن دمو (Demo/Trial) از طریق URL
 //   - خواندن پارامتر ?plan=demo از URL
 //   - تنظیم خودکار استور روی پلن دمو و دوره ۳ روزه
@@ -23,7 +27,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-   import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation' // ✅ useSearchParams حذف شد تا خطای بیلد رفع شود
 import { useAppStore } from '@/lib/store'
 import { setAccessToken, setRefreshToken, setStoredUser } from '@/lib/auth-client'
 import { getTenantUrl, isDevelopment } from '@/lib/tenant-resolver-client'
@@ -83,21 +87,25 @@ const BILLING_CYCLE_FA: Record<string, string> = {
 }
 
 export default function RegisterForm() {
-  const searchParams = useSearchParams() // ✅ خواندن پارامترهای URL
   const { setCurrentView, login, selectedPlanId, setSelectedPlanId, selectedBillingCycle, setSelectedBillingCycle } = useAppStore()
+  const router = useRouter()
   
   const [currentStep, setCurrentStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-   const router = useRouter()
+
   // ✅ همگام‌سازی استور با پارامتر URL (اگر plan=demo باشد)
+  // ✅ اصلاح شده: استفاده از window.location.search به جای useSearchParams برای رفع خطای بیلد Next.js
   useEffect(() => {
-    const planParam = searchParams.get('plan')
-    if (planParam === 'demo') {
-      setSelectedPlanId('demo')
-      setSelectedBillingCycle('trial')
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search)
+      const planParam = urlParams.get('plan')
+      if (planParam === 'demo') {
+        setSelectedPlanId('demo')
+        setSelectedBillingCycle('trial')
+      }
     }
-  }, [searchParams, setSelectedPlanId, setSelectedBillingCycle])
+  }, [setSelectedPlanId, setSelectedBillingCycle])
 
   const compositeKey = selectedBillingCycle ? `${selectedPlanId}_${selectedBillingCycle}` : ''
   const planName = compositeKey && PLAN_INFO[compositeKey]
@@ -356,11 +364,13 @@ export default function RegisterForm() {
     setRegistrationFailed(false)
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
-   const handleCancel = () => { 
-     // ✅ این دستور صفحه فعلی را از تاریخچه حذف کرده و مستقیم به لندینگ می‌رود
-     // بنابراین دکمه برگشت مرورگر دیگر گیج نمی‌شود.
-     router.replace('/') 
-   }
+  
+  const handleCancel = () => { 
+    // ✅ این دستور صفحه فعلی را از تاریخچه حذف کرده و مستقیم به لندینگ می‌رود
+    // بنابراین دکمه برگشت مرورگر دیگر گیج نمی‌شود.
+    router.replace('/') 
+  }
+
   // ─── canGoNext ────────────────────────────────────────────────
   const canGoNext = useCallback(() => {
     switch (currentStep) {
