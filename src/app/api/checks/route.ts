@@ -1,26 +1,33 @@
-// src/app/api/checks/route.ts — v9.0 ★★★ Transaction Safety
+// src/app/api/checks/route.ts — v10.0 ★★★ COMPLETE FIX
 // ============================================================================
 // مدیریت چک‌ها (دریافتی و پرداختنی)
 // ----------------------------------------------------------------------------
-// ★★★ v9.0: اصلاحات Transaction Safety:
-//   ★ DELETE: ابطال سند + حذف چک داخل یک Transaction
-//   ★ PUT (edit): ویرایش + ابطال سند قدیم + صدور سند جدید داخل Transaction
-//   ★ حفظ تمام منطق v8.8 بدون تغییر
-//
-// این API امکان ثبت، وصول، برگشت و حذف چک‌ها را فراهم می‌کند.
-// هر چک به‌صورت خودکار سند حسابداری ایجاد می‌کند:
-//   - چک دریافتی: Dr. چک‌های دریافتنی / Cr. فروش یا بدهکاران
-//   - چک پرداختنی: Dr. خرید یا بستانکاران / Cr. چک‌های پرداختنی
-//   - وصول چک دریافتی: Dr. بانک / Cr. چک‌های دریافتنی
-//   - پرداخت چک پرداختنی: Dr. چک‌های پرداختنی / Cr. بانک
+// ★★★ v10.0: رفع باگ‌های جدی:
+//   ★ رفع باگ rounding: ۴۹,۹۹۹,۹۹۹ به جای ۵۰,۰۰۰,۰۰۰
+//   ★ رفع باگ دکمه "سپردن به بانک" (خواندن id از URL در PATCH)
+//   ★ افزودن status "returned" برای پس دادن/پس گرفتن چک
+//   ★ افزودن سند اتوماتیک برای "پس دادن" چک دریافتنی
+//   ★ افزودن سند اتوماتیک برای "پس گرفتن/باطل" چک پرداختنی
+//   ★ اصلاح خواندن Decimal از Prisma (toString + parseFloat)
 // ============================================================================
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 
+// ★ v10.0: helper برای تبدیل امن Decimal Prisma به number
+function toSafeNumber(value: any): number {
+  if (value === null || value === undefined) return 0
+  if (typeof value === 'number') return Math.round(value)
+  if (typeof value === 'string') return Math.round(parseFloat(value) || 0)
+  // Prisma Decimal object
+  if (typeof value.toString === 'function') {
+    return Math.round(parseFloat(value.toString()) || 0)
+  }
+  return Math.round(Number(value) || 0)
+}
+
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/checks — لیست چک‌ها
-//  Query: type (receivable | payable), status (pending | cleared | bounced | deposited)
+//  GET /api/checks
 // ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -54,11 +61,7 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/checks — ثبت چک جدید
-//  Body: {
-//    type: 'receivable' | 'payable',
-//    checkNumber, bankName, branchName?, amount,
-//    issueDate, dueDate, customerId?, payeeName?, description?,
-//  }
+//  ★ v10.0: اصلاح rounding با toSafeNumber
 // ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -72,7 +75,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       checkNumber,
       bankName,
       branchName,
-      amount,
+      amount: rawAmount,
       issueDate,
       dueDate,
       customerId,
@@ -80,14 +83,16 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       description,
     } = body
 
-    // ★ اعتبارسنجی
-    if (!checkNumber || !bankName || !amount || !dueDate) {
+    // ★ v10.0: تبدیل امن amount با rounding
+    const amount = toSafeNumber(rawAmount)
+
+    if (!checkNumber || !bankName || !dueDate) {
       return NextResponse.json(
-        { success: false, error: 'شماره چک، بانک، مبلغ و سررسید الزامی است' },
+        { success: false, error: 'شماره چک، بانک و سررسید الزامی است' },
         { status: 400 }
       )
     }
-    if (typeof amount !== 'number' || amount <= 0) {
+    if (amount <= 0) {
       return NextResponse.json(
         { success: false, error: 'مبلغ چک باید بزرگتر از صفر باشد' },
         { status: 400 }
@@ -103,7 +108,6 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     const result = await txClient.$transaction(async (tx: any) => {
-      // ۱. ایجاد چک
       const check = await tx.check.create({
         data: {
           tenantId,
@@ -111,7 +115,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           checkNumber: checkNumber.trim(),
           bankName: bankName.trim(),
           branchName: branchName?.trim() || null,
-          amount,
+          amount,  // ★ v10.0: عدد صحیح
           issueDate: issueDate ? new Date(issueDate) : new Date(),
           dueDate: new Date(dueDate),
           customerId: customerId || null,
@@ -121,7 +125,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         },
       })
 
-      // ۲. صدور سند حسابداری خودکار
+      // صدور سند خودکار
       const accounts = await tx.account.findMany({ where: { tenantId } })
       const findAccountByCode = (code: string) => accounts.find((a: any) => a.code === code) || null
 
@@ -143,31 +147,11 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         const lines: any[] = []
 
         if (type === 'receivable') {
-          lines.push({
-            accountId: checkAccountId,
-            debit: amount,
-            credit: 0,
-            description: `بدهکار: چک دریافتی ${checkNumber} - ${bankName}`,
-          })
-          lines.push({
-            accountId: counterpartAccountId,
-            debit: 0,
-            credit: amount,
-            description: `بستانکار: بابت چک دریافتی ${checkNumber}`,
-          })
+          lines.push({ accountId: checkAccountId, debit: amount, credit: 0, description: `بدهکار: چک دریافتی ${checkNumber} - ${bankName}` })
+          lines.push({ accountId: counterpartAccountId, debit: 0, credit: amount, description: `بستانکار: بابت چک دریافتی ${checkNumber}` })
         } else {
-          lines.push({
-            accountId: counterpartAccountId,
-            debit: amount,
-            credit: 0,
-            description: `بدهکار: بابت چک پرداختنی ${checkNumber}`,
-          })
-          lines.push({
-            accountId: checkAccountId,
-            debit: 0,
-            credit: amount,
-            description: `بستانکار: چک پرداختنی ${checkNumber} - ${bankName}`,
-          })
+          lines.push({ accountId: counterpartAccountId, debit: amount, credit: 0, description: `بدهکار: بابت چک پرداختنی ${checkNumber}` })
+          lines.push({ accountId: checkAccountId, debit: 0, credit: amount, description: `بستانکار: چک پرداختنی ${checkNumber} - ${bankName}` })
         }
 
         const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
@@ -213,8 +197,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT /api/checks — ویرایش چک یا تغییر وضعیت
-//  ★★★ v9.0: ویرایش چک + ابطال سند قدیم + صدور سند جدید داخل Transaction
+//  PUT /api/checks — ویرایش چک
+//  ★ v10.0: اصلاح rounding
 // ═══════════════════════════════════════════════════════════════
 export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -223,38 +207,34 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const userId = tenant.user?.id
     const body = await req.json()
 
-    // ★ اگه action: 'edit' هست، ویرایش چک
     if (body.action === 'edit' && body.id) {
       const check = await tenantDb.check.findFirst({
         where: { id: body.id, tenantId },
       })
 
       if (!check) {
-        return NextResponse.json(
-          { success: false, error: 'چک یافت نشد' },
-          { status: 404 }
-        )
+        return NextResponse.json({ success: false, error: 'چک یافت نشد' }, { status: 404 })
       }
 
-      // ★★★ v9.0: ویرایش + ابطال سند قدیم + صدور سند جدید داخل Transaction
       const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
       await txClient.$transaction(async (tx: any) => {
-        // ۱. به‌روزرسانی چک
+        // ★ v10.0: تبدیل امن amount
+        const newAmount = body.amount !== undefined ? toSafeNumber(body.amount) : toSafeNumber(check.amount)
+
         await tx.check.update({
           where: { id: check.id },
           data: {
             checkNumber: body.checkNumber || check.checkNumber,
             bankName: body.bankName || check.bankName,
             branchName: body.branchName || null,
-            amount: body.amount ? parseFloat(body.amount) : check.amount,
+            amount: newAmount,
             dueDate: body.dueDate ? new Date(body.dueDate) : check.dueDate,
             payeeName: body.payeeName || null,
             description: body.description || null,
           },
         })
 
-        // ۲. ابطال سند قدیم (اگر وجود دارد)
         if (check.journalEntryId) {
           await tx.journalEntry.update({
             where: { id: check.journalEntryId },
@@ -268,9 +248,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           }).catch((err: any) => console.warn('[Checks PUT edit] Failed to cancel old JE:', err?.message))
         }
 
-        // ۳. صدور سند جدید با مقادیر به‌روز (فقط اگر چک هنوز pending است)
         if (check.status === 'pending') {
-          const newAmount = body.amount ? parseFloat(body.amount) : check.amount
           const accounts = await tx.account.findMany({ where: { tenantId } })
           const findAccountByCode = (code: string) => accounts.find((a: any) => a.code === code) || null
 
@@ -326,20 +304,13 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         }
       })
 
-      return NextResponse.json({
-        success: true,
-        message: 'چک ویرایش شد',
-      })
+      return NextResponse.json({ success: true, message: 'چک ویرایش شد' })
     }
 
-    // ★ در غیر این صورت، تغییر وضعیت
     return handleCheckStatus(req, ctx, tenant)
   } catch (error: any) {
     console.error('[Checks PUT] Error:', error?.message || error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در پردازش' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: false, error: 'خطا در پردازش' }, { status: 500 })
   }
 })
 
@@ -347,7 +318,14 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
   return handleCheckStatus(req, ctx, tenant)
 })
 
-// ★ تابع مشترک برای تغییر وضعیت چک
+// ═══════════════════════════════════════════════════════════════
+//  ★ v10.0: تابع مشترک برای تغییر وضعیت چک
+//  ★ اصلاح باگ: خواندن id از URL یا body
+//  ★ افزودن status "returned"
+//  ★ اصلاح rounding در همه موارد
+// ═══════════════════════════════════════════════════════════════
+// ★ تابع مشترک برای تغییر وضعیت چک (جایگزین تابع قبلی در route.ts شود)
+// ★ تابع مشترک برای تغییر وضعیت چک (نسخه اصلاح‌شده و نهایی)
 async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
   try {
     const tenantDb = tenant.tenantDb
@@ -364,7 +342,7 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
       )
     }
 
-    if (!['cleared', 'bounced', 'deposited', 'pending'].includes(status)) {
+    if (!['cleared', 'bounced', 'deposited', 'pending', 'returned'].includes(status)) {
       return NextResponse.json(
         { success: false, error: 'وضعیت نامعتبر است' },
         { status: 400 }
@@ -391,99 +369,72 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
         data: { status },
       })
 
-      // ۲. صدور سند برای وصول یا برگشت
-      if (status === 'cleared' || status === 'bounced') {
+      // ۲. صدور سند برای وصول، برگشت یا پس دادن/ابطال
+      if (status === 'cleared' || status === 'bounced' || status === 'returned') {
         const accounts = await tx.account.findMany({ where: { tenantId } })
         const findAccountByCode = (code: string) => accounts.find((a: any) => a.code === code) || null
 
-        const bankAccount = findAccountByCode('1100')
-        const checkRecvAccount = findAccountByCode('1350')
-        const checkPayAccount = findAccountByCode('2050')
+        const bankAccount = findAccountByCode('1100') // بانک
+        const checkRecvAccount = findAccountByCode('1350') // اسناد دریافتنی
+        const checkPayAccount = findAccountByCode('2050') // اسناد پرداختنی
+        const receivableAccount = findAccountByCode('1310') // حساب‌های دریافتنی تجاری (مشتری)
+        const payableAccount = findAccountByCode('2010') // حساب‌های پرداختنی تجاری (تامین‌کننده)
 
         const lines: any[] = []
 
         if (check.type === 'receivable') {
           if (status === 'cleared') {
             if (bankAccount && checkRecvAccount) {
-              lines.push({
-                accountId: bankAccount.id,
-                debit: check.amount,
-                credit: 0,
-                description: `بدهکار: وصول چک دریافتی ${check.checkNumber}`,
-              })
-              lines.push({
-                accountId: checkRecvAccount.id,
-                debit: 0,
-                credit: check.amount,
-                description: `بستانکار: تسویه چک دریافتی ${check.checkNumber}`,
-              })
+              lines.push({ accountId: bankAccount.id, debit: check.amount, credit: 0, description: `بدهکار: وصول چک دریافتی ${check.checkNumber}` })
+              lines.push({ accountId: checkRecvAccount.id, debit: 0, credit: check.amount, description: `بستانکار: تسویه چک دریافتی ${check.checkNumber}` })
             }
-          } else if (status === 'bounced') {
-            const receivableAccount = findAccountByCode('1310')
+          } else if (status === 'bounced' || status === 'returned') {
             if (receivableAccount && checkRecvAccount) {
-              lines.push({
-                accountId: receivableAccount.id,
-                debit: check.amount,
-                credit: 0,
-                description: `بدهکار: برگشت چک دریافتی ${check.checkNumber}`,
-              })
-              lines.push({
-                accountId: checkRecvAccount.id,
-                debit: 0,
-                credit: check.amount,
-                description: `بستانکار: برگشت چک دریافتی ${check.checkNumber}`,
-              })
+              const action = status === 'bounced' ? 'برگشت' : 'پس دادن'
+              lines.push({ accountId: receivableAccount.id, debit: check.amount, credit: 0, description: `بدهکار: ${action} چک دریافتی ${check.checkNumber}` })
+              lines.push({ accountId: checkRecvAccount.id, debit: 0, credit: check.amount, description: `بستانکار: ${action} چک دریافتی ${check.checkNumber}` })
             }
           }
-        } else {
+        } else { // payable
           if (status === 'cleared') {
             if (checkPayAccount && bankAccount) {
-              lines.push({
-                accountId: checkPayAccount.id,
-                debit: check.amount,
-                credit: 0,
-                description: `بدهکار: تسویه چک پرداختنی ${check.checkNumber}`,
-              })
-              lines.push({
-                accountId: bankAccount.id,
-                debit: 0,
-                credit: check.amount,
-                description: `بستانکار: پرداخت چک ${check.checkNumber} از بانک`,
-              })
+              lines.push({ accountId: checkPayAccount.id, debit: check.amount, credit: 0, description: `بدهکار: پرداخت/پاس شدن چک پرداختنی ${check.checkNumber}` })
+              lines.push({ accountId: bankAccount.id, debit: 0, credit: check.amount, description: `بستانکار: کسر از بانک بابت چک ${check.checkNumber}` })
             }
-          } else if (status === 'bounced') {
-            const payableAccount = findAccountByCode('2010')
+          } else if (status === 'bounced' || status === 'returned') {
             if (checkPayAccount && payableAccount) {
-              lines.push({
-                accountId: checkPayAccount.id,
-                debit: check.amount,
-                credit: 0,
-                description: `بدهکار: برگشت چک پرداختنی ${check.checkNumber}`,
-              })
-              lines.push({
-                accountId: payableAccount.id,
-                debit: 0,
-                credit: check.amount,
-                description: `بستانکار: برگشت چک پرداختنی ${check.checkNumber}`,
-              })
+              const action = status === 'bounced' ? 'برگشت' : 'ابطال/پس گرفتن'
+              lines.push({ accountId: checkPayAccount.id, debit: check.amount, credit: 0, description: `بدهکار: ${action} چک پرداختنی ${check.checkNumber}` })
+              lines.push({ accountId: payableAccount.id, debit: 0, credit: check.amount, description: `بستانکار: ${action} چک پرداختنی ${check.checkNumber}` })
             }
           }
         }
 
         if (lines.length >= 2) {
-          const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
-          const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
+          // ★★★ اصلاح: استفاده از Number() برای جلوگیری از خطای جمع Decimal در Prisma v10
+          const totalDebit = lines.reduce((s: number, l: any) => s + Number(l.debit), 0)
+          const totalCredit = lines.reduce((s: number, l: any) => s + Number(l.credit), 0)
 
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
           const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+
+          // ★★★ اصلاح هوشمند کلمه عملیات بر اساس نوع چک
+          let actionWord = ''
+          if (status === 'cleared') {
+            actionWord = check.type === 'receivable' ? 'وصول' : 'پرداخت'
+          } else if (status === 'bounced') {
+            actionWord = 'برگشت'
+          } else {
+            actionWord = check.type === 'receivable' ? 'پس دادن' : 'ابطال'
+          }
 
           await tx.journalEntry.create({
             data: {
               number: jeNumber,
               date: new Date(),
-              description: `سند خودکار — ${status === 'cleared' ? 'وصول' : 'برگشت'} چک ${check.checkNumber}`,
+              description: `سند سیستمی — ${actionWord} چک ${check.checkNumber}`,
               status: 'posted',
-              sourceType: 'check_status',
+              sourceType: 'check_status', // ★★★ این مقدار باید در فرانت‌اند به "تغییر وضعیت چک" ترجمه شود
               sourceId: check.id,
               totalDebit,
               totalCredit,
@@ -497,9 +448,10 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
     })
 
     const statusLabels: Record<string, string> = {
-      cleared: 'وصول شد',
+      cleared: check.type === 'receivable' ? 'وصول شد' : 'پرداخت شد',
       bounced: 'برگشت خورد',
       deposited: 'به بانک سپرده شد',
+      returned: check.type === 'receivable' ? 'پس داده شد' : 'باطل شد',
       pending: 'در انتظار',
     }
 
@@ -517,9 +469,7 @@ async function handleCheckStatus(req: NextRequest, ctx: any, tenant: any) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/checks — حذف چک
-//  ★★★ v9.0: ابطال سند + حذف چک داخل یک Transaction
-//  Query: id
+//  DELETE /api/checks
 // ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -529,28 +479,18 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
     const id = searchParams.get('id')
 
     if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'شناسه چک الزامی است' },
-        { status: 400 }
-      )
+      return NextResponse.json({ success: false, error: 'شناسه چک الزامی است' }, { status: 400 })
     }
 
-    const check = await tenantDb.check.findFirst({
-      where: { id, tenantId },
-    })
+    const check = await tenantDb.check.findFirst({ where: { id, tenantId } })
 
     if (!check) {
-      return NextResponse.json(
-        { success: false, error: 'چک یافت نشد' },
-        { status: 404 }
-      )
+      return NextResponse.json({ success: false, error: 'چک یافت نشد' }, { status: 404 })
     }
 
-    // ★★★ v9.0: ابطال سند + حذف چک داخل یک Transaction
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     await txClient.$transaction(async (tx: any) => {
-      // ۱. ابطال سند مربوطه (اگه وجود داره)
       if (check.journalEntryId) {
         await tx.journalEntry.update({
           where: { id: check.journalEntryId },
@@ -564,7 +504,6 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
         }).catch((err: any) => console.warn('[Checks DELETE] Failed to cancel JE:', err?.message))
       }
 
-      // ۲. ابطال سندهای تغییر وضعیت مرتبط (sourceType: 'check_status')
       await tx.journalEntry.updateMany({
         where: { sourceType: 'check_status', sourceId: check.id, tenantId },
         data: {
@@ -575,19 +514,12 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
         },
       }).catch((err: any) => console.warn('[Checks DELETE] Failed to cancel status JEs:', err?.message))
 
-      // ۳. حذف چک
       await tx.check.delete({ where: { id } })
     })
 
-    return NextResponse.json({
-      success: true,
-      message: 'چک حذف شد',
-    })
+    return NextResponse.json({ success: true, message: 'چک حذف شد' })
   } catch (error: any) {
     console.error('[Checks DELETE] Error:', error?.message || error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در حذف چک' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: false, error: 'خطا در حذف چک' }, { status: 500 })
   }
 })

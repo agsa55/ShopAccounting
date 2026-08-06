@@ -1,7 +1,7 @@
 // ============================================================================
 // src/components/reports/profit-loss-report.tsx — v9.4 ★★★
 // سازگار با API v8.7 و v9.1 و v9.2
-// ★ v9.4: اضافه شدن "ریال" در سمت چپ تمام مبالغ
+// ★ v9.4: اضافه شدن "ریال" در سمت چپ تمام مبالغ + اصلاح ساختار نمایش فیلترها
 // ============================================================================
 
 'use client'
@@ -10,10 +10,11 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   TrendingUp, TrendingDown, Coins, FileText, Scale, Package,
   Loader2, Download, Printer, Calendar, AlertCircle, BarChart3,
-  PieChart as PieIcon, Layers, Crown, CheckCircle2, Database,
+  PieChart as PieIcon, Layers, Crown, CheckCircle2, Database, Building2,
 } from 'lucide-react'
 import {
   ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis,
@@ -21,7 +22,7 @@ import {
 } from 'recharts'
 
 // ============================================================================
-//  Types — سازگار با v8.7 + v9.1 + v9.2
+//  Types
 // ============================================================================
 
 interface PnLData {
@@ -94,7 +95,6 @@ function formatNumberFa(n: number): string {
   return Math.abs(n || 0).toLocaleString('fa-IR')
 }
 
-// ★ v9.4: فرمت مبلغ با واحد ریال در انتها
 function formatCurrency(n: number): string {
   return `${Math.abs(n || 0).toLocaleString('fa-IR')} ریال`
 }
@@ -175,10 +175,10 @@ function daysInJalaliMonth(jy: number, jm: number): number {
   if (jm <= 6) return 31; if (jm <= 11) return 30
   return isJalaliLeapYear(jy) ? 30 : 29
 }
+
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
   try {
-    // ★ parsing دستی برای جلوگیری از باگ timezone
     const parts = iso.split('-')
     if (parts.length !== 3) return null
     const gy = parseInt(parts[0], 10)
@@ -190,19 +190,17 @@ function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null
   } catch { return null }
 }
 
-
 function jalaliToISO(jy: number, jm: number, jd: number): string {
   const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd)
   return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
 }
-function jalaliToGregorianISO(jy: number, jm: number, jd: number): string {
-  return jalaliToISO(jy, jm, jd)
-}
+
 function formatJalaliLong(isoDate: string): string {
   const d = new Date(isoDate); if (isNaN(d.getTime())) return '—'
   const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
   return `${toFaNum(jd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}`
 }
+
 function formatMonthLabel(monthKey: string): string {
   const [y, m] = monthKey.split('-'); const mi = parseInt(m) - 1
   if (mi < 0 || mi > 11) return monthKey
@@ -225,19 +223,20 @@ function daysAgoISO(n: number): string {
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
 function getAuthHeaders(): HeadersInit {
   if (typeof window === 'undefined') return {}
   const token = localStorage.getItem('token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
+
 function getDefaultDateRange(): { from: string; to: string } {
   const now = new Date()
   const [jy, jm] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
-  const firstOfMonth = jalaliToGregorianISO(jy, jm, 1)
+  const firstOfMonth = jalaliToISO(jy, jm, 1)
   return { from: firstOfMonth, to: todayGregorianISO() }
 }
 
-// ★ helper: استخراج بهای تمام شده از هر نسخه API
 function extractCogsInfo(data: PnLData): {
   cogsNet: number
   cogsFromSales: number
@@ -245,7 +244,6 @@ function extractCogsInfo(data: PnLData): {
   isJEBased: boolean
 } {
   const isJEBased = data._dataSource === 'journal_entry'
-
   if (data.cogsFromSales !== undefined && data.cogsFromReturns !== undefined) {
     return {
       cogsNet: data.cogs,
@@ -300,7 +298,6 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
     return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2, '۰')}/${toFaNum(j.jd).padStart(2, '۰')}`
   }, [value])
 
-  // ★ اصلاح‌شده: استفاده از timezone محلی برای iso امروز
   const todayJalali = useMemo(() => {
     const now = new Date()
     const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
@@ -472,7 +469,7 @@ function PersianDateRangePicker({ value, onChange, size = 'md' }: DateRangePicke
 }
 
 // ============================================================================
-//  StatCard — نسخه گرادیان (مثل صفحه گزارش)
+//  StatCard
 // ============================================================================
 
 interface StatCardProps {
@@ -538,11 +535,34 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
   const [error, setError] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<{ from: string; to: string }>(getDefaultDateRange())
 
+  // ★★★ Stateهای جدید برای فیلتر شعبه
+  const [branchId, setBranchId] = useState<string>('all')
+  const [branches, setBranches] = useState<any[]>([])
+
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const res = await fetch('/api/branches', { headers: getAuthHeaders() })
+        const jsonData = await res.json()
+        if (jsonData.success) setBranches(jsonData.data || [])
+      } catch (err) {
+        console.error('Failed to fetch branches', err)
+      }
+    }
+    fetchBranches()
+  }, [])
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const params = new URLSearchParams({ dateFrom: dateRange.from, dateTo: dateRange.to })
+
+      // ★★★ ارسال branchId به بک‌اند اگر "همه شعب" انتخاب نشده باشد
+      if (branchId !== 'all') {
+        params.set('branchId', branchId)
+      }
+      
       const res = await fetch(`/api/reports/profit-loss?${params.toString()}`, {
         headers: getAuthHeaders(),
       })
@@ -559,13 +579,12 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
     } finally {
       setLoading(false)
     }
-  }, [dateRange.from, dateRange.to])
+  }, [dateRange.from, dateRange.to, branchId])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   const isProfit = data ? data.netProfit >= 0 : true
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
   const cogsInfo = data ? extractCogsInfo(data) : null
 
   const handleExportExcel = () => {
@@ -603,363 +622,374 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
     printWindow.document.close()
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-2" />
-        <p className="text-sm text-gray-500">در حال محاسبه گزارش سود و زیان...</p>
-        <p className="text-xs text-gray-400 mt-1">بهای تمام شده از اسناد حسابداری استخراج می‌شود</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
-        </div>
-        <EmptyState message={error} />
-      </div>
-    )
-  }
-
-  if (!data || (data.invoiceCount === 0 && data.netSales === 0 && data.cogs === 0)) {
-    return (
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
-          <Button variant="outline" size="sm" onClick={fetchData} className="h-9 text-xs">
-            بارگذاری مجدد
-          </Button>
-        </div>
-        <EmptyState message="در این بازه زمانی داده‌ای برای نمایش وجود ندارد" />
-      </div>
-    )
-  }
-
+  // ========================================================================
+  //  ★★★ RENDER: ساختار اصلاح‌شده برای نمایش همیشگی فیلترها
+  // ========================================================================
   return (
     <div className="space-y-3 sm:space-y-4">
-      {/* Header badges */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
-          <Scale className="w-3 h-3 ml-1" />
-          صورت سود و زیان — {data._version || 'v8.7'}
-        </Badge>
-        {data._dataSource && (
-          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-            <Database className="w-3 h-3 ml-1" />
-            {data._dataSource === 'journal_entry' ? 'از اسناد حسابداری' : 'از فاکتورها'}
-          </Badge>
-        )}
-        {(data.returnCount ?? 0) > 0 && (
-          <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
-            {toFaNum(data.returnCount!)} برگشتی
-          </Badge>
-        )}
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+      
+      {/* ۱. نوار ابزار: همیشه در بالای صفحه نمایش داده می‌شود */}
+      <div className="flex flex-wrap items-end gap-2 sm:gap-3 bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
         <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
+        
+        {/* فیلتر شعبه */}
+        <div className="min-w-[150px]">
+          <label className="text-[10px] text-gray-500 mb-0.5 block">شعبه</label>
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger className="h-9 text-xs">
+              <Building2 className="w-3.5 h-3.5 ml-1 text-gray-400" />
+              <SelectValue placeholder="همه شعب" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">همه شعب (تلفیقی)</SelectItem>
+              {branches.map((b: any) => (
+                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="flex items-center gap-1.5 mr-auto">
-          <Button variant="outline" size="sm" onClick={handleExportExcel} className="h-9 text-xs">
+          <Button variant="outline" size="sm" onClick={handleExportExcel} className="h-9 text-xs" disabled={!data}>
             <Download className="w-3.5 h-3.5 ml-1" />
             اکسل
           </Button>
-          <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 text-xs">
+          <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 text-xs" disabled={!data}>
             <Printer className="w-3.5 h-3.5 ml-1" />
             چاپ
           </Button>
         </div>
       </div>
 
-      {/* KPI Cards — نسخه گرادیان */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-        <StatCard
-          label="درآمد خالص فروش" value={data.netSales}
-          icon={<TrendingUp className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="ریال"
-          hint={`${toFaNum(data.invoiceCount)} فاکتور`}
-        />
-        <StatCard
-          label="سود ناخالص" value={data.grossProfit}
-          icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="ریال"
-          hint={`درصد سود: ${toFaNum(data.grossMargin.toFixed(1))}٪`}
-        />
-        <StatCard
-          label="سود عملیاتی" value={data.operatingProfit}
-          icon={<FileText className="w-3.5 h-3.5 text-white" />} color="amber" suffix="ریال"
-        />
-        <StatCard
-          label={isProfit ? 'سود خالص' : 'زیان خالص'}
-          value={Math.abs(data.netProfit)}
-          icon={isProfit ? <TrendingUp className="w-3.5 h-3.5 text-white" /> : <TrendingDown className="w-3.5 h-3.5 text-white" />}
-          color={isProfit ? 'emerald' : 'red'} suffix="ریال"
-          hint={`درصد سود: ${toFaNum(data.netMargin.toFixed(1))}٪`}
-        />
-      </div>
+      {/* ۲. وضعیت بارگذاری */}
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-12 bg-white rounded-lg border border-gray-200">
+          <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-2" />
+          <p className="text-sm text-gray-500">در حال محاسبه گزارش سود و زیان...</p>
+        </div>
+      )}
 
-      {/* ★ جزئیات بهای تمام شده — سازگار با همه نسخه‌ها */}
-      {cogsInfo && (
-        <Card className="border-blue-200 bg-blue-50/50">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-blue-600" />
-                <span className="text-xs sm:text-sm font-bold text-blue-900">
-                  جزئیات بهای تمام شده کالای فروش رفته
-                  {cogsInfo.isJEBased && (
-                    <span className="text-[10px] font-normal text-blue-600 mr-2">از اسناد حسابداری</span>
-                  )}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">بهای تمام شده فروش:</span>
-                  {/* ★ v9.4: اضافه شدن "ریال" */}
-                  <span className="font-bold text-emerald-700" dir="rtl">
-                    {formatCurrency(cogsInfo.cogsFromSales)}
-                  </span>
-                </div>
-                {cogsInfo.cogsFromReturns > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-gray-500">کم: بهای تمام شده برگشتی:</span>
-                    {/* ★ v9.4: اضافه شدن "ریال" */}
-                    <span className="font-bold text-amber-700" dir="rtl">
-                      ({formatCurrency(cogsInfo.cogsFromReturns)})
+      {/* ۳. وضعیت خطا */}
+      {error && !loading && (
+        <div className="flex flex-col items-center justify-center py-12 bg-white rounded-lg border border-red-200">
+          <AlertCircle className="w-10 h-10 mb-2 text-red-500" />
+          <p className="text-sm text-red-600 font-medium">{error}</p>
+          <Button variant="outline" size="sm" onClick={fetchData} className="h-8 text-xs mt-3">
+            تلاش مجدد
+          </Button>
+        </div>
+      )}
+
+      {/* ۴. وضعیت خالی بودن داده (فیلترها بالای این بخش هستند و کاربر می‌تواند آن‌ها را تغییر دهد) */}
+      {!loading && !error && (!data || (data.invoiceCount === 0 && data.netSales === 0 && data.cogs === 0)) && (
+        <div className="flex flex-col items-center justify-center py-12 bg-white rounded-lg border border-dashed border-gray-300">
+          <AlertCircle className="w-10 h-10 mb-2 text-gray-300" />
+          <p className="text-sm text-gray-500 font-medium">در این بازه زمانی و برای این شعبه، داده‌ای یافت نشد.</p>
+          <p className="text-xs text-gray-400 mt-1 mb-3">لطفاً بازه تاریخ را گسترش دهید یا فیلتر شعبه را روی "همه شعب" قرار دهید.</p>
+          <Button variant="outline" size="sm" onClick={fetchData} className="h-8 text-xs">
+            تلاش مجدد
+          </Button>
+        </div>
+      )}
+
+      {/* ۵. نمایش داده‌ها (فقط وقتی داده وجود دارد) */}
+      {!loading && !error && data && (data.invoiceCount > 0 || data.netSales > 0 || data.cogs > 0) && (
+        <>
+          {/* Header badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+              <Scale className="w-3 h-3 ml-1" />
+              صورت سود و زیان — {data._version || 'v9.2'}
+            </Badge>
+            {data._dataSource && (
+              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                <Database className="w-3 h-3 ml-1" />
+                {data._dataSource === 'journal_entry' ? 'از اسناد حسابداری' : 'از فاکتورها'}
+              </Badge>
+            )}
+            {(data.returnCount ?? 0) > 0 && (
+              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                {toFaNum(data.returnCount!)} برگشتی
+              </Badge>
+            )}
+          </div>
+
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+            <StatCard
+              label="درآمد خالص فروش" value={data.netSales}
+              icon={<TrendingUp className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="ریال"
+              hint={`${toFaNum(data.invoiceCount)} فاکتور`}
+            />
+            <StatCard
+              label="سود ناخالص" value={data.grossProfit}
+              icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="ریال"
+              hint={`درصد سود: ${toFaNum(data.grossMargin.toFixed(1))}٪`}
+            />
+            <StatCard
+              label="سود عملیاتی" value={data.operatingProfit}
+              icon={<FileText className="w-3.5 h-3.5 text-white" />} color="amber" suffix="ریال"
+            />
+            <StatCard
+              label={isProfit ? 'سود خالص' : 'زیان خالص'}
+              value={Math.abs(data.netProfit)}
+              icon={isProfit ? <TrendingUp className="w-3.5 h-3.5 text-white" /> : <TrendingDown className="w-3.5 h-3.5 text-white" />}
+              color={isProfit ? 'emerald' : 'red'} suffix="ریال"
+              hint={`درصد سود: ${toFaNum(data.netMargin.toFixed(1))}٪`}
+            />
+          </div>
+
+          {/* جزئیات بهای تمام شده */}
+          {cogsInfo && (
+            <Card className="border-blue-200 bg-blue-50/50">
+              <CardContent className="p-3 sm:p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs sm:text-sm font-bold text-blue-900">
+                      جزئیات بهای تمام شده کالای فروش رفته
+                      {cogsInfo.isJEBased && (
+                        <span className="text-[10px] font-normal text-blue-600 mr-2">از اسناد حسابداری</span>
+                      )}
                     </span>
                   </div>
-                )}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-gray-500">بهای تمام شده خالص:</span>
-                  {/* ★ v9.4: اضافه شدن "ریال" */}
-                  <span className="font-bold text-blue-700" dir="rtl">
-                    {formatCurrency(cogsInfo.cogsNet)}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-500">بهای تمام شده فروش:</span>
+                      <span className="font-bold text-emerald-700" dir="rtl">
+                        {formatCurrency(cogsInfo.cogsFromSales)}
+                      </span>
+                    </div>
+                    {cogsInfo.cogsFromReturns > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-gray-500">کم: بهای تمام شده برگشتی:</span>
+                        <span className="font-bold text-amber-700" dir="rtl">
+                          ({formatCurrency(cogsInfo.cogsFromReturns)})
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-500">بهای تمام شده خالص:</span>
+                      <span className="font-bold text-blue-700" dir="rtl">
+                        {formatCurrency(cogsInfo.cogsNet)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
+          )}
 
-      {/* Monthly trend chart */}
-      {data.monthlyBreakdown && data.monthlyBreakdown.length > 0 && (
-        <Card className="border-gray-200">
-          <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-            <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
-              روند ماهانه سود و زیان
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-            <div style={{ width: '100%', height: 280 }}>
-              <ResponsiveContainer>
-                <ComposedChart data={data.monthlyBreakdown}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="month" tickFormatter={formatMonthLabel} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatNumberFa(v)} width={80} />
-                  <Tooltip formatter={(value: number, name: string) => [formatNumberFa(value), name]} labelFormatter={label => formatMonthLabel(label as string)} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="revenue" name="فروش" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="cogs" name="بهای تمام شده" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  <Line type="monotone" dataKey="netProfit" name="سود خالص" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Two-column: P&L Statement + Category Pie */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
-        {/* P&L Statement */}
-        <Card className="border-gray-200 lg:col-span-2">
-          <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6 pt-3 sm:pt-6">
-            <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
-              <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
-              صورت سود و زیان استاندارد
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              دوره: {periodText} • تعداد فاکتور: {toFaNum(data.invoiceCount)}
-              {(data.returnCount ?? 0) > 0 && ` • برگشتی: ${toFaNum(data.returnCount!)}`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-            <div className="space-y-1">
-              {/* ۱. درآمد فروش */}
-              <div className="py-2 border-b-2 border-gray-200">
-                <p className="text-xs font-bold text-gray-700">۱. درآمد فروش</p>
-              </div>
-              <PnLRow label="فروش کالا و خدمات" value={data.grossSales} color="emerald" indent={false} />
-              {data.salesReturns > 0 && (
-                <PnLRow label="کم: بازگشت از فروش" value={data.salesReturns} color="red" negative indent />
-              )}
-              {data.discounts > 0 && (
-                <PnLRow label="کم: تخفیفات" value={data.discounts} color="red" negative indent />
-              )}
-              <PnLRow label="درآمد خالص فروش" value={data.netSales} color="emerald" bold highlight="emerald" />
-
-              {/* ۲. بهای تمام شده */}
-              <div className="py-2 border-b-2 border-gray-200 mt-3">
-                <p className="text-xs font-bold text-gray-700">۲. بهای تمام شده کالای فروش رفته</p>
-              </div>
-              <PnLRow
-                label={`از انبار (میانگین وزنی)${cogsInfo?.isJEBased ? ' — از اسناد حسابداری' : ''}`}
-                value={data.cogs} color="gray" indent
-              />
-              <PnLRow label="سود ناخالص" value={data.grossProfit} color="blue" bold highlight="blue" />
-
-              {/* ۳. هزینه‌های عملیاتی */}
-              <div className="py-2 border-b-2 border-gray-200 mt-3">
-                <p className="text-xs font-bold text-gray-700">۳. هزینه‌های عملیاتی</p>
-              </div>
-              {data.operatingExpenses.length === 0 ? (
-                <p className="text-xs text-gray-400 pr-4 py-1.5">هزینه عملیاتی ثبت نشده است</p>
-              ) : (
-                data.operatingExpenses.map((exp, idx) => (
-                  <PnLRow key={idx} label={exp.name} value={exp.amount} color="red" negative indent />
-                ))
-              )}
-              <PnLRow label="سود عملیاتی" value={data.operatingProfit} color="amber" bold highlight="amber" />
-
-              {/* ۴. سایر */}
-              <div className="py-2 border-b-2 border-gray-200 mt-3">
-                <p className="text-xs font-bold text-gray-700">۴. سایر درآمدها و هزینه‌ها</p>
-              </div>
-              <PnLRow label="سایر درآمدها" value={data.otherIncome} color="emerald" indent />
-              <PnLRow label="سایر هزینه‌ها" value={data.otherExpenses} color="red" negative indent />
-              <PnLRow label="سود قبل از مالیات" value={data.profitBeforeTax} color="gray" bold highlight="gray" />
-
-              {/* ۵. مالیات */}
-              <div className="py-2 border-b-2 border-gray-200 mt-3">
-                <p className="text-xs font-bold text-gray-700">۵. مالیات بر درآمد</p>
-              </div>
-              <PnLRow label="مالیات بر درآمد" value={data.incomeTax} color="red" negative indent />
-
-              {/* سود خالص */}
-              <div className={`flex justify-between items-center py-3 mt-2 border-2 rounded-lg px-3 ${
-                isProfit ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'
-              }`}>
-                <span className="text-sm sm:text-base font-bold text-gray-900">
-                  {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
-                </span>
-                <span className={`text-base sm:text-lg font-bold ${isProfit ? 'text-emerald-700' : 'text-red-700'}`} dir="ltr">
-                  {formatCurrency(Math.abs(data.netProfit))}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Category Pie */}
-        <Card className="border-gray-200">
-          <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-            <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
-              <PieIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-              سود ناخالص به تفکیک دسته
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-            {!data.categoryBreakdown || data.categoryBreakdown.length === 0 ? (
-              <EmptyState message="داده‌ای موجود نیست" />
-            ) : (
-              <>
-                <div style={{ width: '100%', height: 200 }}>
+          {/* Monthly trend chart */}
+          {data.monthlyBreakdown && data.monthlyBreakdown.length > 0 && (
+            <Card className="border-gray-200">
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+                <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+                  روند ماهانه سود و زیان
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                <div style={{ width: '100%', height: 280 }}>
                   <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={data.categoryBreakdown} dataKey="grossProfit" nameKey="categoryName" cx="50%" cy="50%" outerRadius={70}>
-                        {data.categoryBreakdown.map((_, idx) => (
-                          <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value: number) => formatNumberFa(value)} />
-                    </PieChart>
+                    <ComposedChart data={data.monthlyBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="month" tickFormatter={formatMonthLabel} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                      <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatNumberFa(v)} width={80} />
+                      <Tooltip formatter={(value: number, name: string) => [formatNumberFa(value), name]} labelFormatter={label => formatMonthLabel(label as string)} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="revenue" name="فروش" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="cogs" name="بهای تمام شده" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                      <Line type="monotone" dataKey="netProfit" name="سود خالص" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="mt-3 space-y-1 max-h-[180px] overflow-y-auto">
-                  {data.categoryBreakdown.map((cat, idx) => (
-                    <div key={cat.categoryId} className="flex items-center justify-between text-xs py-1 border-b border-gray-100">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
-                        <span className="text-gray-700">{cat.categoryName}</span>
-                      </div>
-                      {/* ★ v9.4: اضافه شدن "ریال" */}
-                      <span className="font-bold text-emerald-700" dir="ltr">{formatCurrency(cat.grossProfit)}</span>
-                    </div>
-                  ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Two-column: P&L Statement + Category Pie */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+            {/* P&L Statement */}
+            <Card className="border-gray-200 lg:col-span-2">
+              <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6 pt-3 sm:pt-6">
+                <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
+                  <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+                  صورت سود و زیان استاندارد
+                </CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
+                  دوره: {periodText} • تعداد فاکتور: {toFaNum(data.invoiceCount)}
+                  {(data.returnCount ?? 0) > 0 && ` • برگشتی: ${toFaNum(data.returnCount!)}`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                <div className="space-y-1">
+                  <div className="py-2 border-b-2 border-gray-200">
+                    <p className="text-xs font-bold text-gray-700">۱. درآمد فروش</p>
+                  </div>
+                  <PnLRow label="فروش کالا و خدمات" value={data.grossSales} color="emerald" indent={false} />
+                  {data.salesReturns > 0 && (
+                    <PnLRow label="کم: بازگشت از فروش" value={data.salesReturns} color="red" negative indent />
+                  )}
+                  {data.discounts > 0 && (
+                    <PnLRow label="کم: تخفیفات" value={data.discounts} color="red" negative indent />
+                  )}
+                  <PnLRow label="درآمد خالص فروش" value={data.netSales} color="emerald" bold highlight="emerald" />
+
+                  <div className="py-2 border-b-2 border-gray-200 mt-3">
+                    <p className="text-xs font-bold text-gray-700">۲. بهای تمام شده کالای فروش رفته</p>
+                  </div>
+                  <PnLRow
+                    label={`از انبار (میانگین وزنی)${cogsInfo?.isJEBased ? ' — از اسناد حسابداری' : ''}`}
+                    value={data.cogs} color="gray" indent
+                  />
+                  <PnLRow label="سود ناخالص" value={data.grossProfit} color="blue" bold highlight="blue" />
+
+                  <div className="py-2 border-b-2 border-gray-200 mt-3">
+                    <p className="text-xs font-bold text-gray-700">۳. هزینه‌های عملیاتی</p>
+                  </div>
+                  {data.operatingExpenses.length === 0 ? (
+                    <p className="text-xs text-gray-400 pr-4 py-1.5">هزینه عملیاتی ثبت نشده است</p>
+                  ) : (
+                    data.operatingExpenses.map((exp, idx) => (
+                      <PnLRow key={idx} label={exp.name} value={exp.amount} color="red" negative indent />
+                    ))
+                  )}
+                  <PnLRow label="سود عملیاتی" value={data.operatingProfit} color="amber" bold highlight="amber" />
+
+                  <div className="py-2 border-b-2 border-gray-200 mt-3">
+                    <p className="text-xs font-bold text-gray-700">۴. سایر درآمدها و هزینه‌ها</p>
+                  </div>
+                  <PnLRow label="سایر درآمدها" value={data.otherIncome} color="emerald" indent />
+                  <PnLRow label="سایر هزینه‌ها" value={data.otherExpenses} color="red" negative indent />
+                  <PnLRow label="سود قبل از مالیات" value={data.profitBeforeTax} color="gray" bold highlight="gray" />
+
+                  <div className="py-2 border-b-2 border-gray-200 mt-3">
+                    <p className="text-xs font-bold text-gray-700">۵. مالیات بر درآمد</p>
+                  </div>
+                  <PnLRow label="مالیات بر درآمد" value={data.incomeTax} color="red" negative indent />
+
+                  <div className={`flex justify-between items-center py-3 mt-2 border-2 rounded-lg px-3 ${
+                    isProfit ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'
+                  }`}>
+                    <span className="text-sm sm:text-base font-bold text-gray-900">
+                      {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
+                    </span>
+                    <span className={`text-base sm:text-lg font-bold ${isProfit ? 'text-emerald-700' : 'text-red-700'}`} dir="ltr">
+                      {formatCurrency(Math.abs(data.netProfit))}
+                    </span>
+                  </div>
                 </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              </CardContent>
+            </Card>
 
-      {/* Top 10 Products */}
-      {data.topProfitableProducts && data.topProfitableProducts.length > 0 && (
-        <Card className="border-gray-200">
-          <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-            <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
-              <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500" />
-              ۱۰ محصول برتر از نظر سودآوری
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b-2 border-gray-200 bg-gray-50">
-                    <th className="py-2 px-2 text-right text-gray-600">رتبه</th>
-                    <th className="py-2 px-2 text-right text-gray-600">نام محصول</th>
-                    <th className="py-2 px-2 text-center text-gray-600">تعداد</th>
-                    <th className="py-2 px-2 text-left text-gray-600">فروش</th>
-                    <th className="py-2 px-2 text-left text-gray-600">بهای تمام شده</th>
-                    <th className="py-2 px-2 text-left text-gray-600">سود</th>
-                    <th className="py-2 px-2 text-center text-gray-600">درصد سود</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.topProfitableProducts.map((p, idx) => (
-                    <tr key={p.productId} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-2">
-                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${
-                          idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
-                        }`}>{toFaNum(idx + 1)}</span>
-                      </td>
-                      <td className="py-2 px-2 font-medium text-gray-800">{p.productName}</td>
-                      <td className="py-2 px-2 text-center" dir="ltr">{toFaNum(p.quantity)}</td>
-                      {/* ★ v9.4: اضافه شدن "ریال" */}
-                      <td className="py-2 px-2 text-left text-emerald-700" dir="rtl">{formatCurrency(p.revenue)}</td>
-                      <td className="py-2 px-2 text-left text-red-500" dir="rtl">{formatCurrency(p.cogs)}</td>
-                      <td className="py-2 px-2 text-left font-bold text-blue-700" dir="rtl">{formatCurrency(p.grossProfit)}</td>
-                      <td className="py-2 px-2 text-center">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
-                          {toFaNum(p.margin)}٪
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+            {/* Category Pie */}
+            <Card className="border-gray-200">
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+                <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
+                  <PieIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+                  سود ناخالص به تفکیک دسته
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                {!data.categoryBreakdown || data.categoryBreakdown.length === 0 ? (
+                  <EmptyState message="داده‌ای موجود نیست" />
+                ) : (
+                  <>
+                    <div style={{ width: '100%', height: 200 }}>
+                      <ResponsiveContainer>
+                        <PieChart>
+                          <Pie data={data.categoryBreakdown} dataKey="grossProfit" nameKey="categoryName" cx="50%" cy="50%" outerRadius={70}>
+                            {data.categoryBreakdown.map((_, idx) => (
+                              <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip formatter={(value: number) => formatNumberFa(value)} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-3 space-y-1 max-h-[180px] overflow-y-auto">
+                      {data.categoryBreakdown.map((cat, idx) => (
+                        <div key={cat.categoryId} className="flex items-center justify-between text-xs py-1 border-b border-gray-100">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                            <span className="text-gray-700">{cat.categoryName}</span>
+                          </div>
+                          <span className="font-bold text-emerald-700" dir="ltr">{formatCurrency(cat.grossProfit)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Top 10 Products */}
+          {data.topProfitableProducts && data.topProfitableProducts.length > 0 && (
+            <Card className="border-gray-200">
+              <CardHeader className="pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+                <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
+                  <Crown className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500" />
+                  ۱۰ محصول برتر از نظر سودآوری
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs sm:text-sm">
+                    <thead>
+                      <tr className="border-b-2 border-gray-200 bg-gray-50">
+                        <th className="py-2 px-2 text-right text-gray-600">رتبه</th>
+                        <th className="py-2 px-2 text-right text-gray-600">نام محصول</th>
+                        <th className="py-2 px-2 text-center text-gray-600">تعداد</th>
+                        <th className="py-2 px-2 text-left text-gray-600">فروش</th>
+                        <th className="py-2 px-2 text-left text-gray-600">بهای تمام شده</th>
+                        <th className="py-2 px-2 text-left text-gray-600">سود</th>
+                        <th className="py-2 px-2 text-center text-gray-600">درصد سود</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.topProfitableProducts.map((p, idx) => (
+                        <tr key={p.productId} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-2">
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${
+                              idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+                            }`}>{toFaNum(idx + 1)}</span>
+                          </td>
+                          <td className="py-2 px-2 font-medium text-gray-800">{p.productName}</td>
+                          <td className="py-2 px-2 text-center" dir="ltr">{toFaNum(p.quantity)}</td>
+                          <td className="py-2 px-2 text-left text-emerald-700" dir="rtl">{formatCurrency(p.revenue)}</td>
+                          <td className="py-2 px-2 text-left text-red-500" dir="rtl">{formatCurrency(p.cogs)}</td>
+                          <td className="py-2 px-2 text-left font-bold text-blue-700" dir="rtl">{formatCurrency(p.grossProfit)}</td>
+                          <td className="py-2 px-2 text-center">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                              {toFaNum(p.margin)}٪
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Footer */}
+          <div className="flex items-center justify-center gap-2 text-[10px] text-gray-400 py-2">
+            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+            <span>
+              گزارش سود و زیان — {data._version || 'v9.2'} — منبع: {data._dataSource === 'journal_entry' ? 'اسناد حسابداری' : 'فاکتورها'}
+            </span>
+          </div>
+        </>
       )}
-
-      {/* Footer */}
-      <div className="flex items-center justify-center gap-2 text-[10px] text-gray-400 py-2">
-        <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-        <span>
-          گزارش سود و زیان — {data._version || 'v8.7'} — منبع: {data._dataSource === 'journal_entry' ? 'اسناد حسابداری' : 'فاکتورها'}
-        </span>
-      </div>
     </div>
   )
 }
 
 // ============================================================================
-//  PnLRow — ردیف استاندارد صورت سود و زیان
-//  ★ v9.4: اضافه شدن "ریال" در سمت چپ تمام مبالغ
+//  PnLRow
 // ============================================================================
 
 function PnLRow({
@@ -995,7 +1025,7 @@ function PnLRow({
 }
 
 // ============================================================================
-//  Print HTML — ★ v9.4: اضافه شدن "ریال"
+//  Print HTML
 // ============================================================================
 
 function generatePrintHtml(data: PnLData, periodText: string): string {

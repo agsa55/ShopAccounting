@@ -1,5 +1,5 @@
 // ============================================================================
-// src/app/api/recurring-journals/[id]/route.ts — PUT/DELETE (v5.3 ★★★ Phase 4)
+// src/app/api/recurring-journals/[id]/route.ts — PUT/DELETE (v5.4 ★★★ Final)
 // ShopAccounting — Recurring Journals API (Update/Delete)
 // ============================================================================
 
@@ -17,16 +17,14 @@ export const PUT = withTenantAndPermission('accounting')(
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
-      const id = ctx?.params?.id
+      // ★★★ در Next.js 15+ پارامترها ممکن است Promise باشند
+      const params = await Promise.resolve(ctx.params)
+      const id = params?.id
 
       if (!id) {
-        return NextResponse.json(
-          { success: false, error: 'شناسه الزامی است' },
-          { status: 400 }
-        )
+        return NextResponse.json({ success: false, error: 'شناسه الزامی است' }, { status: 400 })
       }
 
-      // ★ بررسی پلن
       const features = getFeaturesByPlanName(tenant.planTierName)
       if (!features.canViewAccounts) {
         return NextResponse.json(
@@ -37,30 +35,22 @@ export const PUT = withTenantAndPermission('accounting')(
 
       const body = await req.json()
 
-      // ★ یافتن الگو
       const existing = await tenantDb.recurringJournal.findFirst({
         where: { id, tenantId },
       })
 
       if (!existing) {
-        return NextResponse.json(
-          { success: false, error: 'الگو یافت نشد' },
-          { status: 404 }
-        )
+        return NextResponse.json({ success: false, error: 'الگو یافت نشد' }, { status: 404 })
       }
 
-      // ★ ساخت updateData
       const updateData: any = {}
 
       if (body.title !== undefined) updateData.title = body.title.trim()
       if (body.description !== undefined) updateData.description = body.description || null
       if (body.isActive !== undefined) updateData.isActive = body.isActive
       if (body.autoPost !== undefined) updateData.autoPost = body.autoPost
-      if (body.endDate !== undefined) {
-        updateData.endDate = body.endDate ? new Date(body.endDate) : null
-      }
+      if (body.endDate !== undefined) updateData.endDate = body.endDate ? new Date(body.endDate) : null
 
-      // ★ اگر فرکانس یا روز تغییر کرد، nextExecutionDate را محاسبه کن
       let frequencyChanged = false
       if (body.frequency !== undefined && body.frequency !== existing.frequency) {
         updateData.frequency = body.frequency
@@ -80,7 +70,6 @@ export const PUT = withTenantAndPermission('accounting')(
         )
       }
 
-      // ★ اگر lines ارسال شد
       if (body.lines && Array.isArray(body.lines) && body.lines.length >= 2) {
         const totalDebit = body.lines.reduce((sum: number, l: any) => sum + (Number(l.debit) || 0), 0)
         const totalCredit = body.lines.reduce((sum: number, l: any) => sum + (Number(l.credit) || 0), 0)
@@ -105,8 +94,6 @@ export const PUT = withTenantAndPermission('accounting')(
         data: updateData,
       })
 
-      console.log('[RecurringJournals PUT] Updated:', id)
-
       return NextResponse.json({
         success: true,
         data: {
@@ -119,10 +106,7 @@ export const PUT = withTenantAndPermission('accounting')(
       })
     } catch (error: any) {
       console.error('[RecurringJournals PUT] Error:', error)
-      return NextResponse.json(
-        { success: false, error: 'خطا در به‌روزرسانی الگو' },
-        { status: 500 }
-      )
+      return NextResponse.json({ success: false, error: 'خطا در به‌روزرسانی الگو' }, { status: 500 })
     }
   }
 )
@@ -136,32 +120,24 @@ export const DELETE = withTenantAndPermission('accounting')(
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
-      const id = ctx?.params?.id
+      const params = await Promise.resolve(ctx.params)
+      const id = params?.id
 
       if (!id) {
-        return NextResponse.json(
-          { success: false, error: 'شناسه الزامی است' },
-          { status: 400 }
-        )
+        return NextResponse.json({ success: false, error: 'شناسه الزامی است' }, { status: 400 })
       }
 
-      // ★ یافتن الگو
       const existing = await tenantDb.recurringJournal.findFirst({
         where: { id, tenantId },
       })
 
       if (!existing) {
-        return NextResponse.json(
-          { success: false, error: 'الگو یافت نشد' },
-          { status: 404 }
-        )
+        return NextResponse.json({ success: false, error: 'الگو یافت نشد' }, { status: 404 })
       }
 
       await tenantDb.recurringJournal.delete({
         where: { id },
       })
-
-      console.log('[RecurringJournals DELETE] Deleted:', id)
 
       return NextResponse.json({
         success: true,
@@ -169,10 +145,7 @@ export const DELETE = withTenantAndPermission('accounting')(
       })
     } catch (error: any) {
       console.error('[RecurringJournals DELETE] Error:', error)
-      return NextResponse.json(
-        { success: false, error: 'خطا در حذف الگو' },
-        { status: 500 }
-      )
+      return NextResponse.json({ success: false, error: 'خطا در حذف الگو' }, { status: 500 })
     }
   }
 )

@@ -1,5 +1,5 @@
 // ============================================================================
-// src/lib/db.ts — Unified Database Manager (v3.0)
+// src/lib/db.ts — Unified Database Manager (v3.1)
 // ShopAccounting — Single Shared Database Architecture
 // ============================================================================
 // ★★★ v3.0 — تغییرات اساسی:
@@ -9,6 +9,13 @@
 //   ★ حذف connection pool، encryption، و کدهای مربوط به multi-DB
 //   ★ کد بسیار ساده‌تر و سریع‌تر
 //
+// ★★★ v3.1 — اصلاح مشکل Decimal Prisma:
+//   ★ استفاده از Prisma $extends برای تبدیل خودکار Decimal به number
+//   ★ تمام query ها به صورت خودکار serialize می‌شوند
+//   ★ بدون نیاز به تغییر هیچ API یا کد دیگر
+//   ★ حل مشکل "صفرهای زیاد" در JSON responses
+//   ★ حل باگ ۴۹,۹۹۹,۹۹۹ به جای ۵۰,۰۰۰,۰۰۰
+//
 // ★ نکته مهم:
 //   - همه query های tenant باید `where: { tenantId }` داشته باشن
 //   - db.master و db.forTenant() هر دو همون client رو برمی‌گردونن
@@ -16,7 +23,7 @@
 //
 // ★ استفاده:
 //   import { db } from '@/lib/db'
-//   const tenant = await db.master.tenant.findUnique({ where: { id: tenantId } })
+//   const tenant = await db.master.tenant.findUnique({ where: { tenantId: tenantId } })
 //   const invoices = await db.forTenant(tenantId).invoice.findMany({ where: { tenantId } })
 //   // یا مستقیم:
 //   const client = db.client
@@ -31,14 +38,131 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-const client = globalForPrisma.prisma ?? new PrismaClient({
+// ★ Base client (قبل از extension)
+const baseClient = globalForPrisma.prisma ?? new PrismaClient({
   datasourceUrl: process.env.DATABASE_URL,
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
 })
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = client
+  globalForPrisma.prisma = baseClient
 }
+
+// ─── Decimal Serializer ─────────────────────────────────────
+
+/**
+ * تبدیل عمیق همه Decimal objects به number
+ * این تابع به صورت خودکار تمام مقادیر Decimal Prisma را به number معمولی تبدیل می‌کند
+ */
+function serializeDecimal(data: any): any {
+  if (data === null || data === undefined) return data
+  if (typeof data !== 'object') return data
+  if (data instanceof Date) return data
+
+  if (Array.isArray(data)) {
+    return data.map(item => serializeDecimal(item))
+  }
+
+  const result: any = {}
+  for (const key of Object.keys(data)) {
+    const value = data[key]
+
+    // اگر Prisma Decimal است (دارای toNumber method)
+    if (
+      value !== null &&
+      typeof value === 'object' &&
+      !(value instanceof Date) &&
+      !Array.isArray(value) &&
+      typeof value.toNumber === 'function'
+    ) {
+      result[key] = value.toNumber()
+    }
+    // اگر object یا array است، recursive اعمال کن
+    else if (value !== null && typeof value === 'object') {
+      result[key] = serializeDecimal(value)
+    }
+    // در غیر این صورت، همان‌طور نگه دار
+    else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+// ─── Extended PrismaClient with Auto-Serialization ──────────
+
+/**
+ * ★ PrismaClient با extension برای تبدیل خودکار Decimal به number
+ * تمام query ها (findMany, findFirst, create, update, ...) به صورت خودکار
+ * مقادیر Decimal را به number تبدیل می‌کنند.
+ */
+const client = (baseClient as any).$extends({
+  name: 'decimalSerializer',
+  query: {
+    $allModels: {
+      async findMany({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async findFirst({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async findUnique({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async findFirstOrThrow({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async findUniqueOrThrow({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async create({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async createMany({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async update({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async updateMany({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async upsert({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async delete({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async deleteMany({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async aggregate({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+      async count({ args, query }: any) {
+        const result = await query(args)
+        return result  // count همیشه عدد است
+      },
+      async groupBy({ args, query }: any) {
+        const result = await query(args)
+        return serializeDecimal(result)
+      },
+    },
+  },
+}) as PrismaClient
 
 // ─── Database Manager (خروجی اصلی) ───────────────────────────
 
@@ -103,7 +227,7 @@ export const db = {
    */
   async disconnectAll(): Promise<void> {
     try {
-      await client.$disconnect()
+      await (baseClient as any).$disconnect()
       console.log('[DB] Disconnected successfully')
     } catch (error: any) {
       console.error('[DB] Error during disconnect:', error.message)

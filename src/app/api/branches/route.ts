@@ -13,7 +13,8 @@ import { getFeaturesByPlanName } from '@/lib/plan-features'
 
 export const GET = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const features = getFeaturesByPlanName(tenant.planTierName)
+    // ★★★ اصلاح ۱: استفاده از planName به جای planTierName
+    const features = getFeaturesByPlanName(tenant.planName || 'simple')
     if (!features.canMultiBranch) {
       return NextResponse.json(
         { success: false, error: 'مدیریت شعب فقط در پلن سازمانی (حرفه‌ای) در دسترس است', code: 'PLAN_FEATURE_RESTRICTED' },
@@ -27,7 +28,8 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       where: { tenantId: tenant.tenantId },
       include: {
         _count: {
-          select: { Warehouses: true }
+          // ★★★ اصلاح ۲: Prisma به حروف کوچک/بزرگ حساس است. در schema نام relation به صورت warehouses (با w کوچک) تعریف شده است.
+          select: { warehouses: true }
         }
       },
       orderBy: { createdAt: 'desc' },
@@ -41,7 +43,8 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       phone: b.phone,
       manager: b.manager,
       isActive: b.isActive,
-      warehouseCount: b._count.Warehouses,
+      // ★★★ اصلاح ۳: تطابق با نام فیلد اصلاح‌شده در _count
+      warehouseCount: b._count.warehouses,
       createdAt: b.createdAt,
     }))
 
@@ -58,7 +61,7 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const features = getFeaturesByPlanName(tenant.planTierName)
+    const features = getFeaturesByPlanName(tenant.planName || 'simple') // ★★★ اصلاح شد
     if (!features.canMultiBranch) {
       return NextResponse.json({ success: false, error: 'مدیریت شعب فقط در پلن سازمانی در دسترس است' }, { status: 403 })
     }
@@ -99,7 +102,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
 
 export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const features = getFeaturesByPlanName(tenant.planTierName)
+    const features = getFeaturesByPlanName(tenant.planName || 'simple') // ★★★ اصلاح شد
     if (!features.canMultiBranch) {
       return NextResponse.json({ success: false, error: 'مدیریت شعب فقط در پلن سازمانی در دسترس است' }, { status: 403 })
     }
@@ -136,7 +139,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
 
 export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const features = getFeaturesByPlanName(tenant.planTierName)
+    const features = getFeaturesByPlanName(tenant.planName || 'simple') // ★★★ اصلاح شد
     if (!features.canMultiBranch) {
       return NextResponse.json({ success: false, error: 'مدیریت شعب فقط در پلن سازمانی در دسترس است' }, { status: 403 })
     }

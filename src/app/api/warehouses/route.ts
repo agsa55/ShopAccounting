@@ -18,10 +18,17 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
     const tenantDb = tenant.tenantDb
     const tenantId = tenant.tenantId
 
+    // ★★★ اضافه کردن include برای دریافت اطلاعات شعبه مرتبط
     const warehouses = await tenantDb.warehouse.findMany({
       where: { tenantId },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
       include: {
+        branch: {
+          select: {
+            id: true,
+            name: true,
+          }
+        },
         _count: {
           select: { StockLevels: true, PurchaseInvoices: true, Invoices: true },
         },
@@ -31,11 +38,10 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
     const warehousesWithDetails = await Promise.all(
       warehouses.map(async (wh: any) => {
         try {
-          // ★ بارگذاری موجودی‌ها - استفاده از Product (حرف بزرگ)
           const stockLevels = await tenantDb.stockLevel.findMany({
             where: { warehouseId: wh.id },
             include: {
-              Product: {  // ★ حرف بزرگ P
+              Product: {
                 select: {
                   id: true,
                   name: true,
@@ -50,7 +56,6 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
             orderBy: { quantity: 'desc' },
           })
 
-          // ★ توجه: item.Product (حرف بزرگ)
           const stockItems = stockLevels.map((item: any) => ({
             productId: item.Product?.id,
             productName: item.Product?.name || 'محصول حذف‌شده',
@@ -75,12 +80,15 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
           const activeStockCount = stockItems.filter((item: any) => item.quantity > 0).length
 
+          // ★★★ بازگرداندن branchId و branchName به فرانت‌اند
           return {
             id: wh.id,
             name: wh.name,
             code: wh.code,
             isDefault: wh.isDefault,
             isActive: wh.isActive,
+            branchId: wh.branchId,          // ← اضافه شد
+            branchName: wh.branch?.name || null, // ← اضافه شد
             _count: wh._count,
             stockItems: stockItems.slice(0, 10),
             totalStockItems,
@@ -98,6 +106,8 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
             code: wh.code,
             isDefault: wh.isDefault,
             isActive: wh.isActive,
+            branchId: wh.branchId,
+            branchName: wh.branch?.name || null,
             _count: wh._count,
             stockItems: [],
             totalStockItems: 0,
@@ -206,6 +216,8 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const tenantId = tenant.tenantId
     const body = await req.json()
 
+    console.log('[Warehouses PUT] Received body:', JSON.stringify(body))
+
     if (!body.id) {
       return NextResponse.json({ success: false, error: 'شناسه الزامی است' }, { status: 400 })
     }
@@ -223,6 +235,11 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       updateData.code = body.code
     }
     if (body.isActive !== undefined) updateData.isActive = body.isActive
+    
+    // ★★★ پشتیبانی کامل از branchId (با null برای حذف شعبه)
+    if ('branchId' in body) {
+      updateData.branchId = body.branchId || null
+    }
 
     if (body.isDefault === true && !existing.isDefault) {
       await tenantDb.warehouse.updateMany({
@@ -232,13 +249,21 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       updateData.isDefault = true
     }
 
+    console.log('[Warehouses PUT] updateData:', JSON.stringify(updateData))
+
     await tenantDb.warehouse.update({ where: { id: body.id }, data: updateData })
+    
+    // ★★★ تأیید ذخیره‌سازی
+    const updated = await tenantDb.warehouse.findFirst({ where: { id: body.id } })
+    console.log('[Warehouses PUT] After update, branchId:', updated?.branchId)
+    
     return NextResponse.json({ success: true, message: 'انبار به‌روزرسانی شد' })
   } catch (error: any) {
     console.error('[Warehouses PUT] Error:', error)
     return NextResponse.json({ success: false, error: 'خطا در به‌روزرسانی' }, { status: 500 })
   }
 })
+
 
 export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {

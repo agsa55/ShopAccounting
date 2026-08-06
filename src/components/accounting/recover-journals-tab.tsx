@@ -350,11 +350,22 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
   const content = (
     <div className="space-y-4" dir="rtl">
       {/* ★ Alert راهنما */}
-      <Alert className="border-blue-200 bg-blue-50">
-        <AlertCircle className="w-4 h-4 text-blue-600" />
-        <AlertDescription className="text-blue-800 text-sm">
-          <strong>راهنما:</strong> این ابزار پرداخت‌های آنلاین موفقی را که سند حسابداری برایشان صادر نشده (مثلاً پرداخت‌های قبل از نصب v8.2)،
-          پیدا کرده و به‌صورت خودکار برایشان سند ۴ ردیفی صادر می‌کند. توصیه می‌شود ابتدا با دکمه «شبیه‌سازی» نتیجه را بررسی کنید.
+          {/* ★ Alert راهنمای کاربرپسند و حرفه‌ای */}
+      <Alert className="border-blue-200 bg-blue-50/80">
+        <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+        <AlertDescription className="text-blue-900 text-sm leading-6">
+          <strong className="block text-base mb-1.5 text-blue-800">💡 این ابزار چه کاری انجام می‌دهد؟</strong>
+          <ul className="list-disc list-inside space-y-1.5 mr-1 text-blue-800/90">
+            <li>
+              <strong>شناسایی هوشمند:</strong> پرداخت‌های آنلاین موفقی که به هر دلیلی (مثل قطعی شبکه) سند حسابداری برایشان صادر نشده است را پیدا می‌کند.
+            </li>
+            <li>
+              <strong>کاملاً امن و قابل بررسی:</strong> پیشنهاد می‌شود ابتدا دکمه <span className="font-bold bg-blue-100 px-1.5 py-0.5 rounded text-blue-700">شبیه‌سازی</span> را بزنید. با این کار، سیستم بدون ثبت نهایی، به شما نشان می‌دهد که چه اسنادی قرار است صادر شوند.
+            </li>
+            <li>
+              <strong>صدور خودکار و استاندارد:</strong> پس از تأیید، با زدن دکمه «بازیابی»، اسناد حسابداری مربوطه به‌صورت خودکار، با رعایت اصول بدهکار/بستانکار و با شماره‌گذاری صحیح صادر می‌شوند.
+            </li>
+          </ul>
         </AlertDescription>
       </Alert>
 
@@ -394,13 +405,13 @@ export function RecoverJournalsTab({ embedded = false }: RecoverJournalsTabProps
               icon={<FileText className="w-8 h-8" />}
               color="bg-gradient-to-br from-blue-500 to-blue-600"
             />
-            <SummaryCard
-              title="کارمزد زرین‌پال"
-              value={`${formatRial(missingData.totalGatewayFee)} ریال`}
-              subtitle="هزینه‌ای که باید ثبت شود"
-              icon={<FileText className="w-8 h-8" />}
-              color="bg-gradient-to-br from-red-500 to-red-600"
-            />
+           <SummaryCard
+  title="کارمزد درگاه پرداخت"
+  value={`${formatRial(missingData.totalGatewayFee)} ریال`}
+  subtitle="هزینه کسر شده توسط درگاه"
+  icon={<FileText className="w-8 h-8" />}
+  color="bg-gradient-to-br from-red-500 to-red-600"
+/>
             <SummaryCard
               title="خالص واریزی"
               value={`${formatRial(missingData.totalNetSettled)} ریال`}

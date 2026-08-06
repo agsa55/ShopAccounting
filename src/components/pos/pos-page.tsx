@@ -62,6 +62,7 @@ import {
   Crown,
   Camera,
   ScanLine,
+    Store, Building2 
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { usePosProductSearch } from '@/lib/use-pos-product-search'
@@ -793,6 +794,7 @@ const isProcessingScan = useRef(false);
 
   const storeName = useStore((s) => s.storeName)
   const user = useStore((s) => s.user)
+   const branchId = user?.branchId || null
 
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
@@ -886,8 +888,32 @@ const isProcessingScan = useRef(false);
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<PrintTemplate>('thermal-80mm')
   const [printSubmitting, setPrintSubmitting] = useState(false)
   const [invoiceDiscountPercent, setInvoiceDiscountPercent] = useState<string>('')
-
+  const [branches, setBranches] = useState<any[]>([])
   // ============ Effects ============
+
+  // ★★★ دریافت لیست شعبه‌ها هنگام لود صفحه
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const res = await fetch('/api/branches', { headers: getAuthHeaders() })
+        const data = await res.json()
+        if (data.success) setBranches(data.data || [])
+      } catch (err) {
+        console.error('Failed to fetch branches', err)
+      }
+    }
+    fetchBranches()
+  }, [])
+
+  // ★★★ محاسبه شعبه و انبار فعلی برای نمایش در نوار اطلاعات
+  const currentWarehouse = useMemo(() => {
+    return warehouses.find((w: any) => w.id === selectedWarehouseId) || null
+  }, [warehouses, selectedWarehouseId])
+
+  const currentBranch = useMemo(() => {
+    if (!currentWarehouse?.branchId) return null
+    return branches.find((b: any) => b.id === currentWarehouse.branchId) || null
+  }, [branches, currentWarehouse])
 
   useEffect(() => {
     if (thermalPrintOpen) {
@@ -2157,6 +2183,7 @@ const handleSearchKeyDown = useCallback(
           url: '/api/invoices',
           body: {
             tenantId: getTenantIdFromStore(),
+            branchId: branchId || undefined,
             customerId: selectedCustomerId || undefined,
             paymentType: ptFinal,
             items: invoiceItems,
@@ -2266,6 +2293,7 @@ const handleSearchKeyDown = useCallback(
 
       const requestBody: any = {
         tenantId,
+         branchId: branchId || undefined,
         customerId: selectedCustomerId || undefined,
         paymentType: (paymentType || 'cash').toLowerCase(),
         items: invoiceItems,
@@ -2956,6 +2984,67 @@ const handleSearchKeyDown = useCallback(
                 {cat.name}
               </button>
             ))}
+          </div>
+        </div>
+      </div>
+
+
+            {/* ★★★ نوار اطلاعات شعبه و انبار فعال ★★★ */}
+      <div className="bg-gradient-to-l from-emerald-50 via-teal-50 to-cyan-50 border-b border-emerald-200 px-2 sm:px-3 py-1.5 sm:py-2">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* آیکون فروشگاه */}
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center shrink-0">
+              <Store className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="text-[10px] sm:text-xs font-bold text-emerald-900">
+              {storeName || 'فروشگاه'}
+            </span>
+          </div>
+
+          {/* جداکننده */}
+          <div className="w-px h-4 bg-emerald-300" />
+
+          {/* شعبه */}
+          <div className="flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+            <span className="text-[10px] sm:text-xs text-slate-600">شعبه:</span>
+            {currentBranch ? (
+              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                {currentBranch.name}
+              </Badge>
+            ) : (
+              <Badge className="bg-slate-100 text-slate-500 border-slate-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                مرکزی
+              </Badge>
+            )}
+          </div>
+
+          {/* جداکننده */}
+          <div className="w-px h-4 bg-emerald-300" />
+
+          {/* انبار */}
+          <div className="flex items-center gap-1.5">
+            <Package className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span className="text-[10px] sm:text-xs text-slate-600">انبار:</span>
+            {currentWarehouse ? (
+              <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                {currentWarehouse.name}
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                انتخاب نشده
+              </Badge>
+            )}
+          </div>
+
+          {/* وضعیت اتصال */}
+          <div className="flex-1" />
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[9px] text-slate-500">
+              {isOnline ? 'آنلاین' : 'آفلاین'}
+            </span>
           </div>
         </div>
       </div>

@@ -1,10 +1,9 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v9.7.0 ★★★
-// ★ v9.6.3: اصلاح دقیق RTL تاریخ هدر + کاهش فاصله بین بخش‌های منوی کناری
-// ★ v9.7.0: اتصال هوشمند — جایگزینی navigator.onLine با پینگ واقعی API
-//           + نشانگر وضعیت اتصال در هدر + preload هوشمند
+// src/components/app-shell.tsx — v9.7.1 ★★★
+// ★ v9.7.1: رفع باگ چرخش بی‌پایان آیکون همگام‌سازی در دیپلوی
+//           + پاک‌سازی خودکار IndexedDB هنگام خروج برای جلوگیری از داده‌های منقضی
 // ============================================================================
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
@@ -29,7 +28,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, AlertTriangle, ChevronLeft, Calendar,
+  Download, AlertTriangle, ChevronLeft, Calendar, XCircle,
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -370,7 +369,6 @@ function renderCurrentView(view: AppView) {
     case 'invoices-hub':          return <InvoicesHub />
     case 'invoices':              return <InvoicesHub />
     case 'purchase-invoices':     return <InvoicesHub />
-  
     case 'installments':          return <InstallmentsPage />
     case 'accounting':            return <JournalEntriesPage />
     case 'journal-entry-detail':  return <JournalEntryDetail />
@@ -398,7 +396,7 @@ function renderCurrentView(view: AppView) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
+   ★★★ v9.6.0: SubscriptionBanner
    ═══════════════════════════════════════════════════════════════ */
 
 interface SubscriptionStatus {
@@ -806,7 +804,7 @@ function AppSidebar() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ PWAInstallButton — دکمه نصب اپ
+   ★ PWAInstallButton
    ═══════════════════════════════════════════════════════════════ */
 
 function PWAInstallButton() {
@@ -861,11 +859,28 @@ function PWAInstallButton() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
+   ★ SyncIndicator — نسخه اصلاح‌شده v9.7.1
    ═══════════════════════════════════════════════════════════════ */
 function SyncIndicator() {
   const pendingCount = useStore((s) => s.pendingSyncCount)
   const isOnline = useStore((s) => s.isOnline)
+  const [isSyncing, setIsSyncing] = useState(false)
+
+  // ★ تلاش خودکار برای همگام‌سازی هنگام بارگذاری اگر آیتمی در صف باشد
+  useEffect(() => {
+    if (pendingCount > 0 && isOnline && !isSyncing) {
+      setIsSyncing(true)
+      import('@/lib/sync-engine').then(async ({ syncEngine }) => {
+        try {
+          await syncEngine.sync()
+        } catch (err) {
+          console.warn('[SyncIndicator] Auto-sync failed:', err)
+        } finally {
+          setIsSyncing(false)
+        }
+      })
+    }
+  }, [pendingCount, isOnline])
 
   if (pendingCount === 0 || !isOnline) return null
 
@@ -875,93 +890,38 @@ function SyncIndicator() {
       size="sm"
       className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-300 text-amber-700 hover:bg-amber-50 transition-all"
       onClick={async () => {
-        const { syncEngine } = await import('@/lib/sync-engine')
-        const result = await syncEngine.sync()
-        
-        if (result.succeeded > 0) {
-          useStore.getState().addNotification({
-            title: '✅ همگام‌سازی موفق',
-            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
-            type: 'success',
-          })
-        }
-        if (result.failed > 0) {
-          useStore.getState().addNotification({
-            title: '⚠️ خطا در همگام‌سازی',
-            message: `${result.failed} تغییر همگام‌سازی نشد`,
-            type: 'warning',
-          })
+        setIsSyncing(true)
+        try {
+          const { syncEngine } = await import('@/lib/sync-engine')
+          const result = await syncEngine.sync()
+          
+          if (result.succeeded > 0) {
+            useStore.getState().addNotification({
+              title: '✅ همگام‌سازی موفق',
+              message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
+              type: 'success',
+            })
+          }
+          if (result.failed > 0) {
+            useStore.getState().addNotification({
+              title: '⚠️ خطا در همگام‌سازی',
+              message: `${result.failed} تغییر همگام‌سازی نشد. در صورت تکرار، از حساب خارج و مجدد وارد شوید.`,
+              type: 'warning',
+            })
+          }
+        } catch (err) {
+          console.error('[SyncIndicator] Sync error:', err)
+        } finally {
+          setIsSyncing(false)
         }
       }}
     >
-      <RefreshCw className="h-3 w-3 animate-spin" />
+      <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
       <span className="hidden sm:inline">همگام‌سازی</span>
       <span className="bg-amber-600 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
         {pendingCount}
       </span>
     </Button>
-  )
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   ★ v9.7.0: ConnectionBadge — نشانگر وضعیت اتصال هوشمند
-   ═══════════════════════════════════════════════════════════════
-   ★ بر اساس پینگ واقعی /api/health تصمیم می‌گیرد.
-   ★ در محیط لوکال بدون اینترنت → "آنلاین" (چون API در دسترس است)
-   ★ وقتی سرور واقعاً قطع باشد → "آفلاین"
-   ═══════════════════════════════════════════════════════════════ */
-
-function ConnectionBadge() {
-  const [state, setState] = useState<ConnectivityState>(getConnectivityState())
-
-  useEffect(() => {
-    startConnectivityMonitor()
-    const unsub = onConnectivityChange(setState)
-    return unsub
-  }, [])
-
-  const config = {
-    online: {
-      label: 'آنلاین',
-      dot: 'bg-emerald-500',
-      bg: 'bg-emerald-50/80 border-emerald-200',
-      text: 'text-emerald-700',
-      icon: Wifi,
-    },
-    degraded: {
-      label: 'کند',
-      dot: 'bg-amber-500',
-      bg: 'bg-amber-50/80 border-amber-200',
-      text: 'text-amber-700',
-      icon: AlertTriangle,
-    },
-    offline: {
-      label: 'آفلاین',
-      dot: 'bg-red-500',
-      bg: 'bg-red-50/80 border-red-200',
-      text: 'text-red-700',
-      icon: WifiOff,
-    },
-  }[state.status]
-
-  const IconComponent = config.icon
-
-  return (
-    <div
-      dir="rtl"
-      className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg border ${config.bg} transition-colors duration-300`}
-      title={
-        `سرور: ${state.isApiReachable ? 'متصل' : 'قطع'}` +
-        ` | اینترنت: ${state.isInternetAvailable ? 'متصل' : 'قطع'}` +
-        ` | زمان پاسخ: ${state.responseTimeMs}ms`
-      }
-    >
-      <IconComponent className={`w-3 h-3 ${config.text} shrink-0`} />
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dot} ${state.status !== 'online' ? 'animate-pulse' : ''}`} />
-      <span className={`text-[10px] font-medium ${config.text} whitespace-nowrap`}>
-        {config.label}
-      </span>
-    </div>
   )
 }
 
@@ -999,6 +959,17 @@ function AppHeader() {
           await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)))
         } catch (err) {
           console.warn('[AppHeader] Error clearing caches:', err)
+        }
+      }
+
+      // ★ v9.7.1: پاک‌سازی IndexedDB برای جلوگیری از گیر کردن داده‌های همگام‌سازی قدیمی
+      if ('indexedDB' in window) {
+        try {
+          const dbs = await indexedDB.databases ? await indexedDB.databases() : []
+          const names = dbs.map((db: any) => db.name).filter((n: string) => n && (n.toLowerCase().includes('shop') || n.toLowerCase().includes('sync') || n.toLowerCase().includes('offline')))
+          names.forEach((name: string) => indexedDB.deleteDatabase(name))
+        } catch (err) {
+          console.warn('[AppHeader] Error clearing IndexedDB:', err)
         }
       }
 
@@ -1083,30 +1054,27 @@ function AppHeader() {
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-       {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
-<div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
-  <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-  <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
-    {(() => {
-      const now = new Date();
-      const formatter = new Intl.DateTimeFormat('fa-IR', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-      const parts = formatter.formatToParts(now);
-      const weekday = parts.find(p => p.type === 'weekday')?.value || '';
-      const day = parts.find(p => p.type === 'day')?.value || '';
-      const month = parts.find(p => p.type === 'month')?.value || '';
-      const year = parts.find(p => p.type === 'year')?.value || '';
-      return `${weekday} ${day} ${month} ${year}`;
-    })()}
-  </span>
-</div>
-
-        {/* ★ v9.7.0: نشانگر وضعیت اتصال هوشمند */}
-
+        {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
+        <div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
+          <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+            {(() => {
+              const now = new Date();
+              const formatter = new Intl.DateTimeFormat('fa-IR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              });
+              const parts = formatter.formatToParts(now);
+              const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+              const day = parts.find(p => p.type === 'day')?.value || '';
+              const month = parts.find(p => p.type === 'month')?.value || '';
+              const year = parts.find(p => p.type === 'year')?.value || '';
+              return `${weekday} ${day} ${month} ${year}`;
+            })()}
+          </span>
+        </div>
 
         <PWAInstallButton />
         <SyncIndicator />
@@ -1236,7 +1204,6 @@ export default function AppShell() {
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
-  // ★ v9.7.0: ref برای جلوگیری از preload تکراری هنگام بازگشت از آفلاین
   const hasPreloadedRef = useRef(false)
 
   useEffect(() => {
@@ -1279,19 +1246,14 @@ export default function AppShell() {
       }
     }
 
-    // ── ★ v9.7.0: اتصال هوشمند — جایگزین navigator.onLine ──────
-    // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op است)
+    // ── ★ v9.7.0: اتصال هوشمند ──────
     startConnectivityMonitor()
-
-    // تنظیم اولیه store بر اساس وضعیت واقعی API
     const initialState = getConnectivityState()
     useStore.getState().setOnline(initialState.isApiReachable)
 
-    // گوش دادن به تغییرات connectivity → به‌روزرسانی store
     const unsubConnectivity = onConnectivityChange((state) => {
       useStore.getState().setOnline(state.isApiReachable)
 
-      // ★ v9.7.0: preload هنگام بازگشت از آفلاین (فقط یک‌بار)
       if (state.isApiReachable && !hasPreloadedRef.current) {
         hasPreloadedRef.current = true
         setTimeout(async () => {
@@ -1306,9 +1268,6 @@ export default function AppShell() {
       }
     })
 
-    // ── حفظ backward compat: event‌های مرورگر ───────────────────
-    // ★ این listener‌ها به‌عنوان سیگنال کمکی نگه داشته شده‌اند.
-    //   مقدار نهایی توسط onConnectivityChange تعیین می‌شود (پینگ واقعی API).
     const handleBrowserOnline = () => useStore.getState().setOnline(true)
     const handleBrowserOffline = () => useStore.getState().setOnline(false)
 
@@ -1320,8 +1279,6 @@ export default function AppShell() {
 
     listenToSW()
 
-    // ── Preload اولیه ────────────────────────────────────────────
-    // ★ v9.7.0: بر اساس isApiOnline() به‌جای navigator.onLine
     let preloadTimer: NodeJS.Timeout | null = null
     if (isApiOnline()) {
       hasPreloadedRef.current = true
@@ -1336,9 +1293,7 @@ export default function AppShell() {
     }
 
     return () => {
-      // ★ v9.7.0: cleanup connectivity listener
       unsubConnectivity()
-
       window.removeEventListener('online', handleBrowserOnline)
       window.removeEventListener('offline', handleBrowserOffline)
       if (preloadTimer) clearTimeout(preloadTimer)

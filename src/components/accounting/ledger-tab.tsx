@@ -2,13 +2,14 @@
 
 // ============================================================================
 // src/components/accounting/ledger-tab.tsx — General Ledger Tab
-// ShopAccounting v9.0 — با قابلیت آفلاین کامل + ریسپانسیو
+// ShopAccounting v9.4 — چاپ کاملاً ایزوله با پنجره مستقل
 // ============================================================================
-// ★★★ v9.0:
-//   - قابلیت آفلاین کامل (خواندن از کش journal entries و accounts)
-//   - ریسپانسیو کامل (جدول دسکتاپ + کارت موبایل)
-//   - فیلتر تاریخ + محاسبه مانده اول و آخر دوره
-//   - دکمه چاپ (فقط در حالت آنلاین)
+// ★★★ v9.4:
+//   - چاپ در یک پنجره کاملاً جدید و مستقل (بدون هیچ وابستگی به Layout)
+//   - HTML خالص با استایل‌های inline برای تضمین نمایش صحیح در همه مرورگرها
+//   - سربرگ رسمی + جدول استاندارد A4 + محل امضای سه‌گانه
+//   - رفع باگ یک روز عقب افتادن تاریخ
+//   - پشتیبانی کامل از حالت آفلاین
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
@@ -23,7 +24,7 @@ import {
 } from '@/components/ui/table'
 import {
   FileText, Printer, Loader2, WifiOff, X, BookOpen,
-  Calendar, TrendingUp,  // ← اضافه شدند
+  Calendar, TrendingUp,
 } from 'lucide-react'
 import { PersianDatePicker, formatJalaliLong } from '@/components/ui/persian-date-picker'
 import { useToast } from '@/hooks/use-toast'
@@ -50,13 +51,16 @@ interface Account {
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-function formatCurrency(price: number | undefined | null): string {
-  if (price === undefined || price === null || isNaN(Number(price))) return '۰ ریال'
-  return `${Number(price).toLocaleString('fa-IR')} ریال`
-}
-
 function formatRial(num: number): string {
   return (num || 0).toLocaleString('fa-IR')
+}
+
+// ★★★ رفع باگ یک روز عقب افتادن تاریخ (Timezone Safe)
+const getLocalDateTs = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0
+  const dateOnly = dateStr.split('T')[0]
+  const [year, month, day] = dateOnly.split('-').map(Number)
+  return new Date(year, month - 1, day).getTime()
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -67,7 +71,6 @@ export function LedgerTab() {
   const { toast } = useToast()
   const isOnline = useAppStore((s) => s.isOnline)
 
-  // ─── State ────────────────────────────────────────────────
   const [entries, setEntries] = useState<any[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,13 +79,12 @@ export function LedgerTab() {
   const [toDate, setToDate] = useState<string | null>(null)
 
   // ═══════════════════════════════════════════════════════════
-  // Load Data — با پشتیبانی آفلاین
+  // Load Data
   // ═══════════════════════════════════════════════════════════
 
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      // ── حالت آفلاین: خواندن از کش ─────────────────────
       if (!isOnline) {
         const [cachedEntries, cachedAccounts] = await Promise.all([
           getCachedJournalEntries(),
@@ -94,7 +96,6 @@ export function LedgerTab() {
         return
       }
 
-      // ── حالت آنلاین: دریافت از سرور ──────────────────
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const [entriesRes, accountsRes] = await Promise.all([
         fetch('/api/journal-entries?limit=9999', {
@@ -138,35 +139,28 @@ export function LedgerTab() {
   }, [loadData])
 
   // ═══════════════════════════════════════════════════════════
-  // هندلرهای تاریخ — با swap خودکار
+  // هندلرهای تاریخ
   // ═══════════════════════════════════════════════════════════
   const handleFromDateChange = (iso: string | null) => {
-    if (iso && toDate && iso > toDate) {
-      setToDate(iso)
-    }
+    if (iso && toDate && getLocalDateTs(iso) > getLocalDateTs(toDate)) setToDate(iso)
     setFromDate(iso)
   }
 
   const handleToDateChange = (iso: string | null) => {
-    if (iso && fromDate && iso < fromDate) {
-      setFromDate(iso)
-    }
+    if (iso && fromDate && getLocalDateTs(iso) < getLocalDateTs(fromDate)) setFromDate(iso)
     setToDate(iso)
   }
 
   // ═══════════════════════════════════════════════════════════
-  // Calculate Ledger Rows
+  // محاسبات
   // ═══════════════════════════════════════════════════════════
 
   const ledgerRows = useMemo(() => {
     if (!selectedAccountId) return []
-
     const rows: Omit<LedgerRow, 'balance'>[] = []
 
     for (const entry of entries) {
-      // فیلتر اسناد لغوشده
       if (entry.status === 'CANCELLED') continue
-
       const lines = entry.lines || entry.items || []
       for (const line of lines) {
         if (line.accountId === selectedAccountId) {
@@ -183,39 +177,31 @@ export function LedgerTab() {
       }
     }
 
-    // مرتب‌سازی بر اساس تاریخ
-    rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    rows.sort((a, b) => getLocalDateTs(a.date) - getLocalDateTs(b.date))
 
-    // محاسبه مانده جاری
     let runningBalance = 0
-    const rowsWithBalance: LedgerRow[] = rows.map(row => {
+    return rows.map(row => {
       runningBalance += row.debit - row.credit
       return { ...row, balance: runningBalance }
     })
-
-    return rowsWithBalance
   }, [entries, selectedAccountId])
 
-  // فیلتر تاریخ
   const filteredLedgerRows = useMemo(() => {
     if (!fromDate && !toDate) return ledgerRows
-
-    const fromDateTs = fromDate ? new Date(fromDate).getTime() : 0
-    const toDateTs = toDate ? new Date(toDate).getTime() + 86400000 : Infinity
+    const fromDateTs = fromDate ? getLocalDateTs(fromDate) : 0
+    const toDateTs = toDate ? getLocalDateTs(toDate) + 86400000 : Infinity
 
     return ledgerRows.filter(row => {
-      const rowDate = new Date(row.date).getTime()
-      if (rowDate < fromDateTs || rowDate > toDateTs) return false
-      return true
+      const rowDateTs = getLocalDateTs(row.date)
+      return rowDateTs >= fromDateTs && rowDateTs <= toDateTs
     })
   }, [ledgerRows, fromDate, toDate])
 
-  // محاسبه مانده اول دوره
   const openingBalance = useMemo(() => {
     if (!fromDate) return 0
-    const fromDateTs = new Date(fromDate).getTime()
+    const fromDateTs = getLocalDateTs(fromDate)
     return ledgerRows
-      .filter(r => new Date(r.date).getTime() < fromDateTs)
+      .filter(r => getLocalDateTs(r.date) < fromDateTs)
       .reduce((s, r) => s + (r.debit - r.credit), 0)
   }, [ledgerRows, fromDate])
 
@@ -224,6 +210,268 @@ export function LedgerTab() {
     : openingBalance
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
+
+  // ═══════════════════════════════════════════════════════════
+  // ★★★ v9.4: چاپ در پنجره مستقل (۱۰۰٪ ایزوله)
+  // ═══════════════════════════════════════════════════════════
+  const handlePrint = () => {
+    if (!selectedAccount) return
+
+    // محاسبه جمع‌ها
+    const totalDebit = filteredLedgerRows.reduce((s, r) => s + r.debit, 0)
+    const totalCredit = filteredLedgerRows.reduce((s, r) => s + r.credit, 0)
+    const periodText = fromDate || toDate
+      ? `از ${fromDate ? formatJalaliLong(fromDate) : 'ابتدا'} تا ${toDate ? formatJalaliLong(toDate) : 'انتها'}`
+      : 'کلیه سوابق'
+
+    // ساخت ردیف‌های جدول
+    let rowsHtml = ''
+
+    // مانده اول دوره (در صورت وجود فیلتر تاریخ)
+    if (openingBalance !== 0 && (fromDate || toDate)) {
+      rowsHtml += `
+        <tr style="background:#f3f4f6; font-weight:bold;">
+          <td colspan="5" style="border:1px solid #000; padding:8px; text-align:center;">مانده اول دوره</td>
+          <td style="border:1px solid #000; padding:8px; text-align:center;">
+            ${formatRial(Math.abs(openingBalance))} ${openingBalance >= 0 ? 'بدهکار' : 'بستانکار'}
+          </td>
+        </tr>
+      `
+    }
+
+    // ردیف‌های تراکنش
+    filteredLedgerRows.forEach(row => {
+      rowsHtml += `
+        <tr>
+          <td style="border:1px solid #000; padding:6px;">${formatJalaliLong(row.date)}</td>
+          <td style="border:1px solid #000; padding:6px; font-family:monospace;">${row.number}</td>
+          <td style="border:1px solid #000; padding:6px;">${row.lineDescription || row.description || '—'}</td>
+          <td style="border:1px solid #000; padding:6px; text-align:left;">${row.debit > 0 ? formatRial(row.debit) : '—'}</td>
+          <td style="border:1px solid #000; padding:6px; text-align:left;">${row.credit > 0 ? formatRial(row.credit) : '—'}</td>
+          <td style="border:1px solid #000; padding:6px; text-align:left; font-weight:bold;">
+            ${formatRial(Math.abs(row.balance))} ${row.balance >= 0 ? 'بد' : 'بس'}
+          </td>
+        </tr>
+      `
+    })
+
+    // ردیف جمع کل
+    rowsHtml += `
+      <tr style="background:#e5e7eb; font-weight:bold;">
+        <td colspan="3" style="border:1px solid #000; padding:8px; text-align:center;">جمع کل گردش حساب</td>
+        <td style="border:1px solid #000; padding:8px; text-align:left;">${formatRial(totalDebit)}</td>
+        <td style="border:1px solid #000; padding:8px; text-align:left;">${formatRial(totalCredit)}</td>
+        <td style="border:1px solid #000; padding:8px; text-align:left;">
+          ${formatRial(Math.abs(closingBalance))} ${closingBalance >= 0 ? 'بد' : 'بس'}
+        </td>
+      </tr>
+    `
+
+    // HTML کامل گزارش
+    const printContent = `
+      <!DOCTYPE html>
+      <html lang="fa" dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <title>گزارش دفتر کل - ${selectedAccount.name}</title>
+        <style>
+          @page {
+            size: A4;
+            margin: 15mm;
+          }
+          * {
+            box-sizing: border-box;
+          }
+          body {
+            font-family: Tahoma, Arial, sans-serif;
+            font-size: 12px;
+            color: #000;
+            direction: rtl;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 3px double #000;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+          }
+          .header h1 {
+            font-size: 20px;
+            margin: 0 0 10px 0;
+            font-weight: bold;
+          }
+          .header .account-name {
+            font-size: 16px;
+            font-weight: bold;
+            margin: 5px 0;
+          }
+          .header .account-code {
+            color: #555;
+            font-size: 13px;
+          }
+          .header .period {
+            font-size: 12px;
+            color: #333;
+            margin-top: 8px;
+          }
+          .header .print-date {
+            font-size: 10px;
+            color: #666;
+            margin-top: 5px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            page-break-inside: auto;
+          }
+          thead {
+            background: #f3f4f6;
+          }
+          th {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: right;
+            font-weight: bold;
+            font-size: 11px;
+            background: #e5e7eb;
+          }
+          td {
+            border: 1px solid #000;
+            padding: 6px;
+            font-size: 11px;
+            vertical-align: middle;
+          }
+          tr {
+            page-break-inside: avoid;
+          }
+          .signatures {
+            margin-top: 60px;
+            display: flex;
+            justify-content: space-between;
+            page-break-inside: avoid;
+          }
+          .signature-box {
+            text-align: center;
+            width: 30%;
+          }
+          .signature-box .title {
+            font-weight: bold;
+            margin-bottom: 50px;
+            font-size: 12px;
+          }
+          .signature-box .line {
+            border-top: 1px solid #000;
+            width: 150px;
+            margin: 0 auto;
+            padding-top: 5px;
+          }
+          .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 9px;
+            color: #666;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+          }
+          .empty-message {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 14px;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>گزارش دفتر کل حساب</h1>
+          <div class="account-name">${selectedAccount.name}</div>
+          <div class="account-code">کد حساب: ${selectedAccount.code}</div>
+          <div class="period">${periodText}</div>
+          <div class="print-date">تاریخ تهیه گزارش: ${new Date().toLocaleDateString('fa-IR')}</div>
+        </div>
+
+        ${filteredLedgerRows.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th style="width:13%;">تاریخ</th>
+                <th style="width:12%;">شماره سند</th>
+                <th>شرح</th>
+                <th style="width:13%;">بدهکار (ریال)</th>
+                <th style="width:13%;">بستانکار (ریال)</th>
+                <th style="width:13%;">مانده (ریال)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        ` : `
+          <div class="empty-message">
+            در بازه زمانی انتخاب‌شده تراکنشی وجود ندارد
+          </div>
+        `}
+
+        <div class="signatures">
+          <div class="signature-box">
+            <div class="title">تهیه کننده</div>
+            <div class="line"></div>
+          </div>
+          <div class="signature-box">
+            <div class="title">تایید کننده</div>
+            <div class="line"></div>
+          </div>
+          <div class="signature-box">
+            <div class="title">مدیر مالی</div>
+            <div class="line"></div>
+          </div>
+        </div>
+
+        <div class="footer">
+          سیستم حسابداری فروشگاه — گزارش تولید شده در ${new Date().toLocaleString('fa-IR')}
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          }
+          window.onafterprint = function() {
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `
+
+    // باز کردن پنجره جدید
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) {
+      toast({
+        title: 'خطا',
+        description: 'مرورگر شما پنجره پاپ‌آپ را مسدود کرده است. لطفاً اجازه پاپ‌آپ را برای این سایت فعال کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    // نوشتن HTML در پنجره جدید
+    printWindow.document.open()
+    printWindow.document.write(printContent)
+    printWindow.document.close()
+  }
 
   // ═══════════════════════════════════════════════════════════
   // RENDER
@@ -236,18 +484,15 @@ export function LedgerTab() {
         <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
           <div className="text-xs text-amber-800">
-            <strong>حالت آفلاین فعال است.</strong> دفتر کل بر اساس آخرین داده‌های ذخیره‌شده محاسبه شده است. امکان چاپ در حالت آفلاین وجود ندارد.
+            <strong>حالت آفلاین فعال است.</strong> دفتر کل بر اساس آخرین داده‌های ذخیره‌شده محاسبه شده است.
           </div>
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════
-          Toolbar — انتخاب حساب + فیلتر تاریخ
-      ═══════════════════════════════════════════════════════ */}
+      {/* Toolbar */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="space-y-3">
-            {/* ردیف ۱: انتخاب حساب + چاپ */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-end">
               <div className="flex-1">
                 <Label className="text-xs text-gray-600 mb-1 block">انتخاب حساب:</Label>
@@ -266,14 +511,13 @@ export function LedgerTab() {
                   ))}
                 </select>
               </div>
-              {selectedAccountId && isOnline && (
-                <Button size="sm" variant="outline" className="text-xs h-9" onClick={() => window.print()}>
-                  <Printer className="w-3.5 h-3.5 ml-1" /> چاپ
+              {selectedAccountId && (
+                <Button size="sm" variant="outline" className="text-xs h-9" onClick={handlePrint}>
+                  <Printer className="w-3.5 h-3.5 ml-1" /> چاپ گزارش
                 </Button>
               )}
             </div>
 
-            {/* ردیف ۲: فیلتر تاریخ */}
             {selectedAccountId && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                 <div>
@@ -304,7 +548,6 @@ export function LedgerTab() {
               </div>
             )}
 
-            {/* اطلاعات حساب انتخاب شده */}
             {selectedAccount && (
               <div className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
                 <BookOpen className="w-4 h-4 text-blue-600 shrink-0" />
@@ -317,39 +560,33 @@ export function LedgerTab() {
         </CardContent>
       </Card>
 
-  {/* ═══════════════════════════════════════════════════════
-    کارت‌های مانده — خیلی کوچک و رنگی
-═══════════════════════════════════════════════════════ */}
-{selectedAccountId && filteredLedgerRows.length > 0 && (
-  <div className="grid grid-cols-2 gap-1 sm:gap-1.5">
-    {/* مانده اول دوره */}
-    <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">مانده اول دوره</span>
-        <Calendar className="w-2.5 h-2.5 text-blue-400 shrink-0" />
-      </div>
-      <div className={`text-[10px] sm:text-xs font-bold ${openingBalance >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
-        {formatRial(Math.abs(openingBalance))}
-        <span className="text-[8px] font-normal mr-1">{openingBalance >= 0 ? 'بدهکار' : 'بستانکار'}</span>
-      </div>
-    </div>
+      {/* کارت‌های مانده */}
+      {selectedAccountId && filteredLedgerRows.length > 0 && (
+        <div className="grid grid-cols-2 gap-1 sm:gap-1.5">
+          <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">مانده اول دوره</span>
+              <Calendar className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+            </div>
+            <div className={`text-[10px] sm:text-xs font-bold ${openingBalance >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+              {formatRial(Math.abs(openingBalance))}
+              <span className="text-[8px] font-normal mr-1">{openingBalance >= 0 ? 'بدهکار' : 'بستانکار'}</span>
+            </div>
+          </div>
+          <div className="relative overflow-hidden rounded-md border border-purple-200 bg-gradient-to-br from-purple-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[8px] sm:text-[9px] font-medium text-purple-600 truncate">مانده آخر دوره</span>
+              <TrendingUp className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+            </div>
+            <div className={`text-[10px] sm:text-xs font-bold ${closingBalance >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+              {formatRial(Math.abs(closingBalance))}
+              <span className="text-[8px] font-normal mr-1">{closingBalance >= 0 ? 'بدهکار' : 'بستانکار'}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-    {/* مانده آخر دوره */}
-    <div className="relative overflow-hidden rounded-md border border-purple-200 bg-gradient-to-br from-purple-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[8px] sm:text-[9px] font-medium text-purple-600 truncate">مانده آخر دوره</span>
-        <TrendingUp className="w-2.5 h-2.5 text-purple-400 shrink-0" />
-      </div>
-      <div className={`text-[10px] sm:text-xs font-bold ${closingBalance >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
-        {formatRial(Math.abs(closingBalance))}
-        <span className="text-[8px] font-normal mr-1">{closingBalance >= 0 ? 'بدهکار' : 'بستانکار'}</span>
-      </div>
-    </div>
-  </div>
-)}
-      {/* ═══════════════════════════════════════════════════════
-          Loading / Empty / Content
-      ═══════════════════════════════════════════════════════ */}
+      {/* Loading / Empty */}
       {loading ? (
         <Card className="border-gray-200">
           <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
@@ -378,9 +615,7 @@ export function LedgerTab() {
         </Card>
       ) : (
         <>
-          {/* ═══════════════════════════════════════════════════════
-              نمای دسکتاپ (جدول)
-          ═══════════════════════════════════════════════════════ */}
+          {/* جدول دسکتاپ */}
           <div className="hidden lg:block">
             <Card className="border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
@@ -396,7 +631,6 @@ export function LedgerTab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {/* ردیف مانده اول دوره */}
                     {openingBalance !== 0 && (fromDate || toDate) && (
                       <TableRow className="bg-blue-50/50">
                         <TableCell colSpan={5} className="text-xs text-blue-700 font-medium">مانده اول دوره</TableCell>
@@ -425,7 +659,6 @@ export function LedgerTab() {
                       </TableRow>
                     ))}
 
-                    {/* ردیف جمع کل */}
                     <TableRow className="bg-blue-50 font-bold">
                       <TableCell colSpan={3} className="text-xs text-blue-800">جمع کل</TableCell>
                       <TableCell className="text-xs text-red-700">
@@ -444,11 +677,8 @@ export function LedgerTab() {
             </Card>
           </div>
 
-          {/* ═══════════════════════════════════════════════════════
-              نمای موبایل (کارت‌ها)
-          ═══════════════════════════════════════════════════════ */}
+          {/* کارت‌های موبایل */}
           <div className="lg:hidden space-y-2">
-            {/* کارت مانده اول دوره */}
             {openingBalance !== 0 && (fromDate || toDate) && (
               <Card className="border-blue-200 bg-blue-50/50">
                 <CardContent className="p-3">
@@ -460,11 +690,9 @@ export function LedgerTab() {
               </Card>
             )}
 
-            {/* کارت‌های تراکنش‌ها */}
             {filteredLedgerRows.map((row, idx) => (
               <Card key={`${row.entryId}-${idx}`} className="border-gray-200">
                 <CardContent className="p-3">
-                  {/* هدر */}
                   <div className="flex items-start justify-between mb-2 flex-wrap gap-1">
                     <div className="flex items-center gap-2">
                       <Badge className="bg-gray-100 text-gray-600 text-[9px] font-mono">{row.number}</Badge>
@@ -474,13 +702,9 @@ export function LedgerTab() {
                       {formatRial(Math.abs(row.balance))} {row.balance >= 0 ? 'بد' : 'بس'}
                     </span>
                   </div>
-
-                  {/* شرح */}
                   <p className="text-xs text-gray-600 mb-2 line-clamp-2">
                     {row.lineDescription || row.description || 'بدون شرح'}
                   </p>
-
-                  {/* مبالغ */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className={`rounded p-1.5 ${row.debit > 0 ? 'bg-red-50 border border-red-100' : 'bg-gray-50 border border-gray-100'}`}>
                       <div className="text-[9px] text-red-600">بدهکار</div>
@@ -499,7 +723,6 @@ export function LedgerTab() {
               </Card>
             ))}
 
-            {/* کارت جمع کل */}
             <Card className="border-blue-200 bg-blue-50/50">
               <CardContent className="p-3">
                 <div className="text-xs font-bold text-blue-800 mb-2">جمع کل</div>

@@ -2,29 +2,27 @@
 
 // ============================================================================
 // src/components/reports/inventory-advanced-report.tsx
-// ShopAccounting v6.7 — Advanced Inventory Reports (Fully Fixed)
+// ShopAccounting v6.9 — Advanced Inventory Reports (فیلتر هوشمند محصولات بر اساس انبار)
 // ============================================================================
-// ★ v6.7 تغییرات:
-//   ۱. کارت‌های آماری گرادیان رنگی
-//   ۲. اصلاح باگ DatePicker (timezone fix)
-//   ۳. تمام مبالغ به ریال با "ریال" در سمت چپ
-//   ۴. محاسبه دقیق ارزش انبار
-//   ۵. ترجمه کامل اصطلاحات
+// ★ v6.9 تغییرات:
+//   ۱. فیلتر هوشمند: نمایش فقط محصولاتی که در انبار انتخاب‌شده تعریف شده‌اند (رفع گمراهی کاربر)
+//   ۲. بازمحاسبه خلاصه آمار (Summary) بر اساس محصولات فیلترشده
+//   ۳. حفظ اصلاح باگ DatePicker و فارسی‌سازی اعداد
 // ============================================================================
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Package, ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft, Wallet,
-  AlertTriangle, Loader2, Download, Printer, Calendar,
-  TrendingUp, Coins, CheckCircle2, XCircle,
+  AlertTriangle, Loader2, Download, Calendar,
+  TrendingUp, Coins, CheckCircle2, XCircle, Building2,
 } from 'lucide-react'
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell,
 } from 'recharts'
 
 // ============================================================================
@@ -33,8 +31,6 @@ import {
 
 const toFaNum = (n: number | string) => String(n || 0).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
 const formatNumber = (n: number) => (n || 0).toLocaleString('fa-IR')
-
-// ★ v6.7: تابع فرمت مبلغ با واحد ریال در انتها
 const formatCurrency = (n: number) => `${(n || 0).toLocaleString('fa-IR')} ریال`
 
 function getAuthHeaders(): Record<string, string> {
@@ -59,7 +55,7 @@ const REPORT_TYPES = [
 ]
 
 // ============================================================================
-//  Persian/Jalali Date Utilities — بدون باگ timezone
+//  Persian/Jalali Date Utilities
 // ============================================================================
 
 function div(a: number, b: number): number { return Math.floor(a / b) }
@@ -117,7 +113,6 @@ function daysInJalaliMonth(jy: number, jm: number): number {
   if (jm <= 6) return 31; if (jm <= 11) return 30; return isJalaliLeapYear(jy) ? 30 : 29
 }
 
-// ★ اصلاح‌شده: parsing دستی ISO برای جلوگیری از باگ timezone
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
   try {
@@ -151,7 +146,6 @@ function formatJalaliLong(isoDate: string): string {
   } catch { return isoDate }
 }
 
-// ★ اصلاح‌شده: استفاده از timezone محلی
 function todayGregorianISO(): string {
   const now = new Date()
   const year = now.getFullYear()
@@ -170,7 +164,7 @@ function daysAgoISO(n: number): string {
 }
 
 // ============================================================================
-//  PersianDatePicker — نسخه اصلاح‌شده (بدون باگ)
+//  PersianDatePicker
 // ============================================================================
 
 const EMERALD = {
@@ -333,10 +327,6 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
   )
 }
 
-// ============================================================================
-//  PersianDateRangePicker
-// ============================================================================
-
 interface DateRange { from: string; to: string }
 
 function PersianDateRangePicker({ value, onChange, size = 'sm' }: { value: DateRange; onChange: (v: DateRange) => void; size?: 'sm' | 'md' }) {
@@ -362,7 +352,7 @@ function PersianDateRangePicker({ value, onChange, size = 'sm' }: { value: DateR
 }
 
 // ============================================================================
-//  StatCard — نسخه گرادیان (مثل صفحه گزارش)
+//  StatCard
 // ============================================================================
 
 interface StatCardProps {
@@ -404,24 +394,14 @@ function StatCard({ label, value, icon, color, suffix, hint }: StatCardProps) {
 }
 
 // ============================================================================
-//  محاسبه دقیق ارزش انبار — v6.7
+//  محاسبه دقیق ارزش انبار
 // ============================================================================
 
 function calculateWarehouseValue(product: any): number {
-  // ★ اولویت ۱: مقدار totalValue از سرور
-  if (product.totalValue !== undefined && product.totalValue !== null) {
-    return Number(product.totalValue) || 0
-  }
-
-  // ★ اولویت ۲: محاسبه از currentStock × averageCost
+  if (product.totalValue !== undefined && product.totalValue !== null) return Number(product.totalValue) || 0
   const stock = Number(product.currentStock || product.totalQty || 0)
   const avgCost = Number(product.averageCost || product.purchasePrice || product.cost || 0)
-
-  if (stock > 0 && avgCost > 0) {
-    return stock * avgCost
-  }
-
-  // ★ اولویت ۳: جمع‌بندی از warehouseStocks
+  if (stock > 0 && avgCost > 0) return stock * avgCost
   if (Array.isArray(product.warehouseStocks)) {
     return product.warehouseStocks.reduce((sum: number, ws: any) => {
       const qty = Number(ws.quantity || 0)
@@ -429,26 +409,20 @@ function calculateWarehouseValue(product: any): number {
       return sum + (qty * cost)
     }, 0)
   }
-
   return 0
 }
 
 function calculateRetailValue(product: any): number {
-  // ارزش فروش = موجودی × قیمت فروش
   const stock = Number(product.currentStock || product.totalQty || 0)
   const salePrice = Number(product.salePrice || product.retailPrice || 0)
   return stock * salePrice
 }
 
 function calculatePotentialProfit(product: any): number {
-  // سود بالقوه = ارزش فروش - ارزش انبار
-  const warehouseValue = calculateWarehouseValue(product)
-  const retailValue = calculateRetailValue(product)
-  return retailValue - warehouseValue
+  return calculateRetailValue(product) - calculateWarehouseValue(product)
 }
 
 function calculateShortageValue(product: any): number {
-  // ارزش کمبود = (حداقل - موجودی فعلی) × قیمت خرید
   const stock = Number(product.currentStock || 0)
   const minStock = Number(product.minStock || 0)
   const shortage = Math.max(0, minStock - stock)
@@ -466,6 +440,9 @@ export function InventoryAdvancedReport() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [branches, setBranches] = useState<any[]>([])
+  const [selectedBranch, setSelectedBranch] = useState<string>('all')
+
   const [warehouseId, setWarehouseId] = useState<string>('all')
   const [categoryId, setCategoryId] = useState<string>('all')
   const [dateRange, setDateRange] = useState<DateRange>({ from: daysAgoISO(30), to: todayGregorianISO() })
@@ -474,11 +451,25 @@ export function InventoryAdvancedReport() {
   const warehouses = data?.warehouses || []
   const categories = data?.categories || []
 
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const res = await fetch('/api/branches', { headers: getAuthHeaders() })
+        const jsonData = await res.json()
+        if (jsonData.success) setBranches(jsonData.data || [])
+      } catch (err) {
+        console.error('Failed to fetch branches', err)
+      }
+    }
+    fetchBranches()
+  }, [])
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const params = new URLSearchParams({ type: reportType })
+      if (selectedBranch !== 'all') params.set('branchId', selectedBranch)
       if (warehouseId !== 'all') params.set('warehouseId', warehouseId)
       if (categoryId !== 'all') params.set('categoryId', categoryId)
       if (reportType === 'movements') {
@@ -504,11 +495,11 @@ export function InventoryAdvancedReport() {
     } finally {
       setLoading(false)
     }
-  }, [reportType, warehouseId, categoryId, dateRange.from, dateRange.to, lowStockOnly])
+  }, [reportType, selectedBranch, warehouseId, categoryId, dateRange.from, dateRange.to, lowStockOnly])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // ★ محاسبه مجدد مقادیر در سمت کلاینت برای اطمینان از صحت
+  // ★ ۱. غنی‌سازی محصولات
   const enrichedProducts = useMemo(() => {
     if (!data?.products) return []
     return data.products.map((p: any) => ({
@@ -520,35 +511,70 @@ export function InventoryAdvancedReport() {
     }))
   }, [data?.products])
 
+  // ★ ۲. فیلتر هوشمند محصولات بر اساس انبار انتخاب‌شده (رفع گمراهی کاربر)
+  const filteredProducts = useMemo(() => {
+    let result = enrichedProducts
+
+    // اگر انبار خاصی انتخاب شده، فقط محصولاتی را نشان بده که در آن انبار تعریف شده‌اند (رکورد StockLevel دارند)
+    if (warehouseId !== 'all') {
+      result = result.filter((p: any) => {
+        const stock = p.warehouseStocks?.find((s: any) => s.warehouseId === warehouseId)
+        return stock !== undefined // فقط محصولاتی که رسماً به این انبار واگذار شده‌اند
+      })
+    }
+
+    // فیلتر کم‌موجود
+    if (lowStockOnly) {
+      result = result.filter((p: any) => p.isLowStock || p.isOutOfStock || p.status === 'low' || p.status === 'out')
+    }
+
+    return result
+  }, [enrichedProducts, warehouseId, lowStockOnly])
+
+  // ★ ۳. بازمحاسبه خلاصه آمار بر اساس محصولات فیلترشده
   const enrichedSummary = useMemo(() => {
     if (!data?.summary) return null
     const summary = { ...data.summary }
 
-    if (reportType === 'stockByWarehouse' && enrichedProducts.length > 0) {
-      summary.totalValue = enrichedProducts.reduce((sum, p) => sum + (p.totalValue || 0), 0)
-      summary.totalPotentialProfit = enrichedProducts.reduce((sum, p) => sum + (p.potentialProfit || 0), 0)
-      summary.totalRetailValue = enrichedProducts.reduce((sum, p) => sum + (p.retailValue || 0), 0)
+    if (reportType === 'stockByWarehouse' && filteredProducts.length > 0) {
+      summary.totalProducts = filteredProducts.length
+      summary.totalQty = filteredProducts.reduce((sum, p) => sum + (Number(p.totalQty) || Number(p.currentStock) || 0), 0)
+      summary.totalValue = filteredProducts.reduce((sum, p) => sum + (p.totalValue || 0), 0)
+      summary.totalPotentialProfit = filteredProducts.reduce((sum, p) => sum + (p.potentialProfit || 0), 0)
+      summary.totalRetailValue = filteredProducts.reduce((sum, p) => sum + (p.retailValue || 0), 0)
     }
 
-    if (reportType === 'lowStock' && enrichedProducts.length > 0) {
-      summary.totalShortageValue = enrichedProducts.reduce((sum, p) => sum + (p.shortageValue || 0), 0)
+    if (reportType === 'lowStock' && filteredProducts.length > 0) {
+      summary.totalLowStock = filteredProducts.filter((p) => p.status === 'low' || p.isLowStock).length
+      summary.totalOutOfStock = filteredProducts.filter((p) => p.status === 'out' || p.isOutOfStock).length
+      summary.totalShortageValue = filteredProducts.reduce((sum, p) => sum + (p.shortageValue || 0), 0)
     }
 
     if (reportType === 'value' && data.warehouseValues) {
-      summary.totalValue = data.warehouseValues.reduce((sum: number, w: any) => sum + (Number(w.totalValue) || 0), 0)
+      if (warehouseId !== 'all') {
+        const selectedWarehouse = data.warehouseValues.find((w: any) => w.warehouseId === warehouseId)
+        if (selectedWarehouse) {
+          summary.totalWarehouses = 1
+          summary.totalProducts = selectedWarehouse.productCount
+          summary.totalQuantity = selectedWarehouse.totalQuantity
+          summary.totalValue = selectedWarehouse.totalValue
+        }
+      } else {
+        summary.totalValue = data.warehouseValues.reduce((sum: number, w: any) => sum + (Number(w.totalValue) || 0), 0)
+      }
     }
 
     return summary
-  }, [data?.summary, enrichedProducts, reportType, data?.warehouseValues])
+  }, [data?.summary, filteredProducts, reportType, data?.warehouseValues, warehouseId])
 
   const handleExportExcel = () => {
     if (!data) return
     let rows: (string | number)[][] = []
     let filename = `inventory-${reportType}`
 
-    if (reportType === 'stockByWarehouse' && enrichedProducts.length > 0) {
+    if (reportType === 'stockByWarehouse' && filteredProducts.length > 0) {
       rows.push(['کد', 'نام محصول', 'دسته', 'موجودی کل', 'ارزش خرید (ریال)', 'ارزش فروش (ریال)', 'سود بالقوه (ریال)'])
-      enrichedProducts.forEach((p: any) => {
+      filteredProducts.forEach((p: any) => {
         rows.push([p.code, p.name, p.categoryName, p.totalQty || p.currentStock, p.totalValue, p.retailValue, p.potentialProfit])
       })
     } else if (reportType === 'movements' && data.movements) {
@@ -566,9 +592,9 @@ export function InventoryAdvancedReport() {
       data.warehouseValues.forEach((w: any) => {
         rows.push([w.warehouseName, w.productCount, w.totalQuantity, w.totalValue])
       })
-    } else if (reportType === 'lowStock' && enrichedProducts.length > 0) {
+    } else if (reportType === 'lowStock' && filteredProducts.length > 0) {
       rows.push(['کد', 'نام', 'دسته', 'موجودی', 'حداقل', 'کمبود', 'ارزش کمبود (ریال)', 'وضعیت'])
-      enrichedProducts.forEach((p: any) => {
+      filteredProducts.forEach((p: any) => {
         rows.push([p.code, p.name, p.categoryName, p.currentStock, p.minStock, p.shortage, p.shortageValue, p.status === 'out' ? 'ناموجود' : 'کم‌موجود'])
       })
     }
@@ -583,9 +609,6 @@ export function InventoryAdvancedReport() {
     URL.revokeObjectURL(url)
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  Render
-  // ═══════════════════════════════════════════════════════════════
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
@@ -609,7 +632,6 @@ export function InventoryAdvancedReport() {
 
   return (
     <div className="space-y-3" dir="rtl">
-      {/* ★ انتخاب نوع گزارش */}
       <div className="flex flex-wrap gap-2">
         {REPORT_TYPES.map((rt) => {
           const Icon = rt.icon
@@ -631,9 +653,24 @@ export function InventoryAdvancedReport() {
         })}
       </div>
 
-      {/* ★ فیلترها */}
       <Card className="border-gray-200">
         <CardContent className="p-3 flex flex-wrap items-end gap-2">
+          <div className="min-w-[150px]">
+            <label className="text-[10px] text-gray-500">شعبه</label>
+            <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+              <SelectTrigger className="h-8 text-xs mt-0.5">
+                <Building2 className="w-3.5 h-3.5 ml-1 text-gray-400" />
+                <SelectValue placeholder="همه شعب" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">همه شعب (تلفیقی)</SelectItem>
+                {branches.map((b: any) => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {(reportType === 'stockByWarehouse' || reportType === 'movements' || reportType === 'value') && (
             <div className="min-w-[150px]">
               <label className="text-[10px] text-gray-500">انبار</label>
@@ -685,138 +722,45 @@ export function InventoryAdvancedReport() {
         </CardContent>
       </Card>
 
-      {/* ★ محتوای گزارش */}
-    {data && (
+      {data && (
         <>
-          {/* ★ کارت‌های آماری گرادیان */}
           {enrichedSummary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {reportType === 'stockByWarehouse' && (
                 <>
-                  <StatCard
-                    label="تعداد محصولات"
-                    value={enrichedSummary.totalProducts || 0}
-                    icon={<Package className="w-3.5 h-3.5 text-white" />}
-                    color="emerald"
-                    suffix="محصول"
-                  />
-                  <StatCard
-                    label="موجودی کل"
-                    value={enrichedSummary.totalQty || 0}
-                    icon={<Coins className="w-3.5 h-3.5 text-white" />}
-                    color="blue"
-                    suffix="واحد"
-                  />
-                  <StatCard
-                    label="ارزش انبار"
-                    value={formatCurrency(enrichedSummary.totalValue || 0)}
-                    icon={<Wallet className="w-3.5 h-3.5 text-white" />}
-                    color="amber"
-                  />
-                  <StatCard
-                    label="سود بالقوه"
-                    value={formatCurrency(enrichedSummary.totalPotentialProfit || 0)}
-                    icon={<TrendingUp className="w-3.5 h-3.5 text-white" />}
-                    color="teal"
-                  />
+                  <StatCard label="تعداد محصولات" value={enrichedSummary.totalProducts || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="محصول" />
+                  <StatCard label="موجودی کل" value={enrichedSummary.totalQty || 0} icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="واحد" />
+                  <StatCard label="ارزش انبار" value={formatCurrency(enrichedSummary.totalValue || 0)} icon={<Wallet className="w-3.5 h-3.5 text-white" />} color="amber" />
+                  <StatCard label="سود بالقوه" value={formatCurrency(enrichedSummary.totalPotentialProfit || 0)} icon={<TrendingUp className="w-3.5 h-3.5 text-white" />} color="teal" />
                 </>
               )}
               {reportType === 'movements' && (
                 <>
-                  <StatCard
-                    label="تعداد حرکت‌ها"
-                    value={enrichedSummary.totalMovements || 0}
-                    icon={<ArrowRightLeft className="w-3.5 h-3.5 text-white" />}
-                    color="emerald"
-                    suffix="حرکت"
-                  />
-                  <StatCard
-                    label="ارزش ورودی"
-                    value={formatCurrency(enrichedSummary.totalIn || 0)}
-                    icon={<ArrowDownToLine className="w-3.5 h-3.5 text-white" />}
-                    color="blue"
-                  />
-                  <StatCard
-                    label="ارزش خروجی"
-                    value={formatCurrency(enrichedSummary.totalOut || 0)}
-                    icon={<ArrowUpFromLine className="w-3.5 h-3.5 text-white" />}
-                    color="amber"
-                  />
-                  <StatCard
-                    label="انتقال‌ها"
-                    value={enrichedSummary.totalTransfer || 0}
-                    icon={<ArrowRightLeft className="w-3.5 h-3.5 text-white" />}
-                    color="purple"
-                    suffix="انتقال"
-                  />
+                  <StatCard label="تعداد حرکت‌ها" value={enrichedSummary.totalMovements || 0} icon={<ArrowRightLeft className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="حرکت" />
+                  <StatCard label="ارزش ورودی" value={formatCurrency(enrichedSummary.totalIn || 0)} icon={<ArrowDownToLine className="w-3.5 h-3.5 text-white" />} color="blue" />
+                  <StatCard label="ارزش خروجی" value={formatCurrency(enrichedSummary.totalOut || 0)} icon={<ArrowUpFromLine className="w-3.5 h-3.5 text-white" />} color="amber" />
+                  <StatCard label="انتقال‌ها" value={enrichedSummary.totalTransfer || 0} icon={<ArrowRightLeft className="w-3.5 h-3.5 text-white" />} color="purple" suffix="انتقال" />
                 </>
               )}
               {reportType === 'value' && (
                 <>
-                  <StatCard
-                    label="تعداد انبارها"
-                    value={enrichedSummary.totalWarehouses || 0}
-                    icon={<Package className="w-3.5 h-3.5 text-white" />}
-                    color="emerald"
-                    suffix="انبار"
-                  />
-                  <StatCard
-                    label="تعداد محصولات"
-                    value={enrichedSummary.totalProducts || 0}
-                    icon={<Coins className="w-3.5 h-3.5 text-white" />}
-                    color="blue"
-                    suffix="محصول"
-                  />
-                  <StatCard
-                    label="تعداد کل کالا"
-                    value={enrichedSummary.totalQuantity || 0}
-                    icon={<Package className="w-3.5 h-3.5 text-white" />}
-                    color="amber"
-                    suffix="واحد"
-                  />
-                  <StatCard
-                    label="ارزش کل انبار"
-                    value={formatCurrency(enrichedSummary.totalValue || 0)}
-                    icon={<Wallet className="w-3.5 h-3.5 text-white" />}
-                    color="teal"
-                  />
+                  <StatCard label="تعداد انبارها" value={enrichedSummary.totalWarehouses || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="انبار" />
+                  <StatCard label="تعداد محصولات" value={enrichedSummary.totalProducts || 0} icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="محصول" />
+                  <StatCard label="تعداد کل کالا" value={enrichedSummary.totalQuantity || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="amber" suffix="واحد" />
+                  <StatCard label="ارزش کل انبار" value={formatCurrency(enrichedSummary.totalValue || 0)} icon={<Wallet className="w-3.5 h-3.5 text-white" />} color="teal" />
                 </>
               )}
               {reportType === 'lowStock' && (
                 <>
-                  <StatCard
-                    label="کم‌موجود"
-                    value={enrichedSummary.totalLowStock || 0}
-                    icon={<AlertTriangle className="w-3.5 h-3.5 text-white" />}
-                    color="amber"
-                    suffix="کالا"
-                  />
-                  <StatCard
-                    label="ناموجود"
-                    value={enrichedSummary.totalOutOfStock || 0}
-                    icon={<XCircle className="w-3.5 h-3.5 text-white" />}
-                    color="red"
-                    suffix="کالا"
-                  />
-                  <StatCard
-                    label="ارزش کمبود"
-                    value={formatCurrency(enrichedSummary.totalShortageValue || 0)}
-                    icon={<Wallet className="w-3.5 h-3.5 text-white" />}
-                    color="red"
-                  />
-                  <StatCard
-                    label="کل کالاهای نیازمند"
-                    value={(enrichedSummary.totalLowStock || 0) + (enrichedSummary.totalOutOfStock || 0)}
-                    icon={<CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                    color="blue"
-                    suffix="کالا"
-                  />
+                  <StatCard label="کم‌موجود" value={enrichedSummary.totalLowStock || 0} icon={<AlertTriangle className="w-3.5 h-3.5 text-white" />} color="amber" suffix="کالا" />
+                  <StatCard label="ناموجود" value={enrichedSummary.totalOutOfStock || 0} icon={<XCircle className="w-3.5 h-3.5 text-white" />} color="red" suffix="کالا" />
+                  <StatCard label="ارزش کمبود" value={formatCurrency(enrichedSummary.totalShortageValue || 0)} icon={<Wallet className="w-3.5 h-3.5 text-white" />} color="red" />
+                  <StatCard label="کل کالاهای نیازمند" value={(enrichedSummary.totalLowStock || 0) + (enrichedSummary.totalOutOfStock || 0)} icon={<CheckCircle2 className="w-3.5 h-3.5 text-white" />} color="blue" suffix="کالا" />
                 </>
               )}
             </div>
           )}
 
-          {/* ★ نمودار (برای value) */}
           {reportType === 'value' && data.warehouseValues && data.warehouseValues.length > 0 && (
             <Card className="border-gray-200">
               <CardHeader className="pb-2">
@@ -838,7 +782,6 @@ export function InventoryAdvancedReport() {
             </Card>
           )}
 
-          {/* ★ نمودار Pie برای دسته‌بندی (value) */}
           {reportType === 'value' && data.categoryValues && data.categoryValues.length > 0 && (
             <Card className="border-gray-200">
               <CardHeader className="pb-2">
@@ -869,11 +812,10 @@ export function InventoryAdvancedReport() {
             </Card>
           )}
 
-          {/* ★ جدول گزارش */}
           <Card className="border-gray-200">
             <CardContent className="p-0">
-              {reportType === 'stockByWarehouse' && enrichedProducts.length > 0 && (
-                <InventoryStockTable products={enrichedProducts} warehouses={warehouses} />
+              {reportType === 'stockByWarehouse' && filteredProducts.length > 0 && (
+                <InventoryStockTable products={filteredProducts} warehouses={warehouses} />
               )}
               {reportType === 'movements' && data.movements && data.movements.length > 0 && (
                 <MovementsTable movements={data.movements} />
@@ -881,15 +823,14 @@ export function InventoryAdvancedReport() {
               {reportType === 'value' && data.warehouseValues && (
                 <ValueTable warehouseValues={data.warehouseValues} categoryValues={data.categoryValues} />
               )}
-              {reportType === 'lowStock' && enrichedProducts.length > 0 && (
-                <LowStockTable products={enrichedProducts} />
+              {reportType === 'lowStock' && filteredProducts.length > 0 && (
+                <LowStockTable products={filteredProducts} />
               )}
               
-      
-              {((reportType === 'stockByWarehouse' && enrichedProducts.length === 0) ||
+              {((reportType === 'stockByWarehouse' && filteredProducts.length === 0) ||
                 (reportType === 'movements' && (!data.movements || data.movements.length === 0)) ||
                 (reportType === 'value' && (!data.warehouseValues || data.warehouseValues.length === 0)) ||
-                (reportType === 'lowStock' && enrichedProducts.length === 0)) && (
+                (reportType === 'lowStock' && filteredProducts.length === 0)) && (
                 <EmptyState message="داده‌ای برای نمایش وجود ندارد" />
               )}
             </CardContent>
@@ -901,13 +842,11 @@ export function InventoryAdvancedReport() {
 }
 
 // ============================================================================
-//  Inventory Stock Table (موجودی هر انبار)
+//  Inventory Stock Table
 // ============================================================================
 
 function InventoryStockTable({ products, warehouses }: { products: any[]; warehouses: any[] }) {
-  if (products.length === 0) {
-    return <EmptyState message="محصولی یافت نشد" />
-  }
+  if (products.length === 0) return <EmptyState message="محصولی یافت نشد" />
 
   return (
     <div className="overflow-x-auto">
@@ -962,13 +901,11 @@ function InventoryStockTable({ products, warehouses }: { products: any[]; wareho
 }
 
 // ============================================================================
-//  Movements Table (حرکت کالا)
+//  Movements Table
 // ============================================================================
 
 function MovementsTable({ movements }: { movements: any[] }) {
-  if (movements.length === 0) {
-    return <EmptyState message="حرکتی در این بازه ثبت نشده است" />
-  }
+  if (movements.length === 0) return <EmptyState message="حرکتی در این بازه ثبت نشده است" />
 
   return (
     <div className="overflow-x-auto max-h-[500px]">
@@ -986,9 +923,7 @@ function MovementsTable({ movements }: { movements: any[] }) {
         <TableBody>
           {movements.map((m) => (
             <TableRow key={m.id} className="hover:bg-blue-50/30">
-              <TableCell className="text-[10px] py-1.5 px-2 text-gray-500">
-                {formatJalaliShort(m.date)}
-              </TableCell>
+              <TableCell className="text-[10px] py-1.5 px-2 text-gray-500">{formatJalaliShort(m.date)}</TableCell>
               <TableCell className="text-[11px] py-1.5 px-2">
                 <div className="font-medium truncate max-w-[150px]">{m.productName}</div>
                 <div className="text-[9px] text-gray-400" dir="ltr">{m.productCode}</div>
@@ -1029,13 +964,12 @@ function MovementsTable({ movements }: { movements: any[] }) {
 }
 
 // ============================================================================
-//  Value Table (ارزش انبار)
+//  Value Table
 // ============================================================================
 
 function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[]; categoryValues: any[] }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-      {/* ★ ارزش بر اساس انبار */}
       <div>
         <h3 className="text-xs font-bold text-gray-700 mb-2">ارزش بر اساس انبار</h3>
         {warehouseValues.length === 0 ? (
@@ -1069,7 +1003,6 @@ function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[
         )}
       </div>
 
-      {/* ★ ارزش بر اساس دسته */}
       <div>
         <h3 className="text-xs font-bold text-gray-700 mb-2">ارزش بر اساس دسته</h3>
         {categoryValues.length === 0 ? (
@@ -1107,13 +1040,11 @@ function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[
 }
 
 // ============================================================================
-//  Low Stock Table (کالاهای کم‌موجود)
+//  Low Stock Table
 // ============================================================================
 
 function LowStockTable({ products }: { products: any[] }) {
-  if (products.length === 0) {
-    return <EmptyState message="همه محصولات موجودی کافی دارند ✓" />
-  }
+  if (products.length === 0) return <EmptyState message="همه محصولات موجودی کافی دارند ✓" />
 
   return (
     <div className="overflow-x-auto">
@@ -1164,10 +1095,6 @@ function LowStockTable({ products }: { products: any[] }) {
     </div>
   )
 }
-
-// ============================================================================
-//  Empty State
-// ============================================================================
 
 function EmptyState({ message }: { message: string }) {
   return (

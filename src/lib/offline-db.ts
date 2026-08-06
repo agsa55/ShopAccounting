@@ -1194,7 +1194,7 @@ export interface CachedCheck {
   dueDate: string
   customerId?: string | null
   payee?: string | null
-  status: 'pending' | 'deposited' | 'cleared' | 'bounced'
+  status: 'pending' | 'deposited' | 'cleared' | 'bounced' | 'returned'
   createdAt?: string
   // ★★★ فیلدهای آفلاین
   _offline?: boolean

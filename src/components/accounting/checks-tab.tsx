@@ -28,7 +28,7 @@ import {
 import {
   Plus, Search, Loader2, WifiOff, CreditCard, Eye,
   CheckCircle2, AlertCircle, Save, Pencil, Trash2, Calendar,
-  Ban, Clock, RefreshCw, Landmark,
+  Ban, Clock, RefreshCw, Landmark,RotateCcw, XCircle, 
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -43,7 +43,7 @@ interface Check {
   dueDate: string
   customerId?: string | null
   payee?: string | null
-  status: 'pending' | 'deposited' | 'cleared' | 'bounced'
+  status: 'pending' | 'deposited' | 'cleared' | 'bounced' | 'returned'
   createdAt?: string
   // ★★★ فیلدهای آفلاین
   _offline?: boolean
@@ -130,6 +130,9 @@ function getStatusBadge(status: string) {
       return <Badge className="bg-emerald-100 text-emerald-700">وصول شده</Badge>
     case 'bounced':
       return <Badge className="bg-red-100 text-red-700">برگشت خورده</Badge>
+       case 'returned':
+      return <Badge className="bg-orange-100 text-orange-700">پس داده/باطل</Badge>
+    
     default:
       return <Badge>{status}</Badge>
   }
@@ -615,60 +618,82 @@ export function ChecksTab() {
   // ★★★ Change Check Status (سپردن، وصول، برگشت)
   // ═══════════════════════════════════════════════════════════
 
-  const handleCheckStatus = useCallback(async (checkId: string, newStatus: 'deposited' | 'cleared' | 'bounced') => {
-    const check = checks.find(c => c.id === checkId)
-    if (!check) return
+  // ═══════════════════════════════════════════════════════════
+// ★★★ v10.0: Change Check Status (سپردن، وصول، برگشت، پس دادن)
+// ★ اصلاح باگ: ارسال id در body (نه فقط در URL)
+// ★ افزودن "پس دادن" و "پس گرفتن"
+// ═══════════════════════════════════════════════════════════
 
-    try {
-      // Optimistic UI: به‌روزرسانی فوری
-      const updated = checks.map(c => 
-        c.id === checkId ? { ...c, status: newStatus } : c
-      )
-      setChecks(updated)
-      await cacheChecks(updated)
+const handleCheckStatus = useCallback(async (
+  checkId: string,
+  newStatus: 'deposited' | 'cleared' | 'bounced' | 'returned'
+) => {
+  const check = checks.find(c => c.id === checkId)
+  if (!check) return
 
-      if (check._offline) {
-        // چک آفلاین: فقط در صف sync قرار بده
-        await addCheckToSyncQueue('status_change', { ...check, status: newStatus })
-        toast({ title: '✓ وضعیت به‌روزرسانی شد', description: 'در صف همگام‌سازی قرار گرفت' })
-      } else {
-        // چک آنلاین: درخواست به سرور
-        if (!isOnline) {
-          toast({ title: 'خطا', description: 'تغییر وضعیت چک آنلاین نیاز به اتصال دارد', variant: 'destructive' })
-          // برگرداندن تغییر
-          setChecks(checks)
-          return
-        }
+  const previousChecks = [...checks] // ذخیره برای رول‌بک در صورت خطا
 
-        const token = localStorage.getItem('token')
-        const res = await fetch(`/api/checks/${checkId}`, {
-          method: 'PATCH',
-          headers: { 
-            'Content-Type': 'application/json', 
-            ...(token ? { Authorization: `Bearer ${token}` } : {}) 
-          },
-          body: JSON.stringify({ status: newStatus }),
-        })
+  try {
+    // 1. Optimistic UI: به‌روزرسانی فوری
+    const updated = checks.map(c =>
+      c.id === checkId ? { ...c, status: newStatus } : c
+    )
+    setChecks(updated)
+    await cacheChecks(updated)
 
-        if (res.ok) {
-          toast({ title: '✓ موفق', description: 'وضعیت چک به‌روزرسانی شد' })
-        } else {
-          const data = await res.json()
-          throw new Error(data.error || 'خطا در به‌روزرسانی')
-        }
-      }
-
-      // Trigger sync اگر آنلاین هستیم
+    // 2. منطق آفلاین
+    if (check._offline || !isOnline) {
+      await addCheckToSyncQueue('status_change', { ...check, status: newStatus })
+      toast({ 
+        title: '✓ وضعیت به‌روزرسانی شد', 
+        description: !isOnline ? 'در صف همگام‌سازی قرار گرفت (آفلاین)' : 'در حال ارسال به سرور' 
+      })
+      
       if (isOnline) {
-        setTimeout(() => syncEngine.sync(), 100)
+        setTimeout(async () => {
+          await syncEngine.sync()
+          await loadChecks()
+        }, 500)
       }
-    } catch (err: any) {
-      toast({ title: 'خطا', description: err.message || 'خطا در به‌روزرسانی چک', variant: 'destructive' })
-      // برگرداندن تغییر
-      await loadChecks()
+      return
     }
-  }, [checks, isOnline, toast, loadChecks])
 
+    // 3. درخواست به سرور (آنلاین) - ★★★ اصلاح مسیر به /api/checks
+    const token = localStorage.getItem('token')
+    const res = await fetch('/api/checks', { // ★★★ حذف checkId از URL
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({
+        id: checkId,       // ★★★ ارسال id در body
+        status: newStatus,
+      }),
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      const statusLabels: Record<string, string> = {
+        deposited: 'به بانک سپرده شد',
+        cleared: 'چک وصول/پاس شد',
+        bounced: 'چک برگشت خورد',
+        returned: check.type === 'receivable' ? 'چک به مشتری پس داده شد' : 'چک باطل/پس گرفته شد',
+      }
+      toast({ title: '✓ موفق', description: data.message || statusLabels[newStatus] })
+      await loadChecks() // بارگذاری مجدد برای دریافت اطلاعات سند حسابداری
+    } else {
+      const data = await res.json()
+      throw new Error(data.error || 'خطا در به‌روزرسانی وضعیت چک')
+    }
+  } catch (err: any) {
+    console.error('[Check Status Error]:', err)
+    toast({ title: 'خطا', description: err.message || 'خطا در به‌روزرسانی', variant: 'destructive' })
+    // Rollback به حالت قبل
+    setChecks(previousChecks)
+    await cacheChecks(previousChecks)
+  }
+}, [checks, isOnline, toast, loadChecks])
   // ═══════════════════════════════════════════════════════════
   // ★★★ Delete Check
   // ═══════════════════════════════════════════════════════════
@@ -875,6 +900,7 @@ export function ChecksTab() {
               <option value="deposited">نزد بانک</option>
               <option value="cleared">وصول شده</option>
               <option value="bounced">برگشت خورده</option>
+                <option value="returned">پس داده/باطل</option>
             </select>
 
             {/* دکمه ثبت چک جدید */}
@@ -966,48 +992,104 @@ export function ChecksTab() {
                         <TableCell className="text-xs font-bold">{formatCurrency(chk.amount)}</TableCell>
                         <TableCell className="text-xs">{formatDate(chk.dueDate)}</TableCell>
                         <TableCell>{getStatusBadge(chk.status)}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            {/* دکمه‌های تغییر وضعیت */}
-                            {chk.status === 'pending' && (
-                              <Button size="sm" variant="outline" className="text-xs h-7"
-                                onClick={() => handleCheckStatus(chk.id, 'deposited')}
-                                title="سپردن به بانک"
-                              >
-                                <Landmark className="w-3 h-3 ml-1" /> سپردن
-                              </Button>
-                            )}
-                            {chk.status === 'deposited' && (
-                              <>
-                                <Button size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                                  onClick={() => handleCheckStatus(chk.id, 'cleared')}
-                                  title="وصول چک"
-                                >
-                                  <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
-                                </Button>
-                                <Button size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
-                                  onClick={() => handleCheckStatus(chk.id, 'bounced')}
-                                  title="برگشت چک"
-                                >
-                                  <Ban className="w-3 h-3 ml-1" /> برگشت
-                                </Button>
-                              </>
-                            )}
-                            {/* دکمه‌های ویرایش و حذف */}
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
-                              onClick={() => openEditDialog(chk)}
-                              title="ویرایش"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
-                              onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
-                              title="حذف"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
+                       <TableCell>
+  <div className="flex items-center gap-1">
+    {/* ─── چک دریافتنی ─── */}
+    {chk.type === 'receivable' && (
+      <>
+        {chk.status === 'pending' && (
+          <>
+            <Button
+              size="sm" variant="outline" className="text-xs h-7"
+              onClick={() => handleCheckStatus(chk.id, 'deposited')}
+              title="سپردن به بانک"
+            >
+              <Landmark className="w-3 h-3 ml-1" /> سپردن
+            </Button>
+            {/* ★ v10.0: پس دادن چک به مشتری */}
+            <Button
+              size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
+              onClick={() => handleCheckStatus(chk.id, 'returned')}
+              title="پس دادن چک به مشتری"
+            >
+              <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
+            </Button>
+          </>
+        )}
+        {chk.status === 'deposited' && (
+          <>
+            <Button
+              size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+              onClick={() => handleCheckStatus(chk.id, 'cleared')}
+              title="وصول چک"
+            >
+              <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
+            </Button>
+            <Button
+              size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
+              onClick={() => handleCheckStatus(chk.id, 'bounced')}
+              title="برگشت چک"
+            >
+              <Ban className="w-3 h-3 ml-1" /> برگشت
+            </Button>
+          </>
+        )}
+      </>
+    )}
+
+    {/* ─── چک پرداختنی ─── */}
+    {chk.type === 'payable' && (
+      <>
+        {chk.status === 'pending' && (
+          <>
+            <Button
+              size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+              onClick={() => handleCheckStatus(chk.id, 'cleared')}
+              title="پاس شدن چک (پرداخت)"
+            >
+              <CheckCircle2 className="w-3 h-3 ml-1" /> پاس شد
+            </Button>
+            {/* ★ v10.0: باطل کردن چک (پس گرفتن از تأمین‌کننده) */}
+            <Button
+              size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
+              onClick={() => handleCheckStatus(chk.id, 'returned')}
+              title="باطل کردن / پس گرفتن چک"
+            >
+              <XCircle className="w-3 h-3 ml-1" /> باطل
+            </Button>
+          </>
+        )}
+        {chk.status === 'bounced' && (
+          <Button
+            size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
+            disabled
+            title="چک برگشت خورده — نیاز به صدور چک جدید"
+          >
+            <Ban className="w-3 h-3 ml-1" /> برگشتی
+          </Button>
+        )}
+      </>
+    )}
+
+    {/* ویرایش و حذف (فقط در pending) */}
+    {chk.status === 'pending' && (
+      <>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+          onClick={() => openEditDialog(chk)}
+          title="ویرایش"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
+          onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
+          title="حذف"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </Button>
+      </>
+    )}
+  </div>
+</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1016,7 +1098,7 @@ export function ChecksTab() {
             </Card>
           </div>
 
-          {/* ═══════════════════════════════════════════════════════
+                  {/* ═══════════════════════════════════════════════════════
               نمای موبایل (کارت‌ها) — فقط زیر lg
           ═══════════════════════════════════════════════════════ */}
           <div className="lg:hidden space-y-3">
@@ -1027,14 +1109,12 @@ export function ChecksTab() {
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge className={chk.type === 'receivable' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}>
-                        {chk.type === 'receivable' ? 'چک دریافتنی' : 'چک پرداختنی'}
+                        {chk.type === 'receivable' ? 'دریافتنی' : 'پرداختنی'}
                       </Badge>
                       {getStatusBadge(chk.status)}
-                      {/* ★★★ نشانگر آفلاین */}
                       {chk._offline && (
                         <Badge className="bg-orange-100 text-orange-700 text-[9px]">
-                          <Clock className="w-2.5 h-2.5 ml-0.5" />
-                          آفلاین
+                          <Clock className="w-2.5 h-2.5 ml-0.5" /> آفلاین
                         </Badge>
                       )}
                     </div>
@@ -1060,40 +1140,69 @@ export function ChecksTab() {
                   </div>
 
                   {/* دکمه‌های عملیات */}
-                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100 flex-wrap">
-                    {/* تغییر وضعیت */}
+                  <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                    
+                    {/* ─── وضعیت: در جریان (pending) ─── */}
                     {chk.status === 'pending' && (
-                      <Button size="sm" variant="outline" className="text-xs h-8 flex-1"
-                        onClick={() => handleCheckStatus(chk.id, 'deposited')}
-                      >
-                        <Landmark className="w-3 h-3 ml-1" /> سپردن به بانک
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        {chk.type === 'receivable' ? (
+                          <>
+                            <Button size="sm" variant="outline" className="text-xs h-9"
+                              onClick={() => handleCheckStatus(chk.id, 'deposited')}>
+                              <Landmark className="w-3 h-3 ml-1" /> سپردن
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-xs h-9 text-orange-600 border-orange-200 hover:bg-orange-50"
+                              onClick={() => handleCheckStatus(chk.id, 'returned')}>
+                              <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                              onClick={() => handleCheckStatus(chk.id, 'cleared')}>
+                              <CheckCircle2 className="w-3 h-3 ml-1" /> پاس شد
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => handleCheckStatus(chk.id, 'returned')}>
+                              <XCircle className="w-3 h-3 ml-1" /> باطل
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     )}
+
+                    {/* ─── وضعیت: نزد بانک (deposited) ─── */}
                     {chk.status === 'deposited' && (
-                      <>
-                        <Button size="sm" variant="outline" className="text-xs h-8 text-emerald-600 border-emerald-200 hover:bg-emerald-50 flex-1"
-                          onClick={() => handleCheckStatus(chk.id, 'cleared')}
-                        >
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                          onClick={() => handleCheckStatus(chk.id, 'cleared')}>
                           <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
                         </Button>
-                        <Button size="sm" variant="outline" className="text-xs h-8 text-red-600 border-red-200 hover:bg-red-50 flex-1"
-                          onClick={() => handleCheckStatus(chk.id, 'bounced')}
-                        >
+                        <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => handleCheckStatus(chk.id, 'bounced')}>
                           <Ban className="w-3 h-3 ml-1" /> برگشت
                         </Button>
-                      </>
+                      </div>
                     )}
-                    {/* ویرایش و حذف */}
-                    <Button size="sm" variant="outline" className="text-xs h-8 flex-1"
-                      onClick={() => openEditDialog(chk)}
-                    >
-                      <Pencil className="w-3 h-3 ml-1" /> ویرایش
-                    </Button>
-                    <Button size="sm" variant="outline" className="text-xs h-8 text-red-600 border-red-200 hover:bg-red-50 flex-1"
-                      onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
-                    >
-                      <Trash2 className="w-3 h-3 ml-1" /> حذف
-                    </Button>
+
+                    {/* ─── دکمه‌های ویرایش و حذف (فقط برای pending) ─── */}
+                 {chk.status === 'pending' && (
+  <>
+    <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+      onClick={() => openEditDialog(chk)}
+      title="ویرایش"
+    >
+      <Pencil className="w-3.5 h-3.5" />
+    </Button>
+    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
+      onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
+      title="حذف"
+    >
+      <Trash2 className="w-3.5 h-3.5" />
+    </Button>
+  </>
+)}
+
                   </div>
                 </CardContent>
               </Card>

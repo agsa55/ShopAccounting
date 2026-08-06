@@ -1,5 +1,5 @@
 // src/app/api/payments/online/missing-journals/route.ts
-// ShopAccounting v8.4 — بازیابی اسناد گم‌شده (فرمت صحیح برای RecoverJournalsTab)
+// ShopAccounting v8.4 — بازیابی اسناد گم‌شده (سازگار با اسکیما v10.0 - Decimal)
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
@@ -23,38 +23,50 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
           }).catch(() => null)
 
           if (!journalEntry) {
-            // ★ پیدا کردن شماره فاکتور و نام مشتری
-            let invoiceNumber = null
-            let customerName = null
+            // ★ اصلاح تایپ‌اسکریپت: تعریف صریح نوع متغیرها برای جلوگیری از خطای Type 'string | null'
+            let invoiceNumber: string | null = null
+            let customerName: string | null = null
+            
             if (payment.invoiceId) {
               const invoice = await tenantDb.invoice.findFirst({
                 where: { id: payment.invoiceId },
                 select: { number: true, customerId: true },
               }).catch(() => null)
-              invoiceNumber = invoice?.number
+              
+              invoiceNumber = invoice?.number ?? null
+              
               if (invoice?.customerId) {
                 const customer = await tenantDb.customer.findFirst({
                   where: { id: invoice.customerId },
                   select: { firstName: true, lastName: true },
                 }).catch(() => null)
-                customerName = customer ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim() : null
+                
+                if (customer) {
+                  const name = `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
+                  customerName = name || null
+                }
               }
             }
 
+            // ★ سازگاری با Decimal v10.0: تبدیل به Number برای محاسبات جاوااسکریپت
+            const amount = Number(payment.amount) || 0
+            
             payments.push({
               id: payment.id,
               paidAt: payment.paidAt,
-              amount: payment.amount || 0,
-              refId: payment.refId || null,
-              authority: payment.authority || null,
-              invoiceId: payment.invoiceId || null,
+              amount,
+              refId: payment.refId ?? null,
+              authority: payment.authority ?? null,
+              invoiceId: payment.invoiceId ?? null,
               invoiceNumber,
               customerName,
-              gatewayFee: 0, // TODO: محاسبه کارمزد
-              netSettledAmount: payment.amount || 0,
+              gatewayFee: 0,
+              netSettledAmount: amount,
             })
           }
-        } catch {}
+        } catch (err) {
+          // خطای تک‌پرداخت نادیده گرفته می‌شود تا کل فرآیند متوقف نشود
+        }
       }
     } catch (err: any) {
       console.warn('[Missing Journals] Query failed:', err?.message)

@@ -2,7 +2,7 @@
 
 // ============================================================================
 // src/components/accounting/accounts-tab.tsx — Accounts Tab (Chart of Accounts)
-// ShopAccounting v29 — با قابلیت آفلاین کامل + ریسپانسیو
+// ShopAccounting v30 — لیست خالی در شروع + فیلترهای اصلاح‌شده + اعداد فارسی
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
@@ -11,7 +11,6 @@ import {
   cacheAccounts, 
   getCachedAccounts, 
   addAccountToSyncQueue,
-  type CachedAccount,
 } from '@/lib/offline-db'
 import { syncEngine } from '@/lib/sync-engine'
 import { Card, CardContent } from '@/components/ui/card'
@@ -29,9 +28,8 @@ import {
 import {
   Plus, Search, Loader2, WifiOff, FileText, Eye,
   CheckCircle2, AlertCircle, Save, Pencil, Trash2,
-  Clock, RefreshCw, FolderTree, Ban,  // ← Ban اضافه شد
+  Clock, RefreshCw, FolderTree, Ban,
 } from 'lucide-react'
-
 import { useToast } from '@/hooks/use-toast'
 
 // ─── Types ────────────────────────────────────────────────────
@@ -44,7 +42,6 @@ interface Account {
   parentId?: string | null
   isActive: boolean
   balance?: number
-  // ★★★ فیلدهای آفلاین
   _offline?: boolean
   _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
   _createdAt?: number
@@ -52,6 +49,11 @@ interface Account {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
+
+function toPersianDigits(val: string | number | null | undefined): string {
+  if (val === null || val === undefined) return '—'
+  return String(val).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
+}
 
 function getTypeLabel(type: string): string {
   const typeMap: Record<string, string> = {
@@ -78,37 +80,29 @@ function getTypeLabel(type: string): string {
     'هزینه': 'هزینه',
     'سرمایه': 'سرمایه',
     'بدهی': 'بدهی',
+    'دارایی': 'دارایی',
   }
   return typeMap[type] || type
 }
 
 function getTypeBadgeColor(type: string): string {
+  const label = getTypeLabel(type)
   const colorMap: Record<string, string> = {
-    'cash': 'bg-emerald-100 text-emerald-700',
-    'bank': 'bg-blue-100 text-blue-700',
-    'receivable': 'bg-cyan-100 text-cyan-700',
-    'payable': 'bg-orange-100 text-orange-700',
-    'inventory': 'bg-purple-100 text-purple-700',
-    'revenue': 'bg-green-100 text-green-700',
-    'cogs': 'bg-red-100 text-red-700',
-    'expense': 'bg-rose-100 text-rose-700',
-    'equity': 'bg-indigo-100 text-indigo-700',
-    'liability': 'bg-amber-100 text-amber-700',
-    'asset': 'bg-gray-100 text-gray-700',
-    'دارایی_ثابت': 'bg-gray-100 text-gray-700',
-    'کاهنده_دارایی': 'bg-gray-200 text-gray-600',
     'صندوق': 'bg-emerald-100 text-emerald-700',
     'بانک': 'bg-blue-100 text-blue-700',
     'دریافتنی': 'bg-cyan-100 text-cyan-700',
     'پرداختنی': 'bg-orange-100 text-orange-700',
     'موجودی': 'bg-purple-100 text-purple-700',
     'درآمد': 'bg-green-100 text-green-700',
-    'بهای_تمام_شده': 'bg-red-100 text-red-700',
+    'بهای تمام شده': 'bg-red-100 text-red-700',
     'هزینه': 'bg-rose-100 text-rose-700',
     'سرمایه': 'bg-indigo-100 text-indigo-700',
     'بدهی': 'bg-amber-100 text-amber-700',
+    'دارایی': 'bg-gray-100 text-gray-700',
+    'دارایی ثابت': 'bg-gray-100 text-gray-700',
+    'کاهنده دارایی': 'bg-gray-200 text-gray-600',
   }
-  return colorMap[type] || 'bg-gray-100 text-gray-700'
+  return colorMap[label] || 'bg-gray-100 text-gray-700'
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -127,6 +121,9 @@ export function AccountsTab() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all')
+  
+  // ★★★ State جدید برای نمایش/مخفی‌سازی لیست
+  const [showAllAccounts, setShowAllAccounts] = useState(false)
 
   // ─── State: Account Dialog (Add/Edit) ─────────────────────
   const [accountFormOpen, setAccountFormOpen] = useState(false)
@@ -145,22 +142,17 @@ export function AccountsTab() {
   const [deleteSaving, setDeleteSaving] = useState(false)
 
   // ═══════════════════════════════════════════════════════════
-  // ★★★ Load Data (Bulletproof Offline + IndexedDB)
+  // Load Data
   // ═══════════════════════════════════════════════════════════
 
   const loadAccounts = useCallback(async () => {
     setLoading(true)
     try {
-      // ۱. حالت آفلاین: خواندن از IndexedDB
       if (!isOnline) {
         const cachedAccounts = await getCachedAccounts()
         if (cachedAccounts.length > 0) {
           setAccounts(cachedAccounts as Account[])
-          toast({ 
-            title: "حالت آفلاین", 
-            description: `${cachedAccounts.length} حساب از حافظه محلی بارگذاری شد`, 
-            variant: "default" 
-          })
+          toast({ title: "حالت آفلاین", description: `${cachedAccounts.length} حساب از حافظه محلی بارگذاری شد`, variant: "default" })
         } else {
           setAccounts([])
         }
@@ -168,7 +160,6 @@ export function AccountsTab() {
         return
       }
 
-      // ۲. حالت آنلاین: دریافت از سرور
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/accounts', {
         headers: { 
@@ -183,7 +174,7 @@ export function AccountsTab() {
           if (Array.isArray(accList)) {
             const formatted = accList.map((a: any) => ({
               id: a.id, 
-              code: a.code, 
+              code: String(a.code), 
               name: a.name, 
               type: (a.type || 'asset'),
               parentId: a.parentId || null, 
@@ -191,27 +182,19 @@ export function AccountsTab() {
               balance: a.balance || 0,
             }))
             setAccounts(formatted)
-            // ★★★ ذخیره در IndexedDB برای استفاده در حالت آفلاین
             await cacheAccounts(formatted)
           }
         }
       } else {
-        // اگر سرور خطا داد، از کش استفاده کن
         const cachedAccounts = await getCachedAccounts()
-        if (cachedAccounts.length > 0) {
-          setAccounts(cachedAccounts as Account[])
-        }
+        if (cachedAccounts.length > 0) setAccounts(cachedAccounts as Account[])
       }
     } catch (error: any) {
       console.warn("[AccountsTab] Fetch failed, using cached data:", error.message)
       const cachedAccounts = await getCachedAccounts()
       if (cachedAccounts.length > 0) {
         setAccounts(cachedAccounts as Account[])
-        toast({ 
-          title: "خطای شبکه", 
-          description: "نمایش داده‌های ذخیره‌شده محلی", 
-          variant: "default" 
-        })
+        toast({ title: "خطای شبکه", description: "نمایش داده‌های ذخیره‌شده محلی", variant: "default" })
       } else {
         setAccounts([])
       }
@@ -225,17 +208,15 @@ export function AccountsTab() {
   }, [loadAccounts])
 
   // ═══════════════════════════════════════════════════════════
-  // ★★★ Create/Update Account (با Optimistic UI + SyncQueue)
+  // Create/Update Account
   // ═══════════════════════════════════════════════════════════
 
   const handleAccountSave = useCallback(async () => {
-    // Validation
     if (!accountFormCode.trim() || !accountFormName.trim()) {
       toast({ title: 'خطا', description: 'کد و نام حساب الزامی است', variant: 'destructive' })
       return
     }
 
-    // بررسی تکراری نبودن کد
     const duplicateCheck = accounts.find(a => a.code === accountFormCode.trim() && a.id !== accountFormId)
     if (duplicateCheck) {
       toast({ title: 'خطا', description: 'کد حساب تکراری است', variant: 'destructive' })
@@ -251,14 +232,12 @@ export function AccountsTab() {
         type: accountFormType,
         parentId: accountFormParentId || null,
         isActive: accountFormIsActive,
-        // ★★★ فیلدهای آفلاین
         _offline: true,
         _syncStatus: 'pending',
         _createdAt: Date.now(),
       }
 
       if (accountFormMode === 'edit') {
-        // ویرایش حساب موجود
         const updated = accounts.map(a => 
           a.id === accountFormId 
             ? { ...a, code: accountFormCode.trim(), name: accountFormName.trim(), type: accountFormType, parentId: accountFormParentId || null, isActive: accountFormIsActive }
@@ -266,29 +245,18 @@ export function AccountsTab() {
         )
         setAccounts(updated)
         await cacheAccounts(updated)
-        
-        // افزودن عملیات update به SyncQueue
         await addAccountToSyncQueue('update', newAccount)
-        
         toast({ title: '✓ حساب ویرایش شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       } else {
-        // ایجاد حساب جدید
         setAccounts(prev => [newAccount, ...prev])
         const updated = [newAccount, ...accounts]
         await cacheAccounts(updated)
-        
-        // افزودن عملیات create به SyncQueue
         await addAccountToSyncQueue('create', newAccount)
-        
         toast({ title: '✓ حساب ایجاد شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       }
 
-      // Trigger sync اگر آنلاین هستیم
-      if (isOnline) {
-        setTimeout(() => syncEngine.sync(), 100)
-      }
+      if (isOnline) setTimeout(() => syncEngine.sync(), 100)
 
-      // Reset form
       setAccountFormOpen(false)
       setAccountFormMode('add')
       setAccountFormId('')
@@ -306,7 +274,7 @@ export function AccountsTab() {
   }, [accountFormMode, accountFormId, accountFormCode, accountFormName, accountFormType, accountFormParentId, accountFormIsActive, accounts, isOnline, toast])
 
   // ═══════════════════════════════════════════════════════════
-  // ★★★ Delete Account
+  // Delete Account
   // ═══════════════════════════════════════════════════════════
 
   const handleAccountDelete = useCallback(async () => {
@@ -315,13 +283,11 @@ export function AccountsTab() {
     setDeleteSaving(true)
     try {
       if (deleteTarget._offline) {
-        // حساب آفلاین: فقط از لیست محلی حذف کن
         const updated = accounts.filter(a => a.id !== deleteTarget.id)
         setAccounts(updated)
         await cacheAccounts(updated)
         toast({ title: '✓ حذف شد', description: 'حساب آفلاین حذف شد' })
       } else {
-        // حساب آنلاین: درخواست به سرور
         if (!isOnline) {
           toast({ title: 'خطا', description: 'حذف حساب آنلاین نیاز به اتصال دارد', variant: 'destructive' })
           setDeleteDialogOpen(false)
@@ -357,11 +323,15 @@ export function AccountsTab() {
   // ═══════════════════════════════════════════════════════════
 
   const filteredAccounts = useMemo(() => {
+    // ★★★ اگر دکمه نمایش زده نشده باشد، لیست خالی برگردان
+    if (!showAllAccounts) return []
+    
     let result = accounts
     
-    // فیلتر نوع
+    // ★★★ فیلتر نوع (با نرمال‌سازی برچسب برای پشتیبانی از کد انگلیسی و فارسی)
     if (filterType !== 'all') {
-      result = result.filter(a => a.type === filterType)
+      const targetLabel = getTypeLabel(filterType)
+      result = result.filter(a => getTypeLabel(a.type) === targetLabel)
     }
     
     // فیلتر وضعیت
@@ -376,33 +346,22 @@ export function AccountsTab() {
       const q = searchQuery.trim().toLowerCase()
       result = result.filter(
         a =>
-          a.code.toLowerCase().includes(q) ||
+          String(a.code).toLowerCase().includes(q) ||
           a.name.toLowerCase().includes(q)
       )
     }
     
     // مرتب‌سازی بر اساس کد
-    return result.sort((a, b) => a.code.localeCompare(b.code))
-  }, [accounts, filterType, filterStatus, searchQuery])
+    return result.sort((a, b) => String(a.code).localeCompare(String(b.code)))
+  }, [accounts, filterType, filterStatus, searchQuery, showAllAccounts])
 
   const stats = useMemo(() => {
     const total = accounts.length
     const active = accounts.filter(a => a.isActive !== false).length
     const inactive = accounts.filter(a => a.isActive === false).length
     const offlineCount = accounts.filter(a => a._offline).length
-    
-    // شمارش بر اساس نوع
-    const typeCounts: Record<string, number> = {}
-    accounts.forEach(a => {
-      typeCounts[a.type] = (typeCounts[a.type] || 0) + 1
-    })
-    
-    return { total, active, inactive, offlineCount, typeCounts }
+    return { total, active, inactive, offlineCount }
   }, [accounts])
-
-  // ═══════════════════════════════════════════════════════════
-  // Helper: Open Edit Dialog
-  // ═══════════════════════════════════════════════════════════
 
   const openEditDialog = (account: Account) => {
     setAccountFormMode('edit')
@@ -421,7 +380,6 @@ export function AccountsTab() {
 
   return (
     <div className="space-y-4" dir="rtl">
-      {/* ★★★ بنر هشدار آفلاین */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
@@ -431,57 +389,46 @@ export function AccountsTab() {
         </div>
       )}
 
-  {/* ═══════════════════════════════════════════════════════
-    Stats Cards — خیلی کوچک و رنگی
-═══════════════════════════════════════════════════════ */}
-<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 sm:gap-1.5">
-  {/* کل حساب‌ها */}
-  <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">کل حساب‌ها</span>
-      <FolderTree className="w-2.5 h-2.5 text-blue-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-blue-700">{stats.total.toLocaleString('fa-IR')}</div>
-  </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 sm:gap-1.5">
+        <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">کل حساب‌ها</span>
+            <FolderTree className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-blue-700">{stats.total.toLocaleString('fa-IR')}</div>
+        </div>
 
-  {/* فعال */}
-  <div className="relative overflow-hidden rounded-md border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-emerald-600 truncate">فعال</span>
-      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-emerald-700">{stats.active.toLocaleString('fa-IR')}</div>
-  </div>
+        <div className="relative overflow-hidden rounded-md border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-emerald-600 truncate">فعال</span>
+            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-emerald-700">{stats.active.toLocaleString('fa-IR')}</div>
+        </div>
 
-  {/* غیرفعال */}
-  <div className="relative overflow-hidden rounded-md border border-red-200 bg-gradient-to-br from-red-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-red-600 truncate">غیرفعال</span>
-      <Ban className="w-2.5 h-2.5 text-red-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-red-700">{stats.inactive.toLocaleString('fa-IR')}</div>
-  </div>
+        <div className="relative overflow-hidden rounded-md border border-red-200 bg-gradient-to-br from-red-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-red-600 truncate">غیرفعال</span>
+            <Ban className="w-2.5 h-2.5 text-red-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-red-700">{stats.inactive.toLocaleString('fa-IR')}</div>
+        </div>
 
-  {/* در انتظار sync */}
-  {stats.offlineCount > 0 && (
-    <div className="relative overflow-hidden rounded-md border border-orange-300 bg-gradient-to-br from-orange-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[8px] sm:text-[9px] font-medium text-orange-600 flex items-center gap-0.5 truncate">
-          <Clock className="w-2 h-2 shrink-0" /> در انتظار sync
-        </span>
+        {stats.offlineCount > 0 && (
+          <div className="relative overflow-hidden rounded-md border border-orange-300 bg-gradient-to-br from-orange-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[8px] sm:text-[9px] font-medium text-orange-600 flex items-center gap-0.5 truncate">
+                <Clock className="w-2 h-2 shrink-0" /> در انتظار sync
+              </span>
+            </div>
+            <div className="text-xs sm:text-sm font-bold text-orange-700">{stats.offlineCount.toLocaleString('fa-IR')}</div>
+          </div>
+        )}
       </div>
-      <div className="text-xs sm:text-sm font-bold text-orange-700">{stats.offlineCount.toLocaleString('fa-IR')}</div>
-    </div>
-  )}
-</div>
 
-      {/* ═══════════════════════════════════════════════════════
-          Toolbar — ریسپانسیو (ستونی در موبایل، ردیفی در دسکتاپ)
-      ═══════════════════════════════════════════════════════ */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex flex-col lg:flex-row gap-2 sm:gap-3">
-            {/* جستجو */}
             <div className="relative flex-1">
               <Search className="absolute right-2.5 top-2.5 h-4 w-4 text-gray-400" />
               <Input
@@ -492,7 +439,6 @@ export function AccountsTab() {
               />
             </div>
 
-            {/* فیلتر نوع */}
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
@@ -510,9 +456,10 @@ export function AccountsTab() {
               <option value="equity">سرمایه</option>
               <option value="liability">بدهی</option>
               <option value="asset">دارایی</option>
+              <option value="دارایی_ثابت">دارایی ثابت</option>
+              <option value="کاهنده_دارایی">کاهنده دارایی</option>
             </select>
 
-            {/* فیلتر وضعیت */}
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as any)}
@@ -523,7 +470,17 @@ export function AccountsTab() {
               <option value="inactive">غیرفعال</option>
             </select>
 
-            {/* دکمه افزودن حساب */}
+            {/* ★★★ دکمه نمایش/مخفی‌سازی چارت حساب */}
+            <Button
+              size="sm"
+              variant={showAllAccounts ? "default" : "outline"}
+              className="text-xs h-9 flex-1 lg:flex-none"
+              onClick={() => setShowAllAccounts(!showAllAccounts)}
+            >
+              <FolderTree className="w-3.5 h-3.5 ml-1" />
+              {showAllAccounts ? 'مخفی کردن چارت' : 'نمایش چارت حساب'}
+            </Button>
+
             <Button
               size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 flex-1 lg:flex-none"
@@ -542,12 +499,28 @@ export function AccountsTab() {
               افزودن حساب
             </Button>
           </div>
+          
+          {/* ★★★ دکمه پاک‌سازی فیلترها (فقط وقتی فیلتری فعال است نمایش داده می‌شود) */}
+          {(searchQuery || filterType !== 'all' || filterStatus !== 'all') && showAllAccounts && (
+            <div className="mt-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs h-8 text-red-600 hover:bg-red-50"
+                onClick={() => {
+                  setSearchQuery('')
+                  setFilterType('all')
+                  setFilterStatus('all')
+                }}
+              >
+                <Ban className="w-3.5 h-3.5 ml-1" />
+                پاک کردن فیلترها
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* ═══════════════════════════════════════════════════════
-          Loading State
-      ═══════════════════════════════════════════════════════ */}
       {loading ? (
         <Card className="border-gray-200">
           <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
@@ -555,10 +528,18 @@ export function AccountsTab() {
             <p className="text-sm text-gray-500">در حال بارگذاری حساب‌ها...</p>
           </CardContent>
         </Card>
+      ) : !showAllAccounts ? (
+        /* ★★★ حالت خالی اولیه */
+        <Card className="border-dashed border-gray-300">
+          <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
+            <FolderTree className="w-12 h-12 text-gray-300" />
+            <h3 className="text-base font-medium text-gray-600">چارت حساب‌ها مخفی است</h3>
+            <p className="text-sm text-gray-400 text-center max-w-md">
+              برای مشاهده لیست کامل حساب‌ها، روی دکمه «نمایش چارت حساب» در بالای صفحه کلیک کنید.
+            </p>
+          </CardContent>
+        </Card>
       ) : filteredAccounts.length === 0 ? (
-        /* ═══════════════════════════════════════════════════════
-            Empty State
-        ═══════════════════════════════════════════════════════ */
         <Card className="border-dashed border-gray-300">
           <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
             <FolderTree className="w-12 h-12 text-gray-300" />
@@ -572,9 +553,6 @@ export function AccountsTab() {
         </Card>
       ) : (
         <>
-          {/* ═══════════════════════════════════════════════════════
-              نمای دسکتاپ (جدول) — فقط در lg و بالاتر
-          ═══════════════════════════════════════════════════════ */}
           <div className="hidden lg:block">
             <Card className="border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
@@ -592,8 +570,8 @@ export function AccountsTab() {
                     {filteredAccounts.map((acc) => (
                       <TableRow key={acc.id} className="hover:bg-gray-50/50">
                         <TableCell className="text-xs font-mono">
-                          {acc.code}
-                          {/* ★★★ نشانگر آفلاین */}
+                          {/* ★★★ فارسی‌سازی کد حساب */}
+                          {toPersianDigits(acc.code)}
                           {acc._offline && (
                             <Badge className="bg-orange-100 text-orange-700 mr-1 text-[9px]">
                               <Clock className="w-2.5 h-2.5 ml-0.5" />
@@ -614,16 +592,10 @@ export function AccountsTab() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
-                              onClick={() => openEditDialog(acc)}
-                              title="ویرایش"
-                            >
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEditDialog(acc)} title="ویرایش">
                               <Pencil className="w-3.5 h-3.5" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
-                              onClick={() => { setDeleteTarget(acc); setDeleteDialogOpen(true) }}
-                              title="حذف"
-                            >
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500" onClick={() => { setDeleteTarget(acc); setDeleteDialogOpen(true) }} title="حذف">
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
@@ -636,21 +608,16 @@ export function AccountsTab() {
             </Card>
           </div>
 
-          {/* ═══════════════════════════════════════════════════════
-              نمای موبایل (کارت‌ها) — فقط زیر lg
-          ═══════════════════════════════════════════════════════ */}
           <div className="lg:hidden space-y-2">
             {filteredAccounts.map((acc) => (
               <Card key={acc.id} className="border-gray-200">
                 <CardContent className="p-3">
-                  {/* هدر کارت: نام + وضعیت */}
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-800">{acc.name}</span>
                       {acc._offline && (
                         <Badge className="bg-orange-100 text-orange-700 text-[9px]">
-                          <Clock className="w-2.5 h-2.5 ml-0.5" />
-                          آفلاین
+                          <Clock className="w-2.5 h-2.5 ml-0.5" /> آفلاین
                         </Badge>
                       )}
                     </div>
@@ -659,24 +626,19 @@ export function AccountsTab() {
                       : <Badge className="bg-red-100 text-red-700 text-[9px]">غیرفعال</Badge>}
                   </div>
 
-                  {/* کد و نوع */}
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-[10px] text-gray-500 font-mono">{acc.code}</span>
+                    {/* ★★★ فارسی‌سازی کد حساب در موبایل */}
+                    <span className="text-[10px] text-gray-500 font-mono">{toPersianDigits(acc.code)}</span>
                     <Badge className={getTypeBadgeColor(acc.type) + ' text-[9px]'}>
                       {getTypeLabel(acc.type)}
                     </Badge>
                   </div>
 
-                  {/* دکمه‌های عملیات */}
                   <div className="flex gap-2 pt-2 border-t border-gray-100">
-                    <Button size="sm" variant="outline" className="text-xs h-7 flex-1"
-                      onClick={() => openEditDialog(acc)}
-                    >
+                    <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={() => openEditDialog(acc)}>
                       <Pencil className="w-3 h-3 ml-1" /> ویرایش
                     </Button>
-                    <Button size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50 flex-1"
-                      onClick={() => { setDeleteTarget(acc); setDeleteDialogOpen(true) }}
-                    >
+                    <Button size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50 flex-1" onClick={() => { setDeleteTarget(acc); setDeleteDialogOpen(true) }}>
                       <Trash2 className="w-3 h-3 ml-1" /> حذف
                     </Button>
                   </div>
@@ -686,9 +648,7 @@ export function AccountsTab() {
           </div>
         </>
       )}
-            {/* ═══════════════════════════════════════════════════════════
-          ★★★ Dialog: Account Form (Add/Edit) — ریسپانسیو + fullscreen موبایل
-      ═══════════════════════════════════════════════════════════ */}
+
       <Dialog open={accountFormOpen} onOpenChange={setAccountFormOpen}>
         <DialogContent className="max-w-md w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -697,14 +657,11 @@ export function AccountsTab() {
               {accountFormMode === 'add' ? 'افزودن حساب جدید' : 'ویرایش حساب'}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              {accountFormMode === 'add' 
-                ? 'اطلاعات حساب جدید را وارد کنید' 
-                : `ویرایش حساب ${accountFormName}`}
+              {accountFormMode === 'add' ? 'اطلاعات حساب جدید را وارد کنید' : `ویرایش حساب ${accountFormName}`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* کد و نام حساب */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">کد حساب *</Label>
@@ -727,7 +684,6 @@ export function AccountsTab() {
               </div>
             </div>
 
-            {/* نوع حساب */}
             <div>
               <Label className="text-xs">نوع حساب *</Label>
               <select
@@ -751,7 +707,6 @@ export function AccountsTab() {
               </select>
             </div>
 
-            {/* حساب والد (اختیاری) */}
             <div>
               <Label className="text-xs">حساب والد (اختیاری)</Label>
               <select
@@ -761,35 +716,25 @@ export function AccountsTab() {
               >
                 <option value="">— بدون والد —</option>
                 {accounts
-                  .filter(a => a.id !== accountFormId) // جلوگیری از انتخاب خود حساب به عنوان والد
+                  .filter(a => a.id !== accountFormId)
                   .map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                    <option key={a.id} value={a.id}>{toPersianDigits(a.code)} — {a.name}</option>
                   ))}
               </select>
             </div>
 
-            {/* وضعیت فعال بودن */}
             <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
               <div>
                 <Label className="text-xs font-medium">حساب فعال</Label>
                 <p className="text-[10px] text-gray-500 mt-0.5">حساب‌های غیرفعال در تراکنش‌ها قابل انتخاب نیستند</p>
               </div>
-              <Switch 
-                checked={accountFormIsActive} 
-                onCheckedChange={setAccountFormIsActive} 
-              />
+              <Switch checked={accountFormIsActive} onCheckedChange={setAccountFormIsActive} />
             </div>
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setAccountFormOpen(false)} disabled={accountFormSaving} className="w-full sm:w-auto">
-              انصراف
-            </Button>
-            <Button
-              onClick={handleAccountSave}
-              disabled={accountFormSaving || !accountFormCode.trim() || !accountFormName.trim()}
-              className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto"
-            >
+            <Button variant="outline" onClick={() => setAccountFormOpen(false)} disabled={accountFormSaving} className="w-full sm:w-auto">انصراف</Button>
+            <Button onClick={handleAccountSave} disabled={accountFormSaving || !accountFormCode.trim() || !accountFormName.trim()} className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto">
               {accountFormSaving ? <Loader2 className="w-4 h-4 animate-spin ml-1" /> : <Save className="w-4 h-4 ml-1" />}
               {accountFormSaving ? 'در حال ذخیره...' : accountFormMode === 'add' ? 'افزودن حساب' : 'ذخیره تغییرات'}
             </Button>
@@ -797,21 +742,17 @@ export function AccountsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* ═══════════════════════════════════════════════════════════
-          ★★★ Dialog: Delete Confirmation
-      ═══════════════════════════════════════════════════════════ */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="max-w-md w-[95vw] sm:w-full">
           <DialogHeader>
             <DialogTitle className="text-base text-red-600">حذف حساب</DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              آیا از حذف حساب <strong>{deleteTarget?.name}</strong> (کد: {deleteTarget?.code}) مطمئن هستید؟ 
+              آیا از حذف حساب <strong>{deleteTarget?.name}</strong> (کد: {toPersianDigits(deleteTarget?.code)}) مطمئن هستید؟ 
               <br />
               <span className="text-red-600 font-medium mt-2 block">⚠️ این عمل غیرقابل بازگشت است.</span>
             </DialogDescription>
           </DialogHeader>
 
-          {/* هشدار اگر حساب در تراکنش‌ها استفاده شده باشد */}
           {deleteTarget && !deleteTarget._offline && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -823,9 +764,7 @@ export function AccountsTab() {
           )}
 
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleteSaving} className="w-full sm:w-auto">
-              انصراف
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={deleteSaving} className="w-full sm:w-auto">انصراف</Button>
             <Button onClick={handleAccountDelete} disabled={deleteSaving} className="bg-red-600 hover:bg-red-700 text-white w-full sm:w-auto">
               {deleteSaving ? <Loader2 className="w-4 h-4 animate-spin ml-1" /> : <Trash2 className="w-4 h-4 ml-1" />}
               حذف حساب

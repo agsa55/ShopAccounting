@@ -38,7 +38,7 @@ export const GET = withTenantAndPermission('dashboard')(
       const { searchParams } = new URL(req.url)
       const dateFrom = searchParams.get('dateFrom')
       const dateTo = searchParams.get('dateTo')
-
+ const branchId = searchParams.get('branchId')
       const now = new Date()
       const fromDate = dateFrom
         ? new Date(dateFrom)
@@ -75,12 +75,13 @@ export const GET = withTenantAndPermission('dashboard')(
         })
       }
 
-      // ══════════════════════════════════════════════════════
+         // ══════════════════════════════════════════════════════
       // ۲. واکشی اسناد حسابداری
       // ══════════════════════════════════════════════════════
       const allJournalEntries = await tenantDb.journalEntry.findMany({
         where: {
           tenantId,
+          ...(branchId ? { branchId } : {}), // ← ★★★ این خط حیاتی را اضافه کنید
           date: { gte: fromDate, lte: toDateEnd },
           status: 'posted',
         },
@@ -242,6 +243,7 @@ export const GET = withTenantAndPermission('dashboard')(
       const allInvoices = await tenantDb.invoice.findMany({
         where: {
           tenantId,
+            ...(branchId ? { branchId } : {}),
           invoiceDate: { gte: fromDate, lte: toDateEnd },
         },
         include: {

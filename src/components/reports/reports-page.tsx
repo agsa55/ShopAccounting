@@ -127,7 +127,15 @@ function daysInJalaliMonth(jy: number, jm: number): number { if (jm <= 6) return
 
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
-  try { const d = new Date(iso); if (isNaN(d.getTime())) return null; const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate()); return { jy, jm, jd } } catch { return null }
+  try {
+    const safeDateStr = iso.includes('T') ? iso : `${iso}T12:00:00`
+    const d = new Date(safeDateStr)
+    if (isNaN(d.getTime())) return null
+    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    return { jy, jm, jd }
+  } catch { 
+    return null 
+  }
 }
 
 function jalaliToISO(jy: number, jm: number, jd: number): string { const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd); return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}` }
@@ -1711,6 +1719,14 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
 // ★ v6.2: کارت‌های گرادیان + محاسبه دقیق ارزش انبار + ستون ارزش فروش
 // ============================================================================
 
+// ============================================================================
+//  REPORT 6: Inventory — موجودی کالاها (v6.3 اصلاح‌شده با فیلتر شعبه)
+// ============================================================================
+
+// ============================================================================
+//  REPORT 6: Inventory — موجودی کالاها (v6.9 اصلاح‌شده با فیلتر هوشمند انبار)
+// ============================================================================
+
 function InventoryReport() {
   const [loading, setLoading] = useState(true)
   const [products, setProducts] = useState<any[]>([])
@@ -1722,20 +1738,19 @@ function InventoryReport() {
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-  // ★★★ v6.1: محاسبه دقیق ارزش انبار در سمت کلاینت
+  // ★★★ Stateهای جدید برای فیلتر انبار
+  const [warehouses, setWarehouses] = useState<any[]>([])
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all')
+
   const calculateProductValue = useCallback((p: any): number => {
     if (p.stockValue !== undefined && p.stockValue !== null && Number(p.stockValue) > 0) {
       return Number(p.stockValue)
     }
     const stock = Number(p.currentStock || 0)
     const purchasePrice = Number(p.purchasePrice || 0)
-    if (stock > 0 && purchasePrice > 0) {
-      return stock * purchasePrice
-    }
+    if (stock > 0 && purchasePrice > 0) return stock * purchasePrice
     const avgCost = Number(p.averageCost || p.cost || 0)
-    if (stock > 0 && avgCost > 0) {
-      return stock * avgCost
-    }
+    if (stock > 0 && avgCost > 0) return stock * avgCost
     return 0
   }, [])
 
@@ -1756,6 +1771,9 @@ function InventoryReport() {
       const params = new URLSearchParams()
       params.set('summary', 'true')
       if (selectedCategory !== 'all') params.set('categoryId', selectedCategory)
+      
+      // ★★★ ارسال فیلتر انبار به بک‌اند
+      if (selectedWarehouse !== 'all') params.set('warehouseId', selectedWarehouse)
 
       const res = await fetch(`/api/reports/inventory?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await res.json()
@@ -1770,12 +1788,25 @@ function InventoryReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [selectedCategory])
+  }, [selectedCategory, selectedWarehouse]) // ← وابستگی به selectedWarehouse اضافه شد
+
+  // ★★★ دریافت لیست انبارها هنگام لود کامپوننت
+  useEffect(() => {
+    const fetchWarehouses = async () => {
+      try {
+        const res = await fetch('/api/warehouses', { headers: getAuthHeaders() })
+        const data = await res.json()
+        if (data.success) setWarehouses(data.data || [])
+      } catch (err) {
+        console.error('Failed to fetch warehouses', err)
+      }
+    }
+    fetchWarehouses()
+  }, [])
 
   useEffect(() => { loadSummary() }, [loadSummary])
-  useEffect(() => { setListVisible(false); setPage(1) }, [selectedCategory, showOnlyLowStock])
+  useEffect(() => { setListVisible(false); setPage(1) }, [selectedCategory, showOnlyLowStock, selectedWarehouse])
 
-  // ★ v6.1: محاسبه مجدد مقادیر در سمت کلاینت
   const enrichedProducts = useMemo(() => {
     return products.map((p: any) => ({
       ...p,
@@ -1785,17 +1816,40 @@ function InventoryReport() {
     }))
   }, [products, calculateProductValue, calculateRetailValue, calculatePotentialProfit])
 
-  // ★ v6.1: خلاصه محاسبه‌شده در سمت کلاینت
+  // ★★★ فیلتر هوشمند: اگر انبار خاصی انتخاب شد، فقط کالاهای همان انبار را نشان بده
+   // ★★★ فیلتر هوشمند و اصلاح‌شده
+  const filteredProducts = useMemo(() => {
+    let result = enrichedProducts
+
+    if (selectedWarehouse !== 'all') {
+      result = result.filter((p: any) => {
+        // حالت ۱: اگر بک‌اند warehouseStocks را برای این انبار فرستاده باشد، چک می‌کنیم
+        if (p.warehouseStocks && Array.isArray(p.warehouseStocks)) {
+          return p.warehouseStocks.length > 0
+        }
+        // حالت ۲: اگر بک‌اند از قبل لیست را فیلتر کرده باشد (یعنی محصول در لیست هست)، آن را نگه می‌داریم
+        return true
+      })
+    }
+
+    if (showOnlyLowStock) {
+      result = result.filter((p: any) => p.stockStatus === 'low' || p.stockStatus === 'out')
+    }
+
+    return result
+  }, [enrichedProducts, selectedWarehouse, showOnlyLowStock])
+  
+
   const calculatedSummary = useMemo(() => {
     if (!summary) return null
-    if (enrichedProducts.length === 0) return summary
+    if (filteredProducts.length === 0) return { ...summary, totalProducts: 0, totalStockValue: 0, totalRetailValue: 0, totalPotentialProfit: 0, lowStockCount: 0, outOfStockCount: 0 }
 
-    const totalProducts = enrichedProducts.length
-    const totalStockValue = enrichedProducts.reduce((sum, p) => sum + (p.stockValue || 0), 0)
-    const totalRetailValue = enrichedProducts.reduce((sum, p) => sum + (p.retailValue || 0), 0)
-    const totalPotentialProfit = enrichedProducts.reduce((sum, p) => sum + (p.potentialProfit || 0), 0)
-    const lowStockCount = enrichedProducts.filter((p) => p.stockStatus === 'low').length
-    const outOfStockCount = enrichedProducts.filter((p) => p.stockStatus === 'out').length
+    const totalProducts = filteredProducts.length
+    const totalStockValue = filteredProducts.reduce((sum, p) => sum + (p.stockValue || 0), 0)
+    const totalRetailValue = filteredProducts.reduce((sum, p) => sum + (p.retailValue || 0), 0)
+    const totalPotentialProfit = filteredProducts.reduce((sum, p) => sum + (p.potentialProfit || 0), 0)
+    const lowStockCount = filteredProducts.filter((p) => p.stockStatus === 'low').length
+    const outOfStockCount = filteredProducts.filter((p) => p.stockStatus === 'out').length
 
     return {
       ...summary,
@@ -1806,13 +1860,7 @@ function InventoryReport() {
       lowStockCount,
       outOfStockCount,
     }
-  }, [summary, enrichedProducts])
-
-  // ★ فیلتر products بر اساس showOnlyLowStock
-  const filteredProducts = useMemo(() => {
-    if (!showOnlyLowStock) return enrichedProducts
-    return enrichedProducts.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out')
-  }, [enrichedProducts, showOnlyLowStock])
+  }, [summary, filteredProducts])
 
   const paginatedProducts = paginate(filteredProducts, page)
 
@@ -1930,6 +1978,20 @@ function InventoryReport() {
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
+        {/* ★★★ فیلتر انبار (جدید) */}
+        <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
+          <SelectTrigger className="w-48 h-8 text-xs">
+            <Package className="w-3.5 h-3.5 ml-1 text-gray-400" />
+            <SelectValue placeholder="همه انبارها" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">همه انبارها (تلفیقی)</SelectItem>
+            {warehouses.map((w: any) => (
+              <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select value={selectedCategory} onValueChange={setSelectedCategory}>
           <SelectTrigger className="w-48 h-8 text-xs">
             <SelectValue placeholder="همه دسته‌ها" />
@@ -1941,15 +2003,16 @@ function InventoryReport() {
             ))}
           </SelectContent>
         </Select>
+        
         <label className="flex items-center gap-1.5 text-xs cursor-pointer">
           <input type="checkbox" checked={showOnlyLowStock} onChange={(e) => setShowOnlyLowStock(e.target.checked)} className="w-3.5 h-3.5" />
           <span>فقط کالاهای رو به اتمام و ناموجود</span>
         </label>
         <div className="flex-1" />
         <ReportActions
-          onExportExcel={() => exportToExcel(meta, columns, enrichedProducts, 'گزارش-موجودی-کالا')}
-          onPrint={() => printReport(meta, columns, enrichedProducts)}
-          disabled={enrichedProducts.length === 0}
+          onExportExcel={() => exportToExcel(meta, columns, filteredProducts, 'گزارش-موجودی-کالا')}
+          onPrint={() => printReport(meta, columns, filteredProducts)}
+          disabled={filteredProducts.length === 0}
         />
       </div>
 
@@ -1967,7 +2030,7 @@ function InventoryReport() {
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : filteredProducts.length === 0 ? (
-            <EmptyState message="کالایی یافت نشد" />
+            <EmptyState message="کالایی در این انبار/دسته یافت نشد" />
           ) : (
             <div className="overflow-x-auto -mx-3 sm:-mx-4">
               <Table dir="rtl">
@@ -2016,6 +2079,7 @@ function InventoryReport() {
     </div>
   )
 }
+
 // ============================================================================
 //  REPORT 7: VAT
 // ============================================================================
@@ -3084,6 +3148,8 @@ function AgingReport() {
 //  REPORT 12: Sales Trend & Payment Analysis — روند فروش و تحلیل پرداخت
 // ============================================================================
 
+
+
 function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]; dashboardData: any }) {
   const [dateRange, setDateRange] = useState<DateRange>({
     from: daysAgoISO(90),
@@ -3445,13 +3511,13 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
     })
   }, [])
 
-  // ★ محاسبه فروش به تفکیک شعبه (بر اساس branchId در فاکتور)
+    // ★ محاسبه فروش به تفکیک شعبه (با برچسب شفاف‌تر برای حالت پیش‌فرض)
   const branchStats = useMemo(() => {
     const map: Record<string, { id: string; name: string; total: number; count: number; cash: number; credit: number }> = {}
 
-    // ★ اگر شعبه‌ای تعریف نشده، همه را «شعبه مرکزی» می‌زنیم
+    // ★ اگر شعبه‌ای تعریف نشده، همه را «شعبه مرکزی (پیش‌فرض)» می‌زنیم تا گمراه‌کننده نباشد
     if (branches.length === 0) {
-      map['main'] = { id: 'main', name: 'شعبه مرکزی', total: 0, count: 0, cash: 0, credit: 0 }
+      map['main'] = { id: 'main', name: 'شعبه مرکزی (پیش‌فرض)', total: 0, count: 0, cash: 0, credit: 0 }
     } else {
       branches.forEach((b) => {
         map[b.id] = { id: b.id, name: b.name, total: 0, count: 0, cash: 0, credit: 0 }
@@ -3465,8 +3531,11 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
 
       const branchId = inv.branchId || 'main'
       if (!map[branchId]) {
-        map[branchId] = { id: branchId, name: inv.branchName || `شعبه ${branchId}`, total: 0, count: 0, cash: 0, credit: 0 }
+        // ★ هوشمندی: اگر نام شعبه نبود، برچسب پیش‌فرض را نمایش بده
+        const fallbackName = branchId === 'main' ? 'شعبه مرکزی (پیش‌فرض)' : `شعبه ${branchId}`
+        map[branchId] = { id: branchId, name: inv.branchName || fallbackName, total: 0, count: 0, cash: 0, credit: 0 }
       }
+      
       const total = getInvoiceTotal(inv)
       map[branchId].total += total
       map[branchId].count++

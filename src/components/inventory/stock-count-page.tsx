@@ -2,7 +2,7 @@
 
 // ============================================================================
 // src/components/inventory/stock-count-page.tsx
-// ShopAccounting v6.5.2 — Stock Count Page (clean rewrite)
+// ShopAccounting v6.5.3 — Stock Count Page (Offline + Persian Numbers)
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table'
 import {
   ClipboardList, Plus, Loader2, CheckCircle2, Package, AlertTriangle,
-  Search, Eye, XCircle, CheckCircle, Clock, FileText,
+  Search, Eye, XCircle, CheckCircle, Clock, FileText, Calendar,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -86,6 +86,11 @@ function getAuthHeaders(): Record<string, string> {
   }
 }
 
+function todayGregorianISO(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   draft:       { label: 'پیش‌نویس',     color: 'text-gray-700',  bg: 'bg-gray-100 border-gray-200',  icon: FileText },
   in_progress: { label: 'در حال شمارش', color: 'text-blue-700',  bg: 'bg-blue-100 border-blue-200',  icon: Clock },
@@ -109,6 +114,7 @@ export function StockCountPage() {
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('')
+  const [countDate, setCountDate] = useState<string>(todayGregorianISO())
   const [products, setProducts] = useState<Product[]>([])
   const [countedItems, setCountedItems] = useState<Record<string, { countedQty: string; reason: string }>>({})
   const [productSearch, setProductSearch] = useState('')
@@ -120,82 +126,85 @@ export function StockCountPage() {
 
   const [approveDialogOpen, setApproveDialogOpen] = useState(false)
   const [approveNotes, setApproveNotes] = useState('')
-const isOnline = useAppStore((s) => s.isOnline)
+  
+  const isOnline = useAppStore((s) => s.isOnline)
 
-// ★ کلیدهای localStorage برای کش
-const STORAGE_KEYS = {
-  STOCK_COUNTS: 'stock_counts_offline',
-  WAREHOUSES: 'warehouses_offline',
-} as const
+  // ★ کلیدهای localStorage برای کش و صف آفلاین
+  const STORAGE_KEYS = {
+    STOCK_COUNTS: 'stock_counts_offline',
+    WAREHOUSES: 'warehouses_offline',
+    STOCK_COUNTS_QUEUE: 'stock_counts_queue',
+  } as const
 
-const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
-  if (typeof window === 'undefined') return defaultValue
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : defaultValue
-  } catch { return defaultValue }
-}
-const saveToStorage = <T,>(key: string, value: T): void => {
-  if (typeof window === 'undefined') return
-  try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
-}
+  const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
+    if (typeof window === 'undefined') return defaultValue
+    try {
+      const raw = localStorage.getItem(key)
+      return raw ? JSON.parse(raw) : defaultValue
+    } catch { return defaultValue }
+  }
+  
+  const saveToStorage = <T,>(key: string, value: T): void => {
+    if (typeof window === 'undefined') return
+    try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+  }
 
-// ★★★ v6.5.1: صفحه‌بندی
+  const generateOfflineId = () => `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-
-  // ★★★ v6.5.1: صفحه‌بندی
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 15
 
- const loadData = useCallback(async () => {
-  setLoading(true)
-  const tid = useAppStore.getState().tenantId || useAppStore.getState().currentTenant?.id
-  const trulyOnline = isOnline && navigator.onLine
-  
-  if (!trulyOnline) {
-    const cachedCounts = loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, [])
-    const cachedWh = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
-    setStockCounts(cachedCounts)
-    setWarehouses(cachedWh)
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    const tid = useAppStore.getState().tenantId || useAppStore.getState().currentTenant?.id
+    const trulyOnline = isOnline && navigator.onLine
+    
+    if (!trulyOnline) {
+      const cachedCounts = loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, [])
+      const cachedWh = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
+      setStockCounts(cachedCounts)
+      setWarehouses(cachedWh)
+      setLoading(false)
+      if (cachedCounts.length === 0) {
+        toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه محلی یافت نشد' })
+      }
+      return
+    }
+    
+    try {
+      if (!tid) { setLoading(false); return }
+      const params = new URLSearchParams({ tenantId: tid })
+      if (filterWarehouse !== 'all') params.set('warehouseId', filterWarehouse)
+      if (filterStatus !== 'all') params.set('status', filterStatus)
+      
+      const [whRes, scRes] = await Promise.all([
+        fetch(`/api/warehouses?tenantId=${tid}`, { headers: getAuthHeaders() }),
+        fetch(`/api/stock-counts?${params.toString()}`, { headers: getAuthHeaders() }),
+      ])
+      const [whData, scData] = await Promise.all([whRes.json(), scRes.json()])
+      
+      if (whData.success) {
+        setWarehouses(whData.data || [])
+        saveToStorage(STORAGE_KEYS.WAREHOUSES, whData.data || [])
+        const def = (whData.data || []).find((w: Warehouse) => w.isDefault)
+        if (def) setSelectedWarehouse(def.id)
+      }
+      if (scData.success) {
+        setStockCounts(scData.data || [])
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS, scData.data || [])
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
+        console.warn('[StockCountPage] سوئیچ به حالت آفلاین')
+        setStockCounts(loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, []))
+        setWarehouses(loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, []))
+      } else {
+        console.error('Error loading data:', err)
+        toast({ title: 'خطا', description: err?.message, variant: 'destructive' })
+      }
+    }
     setLoading(false)
-    if (cachedCounts.length === 0) {
-      toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه یافت نشد' })
-    }
-    return
-  }
-  
-  try {
-    if (!tid) { setLoading(false); return }
-    const params = new URLSearchParams({ tenantId: tid })
-    if (filterWarehouse !== 'all') params.set('warehouseId', filterWarehouse)
-    if (filterStatus !== 'all') params.set('status', filterStatus)
-    const [whRes, scRes] = await Promise.all([
-      fetch(`/api/warehouses?tenantId=${tid}`, { headers: getAuthHeaders() }),
-      fetch(`/api/stock-counts?${params.toString()}`, { headers: getAuthHeaders() }),
-    ])
-    const [whData, scData] = await Promise.all([whRes.json(), scRes.json()])
-    if (whData.success) {
-      setWarehouses(whData.data || [])
-      saveToStorage(STORAGE_KEYS.WAREHOUSES, whData.data || [])
-      const def = (whData.data || []).find((w: Warehouse) => w.isDefault)
-      if (def) setSelectedWarehouse(def.id)
-    }
-    if (scData.success) {
-      setStockCounts(scData.data || [])
-      saveToStorage(STORAGE_KEYS.STOCK_COUNTS, scData.data || [])
-    }
-  } catch (err: any) {
-    if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
-      console.warn('[StockCountPage] سوئیچ به آفلاین')
-      setStockCounts(loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, []))
-      setWarehouses(loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, []))
-    } else {
-      console.error('Error loading data:', err)
-      toast({ title: 'خطا', description: err?.message, variant: 'destructive' })
-    }
-  }
-  setLoading(false)
-}, [filterWarehouse, filterStatus, isOnline, toast])
+  }, [filterWarehouse, filterStatus, isOnline, toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -221,6 +230,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
   useEffect(() => {
     if (createDialogOpen && selectedWarehouse) {
+      setCountDate(todayGregorianISO())
       loadProducts()
     }
   }, [createDialogOpen, selectedWarehouse, loadProducts])
@@ -263,7 +273,6 @@ const saveToStorage = <T,>(key: string, value: T): void => {
     )
   }, [products, productSearch])
 
-  // ★★★ v6.5.1: صفحه‌بندی
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
   const currentPageSafe = Math.min(currentPage, totalPages)
   const paginatedProducts = useMemo(() => {
@@ -274,12 +283,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
   useEffect(() => { setCurrentPage(1) }, [productSearch])
 
   const handleCreate = async () => {
-    
-     if (!isOnline) {
-    toast({ title: 'عدم دسترسی', description: 'ایجاد سند انبار گردانی نیاز به اتصال اینترنت دارد', variant: 'destructive' })
-    return
-  }
-  if (!selectedWarehouse) {
+    if (!selectedWarehouse) {
       toast({ title: 'خطا', description: 'انتخاب انبار الزامی است', variant: 'destructive' })
       return
     }
@@ -299,12 +303,55 @@ const saveToStorage = <T,>(key: string, value: T): void => {
           reason: v.reason || null,
         }))
 
+      // ★★★ حالت آفلاین
+      if (!isOnline) {
+        const queue = loadFromStorage<any[]>(STORAGE_KEYS.STOCK_COUNTS_QUEUE, [])
+        const offlineId = generateOfflineId()
+        queue.push({
+          id: offlineId,
+          type: 'create',
+          data: { tenantId: tid, warehouseId: selectedWarehouse, countDate, status: 'draft', items },
+          createdAt: new Date().toISOString()
+        })
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS_QUEUE, queue)
+
+        const localCounts = loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, [])
+        const whName = warehouses.find(w => w.id === selectedWarehouse)?.name || 'نامشخص'
+        const newLocalCount: StockCount = {
+          id: offlineId,
+          number: `SC-OFF-${toFa(Date.now().toString().slice(-6))}`,
+          warehouseId: selectedWarehouse,
+          warehouseName: whName,
+          countDate: countDate,
+          status: 'draft',
+          countedByName: 'شما (آفلاین)',
+          approvedByName: null,
+          approvedAt: null,
+          notes: null,
+          totalDifference: computedTotals.netDifference,
+          totalItems: computedTotals.countedItemsCount,
+          itemsCount: computedTotals.countedItemsCount
+        }
+        localCounts.unshift(newLocalCount)
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS, localCounts)
+        setStockCounts(localCounts)
+
+        toast({ title: 'ذخیره آفلاین', description: 'سند در صف همگام‌سازی قرار گرفت و پس از اتصال به اینترنت ارسال می‌شود.' })
+        setCreateDialogOpen(false)
+        setCountedItems({})
+        setProductSearch('')
+        setSubmitting(false)
+        return
+      }
+
+      // ★★★ حالت آنلاین
       const res = await fetch('/api/stock-counts', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
           tenantId: tid,
           warehouseId: selectedWarehouse,
+          countDate,
           status: 'draft',
           items,
         }),
@@ -344,13 +391,37 @@ const saveToStorage = <T,>(key: string, value: T): void => {
   }
 
   const handleApprove = async () => {
-    if (!isOnline) {
-    toast({ title: 'عدم دسترسی', description: 'تأیید سند نیاز به اتصال اینترنت دارد', variant: 'destructive' })
-    return
-  }
-  if (!selectedCount) return
+    if (!selectedCount) return
     setSubmitting(true)
     try {
+      // ★★★ حالت آفلاین
+      if (!isOnline) {
+        const queue = loadFromStorage<any[]>(STORAGE_KEYS.STOCK_COUNTS_QUEUE, [])
+        queue.push({
+          id: generateOfflineId(),
+          type: 'approve',
+          data: { id: selectedCount.id, notes: approveNotes },
+          createdAt: new Date().toISOString()
+        })
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS_QUEUE, queue)
+        
+        const localCounts = loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, [])
+        const updatedCounts = localCounts.map(sc => 
+          sc.id === selectedCount.id ? { ...sc, status: 'completed' as const, notes: approveNotes || sc.notes } : sc
+        )
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS, updatedCounts)
+        setStockCounts(updatedCounts)
+
+        toast({ title: 'ذخیره آفلاین', description: 'عملیات تأیید در صف همگام‌سازی قرار گرفت.' })
+        setApproveDialogOpen(false)
+        setApproveNotes('')
+        setDetailDialogOpen(false)
+        setSelectedCount(null)
+        setSubmitting(false)
+        return
+      }
+
+      // ★★★ حالت آنلاین
       const res = await fetch(`/api/stock-counts/${selectedCount.id}`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -375,12 +446,31 @@ const saveToStorage = <T,>(key: string, value: T): void => {
   }
 
   const handleCancel = async (sc: StockCount) => {
-    if (!isOnline) {
-    toast({ title: 'عدم دسترسی', description: 'لغو سند نیاز به اتصال اینترنت دارد', variant: 'destructive' })
-    return
-  }
-  if (!confirm(`آیا از لغو سند ${sc.number} مطمئن هستید؟`)) return
+    if (!confirm(`آیا از لغو سند ${sc.number} مطمئن هستید؟`)) return
     try {
+      // ★★★ حالت آفلاین
+      if (!isOnline) {
+        const queue = loadFromStorage<any[]>(STORAGE_KEYS.STOCK_COUNTS_QUEUE, [])
+        queue.push({
+          id: generateOfflineId(),
+          type: 'cancel',
+          data: { id: sc.id },
+          createdAt: new Date().toISOString()
+        })
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS_QUEUE, queue)
+        
+        const localCounts = loadFromStorage<StockCount[]>(STORAGE_KEYS.STOCK_COUNTS, [])
+        const updatedCounts = localCounts.map(item => 
+          item.id === sc.id ? { ...item, status: 'cancelled' as const } : item
+        )
+        saveToStorage(STORAGE_KEYS.STOCK_COUNTS, updatedCounts)
+        setStockCounts(updatedCounts)
+
+        toast({ title: 'ذخیره آفلاین', description: 'عملیات لغو در صف همگام‌سازی قرار گرفت.' })
+        return
+      }
+
+      // ★★★ حالت آنلاین
       const res = await fetch(`/api/stock-counts/${sc.id}`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -403,7 +493,6 @@ const saveToStorage = <T,>(key: string, value: T): void => {
   // ═══════════════════════════════════════════════════════════════
   return (
     <div className="space-y-4" dir="rtl">
-      {/* ★ Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center">
@@ -411,23 +500,22 @@ const saveToStorage = <T,>(key: string, value: T): void => {
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-900">انبار گردانی</h1>
-           <p className="text-xs text-gray-500">
-  {formatNumber(stockCounts.length)} سند ثبت شده
-  {!isOnline && <span className="mr-2 text-amber-600">• آفلاین</span>}
-</p>
+            <p className="text-xs text-gray-500">
+              {formatNumber(stockCounts.length)} سند ثبت شده
+              {!isOnline && <span className="mr-2 text-amber-600">• آفلاین</span>}
+            </p>
           </div>
         </div>
-       <Button
-  onClick={() => setCreateDialogOpen(true)}
-  className="gap-1.5 bg-purple-600 hover:bg-purple-700 w-full sm:w-auto"
->
-  <Plus className="w-4 h-4" />
-  <span className="hidden sm:inline">انبار گردانی جدید</span>
-  <span className="sm:hidden">جدید</span>
-</Button>
+        <Button
+          onClick={() => setCreateDialogOpen(true)}
+          className="gap-1.5 bg-purple-600 hover:bg-purple-700 w-full sm:w-auto"
+        >
+          <Plus className="w-4 h-4" />
+          <span className="hidden sm:inline">انبار گردانی جدید</span>
+          <span className="sm:hidden">جدید</span>
+        </Button>
       </div>
 
-      {/* ★ فیلترها */}
       <Card>
         <CardContent className="p-3 flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[200px]">
@@ -456,7 +544,6 @@ const saveToStorage = <T,>(key: string, value: T): void => {
         </CardContent>
       </Card>
 
-      {/* ★ لیست اسناد */}
       <Card>
         <CardContent className="p-0">
           {loading ? (
@@ -517,38 +604,20 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewDetail(sc)}
-                            className="h-7 w-7 p-0"
-                            title="مشاهده جزئیات"
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => handleViewDetail(sc)} className="h-7 w-7 p-0" title="مشاهده جزئیات">
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
                           {(sc.status === 'draft' || sc.status === 'in_progress') && (
                             <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedCount(sc)
-                                setApproveNotes('')
-                                setApproveDialogOpen(true)
-                              }}
-                              className="h-7 px-2 text-emerald-600 hover:bg-emerald-50"
-                              title="تأیید و ثبت"
+                              variant="ghost" size="sm"
+                              onClick={() => { setSelectedCount(sc); setApproveNotes(''); setApproveDialogOpen(true) }}
+                              className="h-7 px-2 text-emerald-600 hover:bg-emerald-50" title="تأیید و ثبت"
                             >
                               <CheckCircle className="w-3.5 h-3.5" />
                             </Button>
                           )}
                           {(sc.status === 'draft' || sc.status === 'in_progress') && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCancel(sc)}
-                              className="h-7 w-7 p-0 text-red-500 hover:bg-red-50"
-                              title="لغو"
-                            >
+                            <Button variant="ghost" size="sm" onClick={() => handleCancel(sc)} className="h-7 w-7 p-0 text-red-500 hover:bg-red-50" title="لغو">
                               <XCircle className="w-3.5 h-3.5" />
                             </Button>
                           )}
@@ -565,7 +634,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
       {/* ★ مودال ایجاد سند جدید */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-       <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[1200px] max-h-[95vh] rounded-xl" dir="rtl">
+        <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[1200px] max-h-[95vh] rounded-xl" dir="rtl">
           <DialogHeader className="pb-2">
             <DialogTitle className="flex items-center gap-2 text-base">
               <ClipboardList className="w-5 h-5 text-purple-600" />
@@ -577,23 +646,29 @@ const saveToStorage = <T,>(key: string, value: T): void => {
           </DialogHeader>
 
           <div className="space-y-2.5 overflow-y-auto max-h-[80vh] pr-1">
-            {/* ★ انتخاب انبار */}
-            <div>
-              <Label className="text-xs">انبار <span className="text-red-500">*</span></Label>
-              <Select
-                value={selectedWarehouse}
-                onValueChange={(v) => { setSelectedWarehouse(v); setCountedItems({}) }}
-              >
-                <SelectTrigger className="mt-1"><SelectValue placeholder="انتخاب انبار..." /></SelectTrigger>
-                <SelectContent>
-                  {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">انبار <span className="text-red-500">*</span></Label>
+                <Select value={selectedWarehouse} onValueChange={(v) => { setSelectedWarehouse(v); setCountedItems({}) }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="انتخاب انبار..." /></SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">تاریخ شمارش</Label>
+                <Input 
+                  type="text" 
+                  value={new Date(countDate).toLocaleDateString('fa-IR')} 
+                  disabled 
+                  className="mt-1 bg-gray-50"
+                />
+              </div>
             </div>
 
             {selectedWarehouse && (
               <>
-                {/* ★ جستجوی محصول */}
                 <div className="relative">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
@@ -604,7 +679,6 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                   />
                 </div>
 
-                {/* ★ خلاصه */}
                 <div className="grid grid-cols-3 gap-2">
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-center">
                     <p className="text-[10px] text-blue-600">شمارش شده</p>
@@ -620,7 +694,6 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                   </div>
                 </div>
 
-                {/* ★ لیست محصولات — جمع‌وجور */}
                 {loadingProducts ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
@@ -686,33 +759,21 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                       </Table>
                     </div>
 
-                    {/* ★★★ صفحه‌بندی */}
                     {filteredProducts.length > pageSize && (
                       <div className="flex items-center justify-between gap-2 px-2 py-1 border-t bg-gray-50 rounded-b-lg">
                         <div className="text-[10px] text-gray-500">
                           صفحه {toFa(currentPageSafe)} از {toFa(totalPages)} — {formatNumber(filteredProducts.length)} محصول
                         </div>
                         <div className="flex items-center gap-0.5">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                            disabled={currentPageSafe === 1}
-                            className="h-6 px-1.5 text-[10px]"
-                          >
+                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPageSafe === 1} className="h-6 px-1.5 text-[10px]">
                             قبلی
                           </Button>
                           {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                             let pageNum: number
-                            if (totalPages <= 5) {
-                              pageNum = i + 1
-                            } else if (currentPageSafe <= 3) {
-                              pageNum = i + 1
-                            } else if (currentPageSafe >= totalPages - 2) {
-                              pageNum = totalPages - 4 + i
-                            } else {
-                              pageNum = currentPageSafe - 2 + i
-                            }
+                            if (totalPages <= 5) pageNum = i + 1
+                            else if (currentPageSafe <= 3) pageNum = i + 1
+                            else if (currentPageSafe >= totalPages - 2) pageNum = totalPages - 4 + i
+                            else pageNum = currentPageSafe - 2 + i
                             return (
                               <Button
                                 key={pageNum}
@@ -725,13 +786,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                               </Button>
                             )
                           })}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                            disabled={currentPageSafe === totalPages}
-                            className="h-6 px-1.5 text-[10px]"
-                          >
+                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPageSafe === totalPages} className="h-6 px-1.5 text-[10px]">
                             بعدی
                           </Button>
                         </div>
@@ -745,11 +800,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>انصراف</Button>
-            <Button
-              onClick={handleCreate}
-              disabled={submitting || computedTotals.countedItemsCount === 0}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
+            <Button onClick={handleCreate} disabled={submitting || computedTotals.countedItemsCount === 0} className="bg-purple-600 hover:bg-purple-700">
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               ثبت سند ({formatNumber(computedTotals.countedItemsCount)} آیتم)
             </Button>
@@ -759,7 +810,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
       {/* ★ مودال جزئیات */}
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-  <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[800px] max-h-[90vh] rounded-xl" dir="rtl">
+        <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[800px] max-h-[90vh] rounded-xl" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="w-5 h-5 text-purple-600" />
@@ -794,17 +845,25 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+                           <div className="grid grid-cols-3 gap-2">
                 <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-center">
                   <p className="text-[10px] text-red-600">جمع کسری</p>
                   <p className="text-sm font-bold text-red-700">
-                    {formatNumber(selectedCount.items?.filter(i => i.difference < 0).reduce((s, i) => s + Math.abs(i.differenceAmount), 0) || 0)}
+                    {formatNumber(
+                      selectedCount.items 
+                        ? selectedCount.items.filter(i => i.difference < 0).reduce((s, i) => s + Math.abs(i.differenceAmount), 0) 
+                        : 0
+                    )}
                   </p>
                 </div>
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-center">
                   <p className="text-[10px] text-emerald-600">جمع مازاد</p>
                   <p className="text-sm font-bold text-emerald-700">
-                    {formatNumber(selectedCount.items?.filter(i => i.difference > 0).reduce((s, i) => s + i.differenceAmount, 0) || 0)}
+                    {formatNumber(
+                      selectedCount.items 
+                        ? selectedCount.items.filter(i => i.difference > 0).reduce((s, i) => s + i.differenceAmount, 0) 
+                        : 0
+                    )}
                   </p>
                 </div>
                 <div className={`border rounded-lg p-2 text-center ${selectedCount.totalDifference >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
@@ -868,22 +927,11 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
               {(selectedCount.status === 'draft' || selectedCount.status === 'in_progress') && (
                 <div className="flex gap-2 pt-2 border-t">
-                  <Button
-                    onClick={() => {
-                      setApproveNotes(selectedCount.notes || '')
-                      setApproveDialogOpen(true)
-                    }}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 gap-1"
-                    disabled={submitting}
-                  >
+                  <Button onClick={() => { setApproveNotes(selectedCount.notes || ''); setApproveDialogOpen(true) }} className="flex-1 bg-emerald-600 hover:bg-emerald-700 gap-1" disabled={submitting}>
                     {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                     تأیید و ثبت نهایی
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => handleCancel(selectedCount)}
-                    className="text-red-600 border-red-200 hover:bg-red-50"
-                  >
+                  <Button variant="outline" onClick={() => handleCancel(selectedCount)} className="text-red-600 border-red-200 hover:bg-red-50">
                     <XCircle className="w-4 h-4 ml-1" />
                     لغو سند
                   </Button>
@@ -896,7 +944,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
       {/* ★ مودال تأیید */}
       <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
-<DialogContent className="w-[calc(100%-1rem)] sm:max-w-[500px] rounded-xl" dir="rtl">
+        <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[500px] rounded-xl" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-600" />
@@ -913,7 +961,7 @@ const saveToStorage = <T,>(key: string, value: T): void => {
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="text-xs text-amber-800 space-y-1">
                   <p className="font-bold">تأیید این عمل قابل بازگشت نیست!</p>
-                  <p>• موجودی {selectedCount?.itemsCount || selectedCount?.totalItems} قلم به‌روزرسانی می‌شود</p>
+                  <p>• موجودی {formatNumber(selectedCount?.itemsCount || selectedCount?.totalItems || 0)} قلم به‌روزرسانی می‌شود</p>
                   <p>• سند حسابداری برای اختلافات ثبت می‌شود</p>
                   <p>• حرکت کالا (StockMovement) برای هر اختلاف ایجاد می‌شود</p>
                 </div>
@@ -922,22 +970,13 @@ const saveToStorage = <T,>(key: string, value: T): void => {
 
             <div>
               <Label className="text-xs">یادداشت (اختیاری)</Label>
-              <Input
-                value={approveNotes}
-                onChange={(e) => setApproveNotes(e.target.value)}
-                placeholder="توضیحات یا دلیل تأیید..."
-                className="mt-1"
-              />
+              <Input value={approveNotes} onChange={(e) => setApproveNotes(e.target.value)} placeholder="توضیحات یا دلیل تأیید..." className="mt-1" />
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproveDialogOpen(false)}>انصراف</Button>
-            <Button
-              onClick={handleApprove}
-              disabled={submitting}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
+            <Button onClick={handleApprove} disabled={submitting} className="bg-emerald-600 hover:bg-emerald-700">
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               تأیید نهایی
             </Button>

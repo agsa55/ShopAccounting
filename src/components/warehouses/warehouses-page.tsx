@@ -20,6 +20,13 @@ import { useToast } from '@/hooks/use-toast'
 // ══════════════════════════
 // Types
 // ══════════════════════════
+interface Branch {
+  id: string
+  name: string
+  code: string
+  isActive: boolean
+}
+
 interface StockItem {
   productId: string
   productName: string
@@ -39,6 +46,8 @@ interface Warehouse {
   code: string
   isDefault: boolean
   isActive: boolean
+  branchId?: string | null      // ★★★ اضافه شده
+  branchName?: string | null    // ★★★ اضافه شده برای نمایش
   _count?: { StockLevels: number; PurchaseInvoices: number; Invoices: number }
   stockItems?: StockItem[]
   totalStockItems?: number
@@ -129,12 +138,16 @@ export function WarehousesPage() {
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
   
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [branches, setBranches] = useState<Branch[]>([]) // ★★★ اضافه شده
   const [planInfo, setPlanInfo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState({ name: '', code: '', isDefault: false, isActive: true })
+  
+  // ★★★ اضافه شدن branchId به فرم
+  const [form, setForm] = useState({ name: '', code: '', isDefault: false, isActive: true, branchId: '' })
+  
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([])
   const syncInProgress = useRef(false)
@@ -199,14 +212,38 @@ export function WarehousesPage() {
   // ══════════════════════════
   // Load Data
   // ══════════════════════════
-  const loadData = useCallback(async (showLoader = true) => {
+    const loadData = useCallback(async (showLoader = true) => {
     if (showLoader) setLoading(true)
     const tid = tenantId || useAppStore.getState().currentTenant?.id
     const trulyOnline = isOnline && navigator.onLine
     
+    let branchesList: Branch[] = []
+
+    // ۱. دریافت لیست شعب (همیشه اول)
+    if (trulyOnline && tid) {
+      try {
+        const resBranches = await fetch('/api/branches', { headers: getAuthHeaders() })
+        const branchesData = await resBranches.json()
+        if (branchesData.success) {
+          branchesList = branchesData.data || []
+          setBranches(branchesList)
+        }
+      } catch (err) {
+        console.error('Error loading branches:', err)
+      }
+    }
+
     if (!trulyOnline) {
       const cached = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
-      setWarehouses(cached)
+      // ★★★ افزودن branchName به انبارهای کش شده
+      const enriched = cached.map(wh => {
+        if (wh.branchId && branchesList.length > 0) {
+          const matched = branchesList.find(b => b.id === wh.branchId)
+          return { ...wh, branchName: matched?.name || null }
+        }
+        return wh
+      })
+      setWarehouses(enriched)
       setSyncQueue(loadFromStorage<SyncQueueItem[]>(STORAGE_KEYS.SYNC_QUEUE, []))
       setLoading(false)
       if (cached.length === 0) {
@@ -219,10 +256,18 @@ export function WarehousesPage() {
       if (!tid) { setLoading(false); return }
       const res = await fetch(`/api/warehouses?tenantId=${tid}`, { headers: getAuthHeaders() })
       const data = await res.json()
+      
       if (data.success) {
-        const serverWarehouses = data.data || []
+        // ★★★ نگاشت branchId به branchName
+        const serverWarehouses = (data.data || []).map((wh: any) => {
+          const matchedBranch = branchesList.find((b: any) => b.id === wh.branchId)
+          return {
+            ...wh,
+            branchName: matchedBranch ? matchedBranch.name : null
+          }
+        })
+
         const cached = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
-        
         const serverIds = new Set(serverWarehouses.map((w: any) => w.id))
         const stillOffline = cached.filter(o => 
           o._isOffline && (!serverIds.has(o.id) || o._offlineAction === 'delete')
@@ -245,6 +290,7 @@ export function WarehousesPage() {
     }
     setLoading(false)
   }, [tenantId, isOnline, toast])
+
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -343,13 +389,19 @@ export function WarehousesPage() {
       return
     }
     setEditingWarehouse(null)
-    setForm({ name: '', code: '', isDefault: false, isActive: true })
+    setForm({ name: '', code: '', isDefault: false, isActive: true, branchId: '' }) // ★★★ ریست branchId
     setDialogOpen(true)
   }
 
-  const handleOpenEdit = (wh: Warehouse) => {
+     const handleOpenEdit = (wh: Warehouse) => {
     setEditingWarehouse(wh)
-    setForm({ name: wh.name, code: wh.code, isDefault: wh.isDefault, isActive: wh.isActive })
+    setForm({ 
+      name: wh.name, 
+      code: wh.code, 
+      isDefault: wh.isDefault, 
+      isActive: wh.isActive, 
+      branchId: wh.branchId || '' // این خط حیاتی است
+    })
     setDialogOpen(true)
   }
 
@@ -370,6 +422,8 @@ export function WarehousesPage() {
         code: form.code || `WH-${Date.now()}`,
         isDefault: form.isDefault,
         isActive: form.isActive,
+        branchId: form.branchId || null, // ★★★ اضافه شده
+        branchName: branches.find(b => b.id === form.branchId)?.name || null,
         _count: { StockLevels: 0, PurchaseInvoices: 0, Invoices: 0 },
         stockItems: [],
         totalStockItems: 0,
@@ -395,7 +449,7 @@ export function WarehousesPage() {
         offlineId,
         serverId: editingWarehouse?.id,
         action: editingWarehouse ? 'update' : 'create',
-        payload: form,
+        payload: { ...form, branchId: form.branchId || null }, // ★★★ ارسال در payload
       })
       
       toast({ title: '📡 ذخیره آفلاین ✓', description: 'پس از اتصال همگام‌سازی می‌شود' })
@@ -404,10 +458,18 @@ export function WarehousesPage() {
       return
     }
     
-    try {
+       try {
       const method = editingWarehouse ? 'PUT' : 'POST'
-      const body: any = { ...form, tenantId: tid }
+      // ★★★ اطمینان از ارسال branchId (حتی اگر خالی باشد)
+      const body: any = { 
+        ...form, 
+        tenantId: tid, 
+        branchId: form.branchId || null 
+      }
       if (editingWarehouse) body.id = editingWarehouse.id
+      
+      console.log('[Warehouses] Submitting body:', JSON.stringify(body)) // ★★★ لاگ
+      
       const res = await fetch('/api/warehouses', { method, headers: getAuthHeaders(), body: JSON.stringify(body) })
       const data = await res.json()
       if (data.success) { 
@@ -603,17 +665,28 @@ export function WarehousesPage() {
                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${wh.isDefault ? 'bg-emerald-100' : 'bg-gray-100'}`}>
                       <Package className={`w-5 h-5 ${wh.isDefault ? 'text-emerald-600' : 'text-gray-500'}`} />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-bold text-gray-900 truncate">{wh.name}</h3>
-                        {wh._isOffline && (
-                          <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 bg-amber-50 h-4 px-1">
-                            {wh._offlineAction === 'delete' ? 'حذف آفلاین' : 'آفلاین'}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-gray-400 font-mono" dir="ltr">{wh.code}</p>
-                    </div>
+                 <div className="min-w-0 flex-1">
+  <div className="flex items-center gap-1.5 flex-wrap">
+    <h3 className="text-sm font-bold text-gray-900 truncate">{wh.name}</h3>
+    {wh._isOffline && (
+      <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 bg-amber-50 h-4 px-1">
+        {wh._offlineAction === 'delete' ? 'حذف آفلاین' : 'آفلاین'}
+      </Badge>
+    )}
+  </div>
+  
+  <p className="text-[10px] text-gray-400 font-mono" dir="ltr">{wh.code}</p>
+  
+  {/* ★★★ نمایش نام شعبه (فقط و فقط یک بار) */}
+  {wh.branchName && (
+    <div className="flex items-center gap-1 mt-1">
+      <Building2 className="w-3 h-3 text-purple-500 shrink-0" />
+      <span className="text-[10px] text-purple-700 font-medium truncate">
+        شعبه: {wh.branchName}
+      </span>
+    </div>
+  )}
+</div>
                   </div>
                   <div className="flex flex-col gap-1 shrink-0">
                     {wh.isDefault && <Badge className="text-[9px] bg-emerald-100 text-emerald-700 h-4 px-1.5">پیش‌فرض</Badge>}
@@ -706,7 +779,7 @@ export function WarehousesPage() {
 
       {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="font-fa w-[calc(100%-1rem)] sm:max-w-[400px] rounded-xl" dir="rtl">
+        <DialogContent className="font-fa w-[calc(100%-1rem)] sm:max-w-[450px] rounded-xl" dir="rtl">
           <DialogHeader>
             <DialogTitle className="text-sm sm:text-base flex items-center gap-2">
               {editingWarehouse ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
@@ -718,17 +791,39 @@ export function WarehousesPage() {
               <Label className="text-xs">نام انبار <span className="text-red-500">*</span></Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1" placeholder="مثلاً: انبار اصلی" />
             </div>
+            
+            {/* ★★★ کمبوباکس انتخاب شعبه */}
+            <div>
+              <Label className="text-xs">شعبه مربوطه (اختیاری)</Label>
+              <select
+                value={form.branchId}
+                onChange={(e) => setForm({ ...form, branchId: e.target.value })}
+                className="w-full text-xs mt-1 h-9 border border-gray-200 rounded px-2 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+              >
+                <option value="">بدون شعبه (مرکزی)</option>
+                {branches.filter(b => b.isActive).map(b => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
+                ))}
+              </select>
+              {branches.length === 0 && (
+                <p className="text-[10px] text-gray-400 mt-1">شعبه‌ای تعریف نشده است. برای تعریف شعبه به بخش مدیریت شعب مراجعه کنید.</p>
+              )}
+            </div>
+
             <div>
               <Label className="text-xs">کد (اختیاری)</Label>
               <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} className="mt-1" placeholder="خودکار" dir="ltr" />
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-              <Label className="text-xs">انبار پیش‌فرض</Label>
-              <CustomSwitch checked={form.isDefault} onCheckedChange={(v) => setForm({ ...form, isDefault: v })} />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-              <Label className="text-xs">فعال</Label>
-              <CustomSwitch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                <Label className="text-xs">انبار پیش‌فرض</Label>
+                <CustomSwitch checked={form.isDefault} onCheckedChange={(v) => setForm({ ...form, isDefault: v })} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                <Label className="text-xs">فعال</Label>
+                <CustomSwitch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+              </div>
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
