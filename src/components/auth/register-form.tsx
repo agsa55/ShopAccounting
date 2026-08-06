@@ -1,9 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/auth/register-form.tsx (v9.0 ★★★)
+// src/components/auth/register-form.tsx (v9.1 ★★★)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
+// ★★★ v9.1: افزودن پشتیبانی کامل از پلن دمو (Demo/Trial) از طریق URL
+//   - خواندن پارامتر ?plan=demo از URL
+//   - تنظیم خودکار استور روی پلن دمو و دوره ۳ روزه
+//   - تغییر UI مرحله پرداخت برای نمایش "فعال‌سازی رایگان" به جای درگاه بانکی
+//
 // ★★★ v9.0: تغییر ساختار پلن‌ها
 //   - ۳ پلن: پایه / پیشرفته / حرفه‌ای  (نام کد: simple / professional / enterprise)
 //   - ۲ دوره: سالانه (۳۶۵ روز) / مادام‌العمر (بدون انقضا)
@@ -13,15 +18,12 @@
 // ★★★ v5.1.5 (Phase 4): بازنویسی کامل با ۳ مرحله
 //   ۱. اطلاعات فروشگاه (نام، زیردامنه، نام کاربری، رمز عبور)
 //   ۲. تأیید شماره موبایل با OTP (IPPanel)
-//   ۳. پرداخت با زرین‌پال (sandbox برای تست)
+//   ۳. پرداخت با زرین‌پال (sandbox برای تست) یا فعال‌سازی دمو
 //   ۴. پس از پرداخت موفق → داشبورد یا صفحه موفقیت
-//
-// ★★★ v3.1 (قدیمی):
-//   ★ حذف مرحله OTP — فعلاً فقط با نام کاربری و رمز عبور ثبت‌نام می‌کردیم
-//   ★ اضافه‌شدن فیلد "نام کاربری" (جایگزین ایمیل)
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+   import { useRouter, useSearchParams } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 import { setAccessToken, setRefreshToken, setStoredUser } from '@/lib/auth-client'
 import { getTenantUrl, isDevelopment } from '@/lib/tenant-resolver-client'
@@ -40,30 +42,34 @@ import {
 const steps = [
   { id: 1, title: 'اطلاعات فروشگاه' },
   { id: 2, title: 'تأیید موبایل' },
-  { id: 3, title: 'پرداخت اشتراک' },
+  { id: 3, title: 'فعال‌سازی' }, // ✅ تغییر عنوان مرحله ۳ برای سازگاری با دمو
 ]
 
-// ★★★ v9.0: PLAN_INFO با نام‌های جدید و دوره‌های جدید
-//   - ۳ پلن: پایه / پیشرفته / حرفه‌ای
-//   - ۲ دوره: سالانه / مادام‌العمر
-//   - نام کد (tierName) ثابت می‌ماند: simple / professional / enterprise
+// ★★★ v9.1: PLAN_INFO با افزودن پلن دمو
 const PLAN_INFO: Record<string, { title: string; detail: string; isTrial: boolean; tierName: string; billingCycle: string }> = {
+  // ✅ پلن دمو / تست رایگان
+  demo: { title: 'تست ۳ روزه رایگان', detail: 'امکانات کامل پلن حرفه‌ای به مدت ۳ روز', isTrial: true, tierName: 'demo', billingCycle: 'trial' },
+  
   // ★ پلن‌های پایه (default cycle = annual)
   simple:             { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
   professional:       { title: 'پلن پیشرفته',       detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول',   isTrial: false, tierName: 'professional', billingCycle: 'annual' },
   enterprise:         { title: 'پلن حرفه‌ای',       detail: 'کاربر و محصول نامحدود',        isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
+  
   // ★ ترکیب پلن + دوره (سالانه)
   simple_annual:      { title: 'پلن پایه سالانه',  detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
   professional_annual: { title: 'پلن پیشرفته سالانه', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'annual' },
   enterprise_annual:  { title: 'پلن حرفه‌ای سالانه', detail: 'کاربر و محصول نامحدود',     isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
+  
   // ★ ترکیب پلن + دوره (مادام‌العمر)
   simple_lifetime:      { title: 'پلن پایه مادام‌العمر',    detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'lifetime' },
   professional_lifetime: { title: 'پلن پیشرفته مادام‌العمر', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'lifetime' },
   enterprise_lifetime:  { title: 'پلن حرفه‌ای مادام‌العمر',  detail: 'کاربر و محصول نامحدود',      isTrial: false, tierName: 'enterprise',   billingCycle: 'lifetime' },
+  
   // ★ backward compatibility: پلن‌های قدیمی (ماهانه) → به سالانه تبدیل می‌شوند
   simple_monthly:     { title: 'پلن پایه سالانه',  detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
   professional_monthly: { title: 'پلن پیشرفته سالانه', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'annual' },
   enterprise_monthly: { title: 'پلن حرفه‌ای سالانه', detail: 'کاربر و محصول نامحدود',     isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
+  
   // ★ backward compatibility: پلن‌های قدیمی
   free:               { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
   trial:              { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
@@ -72,15 +78,26 @@ const PLAN_INFO: Record<string, { title: string; detail: string; isTrial: boolea
 const BILLING_CYCLE_FA: Record<string, string> = {
   annual: 'سالانه',
   lifetime: 'مادام‌العمر',
-  // ★ backward compatibility
+  trial: '۳ روزه', // ✅ اضافه شده برای دمو
   monthly: 'سالانه',
 }
 
 export default function RegisterForm() {
+  const searchParams = useSearchParams() // ✅ خواندن پارامترهای URL
   const { setCurrentView, login, selectedPlanId, setSelectedPlanId, selectedBillingCycle, setSelectedBillingCycle } = useAppStore()
+  
   const [currentStep, setCurrentStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+   const router = useRouter()
+  // ✅ همگام‌سازی استور با پارامتر URL (اگر plan=demo باشد)
+  useEffect(() => {
+    const planParam = searchParams.get('plan')
+    if (planParam === 'demo') {
+      setSelectedPlanId('demo')
+      setSelectedBillingCycle('trial')
+    }
+  }, [searchParams, setSelectedPlanId, setSelectedBillingCycle])
 
   const compositeKey = selectedBillingCycle ? `${selectedPlanId}_${selectedBillingCycle}` : ''
   const planName = compositeKey && PLAN_INFO[compositeKey]
@@ -230,7 +247,7 @@ export default function RegisterForm() {
 
       if (data.success) {
         setMobileVerified(true)
-        // ★ رفتن به مرحله ۳ (پرداخت)
+        // ★ رفتن به مرحله ۳ (پرداخت/فعال‌سازی)
         setTimeout(() => setCurrentStep(3), 1000)
       } else {
         setError(data.error || 'کد نامعتبر است')
@@ -287,38 +304,43 @@ export default function RegisterForm() {
       regResultRef.current = { accessToken: accessToken || regData.data.token, refreshToken, user, tenant }
       setRegistrationData(regResultRef.current)
 
-      // ★ ذخیره توکن در localStorage (برای فراخوانی checkout)
+      // ★ ذخیره توکن در localStorage (برای فراخوانی checkout یا ورود مستقیم)
       if (typeof window !== 'undefined') {
         setAccessToken(accessToken || regData.data.token)
         if (refreshToken) setRefreshToken(refreshToken)
         if (user) setStoredUser(user)
       }
 
-      // ★ ۲. checkout با زرین‌پال
-      const token = accessToken || regData.data.token
-      const checkoutRes = await fetch('/api/subscription/checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          tierName: effectiveTierName,
-          billingCycle: effectiveBillingCycle,
-          action: 'new',
-        }),
-      })
+      // ★ ۲. اگر پلن دمو نیست، checkout با زرین‌پال انجام شود
+      if (!planInfo.isTrial) {
+        const token = accessToken || regData.data.token
+        const checkoutRes = await fetch('/api/subscription/checkout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            tierName: effectiveTierName,
+            billingCycle: effectiveBillingCycle,
+            action: 'new',
+          }),
+        })
 
-      const checkoutData = await checkoutRes.json()
+        const checkoutData = await checkoutRes.json()
 
-      if (checkoutData.success && checkoutData.data?.paymentUrl) {
-        // ★ هدایت به درگاه زرین‌پال
-        window.location.href = checkoutData.data.paymentUrl
+        if (checkoutData.success && checkoutData.data?.paymentUrl) {
+          // ★ هدایت به درگاه زرین‌پال
+          window.location.href = checkoutData.data.paymentUrl
+        } else {
+          setError(checkoutData.error || 'خطا در ایجاد درخواست پرداخت. فروشگاه ایجاد شد ولی پرداخت ناموفق بود.')
+          setCurrentStep(3)
+        }
       } else {
-        // ★ اگر checkout خطا داد، ولی Tenant ایجاد شده — کاربر می‌تواند بعداً پرداخت کند
-        setError(checkoutData.error || 'خطا در ایجاد درخواست پرداخت. فروشگاه ایجاد شد ولی پرداخت ناموفق بود.')
-        // ★ رفتن به مرحله موفقیت (بدون پرداخت)
-        setCurrentStep(3)
+        // ✅ اگر پلن دمو است، مستقیماً به داشبورد هدایت شود (یا نمایش پیام موفقیت)
+        // فرض بر این است که بک‌اند توکن معتبر برای پلن دمو صادر کرده است
+        const tenantUrl = getTenantUrl(subdomain)
+        window.location.href = tenantUrl
       }
     } catch (err) {
       console.error('[Register] Network error:', err)
@@ -334,9 +356,11 @@ export default function RegisterForm() {
     setRegistrationFailed(false)
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
-
-  const handleCancel = () => { window.location.href = '/' }
-
+   const handleCancel = () => { 
+     // ✅ این دستور صفحه فعلی را از تاریخچه حذف کرده و مستقیم به لندینگ می‌رود
+     // بنابراین دکمه برگشت مرورگر دیگر گیج نمی‌شود.
+     router.replace('/') 
+   }
   // ─── canGoNext ────────────────────────────────────────────────
   const canGoNext = useCallback(() => {
     switch (currentStep) {
@@ -422,10 +446,15 @@ export default function RegisterForm() {
             <Sparkles className="w-4 h-4" />
             شروع فوری در کمتر از ۲ دقیقه
           </p>
-          {/* ★ نمایش پلن انتخاب‌شده */}
-          <div className="mt-3 inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-4 py-1.5 rounded-full">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span className="text-sm font-medium text-emerald-700">
+          
+          {/* ★ نمایش پلن انتخاب‌شده (اصلاح‌شده برای نمایش صحیح دمو) */}
+          <div className={`mt-3 inline-flex items-center gap-2 border px-4 py-1.5 rounded-full ${
+            planInfo.isTrial 
+              ? 'bg-amber-50 border-amber-200' 
+              : 'bg-emerald-50 border-emerald-200'
+          }`}>
+            <CheckCircle2 className={`w-4 h-4 ${planInfo.isTrial ? 'text-amber-600' : 'text-emerald-600'}`} />
+            <span className={`text-sm font-medium ${planInfo.isTrial ? 'text-amber-700' : 'text-emerald-700'}`}>
               پلن انتخابی: {planInfo.title} - {BILLING_CYCLE_FA[effectiveBillingCycle] || effectiveBillingCycle}
             </span>
           </div>
@@ -435,12 +464,14 @@ export default function RegisterForm() {
         <div className="mb-8">
           <div className="flex justify-between mb-2">
             {steps.map((step) => (
-              <div key={step.id} className={`flex items-center gap-1 text-xs ${step.id <= currentStep ? 'text-emerald-600 font-semibold' : 'text-gray-400'}`}>
+              <div key={step.id} className={`flex items-center gap-1 text-xs ${step.id <= currentStep ? (planInfo.isTrial && step.id === 3 ? 'text-amber-600' : 'text-emerald-600') + ' font-semibold' : 'text-gray-400'}`}>
                 {step.id < currentStep ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <CheckCircle2 className={`w-4 h-4 ${planInfo.isTrial && step.id === 3 ? 'text-amber-500' : 'text-emerald-500'}`} />
                 ) : (
                   <span className={`w-6 h-6 rounded-full text-[10px] flex items-center justify-center transition-all ${
-                    step.id === currentStep ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-200 text-gray-500'
+                    step.id === currentStep 
+                      ? (planInfo.isTrial && step.id === 3 ? 'bg-amber-500' : 'bg-emerald-600') + ' text-white shadow-md' 
+                      : 'bg-gray-200 text-gray-500'
                   }`}>
                     {step.id}
                   </span>
@@ -710,7 +741,7 @@ export default function RegisterForm() {
                       onClick={() => setCurrentStep(3)}
                       className="flex-1 h-10 gap-2 bg-emerald-600 hover:bg-emerald-700"
                     >
-                      ادامه به پرداخت
+                      ادامه به فعال‌سازی
                       <ArrowLeft className="w-4 h-4" />
                     </Button>
                   )}
@@ -718,16 +749,26 @@ export default function RegisterForm() {
               </div>
             )}
 
-            {/* ═══ Step 3: Payment ═══ */}
+            {/* ═══ Step 3: Payment / Activation ═══ */}
             {currentStep === 3 && (
               <div className="space-y-5">
                 <div className="text-center mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">پرداخت اشتراک</h2>
-                  <p className="text-sm text-gray-500">برای فعال‌سازی فروشگاه خود، پرداخت را تکمیل کنید</p>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    {planInfo.isTrial ? 'فعال‌سازی حساب تستی' : 'پرداخت اشتراک'}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    {planInfo.isTrial 
+                      ? 'فروشگاه شما بلافاصله و بدون نیاز به پرداخت فعال می‌شود' 
+                      : 'برای فعال‌سازی فروشگاه خود، پرداخت را تکمیل کنید'}
+                  </p>
                 </div>
 
                 {/* خلاصه سفارش */}
-                <div className="bg-gradient-to-bl from-emerald-50 to-teal-50 rounded-xl p-5 space-y-3 border border-emerald-100">
+                <div className={`rounded-xl p-5 space-y-3 border ${
+                  planInfo.isTrial 
+                    ? 'bg-gradient-to-bl from-amber-50 to-orange-50 border-amber-100' 
+                    : 'bg-gradient-to-bl from-emerald-50 to-teal-50 border-emerald-100'
+                }`}>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">نام فروشگاه:</span>
                     <span className="font-medium text-gray-900">{storeName}</span>
@@ -742,14 +783,14 @@ export default function RegisterForm() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">آدرس فروشگاه:</span>
-                    <span className="font-medium text-emerald-600" dir="ltr">
+                    <span className={`font-medium ${planInfo.isTrial ? 'text-amber-600' : 'text-emerald-600'}`} dir="ltr">
                       {isLocalDev ? tenantDevUrl : tenantProdUrl}
                     </span>
                   </div>
-                  <div className="pt-2 border-t border-emerald-100">
+                  <div className="pt-2 border-t border-dashed border-gray-200">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-500">پلن انتخابی:</span>
-                      <span className="font-bold text-emerald-700">{planInfo.title}</span>
+                      <span className={`font-bold ${planInfo.isTrial ? 'text-amber-700' : 'text-emerald-700'}`}>{planInfo.title}</span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-sm text-gray-500">دوره:</span>
@@ -766,17 +807,26 @@ export default function RegisterForm() {
                   </div>
                 )}
 
-                {/* دکمه پرداخت */}
+                {/* دکمه پرداخت / فعال‌سازی */}
                 <div className="space-y-2">
                   <Button
                     onClick={handleRegisterAndCheckout}
                     disabled={checkoutLoading}
-                    className="w-full h-12 gap-2 bg-emerald-600 hover:bg-emerald-700 text-base"
+                    className={`w-full h-12 gap-2 text-base ${
+                      planInfo.isTrial 
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white' 
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    }`}
                   >
                     {checkoutLoading ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        در حال ایجاد درخواست پرداخت...
+                        در حال پردازش...
+                      </>
+                    ) : planInfo.isTrial ? (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        فعال‌سازی تست ۳ روزه رایگان
                       </>
                     ) : (
                       <>
@@ -786,9 +836,15 @@ export default function RegisterForm() {
                     )}
                   </Button>
 
-                  <p className="text-center text-xs text-gray-400">
-                    🔒 پرداخت امن از طریق درگاه زرین‌پال
-                  </p>
+                  {planInfo.isTrial ? (
+                    <p className="text-center text-xs text-amber-600 font-medium">
+                      🎉 بدون نیاز به پرداخت، بلافاصله وارد داشبورد می‌شوید.
+                    </p>
+                  ) : (
+                    <p className="text-center text-xs text-gray-400">
+                      🔒 پرداخت امن از طریق درگاه زرین‌پال
+                    </p>
+                  )}
                 </div>
 
                 {/* دکمه بازگشت */}

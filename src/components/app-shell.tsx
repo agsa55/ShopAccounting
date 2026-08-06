@@ -1,12 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v9.7.1 ★★★
-// ★ v9.7.1: رفع باگ چرخش بی‌پایان آیکون همگام‌سازی در دیپلوی
-//           + پاک‌سازی خودکار IndexedDB هنگام خروج برای جلوگیری از داده‌های منقضی
+// src/components/app-shell.tsx — v9.6.6 ★★★
+// ★ اصلاح قطعی نمایش پلن دمو/سالانه/مادام‌العمر در بالای سایدبار
+// ★ تشخیص دمو از چندین سیگنال API (isDemo, tenantType, planType, ...)
+// ★ نمایش ماه/روز/ساعت باقی‌مانده برای پلن‌های مختلف
+// ★ جلوگیری از نمایش "منقضی" وقتی زمان باقی مانده است
 // ============================================================================
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore, type AppView } from '@/lib/store'
 import { resolvePlan, getFeaturesByPlanName } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
@@ -14,21 +16,12 @@ import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
 // ★ PWA
 import { usePWAInstall } from '@/components/pwa-register'
 
-// ★ v9.7.0: ماژول تشخیص اتصال هوشمند
-import {
-  startConnectivityMonitor,
-  onConnectivityChange,
-  isOnline as isApiOnline,
-  getConnectivityState,
-  type ConnectivityState,
-} from '@/lib/connectivity'
-
 import {
   LayoutDashboard, ShoppingCart, Package, Grid3x3, Users, FileText,
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, AlertTriangle, ChevronLeft, Calendar, XCircle,
+  Download, AlertTriangle, ChevronLeft, Calendar,
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -60,7 +53,6 @@ import ProductsPage from '@/components/products/products-page'
 import CategoriesPage from '@/components/products/categories-page'
 import CustomersPage from '@/components/customers/customers-page'
 import InvoicesPage from '@/components/invoices/invoices-page'
-
 import InstallmentsPage from '@/components/installments/installments-page'
 import JournalEntriesPage from '@/components/accounting/journal-entries-page'
 import JournalEntryDetail from '@/components/accounting/journal-entry-detail'
@@ -239,7 +231,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'کالا و انبار',
     items: [
-      { label: 'کالاها', icon: Package, view: 'products', permKey: 'products' },
+      { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
       { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
     ],
@@ -280,12 +272,11 @@ const MANAGER_ONLY_KEYS = ['settings']
 const viewLabels: Record<string, string> = {
   dashboard: 'داشبورد',
   pos: 'صندوق فروش',
-  products: 'کالاها',
+  products: 'محصولات',
   categories: 'دسته‌بندی‌ها',
   customers: 'مشتریان',
   invoices: 'فاکتورها',
   'invoices-hub': 'فاکتورها',
-  'invoice-detail': 'جزئیات فاکتور فروش',
   'purchase-invoices': 'فاکتورها',
   installments: 'اقساط',
   accounting: 'حسابداری',
@@ -396,7 +387,7 @@ function renderCurrentView(view: AppView) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★★★ v9.6.0: SubscriptionBanner
+   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
    ═══════════════════════════════════════════════════════════════ */
 
 interface SubscriptionStatus {
@@ -411,6 +402,8 @@ interface SubscriptionStatus {
 function SubscriptionBanner() {
   const [status, setStatus] = useState<SubscriptionStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const planName = useStore((s) => s.planName)
+  const billingCycle = useStore((s) => s.selectedBillingCycle)
 
   useEffect(() => {
     async function fetchStatus() {
@@ -441,7 +434,10 @@ function SubscriptionBanner() {
     return () => clearInterval(interval)
   }, [])
 
-  if (loading || !status || status.status === 'active') return null
+  // ✅ عدم نمایش بنر برای پلن‌های دمو/تستی
+  if (loading || !status || status.status === 'active' || planName === 'demo' || planName === 'trial' || billingCycle === 'trial') {
+    return null
+  }
 
   const config = {
     warning: {
@@ -519,15 +515,22 @@ function AppSidebar() {
   const user = useStore((s) => s.user)
   const notifications = useStore((s) => s.notifications) ?? []
   const planName = useStore((s) => s.planName)
+  const billingCycle = useStore((s) => s.selectedBillingCycle)
 
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
   const { isDemo, status: demoStatus } = useDemoStatus()
-  const isDemoActive = isDemo && !demoStatus?.isExpired
 
   const [daysRemaining, setDaysRemaining] = useState(0)
+  const [hoursRemaining, setHoursRemaining] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
+  const [isLifetime, setIsLifetime] = useState(false)
+  const [isDemoTenant, setIsDemoTenant] = useState(false)
   const [realPlanName, setRealPlanName] = useState<string | null>(null)
+
+  // ✅ اصلاح حیاتی v9.6.6: تشخیص دمو از چندین سیگنال (hook + API + store)
+  // نکته: این خط باید بعد از تعریف isDemoTenant قرار گیرد (TDZ)
+  const isDemoPlan = isDemo || isDemoTenant || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
 
   useEffect(() => {
     async function checkSubscription() {
@@ -541,32 +544,73 @@ function AppSidebar() {
         const data = await res.json()
 
         if (data.success) {
-          setDaysRemaining(data.data.daysRemaining)
-          setIsExpired(data.data.isExpired)
+          const d = data.data
 
-          if (data.data.planName) {
-            setRealPlanName(data.data.planName)
-            useStore.getState().setPlanName(data.data.planName)
-          } else if (data.data.tierName) {
-            setRealPlanName(data.data.tierName)
-            useStore.getState().setPlanName(data.data.tierName)
+          // ═══ v9.6.6: تشخیص دمو از چندین سیگنال (پشتیبانی از ساختارهای مختلف API) ═══
+          const demoSignal =
+            d.isDemo === true ||
+            d.tenantType === 'demo' ||
+            d.tenantType === 'trial' ||
+            d.planType === 'demo' ||
+            d.planType === 'trial' ||
+            d.billingCycle === 'trial' ||
+            d.planName === 'demo' ||
+            d.planName === 'trial' ||
+            d.tierName === 'demo' ||
+            d.tierName === 'trial'
+
+          setIsDemoTenant(demoSignal)
+
+          // ═══ v9.6.6: تعیین نام پلن برای نمایش — دمو روی 'demo' ثابت می‌ماند ═══
+          let displayPlanName = d.planName || d.tierName || planName
+          if (demoSignal) {
+            displayPlanName = 'demo'
+          }
+
+          // ═══ v9.6.6: زمان باقی‌مانده (روز + ساعت) ═══
+          const dr = typeof d.daysRemaining === 'number' ? d.daysRemaining : 0
+          const hr = typeof d.hoursRemaining === 'number' ? d.hoursRemaining : 0
+          setDaysRemaining(dr)
+          setHoursRemaining(hr)
+
+          // ═══ v9.6.6: تشخیص پلن مادام‌العمر ═══
+          const lifetime = d.isLifetime === true || dr === -1
+          setIsLifetime(lifetime)
+
+          // ═══ v9.6.6: تشخیص منقضی بودن (دفاعی: اگر زمان باقی مانده، منقضی نشان نده) ═══
+          const expired = d.isExpired === true && !lifetime && dr <= 0 && hr <= 0
+          setIsExpired(expired)
+
+          if (displayPlanName) {
+            setRealPlanName(displayPlanName)
+            useStore.getState().setPlanName(displayPlanName)
           }
 
           const { cachePlan } = await import('@/lib/offline-db')
           await cachePlan({
-            planName: data.data.planName || data.data.tierName,
-            daysRemaining: data.data.daysRemaining,
-            isExpired: data.data.isExpired,
+            planName: displayPlanName,
+            daysRemaining: dr,
+            hoursRemaining: hr,
+            isExpired: expired,
+            isDemo: demoSignal,
+            isLifetime: lifetime,
             cached_at: Date.now(),
           })
         } else {
           const { getCachedPlan } = await import('@/lib/offline-db')
           const cachedPlan = await getCachedPlan()
           if (cachedPlan?.planName) {
-            setRealPlanName(cachedPlan.planName)
-            useStore.getState().setPlanName(cachedPlan.planName)
-            setDaysRemaining(cachedPlan.daysRemaining || 0)
-            setIsExpired(cachedPlan.isExpired || false)
+            const cp = cachedPlan as any
+            const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
+            setIsDemoTenant(demoSignal)
+            setRealPlanName(cp.planName)
+            useStore.getState().setPlanName(cp.planName)
+            setDaysRemaining(cp.daysRemaining || 0)
+            setHoursRemaining(cp.hoursRemaining || 0)
+            const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
+            setIsLifetime(lifetime)
+            const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
+            setIsExpired(expired)
           }
         }
       } catch (err) {
@@ -574,10 +618,17 @@ function AppSidebar() {
           const { getCachedPlan } = await import('@/lib/offline-db')
           const cachedPlan = await getCachedPlan()
           if (cachedPlan?.planName) {
-            setRealPlanName(cachedPlan.planName)
-            useStore.getState().setPlanName(cachedPlan.planName)
-            setDaysRemaining(cachedPlan.daysRemaining || 0)
-            setIsExpired(cachedPlan.isExpired || false)
+            const cp = cachedPlan as any
+            const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
+            setIsDemoTenant(demoSignal)
+            setRealPlanName(cp.planName)
+            useStore.getState().setPlanName(cp.planName)
+            setDaysRemaining(cp.daysRemaining || 0)
+            setHoursRemaining(cp.hoursRemaining || 0)
+            const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
+            setIsLifetime(lifetime)
+            const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
+            setIsExpired(expired)
           }
         } catch (cacheErr) {
           console.error('[AppSidebar] Error reading cached plan:', cacheErr)
@@ -590,7 +641,8 @@ function AppSidebar() {
     return () => clearInterval(interval)
   }, [])
 
-  const effectivePlanName = (realPlanName || planName || 'simple') as string
+  // ✅ v9.6.6: اگر دمو تشخیص داده شد، نام پلن روی 'demo' ثابت می‌ماند
+  const effectivePlanName = (isDemoPlan ? 'demo' : (realPlanName || planName || 'simple')) as string
   const effectiveFeatures = getFeaturesByPlanName(effectivePlanName)
   const unreadCount = notifications.filter(n => !n.isRead).length
 
@@ -633,25 +685,38 @@ function AppSidebar() {
     return parts[0]?.[0] || 'م'
   }, [user])
 
-  const formatRemainingTime = (days: number) => {
+  // ✅ v9.6.6: نمایش ماه/روز/ساعت برای پلن‌های مختلف
+  const formatRemainingTime = (days: number, hours: number = 0, demoMode: boolean = false) => {
     if (days === -1) return 'مادام‌العمر';
-    if (days <= 0) return 'منقضی شده';
+    if (days <= 0 && hours <= 0) return 'منقضی شده';
+
+    // برای پلن‌های دمو یا کوتاه‌مدت (زیر ۳۰ روز): روز + ساعت
+    if (demoMode || days < 30) {
+      const dStr = days > 0 ? `${days.toLocaleString('fa-IR')} روز` : '';
+      const hStr = hours > 0 ? `${hours.toLocaleString('fa-IR')} ساعت` : '';
+      if (dStr && hStr) return `${dStr} و ${hStr}`;
+      return dStr || hStr || 'کمتر از ۱ ساعت';
+    }
+
+    // برای پلن‌های سالانه: ماه + روز
     const months = Math.floor(days / 30);
     const remainingDays = days % 30;
-    
+
     const mStr = months > 0 ? `${months.toLocaleString('fa-IR')} ماه` : '';
     const dStr = remainingDays > 0 ? `${remainingDays.toLocaleString('fa-IR')} روز` : '';
-    
+
     if (mStr && dStr) return `${mStr} و ${dStr}`;
     return mStr || dStr;
   };
 
+  // ✅ v9.6.6: پشتیبانی از نام‌های مختلف پلن (case-insensitive)
   const getPlanLabel = (name: string) => {
-    if (name === 'trial') return 'دوره آزمایشی';
-    if (name === 'simple') return 'پلن پایه';
-    if (name === 'professional') return 'پلن پیشرفته';
-    if (name === 'enterprise') return 'پلن حرفه‌ای';
-    return name;
+    const n = (name || '').toString().toLowerCase();
+    if (n === 'trial' || n === 'demo') return 'تست ۳ روزه';
+    if (n === 'simple' || n === 'basic') return 'پلن پایه';
+    if (n === 'professional' || n === 'advanced') return 'پلن پیشرفته';
+    if (n === 'enterprise' || n === 'professional_plus' || n === 'ultimate') return 'پلن حرفه‌ای';
+    return name || 'پلن پایه';
   };
 
   return (
@@ -677,26 +742,40 @@ function AppSidebar() {
         </SidebarMenu>
 
         <div className="mt-1.5 px-1 group-data-[collapsible=icon]:hidden">
-          {isDemoActive ? (
+          {isDemoPlan ? (
+            // ─── کارت دمو / تستی ───
             <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-amber-700">
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="font-medium">تست دمو</span>
+                  <span className="font-medium">تست ۳ روزه رایگان</span>
                 </div>
-                <span className="text-[10px] text-amber-600">
-                  {`${demoStatus?.daysRemaining || 0} روز و ${demoStatus?.hoursRemaining || 0} ساعت`}
+                <span className="text-[10px] text-amber-600 font-medium">
+                  {(() => {
+                    const d = demoStatus?.daysRemaining ?? daysRemaining ?? 3;
+                    const h = demoStatus?.hoursRemaining ?? hoursRemaining ?? 0;
+                    if (d <= 0 && h <= 0) return 'منقضی';
+                    const dStr = d > 0 ? `${Number(d).toLocaleString('fa-IR')} روز` : '';
+                    const hStr = h > 0 ? `${Number(h).toLocaleString('fa-IR')} ساعت` : '';
+                    if (dStr && hStr) return `${dStr} و ${hStr}`;
+                    return dStr || hStr || 'کمتر از ۱ ساعت';
+                  })()}
                 </span>
               </div>
               <a
                 href="/subscription/renew"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setCurrentView('settings-subscription' as AppView)
+                }}
                 className="mt-1.5 w-full text-[10px] py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors flex items-center justify-center gap-1"
               >
                 <RefreshCw className="w-2.5 h-2.5" />
-                خرید پلن
+                ارتقا به پلن اصلی
               </a>
             </div>
           ) : (
+            // ─── کارت پلن‌های عادی ───
             <div 
               onClick={() => setCurrentView('settings-subscription' as AppView)}
               className="cursor-pointer group p-2.5 bg-white border border-slate-200 rounded-xl hover:shadow-md hover:border-indigo-200 transition-all duration-200"
@@ -712,18 +791,19 @@ function AppSidebar() {
                 </div>
                 <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${
                   isExpired ? 'bg-red-100 text-red-700' : 
+                  isLifetime ? 'bg-purple-100 text-purple-700' :
                   daysRemaining <= 7 && daysRemaining > 0 ? 'bg-amber-100 text-amber-700' : 
                   'bg-emerald-100 text-emerald-700'
                 }`}>
-                  {isExpired ? 'منقضی' : daysRemaining === -1 ? 'دائمی' : 'فعال'}
+                  {isExpired ? 'منقضی' : isLifetime ? 'دائمی' : 'فعال'}
                 </span>
               </div>
               
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-slate-600 font-medium">
-                  {daysRemaining === -1 ? 'بدون محدودیت زمانی' : 
+                  {isLifetime ? 'بدون محدودیت زمانی' : 
                    isExpired ? 'لطفاً اشتراک خود را تمدید کنید' :
-                   `مانده تا پایان: ${formatRemainingTime(daysRemaining)}`}
+                   `مانده تا پایان: ${formatRemainingTime(daysRemaining, hoursRemaining)}`}
                 </span>
                 <ChevronLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:-translate-x-0.5 transition-all" />
               </div>
@@ -744,7 +824,7 @@ function AppSidebar() {
               <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => {
                   const isActive = baseView === (item.view as string)
-                  const isItemDisabled = isDemo && item.disabledInDemo
+                  const isItemDisabled = isDemoPlan && item.disabledInDemo
                   return (
                     <SidebarMenuItem key={item.view}>
                       <SidebarMenuButton
@@ -804,7 +884,7 @@ function AppSidebar() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ PWAInstallButton
+   ★ PWAInstallButton — دکمه نصب اپ
    ═══════════════════════════════════════════════════════════════ */
 
 function PWAInstallButton() {
@@ -859,45 +939,12 @@ function PWAInstallButton() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ SyncIndicator — نسخه اصلاح‌شده v9.7.2 (جلوگیری از حلقه بی‌نهایت)
+   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
    ═══════════════════════════════════════════════════════════════ */
 function SyncIndicator() {
   const pendingCount = useStore((s) => s.pendingSyncCount)
   const isOnline = useStore((s) => s.isOnline)
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false)
 
-  // ★ تلاش خودکار برای همگام‌سازی هنگام بارگذاری اگر آیتمی در صف باشد (فقط یک بار)
-  useEffect(() => {
-    if (pendingCount > 0 && isOnline && !isSyncing && !autoSyncAttempted) {
-      setIsSyncing(true)
-      setAutoSyncAttempted(true) // ← جلوگیری از حلقه بی‌نهایت در صورت خطا
-      
-      import('@/lib/sync-engine').then(async ({ syncEngine }) => {
-        try {
-          const result = await syncEngine.sync()
-          if (result.failed > 0) {
-            useStore.getState().addNotification({
-              title: '⚠️ خطا در همگام‌سازی',
-              message: `${result.failed} تغییر همگام‌سازی نشد. لطفاً به صورت دستی روی آیکون کلیک کنید.`,
-              type: 'warning',
-            })
-          }
-        } catch (err) {
-          console.warn('[SyncIndicator] Auto-sync failed:', err)
-          useStore.getState().addNotification({
-            title: '⚠️ خطا در همگام‌سازی',
-            message: 'ارتباط با سرور برقرار نشد. لطفاً دستی تلاش کنید.',
-            type: 'warning',
-          })
-        } finally {
-          setIsSyncing(false)
-        }
-      })
-    }
-  }, [pendingCount, isOnline, autoSyncAttempted])
-
-  // اگر آیتمی در صف نیست یا کاربر آفلاین است، آیکون نمایش داده نشود
   if (pendingCount === 0 || !isOnline) return null
 
   return (
@@ -906,39 +953,31 @@ function SyncIndicator() {
       size="sm"
       className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-300 text-amber-700 hover:bg-amber-50 transition-all"
       onClick={async () => {
-        setIsSyncing(true)
-        try {
-          const { syncEngine } = await import('@/lib/sync-engine')
-          const result = await syncEngine.sync()
-          
-          if (result.succeeded > 0) {
-            useStore.getState().addNotification({
-              title: '✅ همگام‌سازی موفق',
-              message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
-              type: 'success',
-            })
-          }
-          if (result.failed > 0) {
-            useStore.getState().addNotification({
-              title: '⚠️ خطا در همگام‌سازی',
-              message: `${result.failed} تغییر همگام‌سازی نشد. در صورت تکرار، از حساب خارج و مجدد وارد شوید.`,
-              type: 'warning',
-            })
-          }
-        } catch (err) {
-          console.error('[SyncIndicator] Sync error:', err)
-        } finally {
-          setIsSyncing(false)
+        const { syncEngine } = await import('@/lib/sync-engine')
+        const result = await syncEngine.sync()
+        
+        if (result.succeeded > 0) {
+          useStore.getState().addNotification({
+            title: '✅ همگام‌سازی موفق',
+            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
+            type: 'success',
+          })
+        }
+        if (result.failed > 0) {
+          useStore.getState().addNotification({
+            title: '⚠️ خطا در همگام‌سازی',
+            message: `${result.failed} تغییر همگام‌سازی نشد`,
+            type: 'warning',
+          })
         }
       }}
     >
-      <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
+      <RefreshCw className="h-3 w-3 animate-spin" />
       <span className="hidden sm:inline">همگام‌سازی</span>
       <span className="bg-amber-600 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
         {pendingCount}
       </span>
     </Button>
-    
   )
 }
 
@@ -976,17 +1015,6 @@ function AppHeader() {
           await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)))
         } catch (err) {
           console.warn('[AppHeader] Error clearing caches:', err)
-        }
-      }
-
-      // ★ v9.7.1: پاک‌سازی IndexedDB برای جلوگیری از گیر کردن داده‌های همگام‌سازی قدیمی
-      if ('indexedDB' in window) {
-        try {
-          const dbs = await indexedDB.databases ? await indexedDB.databases() : []
-          const names = dbs.map((db: any) => db.name).filter((n: string) => n && (n.toLowerCase().includes('shop') || n.toLowerCase().includes('sync') || n.toLowerCase().includes('offline')))
-          names.forEach((name: string) => indexedDB.deleteDatabase(name))
-        } catch (err) {
-          console.warn('[AppHeader] Error clearing IndexedDB:', err)
         }
       }
 
@@ -1071,27 +1099,27 @@ function AppHeader() {
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-        {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
-        <div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
-          <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-          <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
-            {(() => {
-              const now = new Date();
-              const formatter = new Intl.DateTimeFormat('fa-IR', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              });
-              const parts = formatter.formatToParts(now);
-              const weekday = parts.find(p => p.type === 'weekday')?.value || '';
-              const day = parts.find(p => p.type === 'day')?.value || '';
-              const month = parts.find(p => p.type === 'month')?.value || '';
-              const year = parts.find(p => p.type === 'year')?.value || '';
-              return `${weekday} ${day} ${month} ${year}`;
-            })()}
-          </span>
-        </div>
+       {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
+<div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
+  <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+  <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+    {(() => {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('fa-IR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const parts = formatter.formatToParts(now);
+      const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+      const day = parts.find(p => p.type === 'day')?.value || '';
+      const month = parts.find(p => p.type === 'month')?.value || '';
+      const year = parts.find(p => p.type === 'year')?.value || '';
+      return `${weekday} ${day} ${month} ${year}`;
+    })()}
+  </span>
+</div>
 
         <PWAInstallButton />
         <SyncIndicator />
@@ -1221,8 +1249,6 @@ export default function AppShell() {
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
-  const hasPreloadedRef = useRef(false)
-
   useEffect(() => {
     if (!user) return
     const canAccess = checkAccess(currentView, user.role, user.permissions, planFeatures)
@@ -1241,12 +1267,10 @@ export default function AppShell() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // ── Sync Engine ──────────────────────────────────────────────
     import('@/lib/sync-engine').then(({ syncEngine }) => {
       syncEngine.init()
     })
 
-    // ── Service Worker Listener ──────────────────────────────────
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
       try {
@@ -1263,42 +1287,16 @@ export default function AppShell() {
       }
     }
 
-    // ── ★ v9.7.0: اتصال هوشمند ──────
-    startConnectivityMonitor()
-    const initialState = getConnectivityState()
-    useStore.getState().setOnline(initialState.isApiReachable)
-
-    const unsubConnectivity = onConnectivityChange((state) => {
-      useStore.getState().setOnline(state.isApiReachable)
-
-      if (state.isApiReachable && !hasPreloadedRef.current) {
-        hasPreloadedRef.current = true
-        setTimeout(async () => {
-          try {
-            const { syncEngine } = await import('@/lib/sync-engine')
-            await syncEngine.preloadData()
-            console.log('[AppShell] ✅ Preload after reconnect completed')
-          } catch (err) {
-            console.warn('[AppShell] ⚠️ Preload after reconnect failed:', err)
-          }
-        }, 1500)
-      }
-    })
-
-    const handleBrowserOnline = () => useStore.getState().setOnline(true)
-    const handleBrowserOffline = () => useStore.getState().setOnline(false)
-
     const initialOnline = navigator.onLine
     useStore.getState().setOnline(initialOnline)
 
-    window.addEventListener('online', handleBrowserOnline)
-    window.addEventListener('offline', handleBrowserOffline)
+    window.addEventListener('online', () => useStore.getState().setOnline(true))
+    window.addEventListener('offline', () => useStore.getState().setOnline(false))
 
     listenToSW()
 
     let preloadTimer: NodeJS.Timeout | null = null
-    if (isApiOnline()) {
-      hasPreloadedRef.current = true
+    if (initialOnline) {
       preloadTimer = setTimeout(async () => {
         try {
           const { syncEngine } = await import('@/lib/sync-engine')
@@ -1310,9 +1308,8 @@ export default function AppShell() {
     }
 
     return () => {
-      unsubConnectivity()
-      window.removeEventListener('online', handleBrowserOnline)
-      window.removeEventListener('offline', handleBrowserOffline)
+      window.removeEventListener('online', () => useStore.getState().setOnline(true))
+      window.removeEventListener('offline', () => useStore.getState().setOnline(false))
       if (preloadTimer) clearTimeout(preloadTimer)
     }
   }, [])

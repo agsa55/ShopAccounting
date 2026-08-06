@@ -66,68 +66,57 @@ async function getDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result
 
-      // syncQueue store
       if (!db.objectStoreNames.contains(STORES.syncQueue)) {
         const store = db.createObjectStore(STORES.syncQueue, { keyPath: 'id' })
         store.createIndex('createdAt', 'createdAt')
         store.createIndex('type', 'type')
       }
 
-      // products store
       if (!db.objectStoreNames.contains(STORES.products)) {
         const store = db.createObjectStore(STORES.products, { keyPath: 'id' })
         store.createIndex('tenantId', 'tenantId')
         store.createIndex('name', 'name')
       }
 
-      // customers store
       if (!db.objectStoreNames.contains(STORES.customers)) {
         const store = db.createObjectStore(STORES.customers, { keyPath: 'id' })
         store.createIndex('tenantId', 'tenantId')
       }
 
-      // categories store
       if (!db.objectStoreNames.contains(STORES.categories)) {
         db.createObjectStore(STORES.categories, { keyPath: 'id' })
       }
 
-      // invoices store
       if (!db.objectStoreNames.contains(STORES.invoices)) {
         const store = db.createObjectStore(STORES.invoices, { keyPath: 'id' })
         store.createIndex('tenantId', 'tenantId')
         store.createIndex('status', 'status')
       }
 
-      // ★ v6.3: installmentPlans store
       if (!db.objectStoreNames.contains(STORES.installmentPlans)) {
         const store = db.createObjectStore(STORES.installmentPlans, { keyPath: 'id' })
         store.createIndex('tenantId', 'tenantId')
         store.createIndex('status', 'status')
       }
 
-      // ★ v6.3: installmentSchedules store
       if (!db.objectStoreNames.contains(STORES.installmentSchedules)) {
         const store = db.createObjectStore(STORES.installmentSchedules, { keyPath: 'id' })
         store.createIndex('planId', 'planId')
         store.createIndex('status', 'status')
       }
 
-      // ★ v6.4: tickets store
       if (!db.objectStoreNames.contains(STORES.tickets)) {
         const store = db.createObjectStore(STORES.tickets, { keyPath: 'id' })
         store.createIndex('status', 'status')
         store.createIndex('updatedAt', 'updatedAt')
       }
 
-      // ★ v6.4: ticketMessages store
       if (!db.objectStoreNames.contains(STORES.ticketMessages)) {
         const store = db.createObjectStore(STORES.ticketMessages, { keyPath: 'id' })
         store.createIndex('ticketId', 'ticketId')
         store.createIndex('createdAt', 'createdAt')
       }
 
-      // ★ FIX v6.5: offlineOperations store — قبلاً در STORES تعریف شده بود
-      //   ولی هرگز در onupgradeneeded ساخته نمی‌شد → خطای运行时 هنگام addOfflineOperation
       if (!db.objectStoreNames.contains(STORES.offlineOperations)) {
         const store = db.createObjectStore(STORES.offlineOperations, { keyPath: 'id' })
         store.createIndex('type', 'type')
@@ -135,7 +124,6 @@ async function getDB(): Promise<IDBDatabase> {
         store.createIndex('createdAt', 'createdAt')
       }
 
-      // ★ FIX v6.5: فقط یک‌بار meta store ساخته شود (قبلاً دوبار بود)
       if (!db.objectStoreNames.contains(STORES.meta)) {
         db.createObjectStore(STORES.meta, { keyPath: 'key' })
       }
@@ -152,8 +140,6 @@ async function getDB(): Promise<IDBDatabase> {
     }
   })
 }
-
-// ─── Helper: IDB Transaction ─────────────────────────────────────
 
 async function idbGet<T>(storeName: string, key: string): Promise<T | undefined> {
   const db = await getDB()
@@ -221,8 +207,6 @@ async function idbCount(storeName: string): Promise<number> {
   })
 }
 
-// ─── Sync Queue ──────────────────────────────────────────────────
-
 export async function getSyncQueueCount(): Promise<number> {
   try {
     return await idbCount(STORES.syncQueue)
@@ -275,8 +259,6 @@ export async function clearSyncQueue(): Promise<void> {
   await idbClear(STORES.syncQueue)
 }
 
-// ─── Cache: Products ─────────────────────────────────────────────
-
 export async function cacheProducts(products: any[]): Promise<void> {
   try {
     await idbClear(STORES.products)
@@ -310,8 +292,6 @@ export async function updateCachedProductStock(
   }
 }
 
-// ─── Cache: Customers ────────────────────────────────────────────
-
 export async function cacheCustomers(customers: any[]): Promise<void> {
   try {
     await idbClear(STORES.customers)
@@ -331,8 +311,6 @@ export async function getCachedCustomers(): Promise<any[]> {
   }
 }
 
-// ─── Cache: Categories ───────────────────────────────────────────
-
 export async function cacheCategories(categories: any[]): Promise<void> {
   try {
     await idbClear(STORES.categories)
@@ -351,8 +329,6 @@ export async function getCachedCategories(): Promise<any[]> {
     return []
   }
 }
-
-// ─── Cache: Invoices ─────────────────────────────────────────────
 
 export async function cacheInvoices(invoices: any[]): Promise<void> {
   try {
@@ -383,8 +359,6 @@ export async function markInvoiceSynced(invoiceId: string): Promise<void> {
     console.error('[OfflineDB] markInvoiceSynced error:', err)
   }
 }
-
-// ─── ★ v6.3: Cache Installment Plans ──────────────────────────────
 
 export async function cacheInstallmentPlans(plans: any[]): Promise<void> {
   try {
@@ -433,8 +407,6 @@ export async function getCachedInstallmentPlans(): Promise<any[]> {
   return []
 }
 
-// ─── ★ v6.3: Cache Installment Schedules ──────────────────────────
-
 export async function cacheInstallmentSchedules(schedules: any[]): Promise<void> {
   try {
     await idbClear(STORES.installmentSchedules)
@@ -481,8 +453,6 @@ export async function getCachedInstallmentSchedules(): Promise<any[]> {
 
   return []
 }
-
-// ─── ★ v6.3: Cache Installment Summary ────────────────────────────
 
 export interface CachedInstallmentSummary {
   totalPlans: number
@@ -539,6 +509,11 @@ export interface CachedPlanData {
   daysRemaining: number
   isExpired: boolean
   cached_at: number
+  // ★ v9.1: فیلدهای اختیاری جدید — رفع خطای TS2353 در app-shell.tsx
+  //   (بدون این فیلدها، فراخوانی cachePlan با hoursRemaining/isDemo/isLifetime کامپایل نمی‌شد)
+  hoursRemaining?: number
+  isDemo?: boolean
+  isLifetime?: boolean
 }
 
 export async function cachePlan(planData: CachedPlanData): Promise<void> {
@@ -592,8 +567,6 @@ export async function clearCachedPlan(): Promise<void> {
 
   console.log('[OfflineDB] ✅ Plan cache cleared')
 }
-
-// ─── ★ v6.1: Cache Invoice Data ──────────────────────────────────
 
 export interface CachedInvoiceData {
   invoices: any[]
@@ -698,8 +671,6 @@ export async function clearInvoicesCache(): Promise<void> {
   console.log('[OfflineDB] ✅ Invoices cache cleared')
 }
 
-// ─── ★ v6.2: Cache Warehouses (در meta store) ────────────────────
-
 export async function cacheWarehousesMeta(warehouses: any[]): Promise<void> {
   try {
     await idbPut(STORES.meta, {
@@ -747,8 +718,6 @@ export async function getCachedWarehouses(): Promise<any[]> {
   return []
 }
 
-// ─── Meta: LastSync ──────────────────────────────────────────────
-
 export async function setLastSyncTimestamp(timestamp: number): Promise<void> {
   await idbPut(STORES.meta, { key: 'lastSync', value: timestamp })
 }
@@ -761,8 +730,6 @@ export async function getLastSyncTimestamp(): Promise<number | null> {
     return null
   }
 }
-
-// ─── Cache Stats ─────────────────────────────────────────────────
 
 export async function getCacheStats(): Promise<CacheStats> {
   try {
@@ -794,14 +761,12 @@ export async function clearAllCache(): Promise<void> {
     idbClear(STORES.installmentSchedules),
     idbClear(STORES.tickets),
     idbClear(STORES.ticketMessages),
-    idbClear(STORES.offlineOperations),   // ★ FIX v6.5: قبلاً پاک نمی‌شد
+    idbClear(STORES.offlineOperations),
     idbClear(STORES.syncQueue),
     idbClear(STORES.meta),
   ])
   await clearCachedPlan()
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────
 
 export function isOfflineId(id: string): boolean {
   return id.startsWith('offline-') || id.startsWith('local-')
@@ -811,15 +776,10 @@ export function isOfflineInvoiceNumber(number: string): boolean {
   return number.startsWith('OFF-') || number.startsWith('LOCAL-')
 }
 
-// ★ برای backward compat
 export function getOfflineDB() {
   console.warn('[OfflineDB] getOfflineDB() منسوخ شده — از توابع async استفاده کنید')
   return null
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.4: Cache Tickets
-// ═══════════════════════════════════════════════════════════════
 
 export async function cacheTickets(tickets: any[]): Promise<void> {
   try {
@@ -868,10 +828,6 @@ export async function getCachedTickets(): Promise<any[]> {
   return []
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.4: Cache Ticket Messages
-// ═══════════════════════════════════════════════════════════════
-
 export async function cacheTicketMessages(ticketId: string, messages: any[]): Promise<void> {
   try {
     const allMsgs = await idbGetAll<any>(STORES.ticketMessages)
@@ -900,10 +856,6 @@ export async function getCachedTicketMessages(ticketId: string): Promise<any[]> 
     return []
   }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.4: Cache Ticket Stats
-// ═══════════════════════════════════════════════════════════════
 
 export async function cacheTicketStats(stats: any): Promise<void> {
   try {
@@ -941,10 +893,6 @@ export async function getCachedTicketStats(): Promise<any | null> {
 
   return null
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.5: Offline Operations Queue (برای Sync Manager)
-// ═══════════════════════════════════════════════════════════════
 
 export type OperationType = 'create_ticket' | 'reply_ticket' | 'close_ticket' | 'rate_ticket' | 'update_stock' | 'create_invoice'
 
@@ -1007,10 +955,6 @@ export async function updateOfflineOperation(id: string, updates: Partial<Offlin
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.6: Cache Journal Entries (برای تب حسابداری آفلاین)
-// ═══════════════════════════════════════════════════════════════
-
 export interface CachedJournalEntry {
   id: string
   entryNumber: string
@@ -1040,48 +984,34 @@ export interface CachedJournalEntry {
   }>
   referenceType?: string
   referenceId?: string
-  // ★★★ فیلدهای آفلاین
-  _offline?: boolean           // آیا این سند در حالت آفلاین ساخته شده؟
+  _offline?: boolean
   _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
-  _createdAt?: number          // timestamp ساخت محلی
+  _createdAt?: number
   _lastError?: string
 }
 
-/**
- * ذخیره اسناد حسابداری در IndexedDB (جایگزین localStorage)
- */
 export async function cacheJournalEntries(entries: CachedJournalEntry[]): Promise<void> {
   try {
-    // پاک کردن کش قدیمی و نوشتن جدید
-    await idbClear(STORES.meta) // پاک کردن همه meta cache
-    
-    // ذخیره در meta store با کلید journal-entries
+    await idbClear(STORES.meta)
     await idbPut(STORES.meta, {
       key: 'journal-entries',
       value: entries,
       cachedAt: Date.now(),
     })
-    
-    // fallback به localStorage برای backward compat
     try {
       localStorage.setItem('cached_journal_entries', JSON.stringify({
         entries,
         cachedAt: Date.now(),
       }))
     } catch {}
-    
     console.log(`[OfflineDB] ✅ ${entries.length} سند حسابداری cached`)
   } catch (err) {
     console.error('[OfflineDB] cacheJournalEntries error:', err)
   }
 }
 
-/**
- * خواندن اسناد حسابداری از کش
- */
 export async function getCachedJournalEntries(): Promise<CachedJournalEntry[]> {
   try {
-    // اول IndexedDB
     const record = await idbGet<{ key: string; value: CachedJournalEntry[] }>(
       STORES.meta,
       'journal-entries'
@@ -1094,7 +1024,6 @@ export async function getCachedJournalEntries(): Promise<CachedJournalEntry[]> {
     console.warn('[OfflineDB] Error reading journal entries from IndexedDB:', err)
   }
 
-  // fallback به localStorage
   try {
     const cached = localStorage.getItem('cached_journal_entries')
     if (cached) {
@@ -1109,9 +1038,6 @@ export async function getCachedJournalEntries(): Promise<CachedJournalEntry[]> {
   return []
 }
 
-/**
- * افزودن یک سند آفلاین به صف همگام‌سازی
- */
 export async function addJournalToSyncQueue(
   operation: 'create' | 'update' | 'delete',
   entry: CachedJournalEntry
@@ -1125,7 +1051,6 @@ export async function addJournalToSyncQueue(
       : '/api/journal-entries',
     body: JSON.stringify({
       ...entry,
-      // حذف فیلدهای آفلاین قبل از ارسال به سرور
       _offline: undefined,
       _syncStatus: undefined,
       _createdAt: undefined,
@@ -1146,9 +1071,6 @@ export async function addJournalToSyncQueue(
   }
 }
 
-/**
- * حذف اسناد با ID آفلاین از کش پس از sync موفق
- */
 export async function removeOfflineJournalFromCache(offlineId: string): Promise<void> {
   try {
     const entries = await getCachedJournalEntries()
@@ -1160,9 +1082,6 @@ export async function removeOfflineJournalFromCache(offlineId: string): Promise<
   }
 }
 
-/**
- * به‌روزرسانی وضعیت sync یک سند
- */
 export async function updateJournalSyncStatus(
   id: string,
   status: 'pending' | 'syncing' | 'synced' | 'failed',
@@ -1172,7 +1091,7 @@ export async function updateJournalSyncStatus(
     const entries = await getCachedJournalEntries()
     const updated = entries.map(e =>
       e.id === id
-        ? { ...e, _syncStatus: status, _lastError: error || undefined }  // ← اصلاح شد
+        ? { ...e, _syncStatus: status, _lastError: error || undefined }
         : e
     )
     await cacheJournalEntries(updated)
@@ -1180,10 +1099,6 @@ export async function updateJournalSyncStatus(
     console.error('[OfflineDB] updateJournalSyncStatus error:', err)
   }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.7: Cache Checks (برای تب چک‌ها آفلاین)
-// ═══════════════════════════════════════════════════════════════
 
 export interface CachedCheck {
   id: string
@@ -1196,16 +1111,12 @@ export interface CachedCheck {
   payee?: string | null
   status: 'pending' | 'deposited' | 'cleared' | 'bounced' | 'returned'
   createdAt?: string
-  // ★★★ فیلدهای آفلاین
   _offline?: boolean
   _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
   _createdAt?: number
   _lastError?: string
 }
 
-/**
- * ذخیره چک‌ها در IndexedDB
- */
 export async function cacheChecks(checks: CachedCheck[]): Promise<void> {
   try {
     await idbPut(STORES.meta, {
@@ -1222,9 +1133,6 @@ export async function cacheChecks(checks: CachedCheck[]): Promise<void> {
   }
 }
 
-/**
- * خواندن چک‌ها از کش
- */
 export async function getCachedChecks(): Promise<CachedCheck[]> {
   try {
     const record = await idbGet<{ key: string; value: CachedCheck[] }>(STORES.meta, 'checks')
@@ -1244,9 +1152,6 @@ export async function getCachedChecks(): Promise<CachedCheck[]> {
   return []
 }
 
-/**
- * افزودن عملیات چک به صف همگام‌سازی
- */
 export async function addCheckToSyncQueue(
   operation: 'create' | 'update' | 'delete' | 'status_change',
   check: CachedCheck
@@ -1280,10 +1185,6 @@ export async function addCheckToSyncQueue(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.8: Cache Fixed Assets (برای تب دارایی‌های ثابت آفلاین)
-// ═══════════════════════════════════════════════════════════════
-
 export interface CachedFixedAsset {
   id: string
   name: string
@@ -1297,16 +1198,12 @@ export interface CachedFixedAsset {
   accumulatedDepreciation?: number
   bookValue?: number
   status?: 'active' | 'fully_depreciated' | 'sold'
-  // ★★★ فیلدهای آفلاین
   _offline?: boolean
   _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
   _createdAt?: number
   _lastError?: string
 }
 
-/**
- * ذخیره دارایی‌های ثابت در IndexedDB
- */
 export async function cacheFixedAssets(assets: CachedFixedAsset[]): Promise<void> {
   try {
     await idbPut(STORES.meta, {
@@ -1323,9 +1220,6 @@ export async function cacheFixedAssets(assets: CachedFixedAsset[]): Promise<void
   }
 }
 
-/**
- * خواندن دارایی‌های ثابت از کش
- */
 export async function getCachedFixedAssets(): Promise<CachedFixedAsset[]> {
   try {
     const record = await idbGet<{ key: string; value: CachedFixedAsset[] }>(STORES.meta, 'fixed-assets')
@@ -1345,9 +1239,6 @@ export async function getCachedFixedAssets(): Promise<CachedFixedAsset[]> {
   return []
 }
 
-/**
- * افزودن عملیات دارایی ثابت به صف همگام‌سازی
- */
 export async function addFixedAssetToSyncQueue(
   operation: 'create' | 'update' | 'delete' | 'depreciate',
   asset: CachedFixedAsset
@@ -1383,10 +1274,6 @@ export async function addFixedAssetToSyncQueue(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ★ v6.9: Cache Accounts (برای تب چارت حساب‌ها آفلاین)
-// ═══════════════════════════════════════════════════════════════
-
 export interface CachedAccount {
   id: string
   code: string
@@ -1395,16 +1282,12 @@ export interface CachedAccount {
   parentId?: string | null
   isActive: boolean
   balance?: number
-  // ★★★ فیلدهای آفلاین
   _offline?: boolean
   _syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed'
   _createdAt?: number
   _lastError?: string
 }
 
-/**
- * ذخیره حساب‌ها در IndexedDB
- */
 export async function cacheAccounts(accounts: CachedAccount[]): Promise<void> {
   try {
     await idbPut(STORES.meta, {
@@ -1421,9 +1304,6 @@ export async function cacheAccounts(accounts: CachedAccount[]): Promise<void> {
   }
 }
 
-/**
- * خواندن حساب‌ها از کش
- */
 export async function getCachedAccounts(): Promise<CachedAccount[]> {
   try {
     const record = await idbGet<{ key: string; value: CachedAccount[] }>(STORES.meta, 'accounts')
@@ -1442,9 +1322,6 @@ export async function getCachedAccounts(): Promise<CachedAccount[]> {
   return []
 }
 
-/**
- * افزودن عملیات حساب به صف همگام‌سازی
- */
 export async function addAccountToSyncQueue(
   operation: 'create' | 'update' | 'delete',
   account: CachedAccount

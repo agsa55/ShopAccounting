@@ -1,5 +1,5 @@
 // ============================================================================
-// src/app/api/tenants/trial-check/route.ts — GET (v9.0)
+// src/app/api/tenants/trial-check/route.ts — GET (v9.1)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
 // ★★★ v3.0: isTrial همیشه false — فقط بررسی انقضای اشتراک
@@ -7,6 +7,10 @@
 //   - اگر billingCycle='lifetime' باشد → isExpired همیشه false
 //   - daysRemaining برابر -1 (یعنی نامحدود) برای lifetime
 //   - expiresAt برای lifetime برابر null است
+// ★★★ v9.1: تشخیص مستقل تنانت دمو/تستی
+//   - قبل از این نسخه، تنانت‌های دمو هیچ سیگنالی (isDemo/tenantType/...) برنمی‌گرداندند
+//     و از شاخه‌ی «پلن سالانه» عبور می‌کردند که باعث می‌شد فوراً «منقضی» گزارش شوند
+//   - حالا daysRemaining/hoursRemaining مستقیماً از tenant.expiresAt حساب می‌شود
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -58,6 +62,55 @@ export async function GET(req: NextRequest) {
     const tenant = await db.client.tenant.findUnique({
       where: { id: tenantId },
     })
+
+    // ★★★ v9.1: تشخیص تنانت دمو/تستی — باید قبل از هر شاخه‌ی دیگر بررسی شود
+    //   چون این تنانت‌ها رکورد اشتراک سالانه ندارند و نباید از checkSubscriptionStatus
+    //   عبور کنند (که آن‌ها را به‌اشتباه «منقضی» گزارش می‌کرد)
+    const isDemoTenant = tenant?.status === 'demo' || tenant?.status === 'demo_pending'
+
+    if (isDemoTenant) {
+      const now = new Date()
+      const expiresAt = tenant?.expiresAt ? new Date(tenant.expiresAt) : null
+
+      let daysRemaining = 0
+      let hoursRemaining = 0
+      let isExpired = true
+
+      if (expiresAt) {
+        const diffMs = expiresAt.getTime() - now.getTime()
+        isExpired = diffMs <= 0
+        if (!isExpired) {
+          const totalHours = Math.floor(diffMs / (1000 * 60 * 60))
+          daysRemaining = Math.floor(totalHours / 24)
+          hoursRemaining = totalHours % 24
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          isTrial: true,
+          // ★ سیگنال‌های صریح دمو — همان چیزی که app-shell.tsx در demoSignal چک می‌کند
+          isDemo: true,
+          tenantType: 'demo',
+          planType: 'demo',
+          isExpired,
+          isActive: !isExpired,
+          daysRemaining,
+          hoursRemaining,
+          planName: tenant?.planName || 'simple',
+          planTierName: tenant?.planName || 'simple',
+          planTierNameFa: '',
+          billingCycle: 'trial',
+          expiresAt: expiresAt ? expiresAt.toISOString() : null,
+          isLifetime: false,
+          isIsolated: false,
+          message: isExpired
+            ? 'دوره آزمایشی منقضی شده است'
+            : `دوره آزمایشی رایگان — ${daysRemaining > 0 ? `${daysRemaining} روز و ` : ''}${hoursRemaining} ساعت مانده`,
+        },
+      })
+    }
 
     // ★★★ v9.0: اگر tenant روی پلن مادام‌العمر است → همیشه فعال و بدون انقضا
     const tenantBillingCycle = tenant?.billingCycle || ''

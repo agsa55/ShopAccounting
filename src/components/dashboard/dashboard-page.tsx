@@ -239,6 +239,13 @@ export default function DashboardPage() {
   const plan = resolvePlan(planName)
   const { open, setOpen, handleComplete } = useSetupWizard()
 
+  // ✅ ✅ ✅ اصلاح قطعی: بستن اجباری ویزارد اگر پلن دمو یا تستی است (جلوگیری از Race Condition)
+  useEffect(() => {
+    if (planName === 'demo' || planName === 'trial') {
+      setOpen(false)
+    }
+  }, [planName, setOpen])
+
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -413,6 +420,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* ★ نشانگر وضعیت اتصال — فقط یکی */}
+          <ConnectionStatusBadge isOnline={isOnline} />
      
           <Button
             onClick={() => loadData(true)}
@@ -740,8 +748,8 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* ★★★ ویزارد راه‌اندازی — فقط در حالت آنلاین */}
-      {isOnline && (
+      {/* ★★★ ویزارد راه‌اندازی — فقط در حالت آنلاین و برای پلن‌های غیر دمو */}
+      {isOnline && planName !== 'demo' && planName !== 'trial' && (
         <SetupWizard
           open={open}
           onOpenChange={setOpen}

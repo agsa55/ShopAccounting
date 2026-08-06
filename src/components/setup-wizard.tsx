@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName, type PlanName } from '@/lib/plan-features'
+import { useDemoStatus } from '@/lib/use-demo-status' // ✅ اضافه شده برای شناسایی حساب دمو
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription, DialogFooter,
@@ -169,12 +170,27 @@ export function useSetupWizard() {
     || (currentTenant as any)?.id
     || ''
 
+  // ✅ دریافت وضعیت دمو - این هوک منبع حقیقت است
+  const { isDemo } = useDemoStatus()
+  
+  // ✅ خواندن مستقیم از استور برای اطمینان ۱۰۰٪
+  const planName = useAppStore((s) => s.planName)
+  const billingCycle = useAppStore((s) => s.selectedBillingCycle)
+
   const [open, setOpen] = useState(false)
   const [checked, setChecked] = useState(false)
 
    useEffect(() => {
     if (!tenantId || checked) return
-    setChecked(true)
+
+    // ✅ اصلاح قطعی: اگر هر یک از این شرایط برقرار باشد، حساب دمو/تستی است و ویزارد نباید باز شود
+    const isActuallyDemo = isDemo || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
+
+    if (isActuallyDemo) {
+      console.log('[useSetupWizard] 🚫 Blocked: Demo/Trial account detected (plan:', planName, 'cycle:', billingCycle, ')')
+      setChecked(true)
+      return
+    }
 
     // ★ اصلاح حیاتی: ابتدا چک کنیم آیا کاربر قبلاً ویزارد را تکمیل یا رد کرده است
     if (isWizardDone(tenantId)) {
@@ -206,6 +222,14 @@ export function useSetupWizard() {
         return
       }
 
+      // ✅ چک نهایی قبل از باز کردن ویزارد (در صورتی که در این فاصله استور آپدیت شده باشد)
+      // ✅ اصلاح خطای useStore به useAppStore
+      const currentState = useAppStore.getState()
+      if (currentState.planName === 'demo' || currentState.planName === 'trial' || currentState.selectedBillingCycle === 'trial') {
+        console.log('[useSetupWizard] 🚫 Blocked at last moment before opening')
+        return
+      }
+
       // ★ اگر یکی هم نیست → ویزارد نشان بده
       console.log('[useSetupWizard] Opening wizard:', { hasActiveFY, hasWH })
       setTimeout(() => setOpen(true), 600)
@@ -214,7 +238,7 @@ export function useSetupWizard() {
       // ★ درصورت خطا → ویزارد نشان بده
       setTimeout(() => setOpen(true), 600)
     })
-  }, [tenantId, checked])
+  }, [tenantId, checked, isDemo, planName, billingCycle]) // ✅ planName و billingCycle به وابستگی‌ها اضافه شد
 
   const handleComplete = useCallback(() => {
     if (tenantId) markWizardDone(tenantId)

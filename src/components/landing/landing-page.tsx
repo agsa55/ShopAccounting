@@ -1,8 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/landing/landing-page.tsx (v5.0 — Premium Redesign)
-// ShopAccounting — دکمه داشبورد حذف شد — ورود فقط از دکمه ورود
+// src/components/landing/landing-page.tsx (v5.1 — Fixed Demo Routing & Header Colors)
+// ShopAccounting — اصلاح مسیر دکمه تست رایگان و رنگ دکمه ورود در هدر
 // ============================================================================
 
 import { useState, useEffect, useRef } from 'react'
@@ -468,13 +468,14 @@ export default function LandingPage() {
   }, [])
 
   const handlePlanSelect = (tierName: string) => {
-  if (setSelectedPlanId)        setSelectedPlanId(tierName)
-  if (setSelectedBillingCycle)  setSelectedBillingCycle(globalBilling)
-  router.push(`/auth/register?plan=${tierName}&cycle=${globalBilling}`)
-}
+    if (setSelectedPlanId)        setSelectedPlanId(tierName)
+    if (setSelectedBillingCycle)  setSelectedBillingCycle(globalBilling)
+    router.push(`/auth/register?plan=${tierName}&cycle=${globalBilling}`)
+  }
 
+  // ✅ اصلاح شده: هدایت مستقیم به صفحه ثبت‌نام با انتخاب پلن دمو
   const handleStartDemo = () => {
-    if (typeof window !== 'undefined') window.location.href = '/demo/phone'
+    router.push('/auth/register?plan=demo')
   }
 
   const scrollToPricing = () => {
@@ -553,10 +554,14 @@ export default function LandingPage() {
 
           {/* CTA Buttons — فقط ورود + دمو (بدون داشبورد) */}
           <div className="flex items-center gap-2">
-            {/* دکمه ورود — همیشه نمایش داده می‌شود */}
+            {/* ✅ دکمه ورود اصلاح‌شده: زرد در حالت عادی، سیاه در حالت اسکرول */}
             <button
-        onClick={() => router.push('/auth/login')}
-              className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 hover:text-violet-700 border border-gray-200 hover:border-violet-300 hover:bg-violet-50 rounded-xl transition-all"
+              onClick={() => router.push('/auth/login')}
+              className={`inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 text-sm font-medium border rounded-xl transition-all duration-300 ${
+                scrolled
+                  ? 'text-gray-900 border-gray-200 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50'
+                  : 'text-amber-400 border-amber-400/40 hover:text-amber-300 hover:border-amber-300 hover:bg-amber-400/10'
+              }`}
             >
               <LogIn className="w-4 h-4" />
               <span>ورود</span>
@@ -609,9 +614,17 @@ export default function LandingPage() {
                 <Star className="w-4 h-4 text-violet-500" />
                 نظرات مشتریان
               </a>
-              <div className="pt-2 border-t border-gray-100 mt-2">
+              <div className="pt-2 border-t border-gray-100 mt-2 space-y-2">
+                {/* ✅ افزودن دکمه ورود به منوی موبایل برای دسترسی بهتر */}
                 <button
-                  onClick={handleStartDemo}
+                  onClick={() => { router.push('/auth/login'); setMobileMenuOpen(false); }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 text-gray-900 bg-gray-100 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
+                >
+                  <LogIn className="w-4 h-4" />
+                  ورود به حساب
+                </button>
+                <button
+                  onClick={() => { handleStartDemo(); setMobileMenuOpen(false); }}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white bg-gradient-to-l from-amber-500 to-orange-500 rounded-xl font-bold text-sm hover:shadow-lg transition-all"
                 >
                   <Sparkles className="w-4 h-4" />
@@ -1096,7 +1109,7 @@ export default function LandingPage() {
               شروع تست ۳ روزه رایگان
             </button>
             <button
-            onClick={() => router.push('/auth/login')}
+              onClick={() => router.push('/auth/login')}
               className="px-8 sm:px-10 py-4 border border-white/20 text-white hover:bg-white/10 rounded-2xl font-bold text-base sm:text-lg transition-all flex items-center justify-center gap-3 backdrop-blur-sm"
             >
               <LogIn className="w-5 h-5" />

@@ -37,7 +37,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="fa" dir="rtl">
+    // ✅ فقط این خط تغییر کرده است: افزودن data-scroll-behavior="smooth"
+    <html lang="fa" dir="rtl" data-scroll-behavior="smooth">
       <head>
         {/* Apple PWA meta tags */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
