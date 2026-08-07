@@ -1,27 +1,10 @@
 // ============================================================================
-// src/app/api/subscription/checkout/route.ts (v9.4.1 ★★★)
+// src/app/api/subscription/checkout/route.ts (v9.4.2 ★★★)
 // ShopAccounting — Subscription Checkout API
 // ----------------------------------------------------------------------------
-// ★★★ v9.4.1: FIX — ساخت پویای appUrl از روی هدرهای درخواست
-//   قبلاً: appUrl فقط از process.env.NEXT_PUBLIC_APP_URL خوانده می‌شد و اگر
-//   این env var ست نشده بود (یا هنوز مقدار لوکال داشت)، callback زرین‌پال
-//   همیشه به http://localhost:3000 اشاره می‌کرد — حتی روی سرور دیپلوی‌شده.
-//   حالا appUrl ابتدا از هدرهای خودِ درخواست (host + x-forwarded-proto) ساخته
-//   می‌شود؛ یعنی چه در لوکال (localhost:3000) چه روی Railway (دامنه‌ی موقت یا
-//   دامنه‌ی نهایی بعداً) بدون نیاز به تنظیم دستی env var درست کار می‌کند.
-//   NEXT_PUBLIC_APP_URL همچنان به‌عنوان fallback نگه داشته شده (برای مواردی
-//   که هدر host در دسترس نباشد).
-//
-// ★★★ v9.4.0: پشتیبانی از حالت دمو
-//   - اگر tenant فعلی دمو است و می‌خواهد پلن بخرد:
-//     • action='new' → یک tenant جدید ایجاد می‌کند (نه upgrade)
-//     • tenant دمو بعد از پرداخت موفق حذف نمی‌شود (ممکن است کاربر بخواهد برگردد)
-//     • اطلاعات دمو به tenant جدید منتقل نمی‌شود
-//   - اگر tenant عادی است (active):
-//     • action='upgrade' → همان tenant ارتقا می‌یابد
-//     • اطلاعات حفظ می‌شود
-//
-// ★ نیاز به توکن معتبر دارد (withTenantIsolation)
+// ★★★ v9.4.2: FIX قطعی آدرس localhost در دیپلوی
+//   - بهبود تابع resolveAppUrl برای اولویت‌دهی هوشمند به NEXT_PUBLIC_APP_URL
+//   - اگر env var مقدار localhost داشت، به طور خودکار از هدرهای درخواست استفاده می‌کند
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -42,24 +25,25 @@ interface CheckoutBody {
   action?: 'upgrade' | 'renew' | 'new'
 }
 
-// ★★★ v9.4.1: ساخت پویای base URL از روی هدرهای درخواست
-//   این تابع در لوکال (host=localhost:3000) و در هر محیط دیپلوی‌شده‌ای
-//   (host=دامنه‌ی واقعی سرو‌کننده‌ی درخواست) به‌درستی کار می‌کند، بدون
-//   نیاز به تنظیم دستی هیچ env var ای.
+// ★★★ v9.4.2: تابع هوشمند تشخیص URL پایه
 function resolveAppUrl(req: NextRequest): string {
-  const host = req.headers.get('host')
+  // ۱. اولویت با متغیر محیطی است اگر مقدار معتبری (غیر از localhost) داشته باشد
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl.replace(/\/$/, '')
+  }
 
+  // ۲. استفاده از هدرهای درخواست برای محیط لوکال یا زمانی که env به درستی ست نشده
+  const host = req.headers.get('host')
   if (host) {
     const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1')
-    // ★ Railway و اکثر پلتفرم‌های میزبانی، هدر x-forwarded-proto را برای
-    //   ترافیک HTTPS پشت پراکسی ست می‌کنند
     const forwardedProto = req.headers.get('x-forwarded-proto')
     const protocol = forwardedProto || (isLocalHost ? 'http' : 'https')
     return `${protocol}://${host}`
   }
 
-  // ★ fallback نهایی — اگر به هر دلیلی هدر host در دسترس نبود
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  // ۳. فال‌بک نهایی
+  return (envUrl || 'http://localhost:3000').replace(/\/$/, '')
 }
 
 export const POST = withTenantIsolation(
@@ -95,7 +79,7 @@ export const POST = withTenantIsolation(
         )
       }
 
-      // ★★★ v9.4.0: بررسی اینکه آیا tenant فعلی دمو است
+      // ─── ۲. بررسی وضعیت Tenant ─────────────────────────────────
       const currentTenant = await db.client.tenant.findUnique({
         where: { id: tenant.tenantId },
         select: {
@@ -118,7 +102,7 @@ export const POST = withTenantIsolation(
       const isDemo = isDemoTenant(currentTenant)
       console.log(`[Subscription Checkout] Tenant isDemo: ${isDemo}, status: ${currentTenant.status}`)
 
-      // ─── ۲. محاسبه مبلغ ─────────────────────────────────────────
+      // ─── ۳. محاسبه مبلغ ─────────────────────────────────────────
       const amount = calculateCheckoutAmount(tierName, billingCycle as BillingCycle, action)
 
       if (amount <= 0) {
@@ -130,10 +114,11 @@ export const POST = withTenantIsolation(
 
       console.log(`[Subscription Checkout] Amount: ${amount} (tier: ${tierName}, cycle: ${billingCycle})`)
 
-      // ─── ۳. ایجاد درگاه زرین‌پال ─────────────────────────────────
+      // ─── ۴. ایجاد درگاه زرین‌پال ─────────────────────────────────
       const merchantId = process.env.ZARINPAL_MERCHANT_ID
       const isSandbox = process.env.ZARINPAL_SANDBOX === 'true'
-      // ★★★ v9.4.1: appUrl حالا پویا از روی هدرهای درخواست ساخته می‌شود
+      
+      // ★★★ استفاده از تابع هوشمند برای دریافت URL صحیح
       const appUrl = resolveAppUrl(req)
       console.log(`[Subscription Checkout] Resolved appUrl: ${appUrl}`)
 
@@ -145,14 +130,12 @@ export const POST = withTenantIsolation(
         )
       }
 
-      // ★ توضیح پرداخت
       const cycleLabel = isLifetimeCycle(billingCycle) ? 'مادام‌العمر' : 'سالانه'
       const description = `خرید پلن ${tierName} (${cycleLabel}) - ${currentTenant.companyName || ''}`
 
       // ★ Callback URL — پس از پرداخت، کاربر به این آدرس برمی‌گردد
       const callbackUrl = `${appUrl}/api/subscription/verify?tenantId=${currentTenant.id}`
 
-      // ★ ایجاد تراکنش در زرین‌پال
       const apiRequestUrl = isSandbox
         ? 'https://sandbox.zarinpal.com/pg/v4/payment/request.json'
         : 'https://api.zarinpal.com/pg/v4/payment/request.json'
@@ -179,7 +162,6 @@ export const POST = withTenantIsolation(
       const authority = zarinpalData?.data?.authority
       const code = zarinpalData?.data?.code
 
-      // ★ کدهای موفق: 100 (ایجاد موفق) یا 200 (پرداخت تسهیمی)
       if (code !== 100 && code !== 200) {
         console.error('[Subscription Checkout] Zarinpal request failed:', zarinpalData)
         return NextResponse.json(
@@ -188,7 +170,7 @@ export const POST = withTenantIsolation(
         )
       }
 
-      // ─── ۴. ایجاد رکورد pending در دیتابیس ──────────────────────
+      // ─── ۵. ایجاد رکورد pending در دیتابیس ──────────────────────
       const paymentMethod = buildPaymentMethodMetadata(tierName, billingCycle as BillingCycle)
       const pendingResult = await createPendingSubscription(
         currentTenant.id,
@@ -208,12 +190,12 @@ export const POST = withTenantIsolation(
 
       console.log('[Subscription Checkout] ✓ Pending subscription created:', pendingResult.subscriptionId)
 
-      // ─── ۵. ساخت URL پرداخت ──────────────────────────────────────
+      // ─── ۶. ساخت URL پرداخت ──────────────────────────────────────
       const paymentUrl = isSandbox
         ? `https://sandbox.zarinpal.com/pg/StartPay/${authority}`
         : `https://www.zarinpal.com/pg/StartPay/${authority}`
 
-      // ─── ۶. بازگشت نتیجه ─────────────────────────────────────────
+      // ─── ۷. بازگشت نتیجه ─────────────────────────────────────────
       return NextResponse.json({
         success: true,
         data: {
@@ -224,7 +206,7 @@ export const POST = withTenantIsolation(
           billingCycle,
           description,
           subscriptionPaymentId: pendingResult.paymentId,
-          isDemo,  // ★★★ اطلاع به کلاینت که tenant دمو است
+          isDemo,
         },
       })
     } catch (error: any) {
