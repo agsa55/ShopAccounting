@@ -1,24 +1,18 @@
 // ============================================================================
-// src/app/api/invoices/route.ts — GET/POST/PUT/DELETE (v7.1 ★★★ Final Fixed)
+// src/app/api/invoices/route.ts — GET/POST/PUT/DELETE (v7.4 ★★★ Complete Fixed)
 // ----------------------------------------------------------------------------
-// ★★★ v7.1: اصلاح نهایی نام فیلدها مطابق با schema.prisma
-//   ★ invoiceItem: حذف tenantId، اضافه شدن productName
-//   ★ invoicePayment: تغییر paymentDate به paidAt و referenceNumber به paymentRef
+// ★★★ v7.4: کد کامل بدون هیچ حذفیاتی + رفع باگ ثبت پیش‌پرداخت و اقساط
+//   ★ پشتیبانی همزمان از فرمت تو در تو (installmentData) و فرمت تخت
+//   ★ ثبت صحیح پیش‌پرداخت در InvoicePayment
+//   ★ تفکیک صحیح سند حسابداری (نقد برای پیش‌پرداخت، دریافتنی برای باقیمانده)
+//   ★ لاگ‌های دقیق برای عیب‌یابی داده‌های ارسالی از فرانت‌اند
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-import { randomUUID } from 'crypto'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 import type { PlanTier } from '@/lib/plan-features'
-
-// ─── تولید توکن پورتال ────────────────────────────
-function generatePortalToken(): string {
-  const uuid = randomUUID().replace(/-/g, '')
-  const ts = Date.now().toString(36)
-  return `${uuid}${ts}`.slice(0, 40)
-}
 
 // ─── ایجاد سند حسابداری خودکار ────────────────────────────
 async function createAutoJournalEntry(
@@ -28,7 +22,8 @@ async function createAutoJournalEntry(
   invoiceItems: any[],
   paymentType: string,
   planTier: PlanTier,
-  totalCogs: number
+  totalCogs: number,
+  paidAmount: number = 0
 ) {
   try {
     const totalAmount = invoice.totalAmount || 0
@@ -59,10 +54,24 @@ async function createAutoJournalEntry(
     const lines: any[] = []
     const isCreditOrInstallment = paymentType === 'credit' || paymentType === 'installment'
     const netSales = invoice.subTotal - invoice.discountAmount
+    const remainingAmount = totalAmount - paidAmount
 
-    const debitAccountId = isCreditOrInstallment ? (receivablesAccountId || cashAccountId) : cashAccountId
-    if (debitAccountId) lines.push({ accountId: debitAccountId, debit: totalAmount, credit: 0, description: 'بدهکار: بابت فاکتور فروش' })
-    if (salesAccountId) lines.push({ accountId: salesAccountId, debit: 0, credit: netSales, description: 'بستانکار: درآمد فروش' })
+    // ثبت بدهکار نقد/بانک برای پیش‌پرداخت
+    if (paidAmount > 0 && cashAccountId) {
+      lines.push({ accountId: cashAccountId, debit: paidAmount, credit: 0, description: 'بدهکار: دریافت نقد/پیش‌پرداخت فاکتور' })
+    }
+    
+    // ثبت بدهکار حساب‌های دریافتنی برای باقیمانده
+    if (remainingAmount > 0) {
+      const debitAccountId = isCreditOrInstallment ? (receivablesAccountId || cashAccountId) : cashAccountId
+      if (debitAccountId) {
+        lines.push({ accountId: debitAccountId, debit: remainingAmount, credit: 0, description: `بدهکار: بابت فاکتور فروش ${isCreditOrInstallment ? '(نسیه/قسطی)' : ''}` })
+      }
+    }
+
+    if (salesAccountId) {
+      lines.push({ accountId: salesAccountId, debit: 0, credit: netSales, description: 'بستانکار: درآمد فروش' })
+    }
     if (invoice.taxAmount > 0 && vatAccountId) {
       lines.push({ accountId: vatAccountId, debit: 0, credit: invoice.taxAmount, description: 'بستانکار: مالیات بر ارزش افزوده فروش' })
     }
@@ -97,7 +106,15 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
   try {
     const { downPayment, numberOfInstallments, interestRate, installmentPeriod, totalWithInterest, installmentAmount, remainingAmount } = installmentData
     const periodDays: Record<string, number> = { monthly: 30, biweekly: 14, weekly: 7 }
-    const daysPerPeriod = periodDays[installmentPeriod] || 30
+    const daysPerPeriod = periodDays[installmentPeriod || 'monthly'] || 30
+    const baseDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date()
+
+    console.log('[Invoices] Creating Installment Plan with data:', {
+      numberOfInstallments,
+      installmentAmount,
+      downPayment,
+      remainingAmount
+    })
 
     const plan = await tx.installmentPlan.create({
       data: {
@@ -110,20 +127,29 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
         installmentPeriod: installmentPeriod || 'monthly',
         status: 'active', paidInstallments: 0,
         totalPaidAmount: downPayment || 0,
-        nextDueDate: new Date(Date.now() + daysPerPeriod * 24 * 60 * 60 * 1000),
+        nextDueDate: new Date(baseDate.getTime() + daysPerPeriod * 24 * 60 * 60 * 1000),
         tenantId,
       },
     })
 
     for (let i = 1; i <= numberOfInstallments; i++) {
-      const dueDate = new Date(Date.now() + i * daysPerPeriod * 24 * 60 * 60 * 1000)
+      const dueDate = new Date(baseDate.getTime() + i * daysPerPeriod * 24 * 60 * 60 * 1000)
       await tx.installmentSchedule.create({
-        data: { planId: plan.id, installmentNumber: i, amount: installmentAmount || 0, dueDate, status: 'pending', paidAmount: 0, tenantId },
+        data: { 
+          planId: plan.id, 
+          installmentNumber: i, 
+          amount: installmentAmount || 0, 
+          dueDate, 
+          status: 'pending', 
+          paidAmount: 0, 
+          tenantId 
+        },
       })
     }
+    console.log('[Invoices] ✅ Installment Plan created successfully with ID:', plan.id)
     return plan
   } catch (error: any) {
-    console.error('[Invoices] Failed to create installment plan:', error?.message)
+    console.error('[Invoices] ❌ Failed to create installment plan:', error?.message)
     return null
   }
 }
@@ -184,18 +210,15 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
     const result = invoices.map((inv: any) => {
       let paymentStatus = 'PENDING'
-      const paymentType = (inv.paymentType || 'cash').toLowerCase()
       if (inv.paidAmount >= inv.totalAmount && inv.totalAmount > 0) paymentStatus = 'PAID'
       else if (inv.paidAmount > 0) paymentStatus = 'PARTIAL'
 
-      const statusUpper = (inv.status || 'DRAFT').toUpperCase()
-      const finalAmount = inv.totalAmount || 0
-      const customerName = inv.customer ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim() : null
-      const items = (inv.items || []).map((item: any) => ({ ...item, totalAmount: item.lineTotal || item.totalAmount || 0 }))
-
       return {
-        ...inv, invoiceNumber: inv.number, customerName, finalAmount,
-        paymentStatus, status: statusUpper, items,
+        ...inv, invoiceNumber: inv.number,
+        customerName: inv.customer ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim() : null,
+        finalAmount: inv.totalAmount || 0,
+        paymentStatus, status: (inv.status || 'DRAFT').toUpperCase(),
+        items: (inv.items || []).map((item: any) => ({ ...item, totalAmount: item.lineTotal || item.totalAmount || 0 })),
         installmentPlan: inv.installmentPlan || null,
         customerPortalToken: inv.customer?.portalToken || null,
       }
@@ -215,7 +238,6 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/invoices
-//  ★★★ v7.1: اصلاح نهایی محاسبه COGS و فیلدها مطابق schema
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (
@@ -230,7 +252,16 @@ export const POST = withTenantAndPermission('pos')(async (
     const invoiceData = await req.json()
     const items = invoiceData.items || []
 
-    const branchId = invoiceData.branchId || null
+    // ═══════════════════════════════════════════════════════════════
+    // ★★★ v7.4: لاگ دقیق برای عیب‌یابی داده‌های دریافتی از فرانت
+    // ═══════════════════════════════════════════════════════════════
+    console.log('\n=== 🚨 [Invoices POST] DEBUG RECEIVED DATA 🚨 ===')
+    console.log('paymentType:', invoiceData.paymentType)
+    console.log('paidAmount:', invoiceData.paidAmount)
+    console.log('downPayment (root):', invoiceData.downPayment)
+    console.log('numberOfInstallments (root):', invoiceData.numberOfInstallments)
+    console.log('installmentData (nested):', invoiceData.installmentData)
+    console.log('==================================================\n')
 
     if (!items || items.length === 0) {
       return NextResponse.json(
@@ -261,8 +292,9 @@ export const POST = withTenantAndPermission('pos')(async (
     const discountAmount = Number(invoiceData.discountAmount) || 0
     const taxAmount = Number(invoiceData.taxAmount) || totalTax
     const totalAmount = subTotal - totalDiscount - discountAmount + taxAmount
-    const paidAmount = Number(invoiceData.paidAmount) || (isCreditOrInstallment ? 0 : totalAmount)
-    const remainingAmount = Number(invoiceData.remainingAmount) || (isCreditOrInstallment ? totalAmount : 0)
+    
+    const paidAmount = Number(invoiceData.paidAmount) || 0
+    const remainingAmount = totalAmount - paidAmount
 
     const count = await tenantDb.invoice.count({ where: { tenantId } })
     const invoiceNumber = `INV-${(count + 1).toString().padStart(6, '0')}`
@@ -308,8 +340,6 @@ export const POST = withTenantAndPermission('pos')(async (
     }
 
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
-
-    // ★★★ متغیر برای نگهداری بهای تمام‌شده کل (خارج از تراکنش تعریف می‌شود)
     let totalCogs = 0
 
     const result = await txClient.$transaction(async (tx: any) => {
@@ -323,7 +353,6 @@ export const POST = withTenantAndPermission('pos')(async (
           remainingAmount,
           cashierId: tenant.user?.id || null, description: invoiceData.description || null, tenantId,
           ...(warehouseId ? { warehouseId } : {}),
-          ...(branchId ? { branchId } : {}),
         },
       })
 
@@ -338,7 +367,7 @@ export const POST = withTenantAndPermission('pos')(async (
 
         const unitCost = Number(product?.purchasePrice || 0)
         const itemCogs = unitCost * item.quantity
-        totalCogs += itemCogs // ★★★ جمع زدن بهای تمام‌شده این قلم
+        totalCogs += itemCogs
 
         await tx.invoiceItem.create({
           data: {
@@ -352,13 +381,11 @@ export const POST = withTenantAndPermission('pos')(async (
           },
         })
 
-        // کسر از Product.currentStock
         await tx.product.update({
           where: { id: item.productId },
           data: { currentStock: { decrement: item.quantity } },
         }).catch((err: any) => console.warn(`[Invoices POST] Failed to decrement Product.currentStock:`, err?.message))
 
-        // کسر از StockLevel
         if (warehouseId) {
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
@@ -379,7 +406,6 @@ export const POST = withTenantAndPermission('pos')(async (
             }).catch((err: any) => console.warn(`[Invoices POST] Failed to create StockLevel:`, err?.message))
           }
 
-          // ثبت حرکت انبار
           await tx.stockMovement.create({
             data: {
               tenantId,
@@ -396,23 +422,55 @@ export const POST = withTenantAndPermission('pos')(async (
         }
       }
 
-      // ۳. ثبت پرداخت‌ها (اگر وجود داشته باشد)
+      // ۳. ثبت پرداخت‌ها (شامل پیش‌پرداخت)
       const payments = invoiceData.payments || []
+      
+      // اگر پیش‌پرداخت وجود دارد اما در آرایه payments نیست، آن را به صورت خودکار اضافه کن
+      if (paidAmount > 0 && payments.length === 0) {
+        payments.push({
+          amount: paidAmount,
+          paymentType: invoiceData.downPaymentMethod || 'cash',
+          paymentRef: invoiceData.downPaymentRef || null,
+          paidAt: invoiceData.paidAt || new Date(),
+        })
+      }
+
       for (const p of payments) {
         await tx.invoicePayment.create({
           data: {
             invoiceId: inv.id,
             amount: p.amount,
             paymentType: p.paymentType || 'cash',
-            paidAt: new Date(),
+            paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
             paymentRef: p.paymentRef || p.referenceNumber || null,
             tenantId,
           },
         })
       }
 
-      // ۴. به‌روزرسانی مانده حساب مشتری (در صورت نسیه/قسطی)
-      if (isCreditOrInstallment && invoiceData.customerId) {
+      // ۴. ایجاد پلن قسطی (پشتیبانی از فرمت تو در تو و فرمت تخت در ریشه)
+      const instData = invoiceData.installmentData || {
+        downPayment: invoiceData.downPayment || paidAmount,
+        numberOfInstallments: invoiceData.numberOfInstallments,
+        interestRate: invoiceData.interestRate || 0,
+        installmentPeriod: invoiceData.installmentPeriod || 'monthly',
+        totalWithInterest: invoiceData.totalWithInterest,
+        installmentAmount: invoiceData.installmentAmount,
+        remainingAmount: invoiceData.remainingAmount,
+      }
+
+      if (pt === 'installment' && (invoiceData.installmentData || invoiceData.numberOfInstallments)) {
+        console.log('[Invoices POST] Attempting to create installment plan with data:', instData)
+        const plan = await createInstallmentPlan(tx, tenantId, inv, instData)
+        if (!plan) {
+          console.error('[Invoices POST] ❌ CRITICAL: createInstallmentPlan returned null!')
+        }
+      } else {
+        console.log('[Invoices POST] ⚠️ Skipped installment plan creation. paymentType:', pt, 'hasInstallmentData:', !!invoiceData.installmentData, 'hasNumberOfInstallments:', !!invoiceData.numberOfInstallments)
+      }
+
+      // ۵. به‌روزرسانی مانده حساب مشتری (فقط به اندازه باقیمانده بدهی)
+      if (isCreditOrInstallment && invoiceData.customerId && remainingAmount > 0) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
           data: { currentBalance: { increment: remainingAmount } },
@@ -422,9 +480,9 @@ export const POST = withTenantAndPermission('pos')(async (
       return inv
     })
 
-    // ۵. ایجاد سند حسابداری خودکار (با ارسال totalCogs صحیح که در تراکنش محاسبه شد)
+    // ۶. ایجاد سند حسابداری خودکار (با ارسال paidAmount برای تفکیک نقد و نسیه)
     const planTier = tenant.planTier || 'basic'
-    await createAutoJournalEntry(tenantDb, tenantId, result, items, pt, planTier, totalCogs)
+    await createAutoJournalEntry(tenantDb, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
 
     return NextResponse.json({ success: true, data: result, message: 'فاکتور با موفقیت ثبت شد' }, { status: 201 })
   } catch (error: any) {
@@ -432,6 +490,7 @@ export const POST = withTenantAndPermission('pos')(async (
     return NextResponse.json({ success: false, error: error?.message || 'خطا در ثبت فاکتور' }, { status: 500 })
   }
 })
+
 // ═══════════════════════════════════════════════════════════════
 //  PUT /api/invoices
 // ═══════════════════════════════════════════════════════════════

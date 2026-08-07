@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   CreditCard, Search, CheckCircle2, Clock, AlertTriangle, RefreshCw, 
   Loader2, Banknote, Lock, Crown, Wallet, Calendar as CalendarIcon, 
-  WifiOff, CloudOff, Upload, Eye, EyeOff, ArrowLeft,TrendingUp
+  WifiOff, CloudOff, Upload, Eye, EyeOff, ArrowLeft,TrendingUp,
+  ArrowRight
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -107,8 +108,8 @@ interface SummaryData {
 // ═══════════════════════════════════════════════════════════════
 
 function formatCurrency(num: number | undefined | null): string {
-  if (num === undefined || num === null || isNaN(num)) return '۰ تومان'
-  return `${num.toLocaleString('fa-IR')} تومان`
+  if (num === undefined || num === null || isNaN(num)) return '۰ ریال'
+  return `${num.toLocaleString('fa-IR')} ریال`
 }
 
 function formatNumber(num: number | undefined | null): string {
@@ -791,6 +792,56 @@ export default function InstallmentsPage() {
 
   const totalRemaining = plans.reduce((sum, plan) => sum + (plan.remainingAmount || 0), 0)
 
+
+    // ═══════════════════════════════════════════════════════════════
+  // ★★★ محاسبه آمار دقیق و حرفه‌ای اقساط ★★★
+  // ═══════════════════════════════════════════════════════════════
+  const summaryStats = useMemo(() => {
+    let totalInstallmentsCount = 0
+    let paidInstallmentsCount = 0
+    let remainingInstallmentsCount = 0
+    let totalPaidAmount = 0
+    let totalRemainingAmount = 0
+    let overdueInstallmentsCount = 0
+    let overdueAmount = 0
+
+    plans.forEach((plan: any) => {
+      const pCount = plan.paidCount || 0
+      const tCount = plan.totalInstallments || 0
+      const remCount = Math.max(0, tCount - pCount)
+      const pAmount = Number(plan.totalPaidAmount) || 0
+      const remAmount = Number(plan.remainingAmount) || 0
+      
+      totalInstallmentsCount += tCount
+      paidInstallmentsCount += pCount
+      remainingInstallmentsCount += remCount
+      totalPaidAmount += pAmount
+      totalRemainingAmount += remAmount
+
+      // محاسبه دقیق اقساط معوق و مبلغ آن‌ها
+      const overdueSchedules = plan.schedules.filter((s: any) => {
+        if (s.status?.toLowerCase() === 'paid') return false
+        return new Date(s.dueDate) < new Date()
+      })
+      
+      overdueInstallmentsCount += overdueSchedules.length
+      const planOverdueAmount = overdueSchedules.reduce((sum: number, s: any) => {
+        return sum + (Number(s.amount) - Number(s.paidAmount || 0))
+      }, 0)
+      overdueAmount += planOverdueAmount
+    })
+
+    return {
+      totalInstallmentsCount,
+      paidInstallmentsCount,
+      remainingInstallmentsCount,
+      totalPaidAmount,
+      totalRemainingAmount,
+      overdueInstallmentsCount,
+      overdueAmount,
+    }
+  }, [plans])
+
   // ═══════════════════════════════════════════════════════════════
   // ★★★ Pay Installment ★★★
   // ═══════════════════════════════════════════════════════════════
@@ -946,7 +997,7 @@ export default function InstallmentsPage() {
                 onClick={() => setSelectedPlan(null)}
                 className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-lg hover:bg-gray-100 text-gray-600 shrink-0"
               >
-                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
               <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-100 text-emerald-600 shrink-0">
                 <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1397,72 +1448,82 @@ export default function InstallmentsPage() {
         {!loading || plans.length > 0 ? (
           <>
           
-                                          {/* Summary Cards - Main List - KpiCard Style */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              <div
-                className="bg-gradient-to-br from-blue-500 to-blue-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
-              >
-                <div className="shrink-0">
-                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <TrendingUp className="w-4 h-4 text-white" />
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-white/80 truncate">اقساط فعال</p>
-                  <p className="text-base font-bold text-white truncate">
-                    {formatNumber(summary?.activePlans ?? plans.filter(p => p.status?.toLowerCase() === 'active').length)}
-                  </p>
+                   {/* ★★★ Summary Cards - آمار دقیق و حرفه‌ای اقساط ★★★ */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+            
+            {/* کارت ۱: اقساط پرداخت‌شده */}
+            <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+              <div className="shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5 text-white" />
                 </div>
               </div>
-
-              <div
-                className="bg-gradient-to-br from-red-500 to-red-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
-              >
-                <div className="shrink-0">
-                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <AlertTriangle className="w-4 h-4 text-white" />
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-white/80 truncate">اقساط معوق</p>
-                  <p className="text-base font-bold text-white truncate">
-                    {formatNumber(summary?.totalOverdueInstallments ?? overdueCount)}
-                  </p>
-                </div>
-              </div>
-
-              <div
-                className="bg-gradient-to-br from-amber-500 to-amber-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
-              >
-                <div className="shrink-0">
-                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <Wallet className="w-4 h-4 text-white" />
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-white/80 truncate">مانده کل</p>
-                  <p className="text-base font-bold text-white truncate">{formatCurrency(summary?.totalRemaining ?? totalRemaining)}</p>
-                </div>
-              </div>
-
-              <div
-                className="bg-gradient-to-br from-purple-500 to-purple-600 cursor-pointer hover:shadow-lg transition-all transform hover:scale-[1.02] rounded-xl hidden lg:flex"
-                style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}
-              >
-                <div className="shrink-0">
-                  <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <CreditCard className="w-4 h-4 text-white" />
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-white/80 truncate">تمام اقساط</p>
-                  <p className="text-base font-bold text-white truncate">{formatNumber(summary?.totalPlans || 0)}</p>
-                </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط پرداخت‌شده</p>
+                <p className="text-sm sm:text-base font-bold text-white truncate">
+                  {formatNumber(summaryStats.paidInstallmentsCount)} قسط
+                </p>
+                <p className="text-[10px] text-white/70 truncate">
+                  به مبلغ {formatCurrency(summaryStats.totalPaidAmount)}
+                </p>
               </div>
             </div>
+
+            {/* کارت ۲: اقساط باقیمانده */}
+            <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+              <div className="shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط باقیمانده</p>
+                <p className="text-sm sm:text-base font-bold text-white truncate">
+                  {formatNumber(summaryStats.remainingInstallmentsCount)} قسط
+                </p>
+                <p className="text-[10px] text-white/70 truncate">
+                  به مبلغ {formatCurrency(summaryStats.totalRemainingAmount)}
+                </p>
+              </div>
+            </div>
+
+            {/* کارت ۳: اقساط معوق */}
+            <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+              <div className="shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط معوق</p>
+                <p className="text-sm sm:text-base font-bold text-white truncate">
+                  {formatNumber(summaryStats.overdueInstallmentsCount)} قسط
+                </p>
+                <p className="text-[10px] text-white/70 truncate">
+                  به مبلغ {formatCurrency(summaryStats.overdueAmount)}
+                </p>
+              </div>
+            </div>
+
+            {/* کارت ۴: مجموع کل اقساط */}
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+              <div className="shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <TrendingUp className="w-5 h-5 text-white" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] sm:text-xs text-white/80 truncate">مجموع کل اقساط</p>
+                <p className="text-sm sm:text-base font-bold text-white truncate">
+                  {formatNumber(summaryStats.totalInstallmentsCount)} قسط
+                </p>
+                <p className="text-[10px] text-white/70 truncate">
+                  در {formatNumber(plans.length)} طرح
+                </p>
+              </div>
+            </div>
+
+          </div>
                       {/* Search + Filter */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <div className="relative flex-1 w-full">

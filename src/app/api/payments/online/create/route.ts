@@ -1,24 +1,125 @@
 // ============================================================================
-// src/app/api/payments/online/create/route.ts — v9.0 ★★★
+// src/app/api/payments/online/create/route.ts — v9.2 ★★★
 // ShopAccounting — ایجاد پرداخت آنلاین با درگاه اختصاصی فروشگاه
 // ============================================================================
-// ★★★ v9.0: یکپارچه‌سازی کامل پرداخت آنلاین (جایگزین endpoint تسهیم)
-//   ✓ استفاده از درگاه اختصاصی فروشگاه (زرین‌پال یا ای‌دی‌پی)
-//   ✓ پشتیبانی کامل از پرداخت قسط‌به‌قسط (installmentId)
-//   ✓ اعتبارسنجی کاربر پورتال (امنیت — مشتری فقط فاکتور خودش را پرداخت کند)
-//   ✓ سازگار با verify (ذخیره gatewayId)
-//   ✓ حذف کامل وابستگی به تسهیم کنسل‌شده
+// ★★★ v9.2 تغییرات:
+//   ★ اضافه کردن portalToken به callback URL
+//   ★ redirect مستقیم به پورتال مشتری بعد از پرداخت
+// ★★★ v9.1 تغییرات:
+//   ★ پشتیبانی کامل از Portal User (مشتری)
+//   ★ احراز هویت دوگانه: storeUser (با JWT) یا portalUser (با portalToken)
+//   ★ مشتری فقط فاکتور خودش را پرداخت کند (امنیت)
+//   ★ پشتیبانی کامل از پرداخت قسط‌به‌قسط (installmentId)
+//   ★ مبلغ زرین‌پال به تومان (مطابق با API)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 
-export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
-  console.log('[Online Payment Create v9.0] Handler started, tenantId:', tenant?.tenantId)
+// ════════════════════════════════════════════════════════════════════════════
+// ★ تابع احراز هویت دوگانه (StoreUser یا PortalUser)
+// ════════════════════════════════════════════════════════════════════════════
+async function resolveUserAndTenant(req: NextRequest): Promise<{
+  success: boolean
+  tenantId?: string
+  customerId?: string
+  isPortalUser?: boolean
+  isStoreUser?: boolean
+  user?: any
+  tenantDb?: any
+  portalToken?: string | null
+  error?: string
+  statusCode?: number
+}> {
+  // ─── اولویت ۱: Authorization header ────────────────────────
+  const authHeader = req.headers.get('authorization')
+  let token: string | null = null
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.replace('Bearer ', '')
+  } else {
+    // ─── اولویت ۲: portal_token از کوکی ──────────────────────
+    token = req.cookies.get('portal_token')?.value || null
+  }
+
+  if (!token) {
+    return { success: false, error: 'احراز هویت نشده', statusCode: 401 }
+  }
+
+  // ─── تلاش ۱: جستجو به عنوان portalToken در دیتابیس ─────────
+  const customer = await db.client.customer.findFirst({
+    where: { portalToken: token, isBlacklisted: false },
+    select: { 
+      id: true, 
+      tenantId: true, 
+      firstName: true, 
+      lastName: true,
+      mobile: true,
+    },
+  })
+
+  if (customer) {
+    console.log('[Payment Create] ✅ Portal user found:', customer.id)
+    return {
+      success: true,
+      tenantId: customer.tenantId,
+      customerId: customer.id,
+      isPortalUser: true,
+      isStoreUser: false,
+      user: customer,
+      tenantDb: db.client,
+      portalToken: token,  // ★★★ v9.2: برگرداندن portalToken
+    }
+  }
+
+  // ─── تلاش ۲: بررسی به عنوان JWT (StoreUser) ─────────────────
   try {
-    const tenantDb = tenant.tenantDb
-    const tenantId = tenant.tenantId
+    const jwt = require('jsonwebtoken')
+    const secret = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET
+    const decoded = jwt.verify(token, secret)
+    
+    if (decoded && decoded.tenantId) {
+      console.log('[Payment Create] ✅ StoreUser found:', decoded.userId)
+      return {
+        success: true,
+        tenantId: decoded.tenantId,
+        customerId: undefined,
+        isPortalUser: false,
+        isStoreUser: true,
+        user: decoded,
+        tenantDb: db.client,
+        portalToken: null,
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Payment Create] ⚠️ JWT verification failed:', err?.message)
+  }
+
+  return { success: false, error: 'توکن نامعتبر', statusCode: 401 }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★ POST /api/payments/online/create
+// ════════════════════════════════════════════════════════════════════════════
+export async function POST(req: NextRequest) {
+  try {
+    // ─── احراز هویت ──────────────────────────────────────────
+    const auth = await resolveUserAndTenant(req)
+    if (!auth.success) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.statusCode || 401 }
+      )
+    }
+
+    const { tenantId, customerId, isPortalUser, tenantDb, portalToken } = auth
+
+    console.log('[Online Payment Create v9.2] Handler started:', {
+      tenantId,
+      customerId,
+      isPortalUser,
+      hasPortalToken: !!portalToken,
+    })
 
     const body = await req.json()
     const { invoiceId, installmentId, amount, description } = body
@@ -43,29 +144,21 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
     }
 
     // ─── ۲. اعتبارسنجی کاربر پورتال (امنیت) ─────────────────────
-    // ★ مشتری فقط می‌تواند فاکتور خودش را پرداخت کند
-    if (tenant.isPortalUser) {
-      const portalCustomerId = tenant.customerId
-      if (!portalCustomerId) {
+    if (isPortalUser) {
+      if (!customerId) {
         return NextResponse.json(
-          { success: false, error: 'شناسه مشتری در توکن پورتال یافت نشد', code: 'NO_CUSTOMER_ID' },
+          { success: false, error: 'شناسه مشتری یافت نشد', code: 'NO_CUSTOMER_ID' },
           { status: 403 }
         )
       }
-      if (invoice.customerId !== portalCustomerId) {
-        console.warn('[Online Payment Create] Portal user tried to pay another customer invoice:', {
-          portalCustomerId,
+      if (invoice.customerId !== customerId) {
+        console.warn('[Online Payment Create] ❌ Portal user tried to pay another customer invoice:', {
+          customerId,
           invoiceCustomerId: invoice.customerId,
           invoiceId,
         })
         return NextResponse.json(
           { success: false, error: 'این فاکتور متعلق به شما نیست', code: 'NOT_YOUR_INVOICE' },
-          { status: 403 }
-        )
-      }
-      if (tenant.user?.isBlacklisted) {
-        return NextResponse.json(
-          { success: false, error: 'حساب شما مسدود شده است. با فروشگاه تماس بگیرید.', code: 'CUSTOMER_BLACKLISTED' },
           { status: 403 }
         )
       }
@@ -81,7 +174,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       installmentSchedule = await tenantDb.installmentSchedule.findFirst({
         where: {
           id: installmentId,
-          tenantId,
           plan: { invoiceId },
         },
         include: {
@@ -135,7 +227,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       }
     }
 
-    // ─── ۴. پیدا کردن درگاه فعال فروشگاه (اختصاصی) ──────────────
+    // ─── ۴. پیدا کردن درگاه فعال فروشگاه ─────────────────────────
     const gateway: any = await tenantDb.paymentGateway.findFirst({
       where: { tenantId, isActive: true },
     })
@@ -158,7 +250,9 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    // ─── ۵. بررسی پشتیبانی فیلد installmentId (runtime detection) ──
+    console.log('[Online Payment Create] ✅ Gateway found:', gateway.type, 'sandbox:', gateway.sandbox)
+
+    // ─── ۵. بررسی پشتیبانی فیلد installmentId ────────────────────
     const isInstallmentIdSupported = (() => {
       try {
         const fieldsRaw = (tenantDb.onlinePayment as any).fields as unknown
@@ -177,7 +271,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       amount: paymentAmount,
       status: 'pending',
       gatewayType: gateway.type,
-      gatewayId: gateway.id,   // ★ کلید سازگاری با verify
+      gatewayId: gateway.id,
       description: paymentDescription,
     }
 
@@ -192,20 +286,41 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       data: paymentData,
     })
 
-    // ─── ۷. ساخت callback URL (تمیز — بدون placeholder) ──────────
+    console.log('[Online Payment Create] ✅ OnlinePayment record created:', onlinePayment.id)
+
+    // ─── ۷. ساخت callback URL ────────────────────────────────────
+    // ★★★ v9.2: اضافه کردن portalToken به callback URL
     const callbackUrl = gateway.callbackUrl ||
-      `${process.env.NEXT_PUBLIC_APP_URL || ''}/api/payments/online/verify`
-    const callbackWithParams = `${callbackUrl}?tenantId=${tenantId}&paymentId=${onlinePayment.id}`
+      `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/payments/online/verify`
+    
+    let callbackWithParams = `${callbackUrl}?tenantId=${tenantId}&paymentId=${onlinePayment.id}`
+    
+    // ★ اگر portalUser است، portalToken را به callback اضافه کن
+    if (isPortalUser && portalToken) {
+      callbackWithParams += `&portalToken=${portalToken}`
+      console.log('[Online Payment Create] 🔑 Added portalToken to callback URL')
+    }
 
     // ─── ۸. درخواست به درگاه (زرین‌پال یا ای‌دی‌پی) ──────────────
     let gatewayUrl: string | null = null
     let authority: string | null = null
 
     if (gateway.type === 'zarinpal') {
-      // ─── زرین‌پال ─────────────────────────────────────────
+      // ═══════════════════════════════════════════════════════
+      // زرین‌پال
+      // ═══════════════════════════════════════════════════════
       const apiUrl = gateway.sandbox
         ? 'https://sandbox.zarinpal.com/pg/v4/payment/request.json'
         : 'https://api.zarinpal.com/pg/v4/payment/request.json'
+
+      // تبدیل مبلغ به تومان (زرین‌پال تومان می‌پذیرد)
+      const amountInToman = Math.round(paymentAmount / 10)
+
+      console.log('[Online Payment Create] 🔄 Calling Zarinpal API:', {
+        url: apiUrl,
+        amount: amountInToman,
+        sandbox: gateway.sandbox,
+      })
 
       const zarinpalRes = await fetch(apiUrl, {
         method: 'POST',
@@ -215,16 +330,17 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         },
         body: JSON.stringify({
           merchant_id: gateway.merchantId,
-          amount: Math.round(paymentAmount),
+          amount: amountInToman,
           description: paymentDescription,
           callback_url: callbackWithParams,
         }),
       })
 
       const zarinpalData = await zarinpalRes.json()
+      console.log('[Online Payment Create] 📥 Zarinpal response:', zarinpalData)
 
       if (!zarinpalData?.data || zarinpalData?.data?.code !== 100) {
-        console.error('[Online Payment Create] Zarinpal request failed:', zarinpalData)
+        console.error('[Online Payment Create] ❌ Zarinpal request failed:', zarinpalData)
         await tenantDb.onlinePayment.update({
           where: { id: onlinePayment.id },
           data: { status: 'failed' },
@@ -243,8 +359,11 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       gatewayUrl = gateway.sandbox
         ? `https://sandbox.zarinpal.com/pg/StartPay/${authority}`
         : `https://www.zarinpal.com/pg/StartPay/${authority}`
+
     } else if (gateway.type === 'idpay') {
-      // ─── ای‌دی‌پی ──────────────────────────────────────────
+      // ═══════════════════════════════════════════════════════
+      // ای‌دی‌پی
+      // ═══════════════════════════════════════════════════════
       if (!gateway.apiKey) {
         await tenantDb.onlinePayment.update({
           where: { id: onlinePayment.id },
@@ -260,6 +379,15 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         ? 'https://stg.api.idpay.ir/v1.1/payment'
         : 'https://api.idpay.ir/v1.1/payment'
 
+      // ای‌دی‌پی ریال می‌پذیرد
+      const amountInRial = Math.round(paymentAmount)
+
+      console.log('[Online Payment Create] 🔄 Calling IDPay API:', {
+        url: apiUrl,
+        amount: amountInRial,
+        sandbox: gateway.sandbox,
+      })
+
       const idpayRes = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -269,16 +397,17 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         },
         body: JSON.stringify({
           order_id: onlinePayment.id,
-          amount: Math.round(paymentAmount),
+          amount: amountInRial,
           desc: paymentDescription,
           callback: callbackWithParams,
         }),
       })
 
       const idpayData = await idpayRes.json()
+      console.log('[Online Payment Create] 📥 IDPay response:', idpayData)
 
       if (!idpayData?.link || idpayData?.error_code) {
-        console.error('[Online Payment Create] IDPay request failed:', idpayData)
+        console.error('[Online Payment Create] ❌ IDPay request failed:', idpayData)
         await tenantDb.onlinePayment.update({
           where: { id: onlinePayment.id },
           data: { status: 'failed' },
@@ -311,7 +440,12 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       },
     })
 
-    console.log('[Online Payment Create v9.0] Payment URL generated:', gatewayUrl)
+    console.log('[Online Payment Create v9.2] ✅ Success:', {
+      paymentId: onlinePayment.id,
+      authority,
+      gatewayUrl: gatewayUrl?.substring(0, 50) + '...',
+      portalTokenInCallback: isPortalUser && !!portalToken,
+    })
 
     return NextResponse.json({
       success: true,
@@ -328,10 +462,10 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         : 'کاربر به درگاه پرداخت هدایت می‌شود',
     })
   } catch (error: any) {
-    console.error('[Online Payment Create] Error:', error?.message || error)
+    console.error('[Online Payment Create] ❌ Error:', error?.message || error)
     return NextResponse.json(
       { success: false, error: 'خطا در ایجاد پرداخت آنلاین' },
       { status: 500 }
     )
   }
-})
+}

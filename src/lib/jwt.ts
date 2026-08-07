@@ -1,11 +1,16 @@
 /**
- * JWT Utility — ShopAccounting v23.2
+ * JWT Utility — ShopAccounting v23.3
  *
  * توابع استخراج و اعتبارسنجی JWT Token
  * + توابع مدیریت کوکی و تولید جفت توکن
  *
  * فایل: src/lib/jwt.ts
  *
+ * ★★★ تغییرات v23.3 نسبت به v23.2:
+ *   ★ پشتیبانی کامل از Customer (Portal User) در DecodedToken
+ *   ★ اضافه شدن فیلدهای customerId، firstName، lastName، mobile، portalToken
+ *   ★ optional شدن فیلدهای userId، username، role، permissions (برای پشتیبانی از هر دو نوع کاربر)
+ *   ★ اصلاح generateRefreshToken و signTokenPair برای پذیرش customerId
  * ★★★ تغییرات v23.2 نسبت به v23.1:
  *   ★ رفع مشکل matching نام تابع — نام تابع middleware به proxy تغییر نکرد
  *   ★ اضافه شدن نام‌گذاری واضح‌تر برای خطاها
@@ -17,16 +22,28 @@ import jwt from 'jsonwebtoken';
 // ─── Types ─────────────────────────────────────────────────────
 
 export interface DecodedToken {
-  userId: string;
-  username: string;
-  role: string;
+  // ─── فیلدهای مشترک (همیشه موجود) ────────────────────────
   tenantId: string;
-   userType: 'storeUser' | 'portalUser' | 'admin';
-  permissions: string[];
-  storeId?: string;
-  storeName?: string;
+  userType: 'storeUser' | 'portalUser' | 'admin';
   iat?: number;
   exp?: number;
+
+  // ─── فیلدهای StoreUser (پرسنل فروشگاه) ──────────────────
+  // ★★★ v23.3: optional شدند تا Customer هم پشتیبانی شود
+  userId?: string;
+  username?: string;
+  role?: string;
+  permissions?: string[];
+  storeId?: string;
+  storeName?: string;
+
+  // ─── فیلدهای Customer (پورتال مشتری) ────────────────────
+  // ★★★ v23.3: فیلدهای جدید برای پشتیبانی از ورود مشتری
+  customerId?: string;
+  firstName?: string;
+  lastName?: string;
+  mobile?: string;
+  portalToken?: string;
 }
 
 export interface TokenPair {
@@ -111,22 +128,34 @@ export async function getUserFromRequest(request: NextRequest): Promise<DecodedT
 /**
  * اعتبارسنجی و رمزگشایی Access Token
  * در صورت خطا null برمی‌گرداند (برای استفاده در middleware/guards)
+ *
+ * ★★★ v23.3: هم فیلدهای StoreUser و هم Customer را استخراج می‌کند
  */
 export function verifyToken(token: string): DecodedToken | null {
   try {
     const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as any;
 
     return {
-      userId: decoded.userId,
-      username: decoded.username,
-      role: decoded.role,
+      // ─── فیلدهای مشترک ────────────────────────────────────
       tenantId: decoded.tenantId,
       userType: decoded.userType || 'storeUser',
+      iat: decoded.iat,
+      exp: decoded.exp,
+
+      // ─── فیلدهای StoreUser ────────────────────────────────
+      userId: decoded.userId || undefined,
+      username: decoded.username || undefined,
+      role: decoded.role || undefined,
       permissions: decoded.permissions || [],
       storeId: decoded.storeId || undefined,
       storeName: decoded.storeName || undefined,
-      iat: decoded.iat,
-      exp: decoded.exp,
+
+      // ─── فیلدهای Customer (v23.3) ─────────────────────────
+      customerId: decoded.customerId || undefined,
+      firstName: decoded.firstName || undefined,
+      lastName: decoded.lastName || undefined,
+      mobile: decoded.mobile || undefined,
+      portalToken: decoded.portalToken || undefined,
     };
   } catch (error: any) {
     if (error.name === 'TokenExpiredError') {
@@ -143,14 +172,31 @@ export function verifyToken(token: string): DecodedToken | null {
  * ★ در صورت خطا throw می‌کند (برای استفاده در refresh endpoint)
  * - TokenExpiredError: توکن منقضی شده
  * - TokenInvalidError: توکن نامعتبر
+ *
+ * ★★★ v23.3: هم فیلدهای StoreUser و هم Customer را برمی‌گرداند
  */
-export function verifyRefreshToken(token: string): { userId: string; tenantId: string; userType: string } {
+export function verifyRefreshToken(token: string): DecodedToken {
   try {
     const decoded = jwt.verify(token, JWT_REFRESH_SECRET) as any;
     return {
-      userId: decoded.userId,
+      // ─── فیلدهای مشترک ────────────────────────────────────
       tenantId: decoded.tenantId,
       userType: decoded.userType || 'storeUser',
+
+      // ─── فیلدهای StoreUser ────────────────────────────────
+      userId: decoded.userId || undefined,
+      username: decoded.username || undefined,
+      role: decoded.role || undefined,
+      permissions: decoded.permissions || [],
+      storeId: decoded.storeId || undefined,
+      storeName: decoded.storeName || undefined,
+
+      // ─── فیلدهای Customer (v23.3) ─────────────────────────
+      customerId: decoded.customerId || undefined,
+      firstName: decoded.firstName || undefined,
+      lastName: decoded.lastName || undefined,
+      mobile: decoded.mobile || undefined,
+      portalToken: decoded.portalToken || undefined,
     };
   } catch (error: any) {
     if (error.name === 'TokenExpiredError') {
@@ -169,18 +215,58 @@ export function generateAccessToken(payload: Omit<DecodedToken, 'iat' | 'exp'>):
 
 /**
  * تولید Refresh Token
+ *
+ * ★★★ v23.3: پشتیبانی از customerId (برای Customer/Portal)
+ *   - اگر customerId موجود باشد، به جای userId در refresh token قرار می‌گیرد
+ *   - اگر userId موجود باشد، مثل قبل رفتار می‌کند
  */
-export function generateRefreshToken(userId: string, tenantId: string, userType: string): string {
-  return jwt.sign({ userId, tenantId, userType }, JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES } as jwt.SignOptions);
+export function generateRefreshToken(
+  userIdOrPayload: string | { userId?: string; customerId?: string; tenantId: string; userType: string },
+  tenantId?: string,
+  userType?: string
+): string {
+  let payload: any;
+
+  if (typeof userIdOrPayload === 'string') {
+    // حالت قدیمی: generateRefreshToken(userId, tenantId, userType)
+    payload = {
+      userId: userIdOrPayload,
+      tenantId: tenantId,
+      userType: userType || 'storeUser',
+    };
+  } else {
+    // حالت جدید: generateRefreshToken({ userId?, customerId?, tenantId, userType })
+    payload = {
+      tenantId: userIdOrPayload.tenantId,
+      userType: userIdOrPayload.userType || 'storeUser',
+    };
+    if (userIdOrPayload.userId) {
+      payload.userId = userIdOrPayload.userId;
+    }
+    if (userIdOrPayload.customerId) {
+      payload.customerId = userIdOrPayload.customerId;
+    }
+  }
+
+  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES } as jwt.SignOptions);
 }
 
 /**
  * تولید جفت توکن (access + refresh)
  * ★ برای استفاده در login و refresh endpoints
+ *
+ * ★★★ v23.3: پشتیبانی از Customer (customerId در refresh token)
  */
 export function signTokenPair(payload: Omit<DecodedToken, 'iat' | 'exp'>): TokenPair {
   const accessToken = generateAccessToken(payload);
-  const refreshToken = generateRefreshToken(payload.userId, payload.tenantId, payload.userType);
+
+  // ★★★ v23.3: ساخت payload مخصوص refresh token (با userId یا customerId)
+  const refreshToken = generateRefreshToken({
+    userId: payload.userId,
+    customerId: payload.customerId,
+    tenantId: payload.tenantId,
+    userType: payload.userType,
+  });
 
   // محاسبه expiresIn از access token
   const decoded = jwt.decode(accessToken) as any;

@@ -2173,10 +2173,28 @@ const handleSearchKeyDown = useCallback(
           ),
         }))
 
-        const ptFinal = (paymentType || '').toLowerCase()
+            const ptFinal = (paymentType || '').toLowerCase()
         const isCreditOrInstallment =
           ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-        const paidAmount = isCreditOrInstallment ? 0 : cartTotals.totalAmount
+        
+        // ★★★ اصلاح آفلاین: محاسبه صحیح پیش‌پرداخت
+             // ★★★ اصلاح آفلاین: محاسبه صحیح پیش‌پرداخت
+        const currentInstPlanOffline = useStore.getState().installmentPlan
+        const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
+        const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
+        const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
+
+        // ساختار داده‌های اقساط برای صف آفلاین (با تایپ any برای جلوگیری از خطای TS)
+        const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
+          downPayment: downPaymentAmountOffline,
+          numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
+          remainingAmount: remainingAmountOffline,
+          schedules: installmentCalc?.schedule || [],
+        } : undefined
 
         await addToSyncQueue('invoice', {
           method: 'POST',
@@ -2189,12 +2207,14 @@ const handleSearchKeyDown = useCallback(
             items: invoiceItems,
             discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
             taxAmount: cartTotals.taxAmount,
-            paidAmount,
-            remainingAmount: isCreditOrInstallment ? cartTotals.totalAmount : 0,
+            paidAmount: paidAmountOffline,
+            remainingAmount: remainingAmountOffline,
             warehouseId: selectedWarehouseId || undefined,
+            ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
           },
         })
 
+        
                 // ★ OFFLINE-FIX: کاهش موجودی در state محلی + IndexedDB cache
         try {
           const { updateCachedProductStock } = await import('@/lib/offline-db')
@@ -2267,13 +2287,15 @@ const handleSearchKeyDown = useCallback(
           item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
         ),
       }))
-
       const ptFinal = (paymentType || '').toLowerCase()
       const isCreditOrInstallment =
         ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-      const paidAmount = isCreditOrInstallment ? 0 : cartTotals.totalAmount
-      const remainingAmount = isCreditOrInstallment ? cartTotals.totalAmount : 0
-
+      
+      // ★★★ اصلاح: اگر قسطی است، مبلغ پرداختی برابر با پیش‌پرداخت است (نه صفر!)
+      const currentInstPlan = useStore.getState().installmentPlan
+      const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
+      const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
+      const remainingAmount = cartTotals.totalAmount - paidAmount
       const payments =
         cartTotals.totalAmount > 0
           ? [
@@ -2305,30 +2327,34 @@ const handleSearchKeyDown = useCallback(
         warehouseId: selectedWarehouseId || undefined,
       }
 
-      const currentInstallmentPlan = useStore.getState().installmentPlan
-      if (ptFinal === 'installment' && (installmentCalc || currentInstallmentPlan)) {
-        const planData: InstallmentPlanData = {
-          downPayment: installmentDownPayment || currentInstallmentPlan?.downPayment || 0,
-          numberOfInstallments:
-            installmentCount || currentInstallmentPlan?.numberOfInstallments || 1,
-          interestRate: installmentInterestRate || currentInstallmentPlan?.interestRate || 0,
-          installmentPeriod:
-            installmentPeriod || currentInstallmentPlan?.installmentPeriod || 'monthly',
-          totalWithInterest:
-            installmentCalc?.totalWithInterest ||
-            currentInstallmentPlan?.totalWithInterest ||
-            0,
-          installmentAmount:
-            installmentCalc?.installmentAmount ||
-            currentInstallmentPlan?.installmentAmount ||
-            0,
-          remainingAmount:
-            installmentCalc?.remainingAmount || currentInstallmentPlan?.remainingAmount || 0,
+          // ★★★ اصلاح: ارسال داده‌های اقساط با نام صحیح (installmentData) و همچنین در ریشه برای اطمینان صددرصدی
+          // ★★★ اصلاح: ارسال داده‌های اقساط با نام صحیح و جلوگیری از خطای TypeScript
+      const currentInstPlanReq = useStore.getState().installmentPlan
+      if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
+        const planData: any = {
+          downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
+          numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
+          remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
         }
-        requestBody.installmentPlanData = {
+        
+        // ۱. ارسال به صورت nested (مطابق با انتظار بک‌اند)
+        ;(requestBody as any).installmentData = {
           ...planData,
           schedules: installmentCalc?.schedule || [],
         }
+        
+        // ۲. ارسال به صورت flat در ریشه (برای اطمینان از خوانده شدن توسط بک‌اند)
+        ;(requestBody as any).downPayment = planData.downPayment
+        ;(requestBody as any).numberOfInstallments = planData.numberOfInstallments
+        ;(requestBody as any).interestRate = planData.interestRate
+        ;(requestBody as any).installmentPeriod = planData.installmentPeriod
+        ;(requestBody as any).totalWithInterest = planData.totalWithInterest
+        ;(requestBody as any).installmentAmount = planData.installmentAmount
+        ;(requestBody as any).remainingAmount = planData.remainingAmount
       }
 
       if (ptFinal === 'credit') {

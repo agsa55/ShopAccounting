@@ -1,45 +1,34 @@
 // ============================================================================
-// src/app/portal/payment-result/page.tsx — v3.36.2 ★★★
-// ----------------------------------------------------------------------------
-// ★ صفحه نمایش نتیجه پرداخت آنلاین پس از بازگشت از درگاه زرین‌پال
-// ★ کاربر پس از پرداخت (یا لغو) به این صفحه هدایت می‌شود
-// ★ نمایش: موفقیت / لغو / خطا / تکراری
-// ★ دکمه بازگشت به پورتال مشتری
+// src/app/payment-result/page.tsx — Payment Result (v1.0 ★★★)
+// ShopAccounting — صفحه نتیجه پرداخت آنلاین
 // ============================================================================
 
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import {
-  CheckCircle2, XCircle, AlertCircle, Loader2, Home, RefreshCw,
-} from 'lucide-react'
+import { CheckCircle2, XCircle, AlertCircle, Loader2, ArrowLeft, Wallet, Home } from 'lucide-react'
 
 function PaymentResultContent() {
-  const searchParams = useSearchParams()
   const router = useRouter()
-
-  const status = searchParams.get('status') // success | cancelled | failed | already_paid | error
-  const invoiceId = searchParams.get('invoiceId')
+  const searchParams = useSearchParams()
+  
+  const status = searchParams.get('status') as 'success' | 'failed' | 'cancelled' | 'error' | 'already_paid'
+  const paymentId = searchParams.get('paymentId')
   const refId = searchParams.get('refId')
-  const code = searchParams.get('code')
-  const installmentId = searchParams.get('installmentId')
   const reason = searchParams.get('reason')
-
-  // ★ تلاش برای یافتن portal token برای بازگشت به پورتال
+  
   const [portalToken, setPortalToken] = useState<string | null>(null)
-
+  
   useEffect(() => {
-    const saved = localStorage.getItem('portal_token')
-    if (saved) {
-      setPortalToken(saved)
-    }
-    // ★ همچنین ممکن است token در کوکی باشد
-    const match = document.cookie.match(/(?:^|;\s*)portal_token=([^;]+)/)
-    if (match) {
-      setPortalToken(decodeURIComponent(match[1]))
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('portal_token') : null
+    if (saved) setPortalToken(saved)
+    
+    if (typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)portal_token=([^;]+)/)
+      if (match) setPortalToken(decodeURIComponent(match[1]))
     }
   }, [])
 
@@ -47,153 +36,128 @@ function PaymentResultContent() {
     if (portalToken) {
       router.push(`/portal/${portalToken}`)
     } else {
-      // ★ اگر توکن نبود، به صفحه اصلی
       router.push('/')
     }
   }
 
-  // ★ نمایش بر اساس status
-  const config = (() => {
-    switch (status) {
-      case 'success':
-        return {
-          icon: CheckCircle2,
-          iconColor: 'text-emerald-600',
-          bg: 'bg-emerald-50',
-          border: 'border-emerald-200',
-          title: 'پرداخت با موفقیت انجام شد',
-          message: installmentId
-            ? 'قسط موردنظر با موفقیت پرداخت شد. از صبوری شما متشکریم.'
-            : 'فاکتور با موفقیت پرداخت شد. از خرید شما متشکریم.',
-          showRefId: true,
-        }
-      case 'already_paid':
-        return {
-          icon: AlertCircle,
-          iconColor: 'text-amber-600',
-          bg: 'bg-amber-50',
-          border: 'border-amber-200',
-          title: 'این پرداخت قبلاً ثبت شده است',
-          message: 'به نظر می‌رسد این تراکنش قبلاً با موفقیت انجام شده است.',
-          showRefId: !!refId,
-        }
-      case 'cancelled':
-        return {
-          icon: XCircle,
-          iconColor: 'text-gray-500',
-          bg: 'bg-gray-50',
-          border: 'border-gray-200',
-          title: 'پرداخت لغو شد',
-          message: 'شما پرداخت را لغو کردید. در صورت تمایل می‌توانید دوباره تلاش کنید.',
-          showRefId: false,
-        }
-      case 'failed':
-        return {
-          icon: XCircle,
-          iconColor: 'text-red-600',
-          bg: 'bg-red-50',
-          border: 'border-red-200',
-          title: 'پرداخت ناموفق بود',
-          message: code
-            ? `پرداخت با کد خطای ${code} ناموفق بود. در صورت کسر مبلغ، تا ۲۴ ساعت برگشت داده می‌شود.`
-            : 'پرداخت ناموفق بود. لطفاً دوباره تلاش کنید.',
-          showRefId: false,
-        }
-      case 'error':
-      default:
-        return {
-          icon: AlertCircle,
-          iconColor: 'text-red-600',
-          bg: 'bg-red-50',
-          border: 'border-red-200',
-          title: 'خطا در پردازش پرداخت',
-          message: reason
-            ? `خطا: ${reason}. لطفاً با پشتیبانی تماس بگیرید.`
-            : 'خطای ناشناخته در پردازش پرداخت. لطفاً با پشتیبانی تماس بگیرید.',
-          showRefId: false,
-        }
-    }
-  })()
+  const config: Record<string, any> = {
+    success: {
+      icon: CheckCircle2,
+      iconColor: 'text-emerald-600',
+      bgIconColor: 'bg-emerald-100',
+      title: 'پرداخت با موفقیت انجام شد! 🎉',
+      message: 'پرداخت شما با موفقیت ثبت و فاکتور به‌روزرسانی شد. از خرید شما متشکریم.',
+      borderColor: 'border-emerald-200',
+    },
+    already_paid: {
+      icon: CheckCircle2,
+      iconColor: 'text-emerald-600',
+      bgIconColor: 'bg-emerald-100',
+      title: 'این پرداخت قبلاً ثبت شده است',
+      message: 'به نظر می‌رسد این تراکنش قبلاً با موفقیت انجام شده است.',
+      borderColor: 'border-emerald-200',
+    },
+    failed: {
+      icon: XCircle,
+      iconColor: 'text-red-600',
+      bgIconColor: 'bg-red-100',
+      title: 'پرداخت ناموفق بود',
+      message: 'پرداخت شما با خطا مواجه شد. در صورت کسر مبلغ، تا ۷۲ ساعت به حساب شما بازگردانده می‌شود.',
+      borderColor: 'border-red-200',
+    },
+    cancelled: {
+      icon: XCircle,
+      iconColor: 'text-gray-500',
+      bgIconColor: 'bg-gray-100',
+      title: 'پرداخت لغو شد',
+      message: 'شما پرداخت را لغو کردید. در صورت تمایل می‌توانید دوباره تلاش کنید.',
+      borderColor: 'border-gray-200',
+    },
+    error: {
+      icon: AlertCircle,
+      iconColor: 'text-orange-600',
+      bgIconColor: 'bg-orange-100',
+      title: 'خطا در پرداخت',
+      message: reason ? `خطا: ${reason}. لطفاً با پشتیبانی تماس بگیرید.` : 'خطایی در پردازش پرداخت رخ داد.',
+      borderColor: 'border-orange-200',
+    },
+  }
 
-  const Icon = config.icon
+  const c = config[status] || config.error
+  const Icon = c.icon
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">
-      <Card className={`w-full max-w-md shadow-xl ${config.border}`}>
-        <CardHeader className="text-center pb-4">
-          <div className={`w-16 h-16 ${config.bg} rounded-full flex items-center justify-center mx-auto mb-3`}>
-            <Icon className={`w-8 h-8 ${config.iconColor}`} />
-          </div>
-          <CardTitle className="text-lg text-gray-800">{config.title}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-gray-600 text-center leading-relaxed">
-            {config.message}
-          </p>
-
-          {/* ★ نمایش کد پیگیری */}
-          {config.showRefId && refId && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-center">
-              <p className="text-[10px] text-gray-500 mb-1">کد پیگیری پرداخت:</p>
-              <p className="text-base font-bold font-mono text-emerald-700" dir="ltr">
-                {refId}
-              </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
+      <div className="w-full max-w-md">
+        <Card className={`${c.borderColor} shadow-xl`}>
+          <CardContent className="pt-8 pb-6 px-6">
+            <div className="text-center mb-6">
+              <div className={`w-20 h-20 rounded-full ${c.bgIconColor} flex items-center justify-center mx-auto mb-4`}>
+                <Icon className={`w-12 h-12 ${c.iconColor}`} />
+              </div>
+              <h1 className="text-xl font-bold text-gray-900 mb-2">{c.title}</h1>
+              <p className="text-sm text-gray-600 leading-relaxed">{c.message}</p>
             </div>
-          )}
 
-          {/* ★ نمایش شناسه فاکتور (در صورت موجود بودن) */}
-          {invoiceId && (
-            <div className="text-[10px] text-gray-400 text-center">
-              شناسه فاکتور: <span className="font-mono">{invoiceId.slice(0, 8)}...</span>
-              {installmentId && (
-                <span className="mr-2">
-                  | قسط: <span className="font-mono">{installmentId.slice(0, 8)}...</span>
-                </span>
-              )}
-            </div>
-          )}
+            {refId && (
+              <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200 mb-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-emerald-700">کد پیگیری</span>
+                  <span className="text-sm font-mono font-bold text-emerald-900" dir="ltr">{refId}</span>
+                </div>
+              </div>
+            )}
 
-          {/* ★ دکمه‌ها */}
-          <div className="space-y-2">
-            <Button
-              className="w-full bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleBackToPortal}
-            >
-              <Home className="w-4 h-4 ml-1" />
-              بازگشت به پورتال مشتری
-            </Button>
+            {paymentId && (
+              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 mb-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">شناسه پرداخت</span>
+                  <span className="text-xs font-mono text-gray-500" dir="ltr">
+                    {paymentId.substring(0, 8)}...
+                  </span>
+                </div>
+              </div>
+            )}
 
-            {status === 'failed' || status === 'cancelled' ? (
+            <div className="space-y-2">
+              <Button
+                onClick={handleBackToPortal}
+                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Wallet className="w-4 h-4 ml-2" />
+                بازگشت به پورتال مشتری
+              </Button>
+
               <Button
                 variant="outline"
-                className="w-full"
-                onClick={handleBackToPortal}
+                onClick={() => router.push('/')}
+                className="w-full h-11"
               >
-                <RefreshCw className="w-4 h-4 ml-1" />
-                تلاش مجدد
+                <Home className="w-4 h-4 ml-2" />
+                بازگشت به صفحه اصلی
               </Button>
-            ) : null}
-          </div>
+            </div>
+          </CardContent>
+        </Card>
 
-          {/* ★ توضیحات اضافی */}
-          <div className="text-[10px] text-gray-400 text-center pt-2 border-t border-gray-100">
-            در صورت存在问题، با پشتیبانی فروشگاه تماس بگیرید
-          </div>
-        </CardContent>
-      </Card>
+        <p className="text-center text-xs text-gray-400 mt-6">
+          ShopAccounting — سیستم حسابداری فروشگاهی
+        </p>
+      </div>
     </div>
   )
 }
 
 export default function PaymentResultPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center" dir="rtl">
-          <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50" dir="rtl">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">در حال بارگذاری...</p>
         </div>
-      }
-    >
+      </div>
+    }>
       <PaymentResultContent />
     </Suspense>
   )

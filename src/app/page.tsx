@@ -74,6 +74,7 @@ const LazyRegisterForm = lazy(() =>
 )
 
 function clearAuthData() {
+  if (typeof window === 'undefined') return
   localStorage.removeItem('token')
   localStorage.removeItem('refreshToken')
   localStorage.removeItem('user')
@@ -96,34 +97,51 @@ export default function HomePage() {
 
   const [authCheckDone, setAuthCheckDone] = useState(false)
 
+  // ★★★ v9.5.6: تشخیص مسیر پورتال در ابتدای رندر (قبل از هر useEffect)
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/'
+  const isPortalRoute = currentPath.startsWith('/portal')
+  const isSubscriptionRoute = currentPath.startsWith('/subscription')
+  const isPaymentResultRoute = currentPath.startsWith('/payment-result')
+    const isPortalViewRoute = currentPath.startsWith('/portal-view')
+  const isSpecialRoute = isPortalRoute || isSubscriptionRoute || isPaymentResultRoute
+
+  // ★★★ v9.5.6: اگر مسیر پورتال یا اشتراک است، هیچ کاری نکن
+  // فایل‌های مخصوص (portal/[token]/page.tsx, subscription/*/page.tsx) خودشان را مدیریت می‌کنند
+  if (isSpecialRoute) {
+    console.log('[HomePage] 🚫 Special route detected:', currentPath, '- rendering nothing, letting sub-routes handle it')
+    // بازگشت null تا Next.js فایل مربوطه را رندر کند
+    return null
+  }
+
   useEffect(() => {
     if (_globalInitDone) return
     _globalInitDone = true
 
     console.log('[HomePage] Auth check starting')
 
-    try {
-      const raw = localStorage.getItem('shop-accounting-store')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed && 'currentView' in parsed) {
-          delete parsed.currentView
-          localStorage.setItem('shop-accounting-store', JSON.stringify(parsed))
+    // ─── پاک کردن currentView از store (فقط در browser) ──────────
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('shop-accounting-store')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed && 'currentView' in parsed) {
+            delete parsed.currentView
+            localStorage.setItem('shop-accounting-store', JSON.stringify(parsed))
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
-    // ★★★ v9.5.3: تشخیص مسیر فعلی از URL
-    //   اگر URL شامل /dashboard باشد → کاربر می‌خواهد به داشبورد برود
-    //   اگر URL فقط / باشد → لندینگ پیج نمایش داده شود
-    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/'
-    const isDashboardRoute = currentPath.includes('/dashboard')
-    console.log('[HomePage] Current path:', currentPath, 'isDashboard:', isDashboardRoute)
+    const currentPathInner = typeof window !== 'undefined' ? window.location.pathname : '/'
+    const isDashboardRoute = currentPathInner.includes('/dashboard')
+    
+    console.log('[HomePage] Current path:', currentPathInner, 'isDashboard:', isDashboardRoute)
 
-    const token = localStorage.getItem('token')
+    // ─── بررسی وجود توکن ───────────────────────────────────────────
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
     if (!token) {
-      // ★★★ v9.5.3: اگر توکن نیست و مسیر dashboard است → login صفحه
       if (isDashboardRoute) {
         useAppStore.setState({ currentView: 'login' })
       } else {
@@ -136,6 +154,7 @@ export default function HomePage() {
       return
     }
 
+    // ─── بررسی و تأیید توکن ────────────────────────────────────────
     const doVerify = async () => {
       try {
         const verifyRes = await fetch('/api/auth/verify', {
@@ -145,8 +164,16 @@ export default function HomePage() {
         if (verifyRes.ok) {
           const data = await verifyRes.json()
           if (data?.success && data?.user) {
+            // ★★★ v9.5.6: اگر portalUser است، currentView را portal نگه دار
+            const userType = data?.user?.userType || data?.data?.userType
+            if (userType === 'portalUser') {
+              console.log('[HomePage] Portal user detected, not setting currentView')
+              // currentView را تنظیم نکن - فایل portal/[token] خودش مدیریت می‌کند
+              setAuthCheckDone(true)
+              return
+            }
+            
             useAppStore.getState().login(data.user, token)
-            // ★★★ v9.5.3: اگر مسیر dashboard است → داشبورد، در غیر این صورت → لندینگ
             if (isDashboardRoute) {
               useAppStore.setState({ currentView: 'dashboard' })
             } else {
@@ -157,7 +184,8 @@ export default function HomePage() {
           }
         }
 
-        const refreshToken = localStorage.getItem('refreshToken')
+        // ─── تلاش برای refresh توکن ───────────────────────────────
+        const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null
         if (refreshToken) {
           try {
             const refreshRes = await fetch('/api/auth/refresh', {
@@ -170,12 +198,22 @@ export default function HomePage() {
               const refreshData = await refreshRes.json()
               if (refreshData?.success && refreshData?.data) {
                 const { token: newToken, refreshToken: newRefresh, user: refreshUser } = refreshData.data
+                
+                // ★★★ v9.5.6: اگر portalUser است، currentView را portal نگه دار
+                const userType = refreshUser?.userType
+                if (userType === 'portalUser') {
+                  console.log('[HomePage] Portal user detected after refresh, not setting currentView')
+                  setAuthCheckDone(true)
+                  return
+                }
+                
                 if (newToken && refreshUser) {
-                  localStorage.setItem('token', newToken)
-                  localStorage.setItem('refreshToken', newRefresh || '')
-                  localStorage.setItem('user', JSON.stringify(refreshUser))
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('token', newToken)
+                    localStorage.setItem('refreshToken', newRefresh || '')
+                    localStorage.setItem('user', JSON.stringify(refreshUser))
+                  }
                   useAppStore.getState().login(refreshUser, newToken, newRefresh)
-                  // ★★★ v9.5.3: اگر مسیر dashboard است → داشبورد، در غیر این صورت → لندینگ
                   if (isDashboardRoute) {
                     useAppStore.setState({ currentView: 'dashboard' })
                   } else {
@@ -200,13 +238,19 @@ export default function HomePage() {
     doVerify()
   }, [])
 
+  // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
   if (!authCheckDone) {
     return <AuthLoadingSplash />
   }
 
-  // ★★★ v9.5.4: رندر AppShell برای تمام صفحات داخل برنامه (به‌جز landing, login, register)
-  // این شامل dashboard, pos, products, invoices, accounting و... می‌شود
+  // ─── رندر AppShell فقط برای storeUser ──────────────────────────
   if (isAuthenticated && user && !['landing', 'login', 'register'].includes(currentView)) {
+    // ★★★ v9.5.6: اگر portalUser است، AppShell رندر نکن
+    if (user.userType === 'portalUser') {
+      console.log('[HomePage] Portal user detected, not rendering AppShell')
+      return <AuthLoadingSplash />
+    }
+    
     return (
       <Suspense fallback={<AuthLoadingSplash />}>
         <LazyAppShell />
@@ -230,7 +274,7 @@ export default function HomePage() {
     )
   }
 
-  // ★★★ v9.5.4: پیش‌فرض همیشه لندینگ پیج
+  // پیش‌فرض همیشه لندینگ پیج
   return (
     <Suspense fallback={<AuthLoadingSplash />}>
       <LazyLandingPage />

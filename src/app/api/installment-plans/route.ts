@@ -1,5 +1,8 @@
 // ============================================================================
-// src/app/api/installment-plans/route.ts — GET (v3.0)
+// src/app/api/installment-plans/route.ts — GET (v3.1 ★★★ Dynamic Calculation)
+// ============================================================================
+// ★★★ v3.1: محاسبه پویای باقیمانده و کل پرداختی بر اساس اقساط واقعی
+//   ★ جلوگیری از نمایش اعداد قدیمی یا ناهماهنگ در صفحه اقساط
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -64,6 +67,13 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
       const paidCount = schedules.filter((s: any) => s.status?.toUpperCase() === 'PAID').length
       const totalCount = schedules.length
+      
+      // ★★★ v3.1: محاسبه پویای مبالغ بر اساس داده‌های واقعی اقساط
+      const schedulePaidSum = schedules.reduce((sum: number, s: any) => sum + (Number(s.paidAmount) || 0), 0)
+      const dynamicTotalPaid = (Number(plan.downPayment) || 0) + schedulePaidSum
+      const dynamicRemaining = Math.max(0, (Number(plan.totalAmount) || 0) - dynamicTotalPaid)
+      // ★★★ پایان محاسبات پویا
+
       const overdueCount = schedules.filter((s: any) => {
         if (s.status?.toUpperCase() === 'PAID') return false
         return new Date(s.dueDate) < new Date()
@@ -71,11 +81,19 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
       return {
         id: plan.id, invoiceId: plan.invoiceId, invoiceNumber, customerId: plan.customerId, customerName,
-        totalAmount: plan.totalAmount, downPayment: plan.downPayment, remainingAmount: plan.remainingAmount,
+        totalAmount: plan.totalAmount, 
+        downPayment: plan.downPayment, 
+        
+        // ★★★ استفاده از مقادیر محاسبه‌شده پویا به جای مقادیر دیتابیس
+        remainingAmount: dynamicRemaining,
+        totalPaidAmount: dynamicTotalPaid,
+        // ★★★ پایان تغییرات
+        
         interestRate: plan.interestRate, totalWithInterest: plan.totalWithInterest,
         numberOfInstallments: plan.numberOfInstallments, installmentAmount: plan.installmentAmount,
-        installmentPeriod: plan.installmentPeriod, status: plan.status, paidInstallments: plan.paidInstallments || paidCount,
-        totalPaidAmount: plan.totalPaidAmount, nextDueDate: plan.nextDueDate, description: plan.description,
+        installmentPeriod: plan.installmentPeriod, status: plan.status, 
+        paidInstallments: plan.paidInstallments || paidCount,
+        nextDueDate: plan.nextDueDate, description: plan.description,
         createdAt: plan.createdAt, updatedAt: plan.updatedAt, schedules,
         totalInstallments: totalCount, paidCount, overdueCount,
         progressPct: totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0,
@@ -128,15 +146,27 @@ async function getSinglePlan(tenantDb: any, tenantId: string, planId: string) {
 
     const paidCount = schedules.filter((s: any) => s.status?.toUpperCase() === 'PAID').length
 
+    // ★★★ v3.1: محاسبه پویای مبالغ در حالت تک‌پلن نیز اعمال شود
+    const schedulePaidSum = schedules.reduce((sum: number, s: any) => sum + (Number(s.paidAmount) || 0), 0)
+    const dynamicTotalPaid = (Number(plan.downPayment) || 0) + schedulePaidSum
+    const dynamicRemaining = Math.max(0, (Number(plan.totalAmount) || 0) - dynamicTotalPaid)
+    // ★★★ پایان محاسبات پویا
+
     return NextResponse.json({
       success: true,
       data: {
         id: plan.id, invoiceId: plan.invoiceId, invoiceNumber: (plan.invoice as any)?.number || '---',
         customerId: plan.customerId, customerName, totalAmount: plan.totalAmount, downPayment: plan.downPayment,
-        remainingAmount: plan.remainingAmount, interestRate: plan.interestRate, totalWithInterest: plan.totalWithInterest,
+        
+        // ★★★ استفاده از مقادیر محاسبه‌شده پویا
+        remainingAmount: dynamicRemaining,
+        totalPaidAmount: dynamicTotalPaid,
+        // ★★★ پایان تغییرات
+        
+        interestRate: plan.interestRate, totalWithInterest: plan.totalWithInterest,
         numberOfInstallments: plan.numberOfInstallments, installmentAmount: plan.installmentAmount,
         installmentPeriod: plan.installmentPeriod, status: plan.status, paidInstallments: plan.paidInstallments || paidCount,
-        totalPaidAmount: plan.totalPaidAmount, nextDueDate: plan.nextDueDate, description: plan.description,
+        nextDueDate: plan.nextDueDate, description: plan.description,
         createdAt: plan.createdAt, updatedAt: plan.updatedAt, schedules, paidCount,
         totalInstallments: schedules.length,
         progressPct: schedules.length > 0 ? Math.round((paidCount / schedules.length) * 100) : 0,

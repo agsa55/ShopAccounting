@@ -120,63 +120,131 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [resendCountdown])
 
-  // ★★★ تابع اصلاح‌شده برای هدایت پس از لاگین
- function redirectAfterLogin(subDomain: string) {
-   console.log('[DEBUG] redirectAfterLogin اجرا شد با', subDomain)
- document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`;
-  window.location.replace('/dashboard');
-  console.log('[DEBUG] setCurrentView(dashboard) صدا زده شد')
+   // ★★★ v3.39: تابع اصلاح‌شده برای هدایت پس از لاگین
+  function redirectAfterLogin(subDomain: string, userType?: string, portalToken?: string) {
+    console.log('[DEBUG] redirectAfterLogin اجرا شد با', subDomain, 'userType:', userType)
+    
+    // تنظیم کوکی tenant-slug (سازگار با local و production)
+    const cookieDomain = typeof window !== 'undefined' ? window.location.hostname : ''
+    const isLocalhost = cookieDomain === 'localhost' || cookieDomain === '127.0.0.1'
+    
+    if (isLocalhost) {
+      document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`
+    } else {
+      // در production، domain را تنظیم کن
+      document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax; domain=.${cookieDomain.split('.').slice(-2).join('.')}`
+    }
 
-}
+    // ★★★ v3.39: اگر مشتری است، به پورتال با token هدایت شود
+    if (userType === 'portalUser') {
+      if (portalToken) {
+        const portalPath = `/portal/${portalToken}`
+        console.log('[DEBUG] Redirecting customer to', portalPath)
+        
+        // استفاده از window.location.replace برای redirect کامل
+        // این روش هم در local و هم در production کار می‌کند
+        if (typeof window !== 'undefined') {
+          window.location.replace(portalPath)
+        }
+      } else {
+        console.log('[DEBUG] Redirecting customer to /portal (no token, will redirect)')
+        if (typeof window !== 'undefined') {
+          window.location.replace('/portal')
+        }
+      }
+      return
+    }
+
+    // برای StoreUser (پرسنل فروشگاه)
+    console.log('[DEBUG] Redirecting staff to /dashboard')
+    if (typeof window !== 'undefined') {
+      window.location.replace('/dashboard')
+    }
+  }
 
   function handleGoToLanding() { window.location.href = '/' }
 
-  function handleLoginSuccess(data: LoginResponse['data']) {
-  if (!data) return
-  console.log('[DEBUG] handleLoginSuccess شروع شد', data)
+    function handleLoginSuccess(data: LoginResponse['data']) {
+    if (!data) return
+    console.log('[DEBUG] handleLoginSuccess شروع شد', data)
 
-  const userObj = {
-    id: data.user.id,
-    username: data.user.username,
-    role: data.user.role,
-    tenantId: data.user.tenantId,
-    storeId: data.user.storeId,
-    storeName: data.user.storeName || data.tenant?.companyName || '',
-    permissions: Array.isArray(data.user.permissions) ? data.user.permissions : [],
-    userType: data.user.userType,
-    mobile: data.user.mobile,
+    const isPortalUser = data.user.userType === 'portalUser'
+    
+    // ★★★ v3.40: دریافت portalToken
+    const portalToken = isPortalUser ? (data.user as any).portalToken : null
+    console.log('[DEBUG] isPortalUser:', isPortalUser, 'portalToken:', portalToken?.substring(0, 8) + '...')
+
+    const userObj = {
+      id: data.user.id,
+      username: isPortalUser
+        ? `${(data.user as any).firstName || ''} ${(data.user as any).lastName || ''}`.trim()
+        : data.user.username,
+      role: isPortalUser ? 'customer' : data.user.role,
+      tenantId: data.user.tenantId,
+      storeId: (data.user as any).storeId,
+      storeName: data.user.storeName || data.tenant?.companyName || '',
+      permissions: Array.isArray(data.user.permissions) ? data.user.permissions : [],
+      userType: data.user.userType,
+      mobile: data.user.mobile,
+      customerId: isPortalUser ? data.user.id : undefined,
+      firstName: isPortalUser ? (data.user as any).firstName : undefined,
+      lastName: isPortalUser ? (data.user as any).lastName : undefined,
+      currentBalance: isPortalUser ? (data.user as any).currentBalance : undefined,
+      creditLimit: isPortalUser ? (data.user as any).creditLimit : undefined,
+      portalToken: portalToken,
+    }
+
+    setAccessToken(data.token)
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('refreshToken', data.refreshToken)
+
+      if (portalToken) {
+        localStorage.setItem('portal_token', portalToken)
+        console.log('[DEBUG] ✅ portal_token saved to localStorage:', portalToken.substring(0, 8) + '...')
+      }
+    }
+
+    setStoredUser(userObj)
+
+    if (data.tenant) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('tenant', JSON.stringify(data.tenant))
+        localStorage.setItem('storeName', data.tenant.companyName || '')
+        localStorage.setItem('planName', data.tenant.planName || '')
+      }
+    }
+
+    console.log('[DEBUG] قبل از storeLogin')
+    storeLogin(userObj, data.token, data.refreshToken)
+    console.log('[DEBUG] بعد از storeLogin')
+
+    if (data.tenant) {
+      setCurrentTenant(data.tenant)
+      setPlanName(data.tenant.planName || '')
+    }
+
+    // ★★★ v3.40: برای portalUser، مستقیم redirect کن (بدون تغییر currentView)
+    if (isPortalUser && portalToken) {
+      const portalPath = `/portal-view?token=${portalToken}`
+      console.log('[DEBUG] 🚪 Redirecting customer to:', portalPath)
+      if (typeof window !== 'undefined') {
+        window.location.replace(portalPath)
+      }
+      return
+    }
+
+    // برای storeUser، به داشبورد برو
+    const subDomain = data.tenant?.subDomain
+    console.log('[DEBUG] subDomain =', subDomain)
+    if (subDomain) {
+      document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`
+      console.log('[DEBUG] 🚪 Redirecting store user to /dashboard')
+      if (typeof window !== 'undefined') {
+        window.location.replace('/dashboard')
+      }
+    }
   }
-
-  setAccessToken(data.token)
-  localStorage.setItem('refreshToken', data.refreshToken)
-
-  setStoredUser({ /* ... بدون تغییر ... */ })
-
-  if (data.tenant) {
-    localStorage.setItem('tenant', JSON.stringify(data.tenant))
-    localStorage.setItem('storeName', data.tenant.companyName || '')
-    localStorage.setItem('planName', data.tenant.planName || '')
-  }
-
-  console.log('[DEBUG] قبل از storeLogin')
-  storeLogin(userObj, data.token, data.refreshToken)
-  console.log('[DEBUG] بعد از storeLogin')
-
-  if (data.tenant) {
-    setCurrentTenant(data.tenant)
-    setPlanName(data.tenant.planName || '')
-  }
-
-  const subDomain = data.tenant?.subDomain
-  console.log('[DEBUG] subDomain =', subDomain)
-  if (subDomain) {
-    console.log('[DEBUG] قبل از redirectAfterLogin')
-    redirectAfterLogin(subDomain)
-    console.log('[DEBUG] بعد از redirectAfterLogin')
-  } else {
-    console.log('[DEBUG] subDomain نبود، ریدایرکت انجام نشد!')
-  }
-}
 
   async function handlePasswordLogin(e: React.FormEvent) {
     e.preventDefault()
