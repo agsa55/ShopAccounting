@@ -1,5 +1,5 @@
 // ============================================================================
-// src/lib/subscription-utils.ts — Subscription Helper Functions (v9.0 ★★★)
+// src/lib/subscription-utils.ts — Subscription Helper Functions (v9.1 ★★★)
 // ShopAccounting — Utilities for renewal, upgrade, and applying payments
 // ----------------------------------------------------------------------------
 // این فایل شامل تمام منطق تجاری سیستم اشتراک است:
@@ -7,6 +7,14 @@
 //   - getOrCreatePlanTier: یافتن/ایجاد PlanTier از روی نام
 //   - createPendingSubscription: ایجاد رکورد Subscriptions و SubscriptionPayments
 //   - applySubscriptionPayment: اعمال پرداخت موفق روی Tenant + Subscriptions
+//
+// ★★★ v9.1: FIX — re-export تایپ‌های BillingCycle و SubscriptionStatusResult
+//   قبلاً این تایپ‌ها فقط از plan-limits.ts import می‌شدند ولی دوباره export
+//   نمی‌شدند. فایل‌هایی مثل checkout/route.ts که می‌نوشتند:
+//     import { type BillingCycle } from '@/lib/subscription-utils'
+//   با این خطا مواجه می‌شدند:
+//     "Module declares 'BillingCycle' locally, but it is not exported"
+//   چون import به‌تنهایی یک type را عمومی (قابل import از بیرون) نمی‌کند.
 //
 // ★★★ v9.0: پشتیبانی از پلن مادام‌العمر (lifetime)
 //   - در applySubscriptionPayment: اگر billingCycle='lifetime' است، expiresAt=null
@@ -25,6 +33,10 @@ import {
   type BillingCycle,
   type SubscriptionStatusResult,
 } from '@/lib/plan-limits'
+
+// ★★★ v9.1: re-export این تایپ‌ها تا فایل‌های دیگر (مثل checkout/route.ts)
+//   بتوانند آن‌ها را مستقیماً از subscription-utils.ts هم import کنند
+export type { BillingCycle, SubscriptionStatusResult }
 
 // ─── Types ────────────────────────────────────────────────────────────
 

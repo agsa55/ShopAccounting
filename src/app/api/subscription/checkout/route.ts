@@ -1,7 +1,17 @@
 // ============================================================================
-// src/app/api/subscription/checkout/route.ts (v9.4.0 ★★★)
+// src/app/api/subscription/checkout/route.ts (v9.4.1 ★★★)
 // ShopAccounting — Subscription Checkout API
 // ----------------------------------------------------------------------------
+// ★★★ v9.4.1: FIX — ساخت پویای appUrl از روی هدرهای درخواست
+//   قبلاً: appUrl فقط از process.env.NEXT_PUBLIC_APP_URL خوانده می‌شد و اگر
+//   این env var ست نشده بود (یا هنوز مقدار لوکال داشت)، callback زرین‌پال
+//   همیشه به http://localhost:3000 اشاره می‌کرد — حتی روی سرور دیپلوی‌شده.
+//   حالا appUrl ابتدا از هدرهای خودِ درخواست (host + x-forwarded-proto) ساخته
+//   می‌شود؛ یعنی چه در لوکال (localhost:3000) چه روی Railway (دامنه‌ی موقت یا
+//   دامنه‌ی نهایی بعداً) بدون نیاز به تنظیم دستی env var درست کار می‌کند.
+//   NEXT_PUBLIC_APP_URL همچنان به‌عنوان fallback نگه داشته شده (برای مواردی
+//   که هدر host در دسترس نباشد).
+//
 // ★★★ v9.4.0: پشتیبانی از حالت دمو
 //   - اگر tenant فعلی دمو است و می‌خواهد پلن بخرد:
 //     • action='new' → یک tenant جدید ایجاد می‌کند (نه upgrade)
@@ -30,6 +40,26 @@ interface CheckoutBody {
   tierName: 'simple' | 'professional' | 'enterprise'
   billingCycle: 'annual' | 'lifetime'
   action?: 'upgrade' | 'renew' | 'new'
+}
+
+// ★★★ v9.4.1: ساخت پویای base URL از روی هدرهای درخواست
+//   این تابع در لوکال (host=localhost:3000) و در هر محیط دیپلوی‌شده‌ای
+//   (host=دامنه‌ی واقعی سرو‌کننده‌ی درخواست) به‌درستی کار می‌کند، بدون
+//   نیاز به تنظیم دستی هیچ env var ای.
+function resolveAppUrl(req: NextRequest): string {
+  const host = req.headers.get('host')
+
+  if (host) {
+    const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1')
+    // ★ Railway و اکثر پلتفرم‌های میزبانی، هدر x-forwarded-proto را برای
+    //   ترافیک HTTPS پشت پراکسی ست می‌کنند
+    const forwardedProto = req.headers.get('x-forwarded-proto')
+    const protocol = forwardedProto || (isLocalHost ? 'http' : 'https')
+    return `${protocol}://${host}`
+  }
+
+  // ★ fallback نهایی — اگر به هر دلیلی هدر host در دسترس نبود
+  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 }
 
 export const POST = withTenantIsolation(
@@ -103,7 +133,9 @@ export const POST = withTenantIsolation(
       // ─── ۳. ایجاد درگاه زرین‌پال ─────────────────────────────────
       const merchantId = process.env.ZARINPAL_MERCHANT_ID
       const isSandbox = process.env.ZARINPAL_SANDBOX === 'true'
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      // ★★★ v9.4.1: appUrl حالا پویا از روی هدرهای درخواست ساخته می‌شود
+      const appUrl = resolveAppUrl(req)
+      console.log(`[Subscription Checkout] Resolved appUrl: ${appUrl}`)
 
       if (!merchantId) {
         console.error('[Subscription Checkout] ZARINPAL_MERCHANT_ID not set')

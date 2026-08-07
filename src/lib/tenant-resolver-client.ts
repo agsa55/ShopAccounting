@@ -1,5 +1,5 @@
 // ============================================================================
-// src/lib/tenant-resolver-client.ts — Client-safe Tenant Helpers (v1.0)
+// src/lib/tenant-resolver-client.ts — Client-safe Tenant Helpers (v1.1)
 // ShopAccounting v4.0 — Multi-tenant SaaS Platform
 // ============================================================================
 // فقط توابع قابل استفاده در Client Components
@@ -55,17 +55,27 @@ export function getTenantViewClient(): string | null {
 /**
  * ساخت URL اختصاصی tenant بر اساس محیط فعلی
  *
+ * ★★★ v1.1: FIX — قبلاً برای هر هاست غیر-localhost همیشه یک URL ساب‌دامینی
+ *   (https://{slug}.shopaccounting.ir) ساخته می‌شد، حتی وقتی هنوز روی دامنه‌ی
+ *   موقت Railway (یا هر دامنه‌ای غیر از دامنه‌ی اصلی) هستیم و DNS/SSL برای
+ *   ساب‌دامین‌های wildcard آماده نیست. حالا فقط وقتی هاست فعلی واقعاً همان
+ *   دامنه‌ی اصلی (یا زیردامنه‌ای از آن) باشد، ساب‌دامین ساخته می‌شود؛ در غیر
+ *   این صورت از همان دامنه‌ی فعلی + مسیر (path-based، که proxy.ts از قبل
+ *   پشتیبانی می‌کند) استفاده می‌شود.
+ *
  * @example
  * import { getTenantUrl } from '@/lib/tenant-resolver-client';
  *
  * const url = getTenantUrl('myshop', '/dashboard');
- * // تولید:   https://myshop.shopaccounting.ir/dashboard
- * // توسعه:   http://localhost:3000/myshop/dashboard
+ * // روی دامنه‌ی اصلی:     https://myshop.shopaccounting.ir/dashboard
+ * // روی دامنه‌ی موقت:     https://shopaccounting-production.up.railway.app/myshop/dashboard
+ * // توسعه:                http://localhost:3000/myshop/dashboard
  */
 export function getTenantUrl(slug: string, path: string = ''): string {
+  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
+
   if (typeof window === 'undefined') {
     // Server-side fallback
-    const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
     return `https://${slug}.${rootDomain}${path}`;
   }
 
@@ -74,8 +84,16 @@ export function getTenantUrl(slug: string, path: string = ''): string {
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return `http://localhost:${window.location.port}/${slug}${path}`;
   }
-  const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
-  return `https://${slug}.${rootDomain}${path}`;
+
+  // ★ فقط وقتی واقعاً روی دامنه‌ی اصلی (یا زیردامنه‌ای از آن) هستیم، ساب‌دامین بساز
+  const isOnRootDomain = hostname === rootDomain || hostname.endsWith(`.${rootDomain}`);
+  if (isOnRootDomain) {
+    return `https://${slug}.${rootDomain}${path}`;
+  }
+
+  // ★ در غیر این صورت (مثلاً دامنه‌ی موقت Railway) — از همان origin فعلی
+  //   به‌صورت path-based استفاده کن؛ proxy.ts این حالت را پشتیبانی می‌کند
+  return `${window.location.origin}/${slug}${path}`;
 }
 
 // ============================================================================
