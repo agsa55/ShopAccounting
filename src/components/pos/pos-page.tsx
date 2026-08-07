@@ -1424,108 +1424,145 @@ const isProcessingScan = useRef(false);
   [addToCart, cart, toast, isOnline, setProducts, computeLineTotal, getUnitLabel]
 );
 
-  // ══════════════════════════════════════════════════════════════
-  // ★ بارکدخوان هوشمند در سطح کل صفحه (بدون نیاز به فوکوس روی اینپوت)
-  // ══════════════════════════════════════════════════════════════
-  useEffect(() => {
-    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
-      // ۱. اگر فوکوس روی اینپوت جستجوی خودمان است، اجازه دهیم handleSearchKeyDown کار کند
-      if (document.activeElement === searchInputRef.current) return;
+ // ══════════════════════════════════════════════════════════════
+// ★ بارکدخوان هوشمند در سطح کل صفحه (با پشتیبانی کامل آفلاین)
+// ★★★ v2.1: رفع باگ اسکن دوگانه + پشتیبانی صریح و قطعی از حالت آفلاین
+// ══════════════════════════════════════════════════════════════
+useEffect(() => {
+  const handleGlobalKeyDown = async (e: KeyboardEvent) => {
+    // ★★★ جلوگیری از پردازش همزمان (رفع باگ اسکن دوتایی)
+    if (isProcessingScan.current) {
+      e.preventDefault()
+      return
+    }
 
-      // ۲. اگر فوکوس روی هر اینپوت/textarea/select/contentEditable دیگری است، کاری نکنیم
-      const activeEl = document.activeElement as HTMLElement | null;
-      if (activeEl) {
-        const tagName = activeEl.tagName.toLowerCase();
-        if (
-          tagName === 'input' ||
-          tagName === 'textarea' ||
-          tagName === 'select' ||
-          activeEl.isContentEditable
-        ) {
-          return;
-        }
+    // ۱. اگر فوکوس روی اینپوت جستجوی خودمان است، اجازه دهیم handleSearchKeyDown کار کند
+    if (document.activeElement === searchInputRef.current) return
+
+    // ۲. اگر فوکوس روی هر اینپوت/textarea/select/contentEditable دیگری است، کاری نکنیم
+    const activeEl = document.activeElement as HTMLElement | null
+    if (activeEl) {
+      const tagName = activeEl.tagName.toLowerCase()
+      if (
+        tagName === 'input' ||
+        tagName === 'textarea' ||
+        tagName === 'select' ||
+        activeEl.isContentEditable
+      ) {
+        return
       }
+    }
 
-      // ۳. پردازش کلید Enter: اگر بافر بارکد غیرخالی است، آن را جستجو کن
-      if (e.key === 'Enter') {
-        const barcode = barcodeBufferRef.current.trim();
-        if (barcode.length >= 3) {
-          e.preventDefault();
+    // ۳. پردازش کلید Enter: اگر بافر بارکد غیرخالی است، آن را جستجو کن
+    if (e.key === 'Enter') {
+      const barcode = barcodeBufferRef.current.trim()
+      if (barcode.length >= 3) {
+        e.preventDefault()
+        
+        // ★★★ فعال کردن flag برای جلوگیری از اسکن مجدد
+        isProcessingScan.current = true
 
-          try {
-            // ابتدا جستجو به عنوان بارکد
-            const foundByBarcode = await posLookupByBarcode(barcode);
-            if (foundByBarcode && foundByBarcode.id) {
-              handleAddToCart(foundByBarcode);
-              toast({
-                title: '✓ افزودن به سبد',
-                description: `${foundByBarcode.name} اضافه شد`,
-              });
+        try {
+          // ==========================================================
+          // ★★★ حالت آفلاین: جستجو مستقیم و سریع در کش محلی
+          // ==========================================================
+          if (!navigator.onLine) {
+            const offlineSource = posRecents.length > 0 ? posRecents : products
+            const cachedProduct = offlineSource.find(
+              (p) => p.isActive !== false && (p.barcode === barcode || p.code === barcode)
+            )
+            
+            if (cachedProduct) {
+              handleAddToCart(cachedProduct)
+              toast({ 
+                title: '✓ افزودن به سبد (آفلاین)', 
+                description: cachedProduct.name 
+              })
             } else {
-              // در غیر این صورت، جستجو به عنوان کد محصول
-              const codeFound = await posLookupByCode(barcode);
+              toast({
+                title: '📡 آفلاین — یافت نشد',
+                description: `بارکد "${barcode}" در حافظه محلی ثبت نشده است`,
+                variant: 'destructive',
+              })
+            }
+          } 
+          // ==========================================================
+          // ★★★ حالت آنلاین: جستجو در سرور
+          // ==========================================================
+          else {
+            const foundByBarcode = await posLookupByBarcode(barcode)
+            if (foundByBarcode && foundByBarcode.id) {
+              handleAddToCart(foundByBarcode)
+              toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
+            } else {
+              // تلاش دوم: جستجو به عنوان کد محصول
+              const codeFound = await posLookupByCode(barcode)
               if (codeFound && codeFound.id) {
-                handleAddToCart(codeFound);
-                toast({
-                  title: '✓ افزودن به سبد',
-                  description: `${codeFound.name} اضافه شد`,
-                });
+                handleAddToCart(codeFound)
+                toast({ title: '✓ افزودن به سبد', description: codeFound.name })
               } else {
                 toast({
                   title: 'یافت نشد',
                   description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
                   variant: 'destructive',
-                });
+                })
               }
             }
-          } catch (err) {
-            console.error('[POS] Global barcode scan error:', err);
           }
-
-          // پاک کردن بافر
-          barcodeBufferRef.current = '';
+        } catch (err) {
+          console.error('[POS] Global barcode scan error:', err)
+          toast({ title: 'خطا', description: 'خطا در پردازش بارکد', variant: 'destructive' })
+        } finally {
+          // پاک کردن بافر و ریست کردن تایمر
+          barcodeBufferRef.current = ''
           if (barcodeTimerRef.current) {
-            clearTimeout(barcodeTimerRef.current);
-            barcodeTimerRef.current = null;
+            clearTimeout(barcodeTimerRef.current)
+            barcodeTimerRef.current = null
           }
+          
+          // ★★★ غیرفعال کردن flag بعد از ۵۰۰ میلی‌ثانیه (Debounce)
+          setTimeout(() => {
+            isProcessingScan.current = false
+          }, 500)
         }
-        return;
       }
+      return
+    }
 
-      // ۴. کلید Escape: پاک کردن بافر
-      if (e.key === 'Escape') {
-        barcodeBufferRef.current = '';
-        if (barcodeTimerRef.current) {
-          clearTimeout(barcodeTimerRef.current);
-          barcodeTimerRef.current = null;
-        }
-        return;
-      }
-
-      // ۵. نادیده گرفتن کلیدهای کنترلی و کلیدهای خاص
-      if (e.key.length > 1) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-      // ۶. اضافه کردن کاراکتر به بافر بارکد
-      barcodeBufferRef.current += e.key;
-
-      // ۷. تنظیم تایمر: اگر ۲ ثانیه کلیدی زده نشد، بافر را پاک کن
+    // ۴. کلید Escape: پاک کردن بافر
+    if (e.key === 'Escape') {
+      barcodeBufferRef.current = ''
       if (barcodeTimerRef.current) {
-        clearTimeout(barcodeTimerRef.current);
+        clearTimeout(barcodeTimerRef.current)
+        barcodeTimerRef.current = null
       }
-      barcodeTimerRef.current = setTimeout(() => {
-        barcodeBufferRef.current = '';
-      }, 2000);
-    };
+      return
+    }
 
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleGlobalKeyDown);
-      if (barcodeTimerRef.current) {
-        clearTimeout(barcodeTimerRef.current);
-      }
-    };
-  }, [posLookupByBarcode, posLookupByCode, handleAddToCart, toast]);
+    // ۵. نادیده گرفتن کلیدهای کنترلی و کلیدهای خاص
+    if (e.key.length > 1) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+
+    // ۶. اضافه کردن کاراکتر به بافر بارکد
+    barcodeBufferRef.current += e.key
+
+    // ۷. تنظیم تایمر: اگر ۲ ثانیه کلیدی زده نشد، بافر را پاک کن
+    if (barcodeTimerRef.current) {
+      clearTimeout(barcodeTimerRef.current)
+    }
+    barcodeTimerRef.current = setTimeout(() => {
+      barcodeBufferRef.current = ''
+    }, 2000)
+  }
+
+  window.addEventListener('keydown', handleGlobalKeyDown)
+  return () => {
+    window.removeEventListener('keydown', handleGlobalKeyDown)
+    if (barcodeTimerRef.current) {
+      clearTimeout(barcodeTimerRef.current)
+    }
+  }
+}, [posLookupByBarcode, posLookupByCode, handleAddToCart, toast, posRecents, products])
 
   const handleIncreaseQuantity = useCallback(
   (productId: string) => {
@@ -1772,80 +1809,7 @@ const handleSearchKeyDown = useCallback(
   ]
 );
 
-  // ★ اسکنر بارکد کیبورد (با پشتیبانی آفلاین)
-  useEffect(() => {
-    let buffer = ''
-    let lastTime = Date.now()
-    let active = true
-
-    const handler = async (e: KeyboardEvent) => {
-      if (!active) return
-
-      const target = e.target as HTMLElement
-      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-
-      const now = Date.now()
-      const delta = now - lastTime
-
-      if (delta > 100) buffer = ''
-
-      lastTime = now
-
-      if (e.key === 'Enter' && buffer.length >= 4) {
-        const barcode = buffer
-        buffer = ''
-
-        if (!isInput || target !== searchInputRef.current) {
-          e.preventDefault()
-
-          // ★ OFFLINE: جستجو در cache
-                    if (!navigator.onLine) {
-              // ★ OFFLINE-FIX: fallback به products
-              const offlineSource = posRecents.length > 0 ? posRecents : products
-              const cachedProduct = offlineSource.find(
-                (p) => p.isActive !== false && p.barcode === barcode
-              )
-            if (cachedProduct) {
-              handleAddToCart(cachedProduct)
-              toast({ title: '✓ افزودن به سبد (آفلاین)', description: cachedProduct.name })
-            } else {
-              toast({
-                title: '📡 آفلاین — یافت نشد',
-                description: `بارکد ${barcode} در حافظه محلی ثبت نشده`,
-                variant: 'destructive',
-              })
-            }
-            return
-          }
-
-          // ★ ONLINE: جستجو در سرور
-          const product = await posLookupByBarcode(barcode)
-          if (product) {
-            handleAddToCart(product)
-            toast({ title: '✓ افزودن به سبد', description: product.name })
-          } else {
-            toast({
-              title: 'یافت نشد',
-              description: `بارکد ${barcode} در سیستم ثبت نشده`,
-              variant: 'destructive',
-            })
-          }
-          return
-        }
-      }
-
-      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
-        buffer += e.key
-      }
-    }
-
-    window.addEventListener('keydown', handler)
-    return () => {
-      active = false
-      window.removeEventListener('keydown', handler)
-    }
-  }, [posLookupByBarcode, handleAddToCart, toast, posRecents])
-
+  
   const handleBarcodeDetected = useCallback(
     async (barcode: string) => {
       // ★ OFFLINE: جستجو در cache
