@@ -1,11 +1,23 @@
 // public/sw.js
-// ShopAccounting PWA Service Worker v1.0.1 (Fixed: catch handler always returns Response)
+// ShopAccounting PWA Service Worker v1.1.0
+// ★★★ v1.1.0: FIX ریشه‌ای — صفحات ناوبری (HTML) دیگر Cache First نیستند
+//   مشکل قبلی: چون مسیر '/' با استراتژی Cache First سرو می‌شد، بعد از هر
+//   دیپلوی جدید در Railway، کاربر همچنان همان HTML/باندل JS نسخه‌ی قدیمی را
+//   می‌گرفت (چون محتوای این فایل sw.js بین دیپلوی‌ها عوض نمی‌شد، مرورگر هم
+//   هیچ‌وقت متوجه نیاز به آپدیت کش نمی‌شد). همین باعث می‌شد دکمه‌های دمو در
+//   لندینگ‌پیج به مسیر قدیمی و منسوخ /demo/phone بروند تا کلیک دوم که باندل
+//   تازه از شبکه لود می‌شد.
+//   راه‌حل: صفحات ناوبری (document) حالا Network First هستند — همیشه اول از
+//   شبکه گرفته می‌شوند و کش فقط به‌عنوان fallback در حالت آفلاین استفاده می‌شود.
+//   فایل‌های استاتیک هش‌دار Next.js (_next/static/...، فونت‌ها، آیکون‌ها) که
+//   نامشان با هر دیپلوی عوض می‌شود، همچنان Cache First می‌مانند (کاملاً امن).
+// ★★★ v1.0.1: Fixed: catch handler always returns Response
 
-const CACHE_NAME = 'shopaccounting-v1';
-const STATIC_CACHE = 'shopaccounting-static-v1';
-const DYNAMIC_CACHE = 'shopaccounting-dynamic-v1';
+const SW_VERSION = 'v1.1.0';
+const STATIC_CACHE = `shopaccounting-static-${SW_VERSION}`;
+const DYNAMIC_CACHE = `shopaccounting-dynamic-${SW_VERSION}`;
 
-// فایل‌هایی که باید cache شوند
+// فایل‌هایی که برای fallback آفلاین cache می‌شوند (نه به‌عنوان منبع اصلی ناوبری)
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -27,12 +39,11 @@ const NO_CACHE_PATTERNS = [
 
 // ─── Install Event ───────────────────────────────────────────
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing...');
+  console.log('[SW] Installing...', SW_VERSION);
 
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
-      console.log('[SW] Caching static assets');
-      // از addAll استفاده نمی‌کنیم تا اگر یک فایل نبود کل install fail نشه
+      console.log('[SW] Caching static assets (offline fallback only)');
       return Promise.allSettled(
         STATIC_ASSETS.map((url) =>
           cache.add(url).catch((err) => {
@@ -49,18 +60,15 @@ self.addEventListener('install', (event) => {
 
 // ─── Activate Event ──────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating...');
+  console.log('[SW] Activating...', SW_VERSION);
 
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
           .filter((name) => {
-            return (
-              name !== STATIC_CACHE &&
-              name !== DYNAMIC_CACHE &&
-              name !== CACHE_NAME
-            );
+            // ★ v1.1.0: هر کش متعلق به نسخه‌ی قبلی (نامش شامل SW_VERSION فعلی نیست) پاک می‌شود
+            return name !== STATIC_CACHE && name !== DYNAMIC_CACHE;
           })
           .map((name) => {
             console.log('[SW] Deleting old cache:', name);
@@ -97,7 +105,47 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // استراتژی: Network First برای API، Cache First برای assets
+  // ═══════════════════════════════════════════════════════════
+  // ★★★ v1.1.0: ناوبری (HTML/صفحات) — Network First
+  //   این بخش جدید است و مشکل اصلی را حل می‌کند: همیشه اول تلاش می‌شود
+  //   آخرین نسخه‌ی صفحه از سرور (شامل جدیدترین باندل JS) گرفته شود.
+  //   کش فقط زمانی استفاده می‌شود که کاربر واقعاً آفلاین باشد.
+  // ═══════════════════════════════════════════════════════════
+  const isNavigation =
+    request.mode === 'navigate' || request.destination === 'document';
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(DYNAMIC_CACHE).then((cache) => {
+              cache.put(request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => {
+          // آفلاین — از کش (اول همان مسیر، بعد صفحه‌ی اصلی) استفاده کن
+          return caches.match(request).then((cached) => {
+            if (cached) return cached;
+            return caches.match('/').then((homePage) => {
+              return (
+                homePage ||
+                new Response('آفلاین هستید', {
+                  status: 503,
+                  headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                })
+              );
+            });
+          });
+        })
+    );
+    return;
+  }
+
+  // استراتژی: Network First برای API، Cache First برای assets هش‌دار
   if (url.pathname.startsWith('/api/')) {
     // Network First
     event.respondWith(
@@ -130,7 +178,8 @@ self.addEventListener('fetch', (event) => {
         })
     );
   } else {
-    // Cache First برای static assets
+    // ★ Cache First — فقط برای فایل‌های استاتیک هش‌دار (_next/static، فونت‌ها،
+    //   آیکون‌ها و ...) که نامشان با هر دیپلوی عوض می‌شود، پس کاملاً امن است
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) {
@@ -148,21 +197,8 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch(() => {
-            // صفحه آفلاین برای navigation
-            if (request.destination === 'document') {
-              return caches.match('/').then((homePage) => {
-                return (
-                  homePage ||
-                  new Response('آفلاین هستید', {
-                    status: 503,
-                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-                  })
-                );
-              });
-            }
-            // ★★★ اصلاح اصلی: برای هر درخواست دیگه (فونت، عکس، chunk و ...)
-            // هم باید حتماً یک Response واقعی برگردونیم، وگرنه مرورگر خطای
-            // "Failed to convert value to 'Response'" می‌ده
+            // ★★★ برای هر درخواست دیگه (فونت، عکس، chunk و ...)
+            // هم باید حتماً یک Response واقعی برگردونیم
             return new Response('', {
               status: 504,
               statusText: 'Offline',
@@ -191,4 +227,4 @@ self.addEventListener('push', (event) => {
   );
 });
 
-console.log('[SW] Script loaded successfully');
+console.log('[SW] Script loaded successfully:', SW_VERSION);
