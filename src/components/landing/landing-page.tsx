@@ -17,7 +17,7 @@ import {
   Star, TrendingUp, ShieldCheck, Clock, ArrowLeft, Sparkles,
   Menu, X, LogIn,
 } from 'lucide-react'
-
+import { useSiteContent, mergePlansWithApi } from '@/lib/site-content'
 function formatPrice(price: number): string {
   return new Intl.NumberFormat('fa-IR').format(price)
 }
@@ -429,6 +429,8 @@ export default function LandingPage() {
   const pricingRef = useRef<HTMLDivElement>(null)
   const statsRef   = useRef<HTMLDivElement>(null)
   const [statsStarted, setStatsStarted] = useState(false)
+  const { content: siteContent } = useSiteContent()
+  const mergedPlanTiers = mergePlansWithApi(planTiers, siteContent.plans)
 
   /* inject animation CSS once */
   useEffect(() => {
@@ -490,8 +492,11 @@ export default function LandingPage() {
   const testimonialsRef = useScrollReveal()
   const ctaRef          = useScrollReveal()
 
-  const getPriceForCycle = (plan: PlanTierDef, cycle: BillingCycle) =>
-    cycle === 'lifetime' ? plan.lifetimePrice : plan.annualPrice
+   const getPriceForCycle = (plan: PlanTierDef & { discountPercent?: number }, cycle: BillingCycle) => {
+    const base = cycle === 'lifetime' ? plan.lifetimePrice : plan.annualPrice
+    const discount = cycle === 'annual' ? (plan.discountPercent || 0) : 0
+    return discount > 0 ? Math.round(base * (1 - discount / 100)) : base
+  }
 
   const getLifetimeSavings = (plan: PlanTierDef) => {
     const tenYear = plan.annualPrice * 10
@@ -914,7 +919,7 @@ export default function LandingPage() {
 
           {/* Plan cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 items-stretch">
-            {planTiers.map((plan, idx) => {
+                   {mergedPlanTiers.map((plan, idx) => {
               const price   = getPriceForCycle(plan, globalBilling)
               const savings = getLifetimeSavings(plan)
 
@@ -941,6 +946,14 @@ export default function LandingPage() {
                       </div>
                     )}
 
+                                        {/* ★ بنر تخفیف (فقط اگر تخفیف فعال باشد) */}
+                    {plan.discountPercent > 0 && globalBilling === 'annual' && (
+                      <div className="absolute top-0 left-0 bg-gradient-to-l from-red-500 to-rose-600 text-white text-xs font-black px-3 py-1.5 rounded-bl-2xl rounded-tr-lg z-10 flex items-center gap-1 shadow-lg">
+                        <Percent className="w-3 h-3" />
+                        {plan.discountPercent}٪ تخفیف
+                      </div>
+                    )}
+
                     {/* Card header */}
                     <div className={`p-6 sm:p-7 ${plan.popular ? 'pt-10' : 'pt-6'}`}>
                       {/* Plan icon */}
@@ -953,7 +966,12 @@ export default function LandingPage() {
 
                       {/* Price */}
                       <div className="mt-6 mb-2">
-                        <div className="flex items-baseline gap-1">
+                                               <div className="flex items-baseline gap-2 flex-wrap">
+                          {plan.discountPercent > 0 && globalBilling === 'annual' && (
+                            <span className="text-lg text-gray-400 line-through">
+                              {formatPrice(plan.annualPrice)}
+                            </span>
+                          )}
                           <span className="text-3xl sm:text-4xl font-black text-gray-900">
                             {formatPrice(price)}
                           </span>

@@ -1,35 +1,14 @@
 // ============================================================================
-// src/app/api/installment-schedules/[id]/pay/route.ts — POST (v3.36.5 ★★★)
+// src/app/api/installment-schedules/[id]/pay/route.ts — POST (v3.36.6 ★★★)
 // ShopAccounting — Register In-Store Payment for a Specific Installment
-// ----------------------------------------------------------------------------
-// ★★★ v3.36.5: ثبت پرداخت حضوری برای یک قسط خاص (نقدی/کارت/بانکی/...)
-//
-// این API توسط صندوق‌دار در پنل ادمین استفاده می‌شود (نه پورتال مشتری).
-// کاربرد: وقتی مشتری حضوری می‌آید و می‌خواهد قسط خاصی را پرداخت کند.
-//
-// Supported method:
-//   POST /api/installment-schedules/{id}/pay
-//     body: {
-//       amount: number,             // مبلغ پرداخت (می‌تواند کمتر از مبلغ قسط باشد)
-//       paymentType: string,        // cash | card | bank | online | check
-//       paymentRef?: string,        // مرجع پرداخت (شماره تراکنش کارت، شماره چک، ...)
-//       paidAt?: string,            // تاریخ پرداخت (ISO) - اختیاری، پیش‌فرض: now
-//       notes?: string,             // توضیحات
-//     }
-//
-// پس از پرداخت موفق:
-//   ۱. به‌روزرسانی InstallmentSchedule (paidAmount, status, paidAt, paymentRef, paymentType)
-//   ۲. ایجاد InvoicePayment
-//   ۳. به‌روزرسانی Invoice (paidAmount, remainingAmount, status)
-//   ۴. به‌روزرسانی InstallmentPlan (paidInstallments, totalPaidAmount, nextDueDate, status)
-//   ۵. ایجاد سند حسابداری خودکار (در صورت پشتیبانی پلن)
+// ============================================================================
+// ★★★ v3.36.6: رفع باگ به‌روزرسانی دیرهنگام مانده مشتری + یکپارچگی tenantDb
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { getTenantPlanInfo } from '@/lib/plan-limits'
 import { resolvePlanTier } from '@/lib/plan-features'
-import { db } from '@/lib/db'
 
 export const POST = withTenantAndPermission('pos')(
   async (req: NextRequest, ctx: any, tenant: any) => {
@@ -124,7 +103,6 @@ export const POST = withTenantAndPermission('pos')(
       const remainingForThisInstallment = fullAmount - alreadyPaid
 
       if (amount > remainingForThisInstallment + 1) {
-        // ★ تلورانس ۱ ریال برای خطای گرد کردن
         return NextResponse.json(
           {
             success: false,
@@ -147,183 +125,163 @@ export const POST = withTenantAndPermission('pos')(
         paymentType: pt,
       })
 
-      // ─── ۴. به‌روزرسانی InstallmentSchedule ──────────────────
-      const newPaidAmount = alreadyPaid + amount
-      const isFullyPaid = newPaidAmount >= fullAmount - 1
+      // ─── ۴. شروع تراکنش اتمیک ───────────────────────────────
+      const result = await tenantDb.$transaction(async (tx: any) => {
+        
+        // ۴.۱. به‌روزرسانی InstallmentSchedule
+        const newPaidAmount = alreadyPaid + amount
+        const isFullyPaid = newPaidAmount >= fullAmount - 1
 
-      const updatedSchedule = await tenantDb.installmentSchedule.update({
-        where: { id: schedule.id },
-        data: {
-          paidAmount: newPaidAmount,
-          paidAt: paidAtDate,
-          paymentRef: paymentRef || schedule.paymentRef,
-          paymentType: pt,
-          status: isFullyPaid ? 'paid' : 'partial',
-          notes: notes
-            ? `${schedule.notes || ''}\n[${paidAtDate.toLocaleString('fa-IR')}] ${notes}`.trim()
-            : schedule.notes,
-        },
-      })
-
-      console.log('[Installment Pay] Schedule updated:', {
-        scheduleId,
-        newPaidAmount,
-        isFullyPaid,
-        newStatus: updatedSchedule.status,
-      })
-
-      // ─── ۵. ایجاد InvoicePayment ────────────────────────────
-      await tenantDb.invoicePayment.create({
-        data: {
-          invoiceId,
-          amount,
-          paymentType: pt,
-          paymentRef: paymentRef || null,
-          paidAt: paidAtDate,
-          tenantId,
-        },
-      })
-
-      // ─── ۶. به‌روزرسانی Invoice ──────────────────────────────
-      const newInvoicePaidAmount = (Number(invoice.paidAmount) || 0) + amount
-      const newInvoiceRemaining = Math.max(0, (Number(invoice.totalAmount) || 0) - newInvoicePaidAmount)
-
-      // ★ تعیین status جدید فاکتور
-      let newInvoiceStatus = invoice.status
-      if (newInvoiceRemaining <= 0) {
-        newInvoiceStatus = 'paid'
-      } else if (newInvoicePaidAmount > 0) {
-        newInvoiceStatus = 'partial'
-      }
-
-      await tenantDb.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          paidAmount: newInvoicePaidAmount,
-          remainingAmount: newInvoiceRemaining,
-          status: newInvoiceStatus,
-        },
-      })
-
-      console.log('[Installment Pay] Invoice updated:', {
-        invoiceId,
-        newPaidAmount: newInvoicePaidAmount,
-        newRemaining: newInvoiceRemaining,
-        newStatus: newInvoiceStatus,
-      })
-
-      // ─── ۷. به‌روزرسانی InstallmentPlan ─────────────────────
-      const plan = schedule.plan
-      const newPlanPaidInstallments = isFullyPaid
-        ? (plan.paidInstallments || 0) + 1
-        : plan.paidInstallments || 0
-      const newPlanTotalPaid = (Number(plan.totalPaidAmount) || 0) + amount
-      const isPlanCompleted = newPlanPaidInstallments >= plan.numberOfInstallments
-
-      // ★ یافتن قسط بعدی (pending با کوچک‌ترین dueDate)
-      let nextDueDate: Date | null = null
-      if (!isPlanCompleted) {
-        const nextPending = await tenantDb.installmentSchedule.findFirst({
-          where: {
-            planId: plan.id,
-            tenantId,
-            status: { in: ['pending', 'partial'] },
-            id: { not: schedule.id }, // ★ خود این قسط را مستثنی کن
+        const updatedSchedule = await tx.installmentSchedule.update({
+          where: { id: schedule.id },
+          data: {
+            paidAmount: newPaidAmount,
+            paidAt: paidAtDate,
+            paymentRef: paymentRef || schedule.paymentRef,
+            paymentType: pt,
+            status: isFullyPaid ? 'paid' : 'partial',
+            notes: notes
+              ? `${schedule.notes || ''}\n[${paidAtDate.toLocaleString('fa-IR')}] ${notes}`.trim()
+              : schedule.notes,
           },
-          orderBy: { dueDate: 'asc' },
         })
-        nextDueDate = nextPending?.dueDate || null
-      }
 
-      await tenantDb.installmentPlan.update({
-        where: { id: plan.id },
-        data: {
-          paidInstallments: newPlanPaidInstallments,
-          totalPaidAmount: newPlanTotalPaid,
-          nextDueDate,
-          status: isPlanCompleted ? 'completed' : 'active',
-        },
-      })
-
-      console.log('[Installment Pay] Plan updated:', {
-        planId: plan.id,
-        newPaidInstallments: newPlanPaidInstallments,
-        newTotalPaid: newPlanTotalPaid,
-        isPlanCompleted,
-        nextDueDate,
-      })
-
-      // ─── ۸. به‌روزرسانی موجودی مشتری (در صورت تسویه کامل فاکتور) ─
-      if (newInvoiceRemaining <= 0 && invoice.customerId) {
-        try {
-          const customer = await tenantDb.customer.findFirst({
-            where: { id: invoice.customerId, tenantId },
-            select: { id: true, currentBalance: true },
-          })
-          if (customer && Number(customer.currentBalance) > 0) {
-            // ★ کاهش بدهی مشتری به اندازه مبلغ پرداخت (تا سقف بدهی)
-            const newBalance = Math.max(0, Number(customer.currentBalance) - amount)
-            await tenantDb.customer.update({
-              where: { id: customer.id },
-              data: { currentBalance: newBalance },
-            })
-          }
-        } catch (custErr: any) {
-          console.warn('[Installment Pay] Failed to update customer balance (non-blocking):', custErr?.message)
-        }
-      }
-
-      // ─── ۹. سند حسابداری خودکار (در صورت پشتیبانی پلن) ───────
-      try {
-        const planInfo = await getTenantPlanInfo(tenantId)
-        const planTier = resolvePlanTier(planInfo.tierName)
-
-        if (planTier === 'professional' || planTier === 'enterprise') {
-          await createAutoJournalEntryForInstallment(
-            tenantId,
-            invoice,
+        // ۴.۲. ایجاد InvoicePayment
+        await tx.invoicePayment.create({
+          data: {
+            invoiceId,
             amount,
-            pt,
-            schedule.installmentNumber,
-            paidAtDate,
-            tenant.user?.id || null
-          )
-        }
-      } catch (jeErr: any) {
-        console.warn('[Installment Pay] Auto journal entry failed (non-blocking):', jeErr?.message)
-      }
-
-      // ─── ۱۰. پاسخ ────────────────────────────────────────────
-      return NextResponse.json({
-        success: true,
-        message: isFullyPaid
-          ? `قسط ${schedule.installmentNumber} به طور کامل پرداخت شد`
-          : `پرداخت جزیی برای قسط ${schedule.installmentNumber} ثبت شد`,
-        data: {
-          schedule: {
-            id: updatedSchedule.id,
-            installmentNumber: updatedSchedule.installmentNumber,
-            paidAmount: updatedSchedule.paidAmount,
-            status: updatedSchedule.status,
-            paidAt: updatedSchedule.paidAt,
-            paymentRef: updatedSchedule.paymentRef,
-            paymentType: updatedSchedule.paymentType,
+            paymentType: pt,
+            paymentRef: paymentRef || null,
+            paidAt: paidAtDate,
+            tenantId,
           },
-          invoice: {
-            id: invoiceId,
+        })
+
+        // ۴.۳. به‌روزرسانی Invoice
+        const newInvoicePaidAmount = (Number(invoice.paidAmount) || 0) + amount
+        const newInvoiceRemaining = Math.max(0, (Number(invoice.totalAmount) || 0) - newInvoicePaidAmount)
+
+        let newInvoiceStatus = invoice.status
+        if (newInvoiceRemaining <= 0) {
+          newInvoiceStatus = 'paid'
+        } else if (newInvoicePaidAmount > 0) {
+          newInvoiceStatus = 'partial'
+        }
+
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
             paidAmount: newInvoicePaidAmount,
             remainingAmount: newInvoiceRemaining,
             status: newInvoiceStatus,
           },
-          plan: {
-            id: plan.id,
+        })
+
+        // ۴.۴. ★★★ به‌روزرسانی فوری موجودی مشتری (کاهش بدهی به اندازه مبلغ پرداختی)
+        if (invoice.customerId && amount > 0) {
+          await tx.customer.update({
+            where: { id: invoice.customerId },
+            data: { currentBalance: { decrement: amount } },
+          }).catch((custErr: any) => {
+            console.warn('[Installment Pay] Failed to update customer balance (non-blocking):', custErr?.message)
+          })
+        }
+
+        // ۴.۵. به‌روزرسانی InstallmentPlan
+        const plan = schedule.plan
+        const newPlanPaidInstallments = isFullyPaid
+          ? (plan.paidInstallments || 0) + 1
+          : plan.paidInstallments || 0
+        const newPlanTotalPaid = (Number(plan.totalPaidAmount) || 0) + amount
+        const isPlanCompleted = newPlanPaidInstallments >= plan.numberOfInstallments
+
+        let nextDueDate: Date | null = null
+        if (!isPlanCompleted) {
+          const nextPending = await tx.installmentSchedule.findFirst({
+            where: {
+              planId: plan.id,
+              tenantId,
+              status: { in: ['pending', 'partial'] },
+              id: { not: schedule.id },
+            },
+            orderBy: { dueDate: 'asc' },
+          })
+          nextDueDate = nextPending?.dueDate || null
+        }
+
+        await tx.installmentPlan.update({
+          where: { id: plan.id },
+          data: {
             paidInstallments: newPlanPaidInstallments,
             totalPaidAmount: newPlanTotalPaid,
-            status: isPlanCompleted ? 'completed' : 'active',
             nextDueDate,
+            status: isPlanCompleted ? 'completed' : 'active',
           },
-          isInstallmentFullyPaid: isFullyPaid,
+        })
+
+        // ۴.۶. سند حسابداری خودکار (در صورت پشتیبانی پلن)
+        let journalCreated = false
+        try {
+          const planInfo = await getTenantPlanInfo(tenantId)
+          const planTier = resolvePlanTier(planInfo.tierName)
+
+          if (planTier === 'professional' || planTier === 'enterprise') {
+            journalCreated = await createAutoJournalEntryForInstallment(
+              tx, // ★★★ استفاده از tx برای اطمینان از یکپارچگی تراکنش
+              tenantId,
+              invoice,
+              amount,
+              pt,
+              schedule.installmentNumber,
+              paidAtDate,
+              tenant.user?.id || null
+            )
+          }
+        } catch (jeErr: any) {
+          console.warn('[Installment Pay] Auto journal entry failed (non-blocking):', jeErr?.message)
+        }
+
+        return {
+          updatedSchedule,
+          newInvoicePaidAmount,
+          newInvoiceRemaining,
+          newInvoiceStatus,
+          newPlanPaidInstallments,
+          newPlanTotalPaid,
           isPlanCompleted,
+          nextDueDate,
+          journalCreated,
+        }
+      })
+
+      // ─── ۵. پاسخ ────────────────────────────────────────────
+      return NextResponse.json({
+        success: true,
+        message: result.updatedSchedule.status === 'paid'
+          ? `قسط ${schedule.installmentNumber} به طور کامل پرداخت شد`
+          : `پرداخت جزیی برای قسط ${schedule.installmentNumber} ثبت شد`,
+        data: {
+          schedule: {
+            id: result.updatedSchedule.id,
+            installmentNumber: result.updatedSchedule.installmentNumber,
+            paidAmount: result.updatedSchedule.paidAmount,
+            status: result.updatedSchedule.status,
+          },
+          invoice: {
+            id: invoiceId,
+            paidAmount: result.newInvoicePaidAmount,
+            remainingAmount: result.newInvoiceRemaining,
+            status: result.newInvoiceStatus,
+          },
+          plan: {
+            id: schedule.plan.id,
+            paidInstallments: result.newPlanPaidInstallments,
+            totalPaidAmount: result.newPlanTotalPaid,
+            status: result.isPlanCompleted ? 'completed' : 'active',
+            nextDueDate: result.nextDueDate,
+          },
+          journalEntryCreated: result.journalCreated,
         },
       })
     } catch (error: any) {
@@ -341,6 +299,7 @@ export const POST = withTenantAndPermission('pos')(
 // ═══════════════════════════════════════════════════════════════
 
 async function createAutoJournalEntryForInstallment(
+  tx: any, // ★★★ دریافت tx از تراکنش اصلی
   tenantId: string,
   invoice: any,
   amount: number,
@@ -350,56 +309,37 @@ async function createAutoJournalEntryForInstallment(
   userId: string | null
 ) {
   try {
-    if (amount <= 0) return
+    if (amount <= 0) return false
 
-    // ★ یافتن حساب‌های مربوطه
     let cashAccountId: string | null = null
     let receivablesAccountId: string | null = null
 
-    try {
-      const accounts = await db.client.account.findMany({ where: { tenantId } })
-      for (const acc of accounts) {
-        const code = (acc.code || '').toLowerCase()
-        const type = (acc.type || '').toLowerCase()
-        const name = (acc.name || '').toLowerCase()
+    const accounts = await tx.account.findMany({ where: { tenantId } })
+    for (const acc of accounts) {
+      const code = (acc.code || '').toLowerCase()
+      const type = (acc.type || '').toLowerCase()
+      const name = (acc.name || '').toLowerCase()
 
-        if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110') || name.includes('صندوق') || name.includes('بانک'))) {
-          cashAccountId = acc.id
-        }
-        if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('بدهکار'))) {
-          receivablesAccountId = acc.id
-        }
+      if (!cashAccountId && (paymentType === 'cash' ? (type === 'cash' || name.includes('صندوق')) : (type === 'bank' || name.includes('بانک') || code.startsWith('110')))) {
+        cashAccountId = acc.id
       }
-    } catch (err: any) {
-      console.warn('[Installment Pay] Could not find accounts for journal entry:', err?.message)
+      if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('بدهکار') || name.includes('دریافتنی'))) {
+        receivablesAccountId = acc.id
+      }
     }
 
     if (!cashAccountId || !receivablesAccountId) {
       console.warn('[Installment Pay] Skipping journal entry: cash or receivables account not found')
-      return
+      return false
     }
 
-    const jeCount = await db.client.journalEntry.count({ where: { tenantId } })
+    const jeCount = await tx.journalEntry.count({ where: { tenantId } })
     const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+    
+    const methodLabel = paymentType === 'cash' ? 'نقدی' : (paymentType === 'card' || paymentType === 'pos' ? 'کارتخوان' : 'بانکی')
+    const description = `سند خودکار بابت دریافت قسط ${installmentNumber} فاکتور ${invoice.number} (${methodLabel})`
 
-    const description = `سند خودکار بابت دریافت قسط ${installmentNumber} فاکتور ${invoice.number} (${paymentType})`
-
-    const lines: any[] = [
-      {
-        accountId: cashAccountId,
-        debit: amount,
-        credit: 0,
-        description: 'بدهکار: بابت دریافت قسط',
-      },
-      {
-        accountId: receivablesAccountId,
-        debit: 0,
-        credit: amount,
-        description: 'بستانکار: بابت تسویه قسط',
-      },
-    ]
-
-    await db.client.journalEntry.create({
+    await tx.journalEntry.create({
       data: {
         number: jeNumber,
         date: paidAt,
@@ -411,12 +351,29 @@ async function createAutoJournalEntryForInstallment(
         totalCredit: amount,
         createdBy: userId,
         tenantId,
-        lines: { create: lines },
+        lines: {
+          create: [
+            {
+              accountId: cashAccountId,
+              debit: amount,
+              credit: 0,
+              description: 'بدهکار: بابت دریافت قسط',
+            },
+            {
+              accountId: receivablesAccountId,
+              debit: 0,
+              credit: amount,
+              description: 'بستانکار: بابت تسویه قسط',
+            },
+          ],
+        },
       },
     })
 
     console.log('[Installment Pay] Auto journal entry created:', jeNumber)
+    return true
   } catch (error: any) {
     console.error('[Installment Pay] Failed to create journal entry:', error?.message)
+    return false
   }
 }

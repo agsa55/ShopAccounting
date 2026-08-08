@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   CreditCard, Search, CheckCircle2, Clock, AlertTriangle, RefreshCw, 
   Loader2, Banknote, Lock, Crown, Wallet, Calendar as CalendarIcon, 
-  WifiOff, CloudOff, Upload, Eye, EyeOff, ArrowLeft,TrendingUp,
-  ArrowRight
+  WifiOff, CloudOff, Upload, Eye, EyeOff, ArrowLeft, TrendingUp,
+  FileText, Users,
+  ArrowRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -87,7 +88,6 @@ interface PlanItem {
   createdAt: string
   updatedAt: string
   schedules: ScheduleItem[]
-  // فیلدهای محاسباتی
   totalInstallments: number
   paidCount: number
   overdueCount: number
@@ -101,6 +101,24 @@ interface SummaryData {
   overduePlans: number
   totalRemaining: number
   totalOverdueInstallments: number
+}
+
+interface CreditInvoice {
+  id: string
+  number: string
+  invoiceNumber?: string
+  customerId: string | null
+  customerName: string | null
+  totalAmount: number
+  paidAmount: number
+  remainingAmount: number
+  status: string
+  paymentStatus?: string
+  paymentType: string
+  invoiceDate?: string
+  createdAt: string
+  items?: any[]
+  payments?: any[]
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -512,6 +530,14 @@ function getInstallmentStatusBadge(status: string) {
   return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px]">در انتظار</Badge>
 }
 
+function getCreditStatusBadge(status: string, paymentStatus?: string) {
+  const s = (paymentStatus || status || '').toUpperCase()
+  if (s === 'PAID') return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">تسویه شده</Badge>
+  if (s === 'PARTIAL' || s === 'PARTIALLYPAID') return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px]">پرداخت جزئی</Badge>
+  if (s === 'CANCELLED') return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100 text-[10px]">لغو شده</Badge>
+  return <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 text-[10px]">نسیه باز</Badge>
+}
+
 function isOverdue(schedule: ScheduleItem): boolean {
   if (schedule.status?.toLowerCase() === 'paid') return false
   try {
@@ -542,7 +568,6 @@ function MobileInstallmentCard({ plan, onSelectPlan }: MobileInstallmentCardProp
       onClick={() => onSelectPlan(plan)}
     >
       <CardContent className="p-3">
-        {/* ردیف ۱: نام مشتری + آیکون وضعیت */}
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-start gap-2 flex-1 min-w-0">
             <div className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
@@ -565,18 +590,15 @@ function MobileInstallmentCard({ plan, onSelectPlan }: MobileInstallmentCardProp
           </div>
         </div>
 
-        {/* ردیف ۲: شماره اقساط */}
         <div className="text-xs text-gray-600 mb-2 bg-gray-50 rounded px-2 py-1">
           {formatNumber(paidCount)}/{formatNumber(totalCount)} قسط
         </div>
 
-        {/* ردیف ۳: مبلغ باقیمانده */}
         <div className="flex items-center justify-between gap-2 mb-2">
           <span className="text-xs text-gray-500">مانده:</span>
           <span className="text-sm font-bold text-gray-900">{formatCurrency(plan.remainingAmount || plan.totalAmount)}</span>
         </div>
 
-        {/* Progress Bar */}
         <div className="bg-gray-100 rounded-full h-2 overflow-hidden mb-2">
           <div
             className={`h-full rounded-full transition-all ${
@@ -586,13 +608,11 @@ function MobileInstallmentCard({ plan, onSelectPlan }: MobileInstallmentCardProp
           />
         </div>
 
-        {/* ردیف ۴: وضعیت + درصد */}
         <div className="flex items-center justify-between">
           {getStatusBadge(plan.status)}
           <span className="text-[10px] text-gray-400">{progressPct}%</span>
         </div>
 
-        {/* هشدار سررسید */}
         {planOverdueItems.length > 0 && (
           <div className="mt-2 flex items-center gap-1 px-2 py-1.5 bg-red-50 rounded-lg border border-red-100">
             <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
@@ -607,10 +627,93 @@ function MobileInstallmentCard({ plan, onSelectPlan }: MobileInstallmentCardProp
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ★★★ Mobile Credit Card ★★★
+// ═══════════════════════════════════════════════════════════════
+
+interface MobileCreditCardProps {
+  invoice: CreditInvoice
+  onPay: (invoice: CreditInvoice) => void
+}
+
+function MobileCreditCard({ invoice, onPay }: MobileCreditCardProps) {
+  const remaining = (invoice.totalAmount || 0) - (invoice.paidAmount || 0)
+  const progressPct = invoice.totalAmount > 0 
+    ? Math.round((invoice.paidAmount / invoice.totalAmount) * 100) 
+    : 0
+
+  return (
+    <Card className="hover:shadow-md transition-shadow">
+      <CardContent className="p-3">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-purple-100 shrink-0">
+              <Wallet className="w-4 h-4 text-purple-600" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-gray-900 truncate">{invoice.customerName || 'فروش عمومی'}</p>
+              <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                فاکتور {invoice.invoiceNumber || invoice.number}
+              </p>
+            </div>
+          </div>
+          {getCreditStatusBadge(invoice.status, invoice.paymentStatus)}
+        </div>
+
+        <div className="grid grid-cols-3 gap-1.5 mb-2">
+          <div className="bg-gray-50 rounded p-1.5 text-center">
+            <p className="text-[9px] text-gray-400 leading-tight">کل</p>
+            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">
+              {formatNumber(invoice.totalAmount)}
+            </p>
+          </div>
+          <div className="bg-emerald-50 rounded p-1.5 text-center">
+            <p className="text-[9px] text-gray-400 leading-tight">پرداخت</p>
+            <p className="text-[10px] font-bold text-emerald-600 leading-tight mt-0.5">
+              {formatNumber(invoice.paidAmount)}
+            </p>
+          </div>
+          <div className="bg-amber-50 rounded p-1.5 text-center">
+            <p className="text-[9px] text-gray-400 leading-tight">باقی</p>
+            <p className="text-[10px] font-bold text-amber-600 leading-tight mt-0.5">
+              {formatNumber(remaining)}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-gray-100 rounded-full h-1.5 overflow-hidden mb-2">
+          <div
+            className="h-full rounded-full bg-purple-500 transition-all"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+          <span className="text-[10px] text-gray-400">{formatDateShort(invoice.createdAt)}</span>
+          {remaining > 0 && (
+            <Button
+              size="sm"
+              className="h-7 text-[10px] gap-1 bg-purple-600 hover:bg-purple-700"
+              onClick={(e) => { e.stopPropagation(); onPay(invoice) }}
+            >
+              <Banknote className="w-3 h-3" />
+              پرداخت
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ★★★ Main Component ★★★
 // ═══════════════════════════════════════════════════════════════
 
 export default function InstallmentsPage() {
+  // ★★★ تب فعال
+  const [activeTab, setActiveTab] = useState<'installments' | 'credit'>('installments')
+
+  // States تب اقساط
   const [search, setSearch] = useState('')
   const [selectedPlan, setSelectedPlan] = useState<PlanItem | null>(null)
   const [plans, setPlans] = useState<PlanItem[]>([])
@@ -631,6 +734,25 @@ export default function InstallmentsPage() {
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
+  // ★★★ States تب نسیه
+  const [creditSearch, setCreditSearch] = useState('')
+  const [creditInvoices, setCreditInvoices] = useState<CreditInvoice[]>([])
+  const [creditLoading, setCreditLoading] = useState(false)
+  const [creditError, setCreditError] = useState<string | null>(null)
+  const [creditPayDialogOpen, setCreditPayDialogOpen] = useState(false)
+  const [creditInvoiceToPay, setCreditInvoiceToPay] = useState<CreditInvoice | null>(null)
+  const [creditPayAmount, setCreditPayAmount] = useState('')
+  const [creditPayMethod, setCreditPayMethod] = useState('cash')
+  const [creditPayRef, setCreditPayRef] = useState('')
+  const [creditPayDate, setCreditPayDate] = useState('')
+  const [creditPaySubmitting, setCreditPaySubmitting] = useState(false)
+  const [creditSummary, setCreditSummary] = useState({
+    totalInvoices: 0,
+    totalAmount: 0,
+    totalPaid: 0,
+    totalRemaining: 0,
+  })
+
   const { toast } = useToast()
   const tenantId = useStore((s) => s.tenantId)
   const planName = useStore((s) => s.planName)
@@ -648,7 +770,6 @@ export default function InstallmentsPage() {
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
-    // بررسی وضعیت اولیه
     setIsOnline(navigator.onLine)
 
     return () => {
@@ -658,22 +779,20 @@ export default function InstallmentsPage() {
   }, [])
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ بارگذاری داده‌ها ★★★
+  // ★★★ بارگذاری داده‌های اقساط ★★★
   // ═══════════════════════════════════════════════════════════════
 
-    const loadData = useCallback(async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     const trulyOnline = isOnline && navigator.onLine
 
     if (!trulyOnline) {
-      // بارگذاری از آفلاین
       try {
         const cachedPlans = await getCachedInstallmentPlans()
         const cachedSummary = await getCachedInstallmentSummary()
         
-        // ★ افزودن فلگ آفلاین برای نمایش در UI
         const markedPlans = cachedPlans.map((p: any) => ({ ...p, _isOffline: true }))
         
         setPlans(markedPlans)
@@ -709,7 +828,6 @@ export default function InstallmentsPage() {
         const plansData = result.data || []
         const summaryData = result.summary || null
 
-        // ذخیره در آفلاین
         await cacheInstallmentPlans(plansData)
         if (summaryData) {
           await cacheInstallmentSummary(summaryData)
@@ -718,7 +836,6 @@ export default function InstallmentsPage() {
         setPlans(plansData)
         setSummary(summaryData)
 
-        // بروزرسانی زمان sync
         const timestamp = Date.now()
         await setLastSyncTimestamp(timestamp)
         setLastSyncTime(timestamp)
@@ -730,7 +847,6 @@ export default function InstallmentsPage() {
     } catch (err: any) {
       console.error('[InstallmentsPage] Load error:', err)
       
-      // تلاش برای بارگذاری از آفلاین (Fallback)
       try {
         const cachedPlans = await getCachedInstallmentPlans()
         const cachedSummary = await getCachedInstallmentSummary()
@@ -748,20 +864,22 @@ export default function InstallmentsPage() {
   }, [isOnline])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (activeTab === 'installments') {
+      loadData()
+    }
+  }, [loadData, activeTab])
 
-  // بروزرسانی خودکار هر ۶۰ ثانیه
   useEffect(() => {
     if (!isOnline) return
     
     const interval = setInterval(() => {
-      loadData()
+      if (activeTab === 'installments') {
+        loadData()
+      }
     }, 60000)
     return () => clearInterval(interval)
-  }, [loadData, isOnline])
+  }, [loadData, isOnline, activeTab])
 
-  // بارگذاری آخرین زمان sync از آفلاین
   useEffect(() => {
     const loadLastSync = async () => {
       const timestamp = await getLastSyncTimestamp()
@@ -773,7 +891,94 @@ export default function InstallmentsPage() {
   }, [])
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ Filtering ★★★
+  // ★★★ بارگذاری داده‌های نسیه ★★★
+  // ═══════════════════════════════════════════════════════════════
+
+   const loadCreditData = useCallback(async () => {
+    setCreditLoading(true)
+    setCreditError(null)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      
+      // دریافت همه فاکتورها (فیلتر دقیق در سمت کلاینت انجام می‌شود)
+      const res = await fetch('/api/invoices?limit=500', {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+
+      if (!res.ok) {
+        throw new Error(`خطا در دریافت اطلاعات: ${res.status}`)
+      }
+
+      const result = await res.json()
+
+      if (result.success) {
+        const allInvoices = result.data || []
+        
+        // ★★★ اصلاح نهایی: فقط فاکتورهای "نسیه" (credit) که باز هستند را نمایش بده
+        const openCreditInvoices = allInvoices.filter((inv: any) => {
+          const pType = (inv.paymentType || '').toLowerCase()
+          const status = (inv.paymentStatus || inv.status || '').toUpperCase()
+          
+          // ۱. نوع پرداخت حتماً باید نسیه (credit) باشد (قسطی نباید اینجا باشد)
+          const isCreditOnly = pType === 'credit'
+          
+          // ۲. وضعیت فاکتور نباید تسویه شده یا لغو شده باشد
+          const isOpen = status !== 'PAID' && status !== 'CANCELLED'
+          
+          // ۳. اطمینان از اینکه هنوز مبلغی باقی مانده است
+          const hasRemaining = (inv.totalAmount || 0) > (inv.paidAmount || 0)
+          
+          return isCreditOnly && isOpen && hasRemaining
+        })
+
+        console.log('[InstallmentsPage] Credit invoices loaded:', {
+          total: allInvoices.length,
+          filtered: openCreditInvoices.length,
+          sample: openCreditInvoices.slice(0, 3).map((inv: any) => ({
+            number: inv.number,
+            paymentType: inv.paymentType,
+            status: inv.status,
+            paymentStatus: inv.paymentStatus,
+            total: inv.totalAmount,
+            paid: inv.paidAmount,
+          })),
+        })
+
+        setCreditInvoices(openCreditInvoices)
+
+        const totalAmount = openCreditInvoices.reduce((sum: number, inv: any) => sum + (inv.totalAmount || 0), 0)
+        const totalPaid = openCreditInvoices.reduce((sum: number, inv: any) => sum + (inv.paidAmount || 0), 0)
+        
+        setCreditSummary({
+          totalInvoices: openCreditInvoices.length,
+          totalAmount,
+          totalPaid,
+          totalRemaining: totalAmount - totalPaid,
+        })
+      } else {
+        throw new Error(result.error || 'خطای ناشناخته')
+      }
+    } catch (err: any) {
+      console.error('[InstallmentsPage] Credit load error:', err)
+      setCreditError(err.message || 'خطا در بارگذاری فاکتورهای نسیه')
+      setCreditInvoices([])
+    } finally {
+      setCreditLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'credit') {
+      loadCreditData()
+    }
+  }, [loadCreditData, activeTab])
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★★★ Filtering اقساط ★★★
   // ═══════════════════════════════════════════════════════════════
 
   let filteredPlans = plans.filter((plan) =>
@@ -792,10 +997,7 @@ export default function InstallmentsPage() {
 
   const totalRemaining = plans.reduce((sum, plan) => sum + (plan.remainingAmount || 0), 0)
 
-
-    // ═══════════════════════════════════════════════════════════════
-  // ★★★ محاسبه آمار دقیق و حرفه‌ای اقساط ★★★
-  // ═══════════════════════════════════════════════════════════════
+  // ★★★ محاسبه آمار دقیق اقساط
   const summaryStats = useMemo(() => {
     let totalInstallmentsCount = 0
     let paidInstallmentsCount = 0
@@ -818,7 +1020,6 @@ export default function InstallmentsPage() {
       totalPaidAmount += pAmount
       totalRemainingAmount += remAmount
 
-      // محاسبه دقیق اقساط معوق و مبلغ آن‌ها
       const overdueSchedules = plan.schedules.filter((s: any) => {
         if (s.status?.toLowerCase() === 'paid') return false
         return new Date(s.dueDate) < new Date()
@@ -843,7 +1044,21 @@ export default function InstallmentsPage() {
   }, [plans])
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ Pay Installment ★★★
+  // ★★★ Filtering نسیه ★★★
+  // ═══════════════════════════════════════════════════════════════
+
+  const filteredCreditInvoices = useMemo(() => {
+    if (!creditSearch) return creditInvoices
+    const q = creditSearch.toLowerCase()
+    return creditInvoices.filter((inv) => {
+      const number = (inv.invoiceNumber || inv.number || '').toLowerCase()
+      const customer = (inv.customerName || '').toLowerCase()
+      return number.includes(q) || customer.includes(q)
+    })
+  }, [creditInvoices, creditSearch])
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★★★ Pay Installment (اقساط) ★★★
   // ═══════════════════════════════════════════════════════════════
 
   const handlePayClick = (schedule: ScheduleItem) => {
@@ -947,6 +1162,90 @@ export default function InstallmentsPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // ★★★ Pay Credit (نسیه) ★★★
+  // ═══════════════════════════════════════════════════════════════
+
+  const handleCreditPayClick = (invoice: CreditInvoice) => {
+    const remaining = (invoice.totalAmount || 0) - (invoice.paidAmount || 0)
+    if (remaining <= 0) {
+      toast({ title: 'اطلاع', description: 'این فاکتور قبلاً تسویه شده است' })
+      return
+    }
+    setCreditInvoiceToPay(invoice)
+    setCreditPayAmount(String(remaining))
+    setCreditPayMethod('cash')
+    setCreditPayRef('')
+    setCreditPayDate(new Date().toISOString().split('T')[0])
+    setCreditPayDialogOpen(true)
+  }
+
+  const handleCreditPayConfirm = async () => {
+    if (!creditInvoiceToPay) return
+
+    const amount = Number(creditPayAmount)
+    if (!amount || amount <= 0) {
+      toast({ title: 'خطا', description: 'مبلغ پرداخت باید بزرگتر از صفر باشد', variant: 'destructive' })
+      return
+    }
+
+    const remaining = (creditInvoiceToPay.totalAmount || 0) - (creditInvoiceToPay.paidAmount || 0)
+    if (amount > remaining + 1) {
+      toast({ title: 'خطا', description: 'مبلغ بیش از باقیمانده فاکتور است', variant: 'destructive' })
+      return
+    }
+
+    if (!isOnline) {
+      toast({ title: 'خطا', description: 'ثبت پرداخت نیاز به اتصال اینترنت دارد', variant: 'destructive' })
+      return
+    }
+
+    setCreditPaySubmitting(true)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const res = await fetch('/api/invoices/pay', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          invoiceId: creditInvoiceToPay.id,
+          amount,
+          paymentType: creditPayMethod,
+          paymentRef: creditPayRef || undefined,
+          paidAt: creditPayDate || undefined,
+        }),
+      })
+
+      const result = await res.json()
+
+      if (result.success) {
+        toast({
+          title: 'پرداخت ثبت شد ✓',
+          description: result.message || `پرداخت ${formatCurrency(amount)} با موفقیت ثبت شد`,
+        })
+        setCreditPayDialogOpen(false)
+        setCreditInvoiceToPay(null)
+        setCreditPayAmount('')
+        setCreditPayRef('')
+        setCreditPayDate('')
+        loadCreditData()
+      } else {
+        toast({
+          title: 'خطا در ثبت پرداخت',
+          description: result.error || 'خطای ناشناخته',
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      toast({ title: 'خطا', description: 'خطا در ارتباط با سرور', variant: 'destructive' })
+    } finally {
+      setCreditPaySubmitting(false)
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // ★★★ Feature Gate ★★★
   // ═══════════════════════════════════════════════════════════════
 
@@ -961,7 +1260,7 @@ export default function InstallmentsPage() {
               </div>
               <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2 sm:mb-3">دسترسی محدود</h2>
               <p className="text-xs sm:text-sm text-gray-500 mb-4 sm:mb-6 leading-relaxed">
-                مدیریت اقساط فقط در پلن حرفه‌ای و بالاتر در دسترس است
+                مدیریت اقساط و نسیه فقط در پلن حرفه‌ای و بالاتر در دسترس است
               </p>
               <Button
                 className="bg-emerald-600 hover:bg-emerald-700 gap-2 w-full"
@@ -978,10 +1277,10 @@ export default function InstallmentsPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ Plan Details View ★★★
+  // ★★★ Plan Details View (اقساط) ★★★
   // ═══════════════════════════════════════════════════════════════
 
-  if (selectedPlan) {
+  if (selectedPlan && activeTab === 'installments') {
     const installments = selectedPlan.schedules || []
     const paidCount = selectedPlan.paidCount ?? selectedPlan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
     const totalCount = selectedPlan.totalInstallments || installments.length
@@ -1037,9 +1336,6 @@ export default function InstallmentsPage() {
         </header>
 
         <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-3 sm:space-y-4">
-        
-                               {/* Summary Cards - موبایل - KpiCard Style */}
-                   {/* Summary Cards - ریسپانسیو و بهینه */}
           <div className="grid grid-cols-2 gap-2 sm:gap-3">
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
               <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
@@ -1081,7 +1377,7 @@ export default function InstallmentsPage() {
               </div>
             </div>
           </div>
-          {/* Installments List - موبایل */}
+
           <div className="md:hidden space-y-2">
             {installments.length === 0 ? (
               <Card className="bg-white">
@@ -1148,7 +1444,6 @@ export default function InstallmentsPage() {
             )}
           </div>
 
-          {/* Installments Table - دسکتاپ */}
           <div className="hidden md:block">
             <Card className="bg-white">
               <CardHeader className="pb-2">
@@ -1224,7 +1519,6 @@ export default function InstallmentsPage() {
           </div>
         </div>
 
-            {/* Pay Dialog */}
         <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
           <DialogContent dir="rtl" className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1261,7 +1555,6 @@ export default function InstallmentsPage() {
                 </CardContent>
               </Card>
 
-              {/* ★ هشدار آفلاین در دیالوگ */}
               {!isOnline && (
                 <div className="flex items-start gap-2 p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800">
                   <WifiOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -1275,7 +1568,7 @@ export default function InstallmentsPage() {
                   type="number"
                   value={payAmount}
                   onChange={(e) => setPayAmount(e.target.value)}
-                  placeholder="مبلغ به تومان"
+                  placeholder="مبلغ به ریال"
                   className="text-left font-mono text-xs h-9"
                   max={payingSchedule?.amount}
                   min={1}
@@ -1361,23 +1654,74 @@ export default function InstallmentsPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // ★★★ Plans List View ★★★
+  // ★★★ Main Layout with Tabs ★★★
   // ═══════════════════════════════════════════════════════════════
 
   return (
     <div dir="rtl" className="flex flex-col h-full bg-gray-50/80">
-      <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4 shrink-0 sticky top-0 z-40">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 text-white">
-              <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
+      {/* ─── Header با تب‌ها ─────────────────────────────────── */}
+      <header className="bg-white border-b border-gray-200 px-3 sm:px-5 lg:px-6 py-3 shrink-0">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 rounded-xl bg-emerald-600 text-white shrink-0">
+              <CreditCard className="w-4 h-4 lg:w-5 lg:h-5" />
             </div>
-            <div>
-              <h1 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900">اقساط</h1>
-              <p className="text-[10px] sm:text-xs text-gray-500">مدیریت اقساط مشتریان</p>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900 leading-tight">اقساط و نسیه</h1>
+              <p className="text-[10px] sm:text-xs text-gray-500 leading-tight">
+                {activeTab === 'installments' 
+                  ? `${formatNumber(plans.length)} طرح قسطی` 
+                  : `${formatNumber(creditInvoices.length)} فاکتور نسیه باز`}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
+
+          {/* تب‌ها */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 order-3 sm:order-2 w-full sm:w-auto">
+            <button
+              onClick={() => setActiveTab('installments')}
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                activeTab === 'installments'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <span className="flex items-center justify-center gap-1.5">
+                <CalendarIcon className="w-3.5 h-3.5" />
+                <span>اقساط</span>
+                {plans.length > 0 && (
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                    activeTab === 'installments' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    {formatNumber(plans.length)}
+                  </span>
+                )}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('credit')}
+              className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
+                activeTab === 'credit'
+                  ? 'bg-white text-purple-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <span className="flex items-center justify-center gap-1.5">
+                <Wallet className="w-3.5 h-3.5" />
+                <span>نسیه</span>
+                {creditInvoices.length > 0 && (
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                    activeTab === 'credit' ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    {formatNumber(creditInvoices.length)}
+                  </span>
+                )}
+              </span>
+            </button>
+          </div>
+
+          {/* دکمه‌های اقدام */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 order-2 sm:order-3">
             {!isOnline && (
               <Badge variant="outline" className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5">
                 <WifiOff className="w-2.5 h-2.5" />
@@ -1389,291 +1733,602 @@ export default function InstallmentsPage() {
               size="sm"
               onClick={async () => {
                 setIsSyncing(true)
-                await loadData()
+                if (activeTab === 'installments') {
+                  await loadData()
+                } else {
+                  await loadCreditData()
+                }
                 setIsSyncing(false)
               }}
               disabled={isSyncing || !isOnline}
-              className="h-8 text-xs"
+              className="h-8 sm:h-9 px-2 sm:px-3 gap-1 text-xs sm:text-sm"
             >
-              {isSyncing ? (
-                <Loader2 className="w-3 h-3 ml-1 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3 h-3 ml-1" />
-              )}
+              <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">بروزرسانی</span>
             </Button>
           </div>
         </div>
       </header>
 
-      {/* آفلاین Badge */}
-      {!isOnline && (
-        <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-3 sm:px-6 py-2 shrink-0">
-          <CloudOff className="w-4 h-4 text-amber-600 shrink-0" />
-          <div className="flex-1 text-xs text-amber-700">
-            <span className="font-bold">حالت آفلاین: </span>
-            <span>داده‌های محلی نمایش داده می‌شوند. پس از اتصال بروزرسانی شود.</span>
-          </div>
-          {lastSyncTime && (
-            <span className="text-[10px] text-amber-600 shrink-0 whitespace-nowrap">
-              sync: {new Date(lastSyncTime).toLocaleDateString('fa-IR')}
-            </span>
+      {/* ─── محتوای تب اقساط ─────────────────────────────────── */}
+      {activeTab === 'installments' && (
+        <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-4">
+          {/* Loading State */}
+          {loading && plans.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
+              <p className="text-sm text-gray-500">در حال بارگذاری...</p>
+            </div>
           )}
+
+          {/* Error State */}
+          {error && plans.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <AlertTriangle className="w-8 h-8 text-red-500 mb-3" />
+              <p className="text-sm text-red-600 mb-2">{error}</p>
+              {isOnline && (
+                <Button variant="outline" size="sm" onClick={loadData}>
+                  تلاش مجدد
+                </Button>
+              )}
+            </div>
+          )}
+
+          {!loading || plans.length > 0 ? (
+            <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+                <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط پرداخت‌شده</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatNumber(summaryStats.paidInstallmentsCount)} قسط
+                    </p>
+                    <p className="text-[10px] text-white/70 truncate">
+                      {formatCurrency(summaryStats.totalPaidAmount)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <Clock className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط باقیمانده</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatNumber(summaryStats.remainingInstallmentsCount)} قسط
+                    </p>
+                    <p className="text-[10px] text-white/70 truncate">
+                      {formatCurrency(summaryStats.totalRemainingAmount)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <AlertTriangle className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط معوق</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatNumber(summaryStats.overdueInstallmentsCount)} قسط
+                    </p>
+                    <p className="text-[10px] text-white/70 truncate">
+                      {formatCurrency(summaryStats.overdueAmount)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <TrendingUp className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">مجموع کل اقساط</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatNumber(summaryStats.totalInstallmentsCount)} قسط
+                    </p>
+                    <p className="text-[10px] text-white/70 truncate">
+                      در {formatNumber(plans.length)} طرح
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search + Filter */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="relative flex-1 w-full">
+                  <div className={`${mobileSearchOpen ? 'block' : 'hidden sm:block'}`}>
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <Input
+                      autoFocus={mobileSearchOpen}
+                      type="text"
+                      placeholder="جستجو مشتری یا شماره فاکتور..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onBlur={() => { if (!search && window.innerWidth < 640) setMobileSearchOpen(false) }}
+                      className="w-full pr-9 pl-3 h-9 sm:h-10 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-400"
+                    />
+                  </div>
+                  {!mobileSearchOpen && (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setMobileSearchOpen(true)}
+                      className="h-9 w-full sm:hidden flex items-center justify-center gap-2"
+                    >
+                      <Search className="w-4 h-4" />
+                      جستجو
+                    </Button>
+                  )}
+                </div>
+
+                <Button
+                  variant={showOnlyOverdue ? "destructive" : "outline"}
+                  onClick={() => setShowOnlyOverdue(!showOnlyOverdue)}
+                  className={`flex items-center justify-center gap-1.5 h-9 sm:h-10 text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
+                    showOnlyOverdue ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>فقط معوق</span>
+                  {overdueCount > 0 && (
+                    <span className={`text-[9px] rounded-full px-1.5 py-0.5 ${
+                      showOnlyOverdue ? 'bg-white text-red-600' : 'bg-red-100 text-red-600'
+                    }`}>
+                      {formatNumber(overdueCount)}
+                    </span>
+                  )}
+                </Button>
+              </div>
+
+              {/* Plans List - Mobile */}
+              <div className="md:hidden space-y-2">
+                {filteredPlans.length === 0 ? (
+                  <Card className="bg-white">
+                    <CardContent className="p-6 text-center">
+                      <p className="text-xs text-gray-400">
+                        {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  filteredPlans.map((plan) => (
+                    <MobileInstallmentCard
+                      key={plan.id}
+                      plan={plan}
+                      onSelectPlan={setSelectedPlan}
+                    />
+                  ))
+                )}
+              </div>
+
+              {/* Plans Table - Desktop */}
+              <div className="hidden md:block">
+                <Card className="bg-white">
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      {filteredPlans.length === 0 ? (
+                        <div className="p-8 text-center text-sm text-gray-400">
+                          {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-gray-50/80">
+                              <TableHead className="text-xs">مشتری</TableHead>
+                              <TableHead className="text-xs">فاکتور</TableHead>
+                              <TableHead className="text-xs text-right">مبلغ کل</TableHead>
+                              <TableHead className="text-xs text-right">باقیمانده</TableHead>
+                              <TableHead className="text-xs">اقساط</TableHead>
+                              <TableHead className="text-xs">وضعیت</TableHead>
+                              <TableHead className="text-xs">پیشرفت</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredPlans.map((plan) => {
+                              const paidCount = plan.paidCount ?? plan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
+                              const totalCount = plan.totalInstallments || plan.schedules.length
+                              const progressPct = plan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
+                              const planOverdueItems = plan.schedules.filter(s => isOverdue(s))
+
+                              return (
+                                <TableRow
+                                  key={plan.id}
+                                  className="hover:bg-purple-50/30 cursor-pointer transition-colors"
+                                  onClick={() => setSelectedPlan(plan)}
+                                >
+                                  <TableCell className="text-xs font-medium">{plan.customerName}</TableCell>
+                                  <TableCell className="text-xs font-mono">{plan.invoiceNumber}</TableCell>
+                                  <TableCell className="text-xs text-right">{formatCurrency(plan.totalAmount)}</TableCell>
+                                  <TableCell className="text-xs text-right font-bold text-amber-600">{formatCurrency(plan.remainingAmount)}</TableCell>
+                                  <TableCell className="text-xs">
+                                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-[10px]">
+                                      {formatNumber(paidCount)}/{formatNumber(totalCount)}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    {planOverdueItems.length > 0 ? (
+                                      <Badge className="bg-red-100 text-red-700 text-[10px]">
+                                        {formatNumber(planOverdueItems.length)} معوق
+                                      </Badge>
+                                    ) : (
+                                      getStatusBadge(plan.status)
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                        <div
+                                          className={`h-full rounded-full ${
+                                            plan.status === 'completed' ? 'bg-emerald-500' : planOverdueItems.length > 0 ? 'bg-red-500' : 'bg-blue-500'
+                                          }`}
+                                          style={{ width: `${progressPct}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-[10px] text-gray-400 min-w-[30px]">{progressPct}%</span>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          ) : null}
         </div>
       )}
 
-      <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-4">
-        {/* Loading State */}
-        {loading && plans.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
-            <p className="text-sm text-gray-500">درحال بارگذاری...</p>
-          </div>
-        )}
+      {/* ─── محتوای تب نسیه ─────────────────────────────────── */}
+      {activeTab === 'credit' && (
+        <div className="flex-1 overflow-auto p-3 sm:p-6 space-y-4">
+          {/* Loading State */}
+          {creditLoading && creditInvoices.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-purple-600 mb-3" />
+              <p className="text-sm text-gray-500">در حال بارگذاری فاکتورهای نسیه...</p>
+            </div>
+          )}
 
-        {/* Error State */}
-        {error && plans.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16">
-            <AlertTriangle className="w-8 h-8 text-red-500 mb-3" />
-            <p className="text-sm text-red-600 mb-2">{error}</p>
-            {isOnline && (
-              <Button variant="outline" size="sm" onClick={loadData}>
+          {/* Error State */}
+          {creditError && creditInvoices.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <AlertTriangle className="w-8 h-8 text-red-500 mb-3" />
+              <p className="text-sm text-red-600 mb-2">{creditError}</p>
+              <Button variant="outline" size="sm" onClick={loadCreditData}>
                 تلاش مجدد
               </Button>
-            )}
-          </div>
-        )}
-
-        {/* Content */}
-        {!loading || plans.length > 0 ? (
-          <>
-          
-                   {/* ★★★ Summary Cards - آمار دقیق و حرفه‌ای اقساط ★★★ */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
-            
-            {/* کارت ۱: اقساط پرداخت‌شده */}
-            <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
-              <div className="shrink-0">
-                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                  <CheckCircle2 className="w-5 h-5 text-white" />
-                </div>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط پرداخت‌شده</p>
-                <p className="text-sm sm:text-base font-bold text-white truncate">
-                  {formatNumber(summaryStats.paidInstallmentsCount)} قسط
-                </p>
-                <p className="text-[10px] text-white/70 truncate">
-                  به مبلغ {formatCurrency(summaryStats.totalPaidAmount)}
-                </p>
-              </div>
             </div>
+          )}
 
-            {/* کارت ۲: اقساط باقیمانده */}
-            <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
-              <div className="shrink-0">
-                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                  <Clock className="w-5 h-5 text-white" />
-                </div>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط باقیمانده</p>
-                <p className="text-sm sm:text-base font-bold text-white truncate">
-                  {formatNumber(summaryStats.remainingInstallmentsCount)} قسط
-                </p>
-                <p className="text-[10px] text-white/70 truncate">
-                  به مبلغ {formatCurrency(summaryStats.totalRemainingAmount)}
-                </p>
-              </div>
-            </div>
-
-            {/* کارت ۳: اقساط معوق */}
-            <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
-              <div className="shrink-0">
-                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-white" />
-                </div>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-white/80 truncate">اقساط معوق</p>
-                <p className="text-sm sm:text-base font-bold text-white truncate">
-                  {formatNumber(summaryStats.overdueInstallmentsCount)} قسط
-                </p>
-                <p className="text-[10px] text-white/70 truncate">
-                  به مبلغ {formatCurrency(summaryStats.overdueAmount)}
-                </p>
-              </div>
-            </div>
-
-            {/* کارت ۴: مجموع کل اقساط */}
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
-              <div className="shrink-0">
-                <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                  <TrendingUp className="w-5 h-5 text-white" />
-                </div>
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] sm:text-xs text-white/80 truncate">مجموع کل اقساط</p>
-                <p className="text-sm sm:text-base font-bold text-white truncate">
-                  {formatNumber(summaryStats.totalInstallmentsCount)} قسط
-                </p>
-                <p className="text-[10px] text-white/70 truncate">
-                  در {formatNumber(plans.length)} طرح
-                </p>
-              </div>
-            </div>
-
-          </div>
-                      {/* Search + Filter */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <div className="relative flex-1 w-full">
-                {/* ★ نمایش در دسکتاپ و زمانی که موبایل سرچ باز است */}
-                <div className={`${mobileSearchOpen ? 'block' : 'hidden sm:block'}`}>
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                  <Input
-                    autoFocus={mobileSearchOpen}
-                    type="text"
-                    placeholder="جستجو مشتری یا شماره فاکتور..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onBlur={() => { if (!search && window.innerWidth < 640) setMobileSearchOpen(false) }}
-                    className="w-full pr-9 pl-3 h-9 sm:h-10 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-400"
-                  />
-                </div>
-                {/* ★ دکمه جستجو فقط در موبایل وقتی بسته است */}
-                {!mobileSearchOpen && (
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => setMobileSearchOpen(true)}
-                    className="h-9 w-full sm:hidden flex items-center justify-center gap-2"
-                  >
-                    <Search className="w-4 h-4" />
-                    جستجو
-                  </Button>
-                )}
-              </div>
-
-              <Button
-                variant={showOnlyOverdue ? "destructive" : "outline"}
-                onClick={() => setShowOnlyOverdue(!showOnlyOverdue)}
-                className={`flex items-center justify-center gap-1.5 h-9 sm:h-10 text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
-                  showOnlyOverdue ? 'bg-red-600 hover:bg-red-700 text-white border-red-600' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>فقط معوق</span>
-                {overdueCount > 0 && (
-                  <span className={`text-[9px] rounded-full px-1.5 py-0.5 ${
-                    showOnlyOverdue ? 'bg-white text-red-600' : 'bg-red-100 text-red-600'
-                  }`}>
-                    {formatNumber(overdueCount)}
-                  </span>
-                )}
-              </Button>
-            </div>
-
-            {/* Plans List - Mobile Card View */}
-            <div className="md:hidden space-y-2">
-              {filteredPlans.length === 0 ? (
-                <Card className="bg-white">
-                  <CardContent className="p-6 text-center">
-                    <p className="text-xs text-gray-400">
-                      {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
+          {!creditLoading || creditInvoices.length > 0 ? (
+            <>
+              {/* Summary Cards نسیه */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">فاکتورهای نسیه</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatNumber(creditSummary.totalInvoices)} فاکتور
                     </p>
+                    <p className="text-[10px] text-white/70 truncate">باز و در انتظار</p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <CreditCard className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">مبلغ کل نسیه</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatCurrency(creditSummary.totalAmount)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">دریافت شده</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatCurrency(creditSummary.totalPaid)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md transition-all">
+                  <div className="shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <Wallet className="w-5 h-5 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] sm:text-xs text-white/80 truncate">مانده طلب</p>
+                    <p className="text-sm sm:text-base font-bold text-white truncate">
+                      {formatCurrency(creditSummary.totalRemaining)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search */}
+              <div className="relative w-full">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder="جستجو مشتری یا شماره فاکتور نسیه..."
+                  value={creditSearch}
+                  onChange={(e) => setCreditSearch(e.target.value)}
+                  className="w-full pr-9 pl-3 h-9 sm:h-10 bg-white border border-gray-200 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-purple-400"
+                />
+              </div>
+
+              {/* Credit List - Mobile */}
+              <div className="md:hidden space-y-2">
+                {filteredCreditInvoices.length === 0 ? (
+                  <Card className="bg-white">
+                    <CardContent className="p-6 text-center">
+                      <p className="text-xs text-gray-400">
+                        {creditSearch ? 'فاکتور نسیه‌ای با این مشخصات یافت نشد' : 'هیچ فاکتور نسیه بازی وجود ندارد'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  filteredCreditInvoices.map((inv) => (
+                    <MobileCreditCard
+                      key={inv.id}
+                      invoice={inv}
+                      onPay={handleCreditPayClick}
+                    />
+                  ))
+                )}
+              </div>
+
+              {/* Credit Table - Desktop */}
+              <div className="hidden md:block">
+                <Card className="bg-white">
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      {filteredCreditInvoices.length === 0 ? (
+                        <div className="p-8 text-center text-sm text-gray-400">
+                          {creditSearch ? 'فاکتور نسیه‌ای با این مشخصات یافت نشد' : 'هیچ فاکتور نسیه بازی وجود ندارد'}
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-gray-50/80">
+                              <TableHead className="text-xs">مشتری</TableHead>
+                              <TableHead className="text-xs">فاکتور</TableHead>
+                              <TableHead className="text-xs text-right">مبلغ کل</TableHead>
+                              <TableHead className="text-xs text-right">پرداخت شده</TableHead>
+                              <TableHead className="text-xs text-right">باقیمانده</TableHead>
+                              <TableHead className="text-xs">وضعیت</TableHead>
+                              <TableHead className="text-xs">تاریخ</TableHead>
+                              <TableHead className="text-xs text-center">عملیات</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredCreditInvoices.map((inv) => {
+                              const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
+                              return (
+                                <TableRow key={inv.id} className="hover:bg-purple-50/30 transition-colors">
+                                  <TableCell className="text-xs font-medium">{inv.customerName || 'فروش عمومی'}</TableCell>
+                                  <TableCell className="text-xs font-mono">{inv.invoiceNumber || inv.number}</TableCell>
+                                  <TableCell className="text-xs text-right font-mono">{formatCurrency(inv.totalAmount)}</TableCell>
+                                  <TableCell className="text-xs text-right font-mono text-emerald-600">{formatCurrency(inv.paidAmount)}</TableCell>
+                                  <TableCell className="text-xs text-right font-mono font-bold text-amber-600">{formatCurrency(remaining)}</TableCell>
+                                  <TableCell>{getCreditStatusBadge(inv.status, inv.paymentStatus)}</TableCell>
+                                  <TableCell className="text-xs">{formatDateShort(inv.createdAt)}</TableCell>
+                                  <TableCell className="text-center">
+                                    {remaining > 0 ? (
+                                      <Button
+                                        size="sm"
+                                        className="h-7 text-[10px] gap-1 bg-purple-600 hover:bg-purple-700"
+                                        onClick={() => handleCreditPayClick(inv)}
+                                      >
+                                        <Banknote className="w-3 h-3" />
+                                        پرداخت
+                                      </Button>
+                                    ) : (
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
-              ) : (
-                filteredPlans.map((plan) => (
-                  <MobileInstallmentCard
-                    key={plan.id}
-                    plan={plan}
-                    onSelectPlan={setSelectedPlan}
-                  />
-                ))
-              )}
-            </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
 
-            {/* Plans Table - Desktop */}
-            <div className="hidden md:block">
-              <Card className="bg-white">
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    {filteredPlans.length === 0 ? (
-                      <div className="p-8 text-center text-sm text-gray-400">
-                        {search ? 'طرح قسطی با این مشخصات یافت نشد' : 'هنوز طرح قسطی ثبت نشده است'}
-                      </div>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-gray-50/80">
-                            <TableHead className="text-xs">مشتری</TableHead>
-                            <TableHead className="text-xs">فاکتور</TableHead>
-                            <TableHead className="text-xs text-right">مبلغ کل</TableHead>
-                            <TableHead className="text-xs text-right">باقیمانده</TableHead>
-                            <TableHead className="text-xs">اقساط</TableHead>
-                            <TableHead className="text-xs">وضعیت</TableHead>
-                            <TableHead className="text-xs">پیشرفت</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredPlans.map((plan) => {
-                            const paidCount = plan.paidCount ?? plan.schedules.filter(s => s.status?.toLowerCase() === 'paid').length
-                            const totalCount = plan.totalInstallments || plan.schedules.length
-                            const progressPct = plan.progressPct ?? (totalCount > 0 ? Math.round((paidCount / totalCount) * 100) : 0)
-                            const planOverdueItems = plan.schedules.filter(s => isOverdue(s))
+      {/* ─── Dialog پرداخت نسیه ─────────────────────────────── */}
+      <Dialog open={creditPayDialogOpen} onOpenChange={(open) => {
+        if (!creditPaySubmitting) setCreditPayDialogOpen(open)
+        if (!open) {
+          setCreditInvoiceToPay(null)
+          setCreditPayAmount('')
+          setCreditPayRef('')
+          setCreditPayDate('')
+        }
+      }}>
+        <DialogContent dir="rtl" className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+              پرداخت فاکتور نسیه
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              فاکتور {creditInvoiceToPay?.invoiceNumber || creditInvoiceToPay?.number}
+            </DialogDescription>
+          </DialogHeader>
 
-                            return (
-                              <TableRow
-                                key={plan.id}
-                                className="hover:bg-purple-50/30 cursor-pointer transition-colors"
-                                onClick={() => setSelectedPlan(plan)}
-                              >
-                                <TableCell className="text-xs font-medium">{plan.customerName}</TableCell>
-                                <TableCell className="text-xs font-mono">{plan.invoiceNumber}</TableCell>
-                                <TableCell className="text-xs text-right">{formatCurrency(plan.totalAmount)}</TableCell>
-                                <TableCell className="text-xs text-right font-bold text-amber-600">{formatCurrency(plan.remainingAmount)}</TableCell>
-                                <TableCell className="text-xs">
-                                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-[10px]">
-                                    {formatNumber(paidCount)}/{formatNumber(totalCount)}
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  {planOverdueItems.length > 0 ? (
-                                    <Badge className="bg-red-100 text-red-700 text-[10px]">
-                                      {formatNumber(planOverdueItems.length)} معوق
-                                    </Badge>
-                                  ) : (
-                                    getStatusBadge(plan.status)
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-xs">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                                      <div
-                                        className={`h-full rounded-full ${
-                                          plan.status === 'completed' ? 'bg-emerald-500' : planOverdueItems.length > 0 ? 'bg-red-500' : 'bg-blue-500'
-                                        }`}
-                                        style={{ width: `${progressPct}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-[10px] text-gray-400 min-w-[30px]">{progressPct}%</span>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            )
-                          })}
-                        </TableBody>
-                      </Table>
-                    )}
+          <div className="space-y-3 py-2">
+            <Card className="bg-gray-50/50 border-0">
+              <CardContent className="p-3 space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500">مشتری</span>
+                  <span className="font-medium">{creditInvoiceToPay?.customerName || 'فروش عمومی'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="text-center">
+                    <p className="text-gray-500 text-[10px]">مبلغ کل</p>
+                    <p className="font-bold text-gray-700">{formatCurrency(creditInvoiceToPay?.totalAmount)}</p>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="text-center">
+                    <p className="text-gray-500 text-[10px]">پرداخت شده</p>
+                    <p className="font-bold text-emerald-600">{formatCurrency(creditInvoiceToPay?.paidAmount)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-500 text-[10px]">باقیمانده</p>
+                    <p className="font-bold text-amber-600">
+                      {formatCurrency(((creditInvoiceToPay?.totalAmount || 0) - (creditInvoiceToPay?.paidAmount || 0)))}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {!isOnline && (
+              <div className="flex items-start gap-2 p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800">
+                <WifiOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <p>برای ثبت پرداخت و صدور سند حسابداری، باید به اینترنت متصل باشید.</p>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">مبلغ پرداخت <span className="text-red-500">*</span></Label>
+              <Input
+                type="number"
+                value={creditPayAmount}
+                onChange={(e) => setCreditPayAmount(e.target.value)}
+                placeholder="مبلغ به ریال"
+                className="text-left font-mono text-xs h-9"
+                disabled={creditPaySubmitting || !isOnline}
+              />
+              <div className="flex items-center gap-2">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-6 text-[10px] flex-1"
+                  onClick={() => setCreditPayAmount(String(((creditInvoiceToPay?.totalAmount || 0) - (creditInvoiceToPay?.paidAmount || 0))))}
+                  disabled={creditPaySubmitting || !isOnline}
+                >
+                  کل باقیمانده
+                </Button>
+              </div>
             </div>
-          </>
-        ) : null}
-      </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">روش پرداخت <span className="text-red-500">*</span></Label>
+              <Select value={creditPayMethod} onValueChange={setCreditPayMethod} disabled={creditPaySubmitting || !isOnline}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="انتخاب روش پرداخت" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">نقدی (صندوق)</SelectItem>
+                  <SelectItem value="card">کارتخوان</SelectItem>
+                  <SelectItem value="bank">بانکی (واریز)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">تاریخ پرداخت <span className="text-red-500">*</span></Label>
+              <ShamsiDatePicker
+                value={creditPayDate}
+                onChange={setCreditPayDate}
+                placeholder="انتخاب تاریخ پرداخت"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">شماره مرجع (اختیاری)</Label>
+              <Input
+                type="text"
+                value={creditPayRef}
+                onChange={(e) => setCreditPayRef(e.target.value)}
+                placeholder="شماره فیش / تراکنش"
+                className="text-left font-mono text-xs h-9"
+                disabled={creditPaySubmitting || !isOnline}
+              />
+            </div>
+
+            {isOnline && (
+              <div className="flex items-start gap-2 p-2 bg-purple-50 rounded-lg border border-purple-100 text-[10px] text-purple-700">
+                <CreditCard className="w-3 h-3 shrink-0 mt-0.5" />
+                <p>با ثبت پرداخت، سند حسابداری و بدهی مشتری بروزرسانی می‌شوند.</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 flex-row pt-2 border-t">
+            <Button 
+              variant="outline" 
+              className="flex-1 h-9 text-xs"
+              onClick={() => {
+                setCreditPayDialogOpen(false)
+                setCreditInvoiceToPay(null)
+                setCreditPayAmount('')
+                setCreditPayRef('')
+                setCreditPayDate('')
+              }}
+              disabled={creditPaySubmitting}
+            >
+              انصراف
+            </Button>
+            <Button
+              className="bg-purple-600 hover:bg-purple-700 h-9 text-xs flex-1 gap-1.5"
+              onClick={handleCreditPayConfirm}
+              disabled={creditPaySubmitting || !isOnline || !creditPayAmount || Number(creditPayAmount) <= 0 || !creditPayDate}
+            >
+              {creditPaySubmitting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />در حال ثبت...</>
+              ) : !isOnline ? (
+                <><WifiOff className="w-4 h-4" />عدم دسترسی</>
+              ) : (
+                <><Wallet className="w-4 h-4" />ثبت پرداخت</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-

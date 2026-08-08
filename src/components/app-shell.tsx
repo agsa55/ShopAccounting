@@ -241,7 +241,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
       { label: 'طرف حساب', icon: Users, view: 'contacts' as any, permKey: 'accounting' },
-      { label: 'اقساط', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
+      { label: 'اقساط و نسیه', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
     ],
   },
   {
@@ -278,7 +278,7 @@ const viewLabels: Record<string, string> = {
   invoices: 'فاکتورها',
   'invoices-hub': 'فاکتورها',
   'purchase-invoices': 'فاکتورها',
-  installments: 'اقساط',
+  installments: 'نسیه و اقساط',
   accounting: 'حسابداری',
   'journal-entry-detail': 'جزئیات سند',
   settings: 'تنظیمات',

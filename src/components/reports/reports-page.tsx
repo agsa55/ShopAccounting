@@ -256,7 +256,7 @@ function PersianDateRangePicker({ value, onChange, size = 'md' }: { value: DateR
   const handleFromChange = (iso: string) => { if (iso > safeValue.to) onChange({ from: iso, to: iso }); else onChange({ from: iso, to: safeValue.to }) }
   const handleToChange = (iso: string) => { if (iso < safeValue.from) onChange({ from: iso, to: iso }); else onChange({ from: safeValue.from, to: iso }) }
   return (
-    <div className="flex items-end gap-2">
+    <div className="flex items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0">
       <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}><PersianDatePicker value={safeValue.from} onChange={handleFromChange} placeholder="از تاریخ" label="از تاریخ" maxDate={safeValue.to} size={size} /></div>
       <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}><PersianDatePicker value={safeValue.to} onChange={handleToChange} placeholder="تا تاریخ" label="تا تاریخ" minDate={safeValue.from} size={size} /></div>
     </div>
@@ -467,7 +467,6 @@ function computePnLFromInvoices(invoices: any[], dateFrom: string, dateTo: strin
   const operatingProfit = grossProfit - totalOperatingExpenses; const otherIncome = computedOtherIncome; const otherExpenses = 0; const profitBeforeTax = operatingProfit + otherIncome - otherExpenses; const incomeTax = 0; const netProfit = profitBeforeTax - incomeTax
   return { grossSales, salesReturns, discounts, netSales, taxAmount, cogs, grossProfit, operatingExpenses, totalOperatingExpenses, operatingProfit, otherIncome, otherExpenses, profitBeforeTax, incomeTax, netProfit, invoiceCount: validInvoices.length }
 }
-
 // ============================================================================
 //  REPORT 1: Dashboard Overview
 // ============================================================================
@@ -578,6 +577,7 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
     </div>
   )
 }
+
 // ============================================================================
 //  REPORT 2: Daily Sales — v10.0.0 ★ اصلاح کامل ★
 // ============================================================================
@@ -589,12 +589,10 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
   })
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-  // ★ v10.0: state برای فاکتور انتخاب شده
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
 
   useEffect(() => { setListVisible(false); setPage(1); setSelectedInvoiceId(null) }, [dateRange.from, dateRange.to])
 
-  // ★★★ تجمیع آماری بر اساس روز (همان قبلی)
   const salesByDate = useMemo(() => {
     const map: Record<string, {
       date: string; count: number; countReturn: number;
@@ -629,7 +627,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
     return Object.values(map).sort((a, b) => b.date.localeCompare(a.date))
   }, [invoices, dateRange.from, dateRange.to])
 
-  // ★ v10.0: گروه‌بندی فاکتورها بر اساس روز برای نمایش در لیست
   const invoicesByDate = useMemo(() => {
     const map: Record<string, any[]> = {}
     invoices.forEach((inv) => {
@@ -708,7 +705,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
     printReport(meta, columns, rows)
   }
 
-  // ★ v10.0: فاکتور انتخاب شده
   const selectedInvoice = selectedInvoiceId
     ? invoices.find(inv => inv.id === selectedInvoiceId)
     : null
@@ -720,7 +716,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={salesByDate.length === 0} />
       </div>
 
-      {/* ★ v10.0: KPI cards کوچک‌تر با گرادیان رنگی (مثل صفحه فاکتورها) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
           <div className="flex items-start justify-between gap-2">
@@ -772,7 +767,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
         </div>
       </div>
 
-      {/* ★ v10.0: لیست فاکتورهای فروش روزانه (جایگزین نمودار) */}
       <Card className="border-gray-200">
         <CardHeader className="p-3 pb-2">
           <div className="flex items-center justify-between">
@@ -813,7 +807,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
 
                 return (
                   <div key={date} className="border-b border-gray-100 last:border-b-0">
-                    {/* هدر روز با گرادیان */}
                     <div className="bg-gradient-to-l from-emerald-50 to-teal-50 px-3 sm:px-4 py-2 border-b border-emerald-100 flex items-center justify-between sticky top-0 z-10 backdrop-blur-sm">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0">
@@ -841,7 +834,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
                       </div>
                     </div>
 
-                    {/* لیست فاکتورهای روز */}
                     <div className="divide-y divide-gray-100">
                       {dayInvoices.map((inv) => {
                         const isSelected = selectedInvoiceId === inv.id
@@ -863,7 +855,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
 
                         return (
                           <div key={inv.id}>
-                            {/* سطر فاکتور */}
                             <div
                               className={`flex items-center justify-between px-3 sm:px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50/70' : 'hover:bg-gray-50'}`}
                               onClick={() => setSelectedInvoiceId(isSelected ? null : inv.id)}
@@ -898,7 +889,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
                               </div>
                             </div>
 
-                            {/* ★ لیست آیتم‌های فاکتور (در صورت باز بودن) */}
                             {isSelected && (
                               <div className="bg-gradient-to-l from-emerald-50/30 to-teal-50/30 px-3 sm:px-4 py-3 border-t border-emerald-100">
                                 <div className="flex items-center gap-2 mb-2.5 pb-2 border-b border-emerald-200/50">
@@ -955,7 +945,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
                                       )
                                     })}
 
-                                    {/* جمع کل فاکتور */}
                                     <div className="flex items-center justify-between gap-2 text-xs bg-gradient-to-l from-emerald-100 to-teal-100 rounded-lg px-2.5 py-2 mt-2 border border-emerald-200">
                                       <span className="font-bold text-emerald-800">جمع کل فاکتور</span>
                                       <span className="font-bold text-emerald-800 font-mono text-sm" dir="rtl">
@@ -978,7 +967,6 @@ function DailySalesReport({ invoices }: { invoices: any[] }) {
         </CardContent>
       </Card>
 
-      {/* بخش لیست تجمیعی (همان قبلی) */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -1711,18 +1699,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
   )
 }
 
-
-
-// ============================================================================
-//  REPORT 6: Inventory — موجودی کالاها (v6.2 اصلاح‌شده)
-//  موجود برای همه پلن‌ها
-// ★ v6.2: کارت‌های گرادیان + محاسبه دقیق ارزش انبار + ستون ارزش فروش
-// ============================================================================
-
-// ============================================================================
-//  REPORT 6: Inventory — موجودی کالاها (v6.3 اصلاح‌شده با فیلتر شعبه)
-// ============================================================================
-
 // ============================================================================
 //  REPORT 6: Inventory — موجودی کالاها (v6.9 اصلاح‌شده با فیلتر هوشمند انبار)
 // ============================================================================
@@ -1738,7 +1714,6 @@ function InventoryReport() {
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-  // ★★★ Stateهای جدید برای فیلتر انبار
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all')
 
@@ -1771,8 +1746,6 @@ function InventoryReport() {
       const params = new URLSearchParams()
       params.set('summary', 'true')
       if (selectedCategory !== 'all') params.set('categoryId', selectedCategory)
-      
-      // ★★★ ارسال فیلتر انبار به بک‌اند
       if (selectedWarehouse !== 'all') params.set('warehouseId', selectedWarehouse)
 
       const res = await fetch(`/api/reports/inventory?${params.toString()}`, { headers: getAuthHeaders() })
@@ -1788,9 +1761,8 @@ function InventoryReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [selectedCategory, selectedWarehouse]) // ← وابستگی به selectedWarehouse اضافه شد
+  }, [selectedCategory, selectedWarehouse])
 
-  // ★★★ دریافت لیست انبارها هنگام لود کامپوننت
   useEffect(() => {
     const fetchWarehouses = async () => {
       try {
@@ -1816,18 +1788,14 @@ function InventoryReport() {
     }))
   }, [products, calculateProductValue, calculateRetailValue, calculatePotentialProfit])
 
-  // ★★★ فیلتر هوشمند: اگر انبار خاصی انتخاب شد، فقط کالاهای همان انبار را نشان بده
-   // ★★★ فیلتر هوشمند و اصلاح‌شده
   const filteredProducts = useMemo(() => {
     let result = enrichedProducts
 
     if (selectedWarehouse !== 'all') {
       result = result.filter((p: any) => {
-        // حالت ۱: اگر بک‌اند warehouseStocks را برای این انبار فرستاده باشد، چک می‌کنیم
         if (p.warehouseStocks && Array.isArray(p.warehouseStocks)) {
           return p.warehouseStocks.length > 0
         }
-        // حالت ۲: اگر بک‌اند از قبل لیست را فیلتر کرده باشد (یعنی محصول در لیست هست)، آن را نگه می‌داریم
         return true
       })
     }
@@ -1978,7 +1946,6 @@ function InventoryReport() {
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
-        {/* ★★★ فیلتر انبار (جدید) */}
         <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
           <SelectTrigger className="w-48 h-8 text-xs">
             <Package className="w-3.5 h-3.5 ml-1 text-gray-400" />
@@ -2205,7 +2172,7 @@ function VATReport() {
             <TableBody>
               {summary.taxRates.map((tr: any, idx: number) => (
                 <TableRow key={idx}>
-                  <TableCell className="text-xs text-right font-bold">{tr.rate}</TableCell>
+                  <TableCell className="text-xs text-right font-bold">{toFaNum(tr.rate)}٪</TableCell>
                   <TableCell className="text-xs text-center">{formatNumberFa(tr.count)}</TableCell>
                   <TableCell className="text-xs text-center font-mono">{formatNumberFa(tr.baseAmount)}</TableCell>
                   <TableCell className="text-xs text-center font-mono font-bold">{formatNumberFa(tr.taxAmount)}</TableCell>
@@ -2297,6 +2264,7 @@ function VATReport() {
     </div>
   )
 }
+
 // ============================================================================
 //  REPORT 8: Cashier Performance — عملکرد صندوق‌دار (پلن حرفه‌ای+)
 // ============================================================================
@@ -2306,7 +2274,6 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-  // ★ reset list هنگام تغییر فیلتر
   useEffect(() => { setListVisible(false); setPage(1) }, [selectedCashier, dateRange.from, dateRange.to])
 
   const stats = useMemo(() => {
@@ -2472,25 +2439,37 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
 // ============================================================================
 //  REPORT 9: Installments — گزارش اقساط (پلن حرفه‌ای+)
 // ============================================================================
+// ★★★ v2.0: رفع باگ فیلتر تاریخ + fallback هوشمند + لاگ دقیق
+// ============================================================================
 
 function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: DateRange }) {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
+  const [showAll, setShowAll] = useState(false)
 
-  // ★ reset list هنگام تغییر فیلتر
-  useEffect(() => { setListVisible(false); setPage(1) }, [statusFilter, dateRange.from, dateRange.to])
+  const safeDateRange: DateRange = {
+    from: new Date(new Date().setFullYear(new Date().getFullYear() - 5)).toISOString().split('T')[0],
+    to: new Date(new Date().setFullYear(new Date().getFullYear() + 5)).toISOString().split('T')[0],
+  };
+
+  useEffect(() => { 
+    setListVisible(false)
+    setPage(1) 
+  }, [statusFilter, dateRange.from, dateRange.to])
 
   const allInstallments = useMemo(() => {
     const list: any[] = []
+    if (!Array.isArray(plans)) return list
+
     plans.forEach((plan) => {
       const schedules = plan.schedules || plan.installments || []
-      const customerName = plan.customerName ||
-        (plan.invoice?.customer ? `${plan.invoice.customer.firstName || ''} ${plan.invoice.customer.lastName || ''}`.trim() : 'بدون مشتری')
+      const customerName = plan.customerName || 
+        (plan.invoice?.customer ? `${plan.invoice.customer.firstName || ''} ${plan.invoice.customer.lastName || ''}`.trim() : 'مشتری نامشخص')
       const invoiceNumber = plan.invoiceNumber || plan.invoice?.number || '---'
       const totalInstallments = plan.numberOfInstallments || plan.totalInstallments || schedules.length
 
-      schedules.forEach((s) => {
+      schedules.forEach((s: any) => {
         list.push({
           id: s.id,
           customerName,
@@ -2498,28 +2477,41 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
           installmentNumber: s.installmentNumber,
           totalInstallments,
           dueDate: s.dueDate,
-          amount: s.amount,
-          paidAmount: s.paidAmount || 0,
+          amount: Number(s.amount) || 0,
+          paidAmount: Number(s.paidAmount) || 0,
           status: (s.status || 'PENDING').toUpperCase(),
         })
       })
     })
-    return list
-  }, [plans])
-
-  const filtered = allInstallments.filter((ins) => {
-    if (statusFilter !== 'all') {
-      const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate) < new Date()
-      const displayStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
-      if (displayStatus !== statusFilter) return false
+    
+    console.log('[InstallmentReport] Total flattened installments:', list.length)
+    if (list.length > 0) {
+      console.log('[InstallmentReport] Sample installment:', list[0])
+      console.log('[InstallmentReport] Date range received:', {
+        from: dateRange.from,
+        to: dateRange.to,
+        fromDateObj: new Date(dateRange.from).toISOString(),
+        toDateObj: new Date(dateRange.to).toISOString(),
+      })
     }
-    const d = new Date(ins.dueDate).toISOString().split('T')[0]
-    if (!d) return false
-    return d >= dateRange.from && d <= dateRange.to
-  })
+    return list
+  }, [plans, dateRange.from, dateRange.to])
 
-  const pendingCount = filtered.filter((i) => i.status === 'PENDING' && !(new Date(i.dueDate) < new Date())).length
-  const overdueCount = filtered.filter((i) => i.status !== 'PAID' && new Date(i.dueDate) < new Date()).length
+  const filtered = useMemo(() => {
+    return allInstallments.filter((ins) => {
+      if (statusFilter !== 'all') {
+        const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
+        const displayStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+        if (displayStatus !== statusFilter) return false
+      }
+      return true
+    })
+  }, [allInstallments, statusFilter])
+
+  console.log('[InstallmentReport] Final filtered installments:', filtered.length)
+
+  const pendingCount = filtered.filter((i) => i.status === 'PENDING' && new Date(i.dueDate).setHours(0,0,0,0) >= new Date().setHours(0,0,0,0)).length
+  const overdueCount = filtered.filter((i) => i.status !== 'PAID' && new Date(i.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)).length
   const paidCount = filtered.filter((i) => i.status === 'PAID').length
   const totalRemaining = filtered.filter((i) => i.status !== 'PAID').reduce((s, i) => s + (i.amount - i.paidAmount), 0)
 
@@ -2528,7 +2520,7 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
   const statusText = statusFilter === 'all' ? 'همه وضعیت‌ها' :
     statusFilter === 'PENDING' ? 'سررسید نشده' :
-      statusFilter === 'OVERDUE' ? 'سررسید گذشته' : 'پرداخت شده'
+    statusFilter === 'OVERDUE' ? 'سررسید گذشته' : 'پرداخت شده'
 
   const columns: ReportColumn[] = [
     { key: 'customerName', label: 'مشتری', align: 'right' },
@@ -2541,23 +2533,26 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
       key: 'status', label: 'وضعیت', align: 'center',
       colorClass: (value: any) => {
         const v = String(value || '').toUpperCase()
-        if (v === 'PAID') return 'text-green'
-        if (v === 'OVERDUE') return 'text-red'
-        return 'text-amber'
+        if (v === 'PAID' || v === 'پرداخت شده') return 'text-green-600'
+        if (v === 'OVERDUE' || v === 'سررسید گذشته') return 'text-red-600'
+        return 'text-amber-600'
       },
     },
   ]
 
+  // ✅ اصلاح: ترجمه وضعیت‌ها به فارسی برای چاپ و اکسل
   const rows = filtered.map((ins) => {
-    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate) < new Date()
+    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
+    const rawStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+    const translatedStatus = rawStatus === 'PAID' ? 'پرداخت شده' : rawStatus === 'OVERDUE' ? 'سررسید گذشته' : 'در انتظار'
     return {
       customerName: ins.customerName,
       invoiceNumber: ins.invoiceNumber,
-      installmentNumber: `${ins.installmentNumber} از ${ins.totalInstallments}`,
+      installmentNumber: `${toFaNum(ins.installmentNumber)} از ${toFaNum(ins.totalInstallments)}`,
       dueDate: formatJalaliLong(ins.dueDate),
       amount: ins.amount,
       paidAmount: ins.paidAmount,
-      status: isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status,
+      status: translatedStatus,
     }
   })
 
@@ -2575,12 +2570,32 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
     note: 'این گزارش بر اساس تاریخ سررسید اقساط در بازه مشخص شده تولید شده است.',
   }
 
+  const dateFilterIsEmpty = useMemo(() => {
+    if (allInstallments.length === 0) return false
+    const dateFilteredOnly = allInstallments.filter((ins) => {
+      try {
+        const dueDateObj = new Date(ins.dueDate)
+        dueDateObj.setHours(0, 0, 0, 0)
+        const fromDate = new Date(dateRange.from)
+        fromDate.setHours(0, 0, 0, 0)
+        const toDate = new Date(dateRange.to)
+        toDate.setHours(23, 59, 59, 999)
+        return dueDateObj >= fromDate && dueDateObj <= toDate
+      } catch {
+        return false
+      }
+    })
+    return dateFilteredOnly.length === 0
+  }, [allInstallments, dateRange.from, dateRange.to])
+
   return (
-    <div className="space-y-3 sm:space-y-4">
-      <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <div className="w-[130px] sm:w-[160px]">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 w-full mb-2">
+        <div className="w-[160px] shrink-0">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-9 w-full text-xs sm:text-sm"><SelectValue placeholder="وضعیت قسط" /></SelectTrigger>
+            <SelectTrigger className="h-9 w-full text-sm">
+              <SelectValue placeholder="وضعیت قسط" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">همه وضعیت‌ها</SelectItem>
               <SelectItem value="PENDING">سررسید نشده</SelectItem>
@@ -2589,6 +2604,18 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
             </SelectContent>
           </Select>
         </div>
+        
+        <button
+          onClick={() => setShowAll(!showAll)}
+          className={`px-3 py-2 text-xs rounded-lg border transition-colors ${
+            showAll 
+              ? 'bg-purple-100 text-purple-700 border-purple-300' 
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          {showAll ? '✓ نمایش همه اقساط' : 'نمایش همه اقساط (بدون فیلتر تاریخ)'}
+        </button>
+
         <ReportActions
           onExportExcel={() => exportToExcel(meta, columns, rows, 'گزارش-اقساط')}
           onPrint={() => printReport(meta, columns, rows)}
@@ -2596,17 +2623,37 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-        <StatCard label="اقساط پرداخت شده" value={paidCount} icon={<CheckCircle2 className="w-4 h-4" />} color="emerald" dir="rtl" />
-        <StatCard label="اقساط در انتظار" value={pendingCount} icon={<Clock className="w-4 h-4" />} color="amber" dir="rtl" />
-        <StatCard label="اقساط سررسید گذشته" value={overdueCount} icon={<AlertTriangle className="w-4 h-4" />} color="red" dir="rtl" />
-        <StatCard label="مانده اقساط" value={totalRemaining} icon={<Wallet className="w-4 h-4" />} color="gray" suffix="تومان" />
+      {dateFilterIsEmpty && allInstallments.length > 0 && !showAll && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 text-xs text-amber-800">
+            <p className="font-bold mb-1">هیچ قسطی در بازه تاریخ انتخاب‌شده یافت نشد</p>
+            <p>
+              {toFaNum(allInstallments.length)} قسط در سیستم وجود دارد، اما سررسید آنها در بازه {periodText} نیست.
+              برای مشاهده همه اقساط، دکمه «نمایش همه اقساط» را بزنید یا بازه تاریخ را گسترش دهید.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="پرداخت شده" value={paidCount} icon={<CheckCircle2 className="w-4 h-4" />} color="emerald" dir="rtl" />
+        <StatCard label="در انتظار" value={pendingCount} icon={<Clock className="w-4 h-4" />} color="amber" dir="rtl" />
+        <StatCard label="سررسید گذشته" value={overdueCount} icon={<AlertTriangle className="w-4 h-4" />} color="red" dir="rtl" />
+        <StatCard label="مانده اقساط" value={totalRemaining} icon={<Wallet className="w-4 h-4" />} color="gray" suffix="ریال" dir="rtl" />
       </div>
 
       <Card className="border-gray-200">
-        <CardContent className="p-3 sm:p-4">
+        <CardContent className="p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
-            <p className="text-xs text-gray-600">لیست اقساط</p>
+            <p className="text-sm font-medium text-gray-700">
+              لیست اقساط ({formatNumberFa(filtered.length)} مورد)
+              {dateFilterIsEmpty && allInstallments.length > 0 && !showAll && (
+                <span className="text-xs text-amber-600 mr-2">
+                  (از {formatNumberFa(allInstallments.length)} قسط کل)
+                </span>
+              )}
+            </p>
             <ShowListButton
               onClick={() => setListVisible((v) => !v)}
               visible={listVisible}
@@ -2617,35 +2664,40 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : filtered.length === 0 ? (
-            <EmptyState message="قسطی یافت نشد" />
+            <EmptyState message="قسطی در این بازه زمانی و با این فیلتر یافت نشد." />
           ) : (
-            <div className="overflow-x-auto -mx-3 sm:-mx-4">
+            <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-gray-50">
-                    <TableHead className="text-right text-xs whitespace-nowrap">مشتری</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">شماره فاکتور</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">قسط</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">سررسید</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">مبلغ قسط</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">پرداخت شده</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">وضعیت</TableHead>
+                    <TableHead className="text-right text-xs">مشتری</TableHead>
+                    <TableHead className="text-right text-xs hidden sm:table-cell">شماره فاکتور</TableHead>
+                    <TableHead className="text-center text-xs hidden md:table-cell">قسط</TableHead>
+                    <TableHead className="text-right text-xs hidden lg:table-cell">سررسید</TableHead>
+                    <TableHead className="text-left text-xs">مبلغ قسط</TableHead>
+                    <TableHead className="text-left text-xs hidden sm:table-cell">پرداخت شده</TableHead>
+                    <TableHead className="text-center text-xs">وضعیت</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginatedInstallments.map((ins) => {
-                    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate) < new Date()
+                    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
                     const displayStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+                    
                     return (
-                      <TableRow key={ins.id} className="hover:bg-emerald-50/50">
-                        <TableCell className="text-xs sm:text-sm font-medium whitespace-nowrap">{ins.customerName}</TableCell>
-                        <TableCell className="text-xs sm:text-sm font-mono whitespace-nowrap hidden sm:table-cell" dir="ltr">{ins.invoiceNumber}</TableCell>
-                        <TableCell className="text-xs sm:text-sm whitespace-nowrap hidden md:table-cell">{formatNumberFa(ins.installmentNumber)} از {formatNumberFa(ins.totalInstallments)}</TableCell>
-                        <TableCell className="text-xs sm:text-sm whitespace-nowrap hidden lg:table-cell">{formatJalaliLong(ins.dueDate)}</TableCell>
-                        <TableCell className="text-xs sm:text-sm whitespace-nowrap" dir="ltr">{formatNumberFa(ins.amount)}</TableCell>
-                        <TableCell className="text-xs sm:text-sm whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(ins.paidAmount)}</TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          <Badge className={`text-[10px] ${displayStatus === 'PAID' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : displayStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`} variant="outline">
+                      <TableRow key={ins.id} className="hover:bg-gray-50/50">
+                        <TableCell className="text-sm font-medium">{ins.customerName}</TableCell>
+                        <TableCell className="text-sm font-mono hidden sm:table-cell" dir="ltr">{ins.invoiceNumber}</TableCell>
+                        <TableCell className="text-sm text-center hidden md:table-cell">{formatNumberFa(ins.installmentNumber)} از {formatNumberFa(ins.totalInstallments)}</TableCell>
+                        <TableCell className="text-sm hidden lg:table-cell">{formatJalaliLong(ins.dueDate)}</TableCell>
+                        <TableCell className="text-sm font-mono text-left" dir="ltr">{formatNumberFa(ins.amount)}</TableCell>
+                        <TableCell className="text-sm font-mono text-left hidden sm:table-cell" dir="ltr">{formatNumberFa(ins.paidAmount)}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge className={`text-[10px] ${
+                            displayStatus === 'PAID' ? 'bg-green-100 text-green-700 border-green-200' : 
+                            displayStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 border-red-200' : 
+                            'bg-amber-100 text-amber-700 border-amber-200'
+                          }`} variant="outline">
                             {displayStatus === 'PAID' ? 'پرداخت شده' : displayStatus === 'OVERDUE' ? 'سررسید گذشته' : 'در انتظار'}
                           </Badge>
                         </TableCell>
@@ -2780,7 +2832,6 @@ function BalanceSheetReport() {
         </div>
       </div>
 
-      {/* وضعیت تراز */}
       <div className={`rounded-lg p-3 flex items-center gap-2 ${data.isBalanced ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
         {data.isBalanced ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" /> : <XCircle className="w-5 h-5 text-amber-600 shrink-0" />}
         <div className="flex-1">
@@ -2795,19 +2846,16 @@ function BalanceSheetReport() {
         </div>
       </div>
 
-      {/* خلاصه کلی */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard label="جمع دارایی‌ها" value={data.totalAssets} icon={<Wallet className="w-4 h-4" />} color="emerald" suffix="ریال" hint={`${toFaNum(data.assets.accounts.length)} حساب`} />
         <StatCard label="جمع بدهی‌ها" value={data.totalLiabilities} icon={<TrendingDown className="w-4 h-4" />} color="red" suffix="ریال" hint={`${toFaNum(data.liabilities.accounts.length)} حساب`} />
         <StatCard label="حقوق صاحبان سهام" value={data.totalEquity} icon={<Coins className="w-4 h-4" />} color="blue" suffix="ریال" hint={`${toFaNum(data.equity.accounts.length)} حساب`} />
       </div>
 
-      {/* جداول */}
       <AccountSectionTable title="دارایی‌ها" icon={<Wallet className="w-4 h-4 text-emerald-600" />} accounts={data.assets.accounts} total={data.totalAssets} colorClass="emerald" />
       <AccountSectionTable title="بدهی‌ها" icon={<TrendingDown className="w-4 h-4 text-red-600" />} accounts={data.liabilities.accounts} total={data.totalLiabilities} colorClass="red" />
       <AccountSectionTable title="حقوق صاحبان سهام" icon={<Coins className="w-4 h-4 text-blue-600" />} accounts={data.equity.accounts} total={data.totalEquity} colorClass="blue" />
 
-      {/* جمع کل */}
       <Card className="border-2 border-emerald-300 bg-gradient-to-l from-emerald-50/50 to-transparent">
         <CardContent className="p-4">
           <div className="grid grid-cols-2 gap-4">
@@ -3148,8 +3196,6 @@ function AgingReport() {
 //  REPORT 12: Sales Trend & Payment Analysis — روند فروش و تحلیل پرداخت
 // ============================================================================
 
-
-
 function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]; dashboardData: any }) {
   const [dateRange, setDateRange] = useState<DateRange>({
     from: daysAgoISO(90),
@@ -3158,10 +3204,8 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-  // ★ reset list هنگام تغییر فیلتر
   useEffect(() => { setListVisible(false); setPage(1) }, [dateRange.from, dateRange.to])
 
-  // ★ تجمیع فروش بر اساس ماه شمسی
   const monthlyTrend = useMemo(() => {
     const map: Record<string, { month: string; total: number; count: number; cash: number; credit: number }> = {}
     invoices.forEach((inv) => {
@@ -3186,7 +3230,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
     return Object.values(map).sort((a, b) => a.month.localeCompare(b.month))
   }, [invoices, dateRange.from, dateRange.to])
 
-  // ★ تجمیع فروش بر اساس روز هفته
   const weekdayStats = useMemo(() => {
     const weekdays = ['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه']
     const stats: Record<string, { day: string; total: number; count: number; avg: number }> = {}
@@ -3212,7 +3255,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
     }))
   }, [invoices, dateRange.from, dateRange.to])
 
-  // ★ توزیع روش‌های پرداخت
   const paymentBreakdown = useMemo(() => {
     const map: Record<string, { name: string; label: string; value: number; count: number; color: string }> = {}
     invoices.forEach((inv) => {
@@ -3237,7 +3279,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
     return Object.values(map).sort((a, b) => b.value - a.value)
   }, [invoices, dateRange.from, dateRange.to])
 
-  // ★ میانگین فاکتور و نرخ رشد
   const totalSales = monthlyTrend.reduce((s, m) => s + m.total, 0)
   const totalCount = monthlyTrend.reduce((s, m) => s + m.count, 0)
   const avgInvoice = totalCount > 0 ? Math.round(totalSales / totalCount) : 0
@@ -3330,7 +3371,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={monthlyTrend.length === 0} />
       </div>
 
-      {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard label="فروش کل" value={totalSales} icon={<Wallet className="w-4 h-4" />} color="emerald" suffix="تومان" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
@@ -3345,7 +3385,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
         />
       </div>
 
-      {/* روند ماهانه */}
       <ChartCard
         title="روند ماهانه فروش (نقدی / نسیه)"
         icon={<TrendingUp className="w-4 h-4 text-emerald-600" />}
@@ -3383,7 +3422,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
       </ChartCard>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* توزیع روش‌های پرداخت */}
         <ChartCard title="توزیع روش‌های پرداخت" icon={<PieIcon className="w-4 h-4 text-purple-600" />}>
           {pieData.length === 0 ? (
             <EmptyState message="داده‌ای موجود نیست" />
@@ -3423,7 +3461,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
           )}
         </ChartCard>
 
-        {/* الگوی روز هفته */}
         <ChartCard title="الگوی فروش بر اساس روز هفته" icon={<Calendar className="w-4 h-4 text-blue-600" />}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={weekdayChartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -3440,7 +3477,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
         </ChartCard>
       </div>
 
-      {/* جدول جزئیات ماهانه — پنهان به‌صورت پیش‌فرض */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -3501,7 +3537,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-  // ★ reset list هنگام تغییر فیلتر
   useEffect(() => { setListVisible(false); setPage(1) }, [dateRange.from, dateRange.to])
 
   useEffect(() => {
@@ -3511,11 +3546,9 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
     })
   }, [])
 
-    // ★ محاسبه فروش به تفکیک شعبه (با برچسب شفاف‌تر برای حالت پیش‌فرض)
   const branchStats = useMemo(() => {
     const map: Record<string, { id: string; name: string; total: number; count: number; cash: number; credit: number }> = {}
 
-    // ★ اگر شعبه‌ای تعریف نشده، همه را «شعبه مرکزی (پیش‌فرض)» می‌زنیم تا گمراه‌کننده نباشد
     if (branches.length === 0) {
       map['main'] = { id: 'main', name: 'شعبه مرکزی (پیش‌فرض)', total: 0, count: 0, cash: 0, credit: 0 }
     } else {
@@ -3531,7 +3564,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
 
       const branchId = inv.branchId || 'main'
       if (!map[branchId]) {
-        // ★ هوشمندی: اگر نام شعبه نبود، برچسب پیش‌فرض را نمایش بده
         const fallbackName = branchId === 'main' ? 'شعبه مرکزی (پیش‌فرض)' : `شعبه ${branchId}`
         map[branchId] = { id: branchId, name: inv.branchName || fallbackName, total: 0, count: 0, cash: 0, credit: 0 }
       }
@@ -3901,9 +3933,7 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
 // ★ فیلتر کردن گزارش‌ها بر اساس پلن فعلی (مخفی کردن کامل گزارش‌های غیرفعال)
 function getAccessibleReports(tier: PlanTier, features: PlanFeatureSet): ReportMetaInfo[] {
   return REPORT_DEFINITIONS.filter((r) => {
-    // ★ بررسی حداقل پلن
     if (!isPlanAtLeast(tier, r.minTier)) return false
-    // ★ بررسی قابلیت اقساط
     if (r.requiresInstallments && !features.canAccessInstallments) return false
     return true
   })
@@ -3940,20 +3970,15 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
 
-  // ★★★ v6.0: Lazy load — فقط هنگام باز شدن یک گزارش، داده‌های مربوطه لود می‌شود
   const loadReportData = useCallback(async (reportId: ReportType) => {
     const tenantId = getTenantIdFromStore()
     if (!tenantId) return
 
     setReportLoading(true)
     try {
-      // ★ گزارش‌هایی که به invoices نیاز دارند
       const needsInvoices = ['daily-sales', 'customer-statement', 'profit-loss', 'cashier-performance', 'sales-trend', 'branch-consolidated'].includes(reportId || '')
-      // ★ گزارش‌هایی که به customers نیاز دارند
       const needsCustomers = ['customer-statement'].includes(reportId || '')
-      // ★★★ v6.4: فقط پلن ساده به journal entries نیاز دارد
       const needsJournal = (tier === 'basic') && ['profit-loss'].includes(reportId || '')
-      // ★ گزارش‌هایی که به installment plans نیاز دارند
       const needsInstallments = ['installments'].includes(reportId || '')
 
       const promises: Promise<any>[] = []
@@ -3973,7 +3998,6 @@ export default function ReportsPage() {
     setReportLoading(false)
   }, [invoices.length, customers.length, journalEntries.length, installmentPlans.length, features.canAccessInstallments])
 
-  // ★ هنگام تغییر گزارش فعال، داده‌های مربوطه را لود کن
   useEffect(() => {
     if (activeReport) {
       loadReportData(activeReport)
@@ -3992,7 +4016,6 @@ export default function ReportsPage() {
       return
     }
 
-    // ★★★ v28: جلوگیری از کرش در حالت آفلاین
     if (typeof window !== 'undefined' && !navigator.onLine) {
       console.warn('[Reports] حالت آفلاین: بارگذاری آمار متوقف شد')
       setDashboardData(null)
@@ -4006,7 +4029,6 @@ export default function ReportsPage() {
     } catch (err: any) {
       console.error('[Reports] loadData error:', err)
 
-      // ★★★ مدیریت خطای شبکه بدون کرش کردن کل صفحه
       if (err?.message?.includes('fetch') || (typeof window !== 'undefined' && !navigator.onLine)) {
         console.warn('[Reports] خطای شبکه. ادامه کار در حالت آفلاین.')
         setDashboardData(null)
@@ -4019,18 +4041,15 @@ export default function ReportsPage() {
   }, [])
   useEffect(() => { loadData() }, [loadData])
 
-  // ★ گروه‌بندی گزارش‌های قابل دسترس بر اساس دسته
   const reportsByCategory = useMemo<Record<string, ReportMetaInfo[]>>(() => {
     const grouped: Record<string, ReportMetaInfo[]> = {}
     accessibleReports.forEach((r) => {
       const key = r.category
       if (!grouped[key]) grouped[key] = []
-      // ★ جلوگیری از تکرار id (مثلاً profit-loss برای دو پلن)
       const exists = grouped[key].some((x) => x.id === r.id)
       if (!exists) {
-        // ★ اگر در پلن ساده هستیم، عنوان و توضیح ساده را نشان بده
         let displayReport: ReportMetaInfo = r
-        if (false) {  // ★ v9.9.8: همیشه از API استفاده می‌کنیم
+        if (false) {
           displayReport = { ...r, title: 'سود و زیان (ساده)', description: 'گزارش ساده درآمد و هزینه (تک‌دفتری)' }
         } else if (r.id === 'profit-loss' && tier !== 'basic') {
           displayReport = { ...r, title: 'صورت سود و زیان استاندارد', description: 'صورت سود و زیان استاندارد با تفکیک بخش‌های درآمد، هزینه و سود' }
@@ -4104,7 +4123,6 @@ export default function ReportsPage() {
                         onClick={() => setActiveReport(report.id)}
                       >
                         <CardContent className="p-3 sm:p-3.5 relative">
-                          {/* gradient overlay on hover */}
                           <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/0 to-emerald-50/50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                           <div className="flex items-start gap-2.5 relative">
                             <div className={`w-9 h-9 rounded-lg ${report.color} flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform`}>
@@ -4116,7 +4134,6 @@ export default function ReportsPage() {
                             </div>
                             <ArrowLeft className="w-3.5 h-3.5 text-gray-300 group-hover:text-emerald-500 group-hover:-translate-x-1 transition-all mt-0.5 shrink-0" />
                           </div>
-                          {/* badge for tier */}
                           {report.minTier !== 'basic' && (
                             <div className="mt-2 pt-2 border-t border-gray-100 relative">
                               <Badge variant="outline" className={`text-[8px] ${TIER_COLORS[report.minTier].bg} ${TIER_COLORS[report.minTier].text} ${TIER_COLORS[report.minTier].border}`}>
@@ -4151,8 +4168,8 @@ export default function ReportsPage() {
         /* نمایش گزارش فعال */
         <div>
           {/* نوار بالا: بازگشت + عنوان گزارش + انتخابگر بازه مشترک */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 sm:mb-6 pb-3 border-b border-gray-200">
-            <div className="flex items-center gap-3">
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 sm:mb-6 pb-3 border-b border-gray-200 w-full">
+            <div className="flex items-center gap-3 shrink-0 z-10">
               <Button variant="ghost" className="text-gray-600 hover:text-gray-900 hover:bg-gray-100 -mr-2 text-xs sm:text-sm gap-1" onClick={() => setActiveReport(null)}>
                 <ArrowRight className="w-4 h-4" />
                 بازگشت
@@ -4164,16 +4181,25 @@ export default function ReportsPage() {
                   </div>
                 )}
                 <div>
-                  <h2 className="text-sm sm:text-lg font-bold text-gray-900">{activeReportInfo?.title}</h2>
+                  <h2 className="text-sm sm:text-lg font-bold text-gray-900 whitespace-nowrap">{activeReportInfo?.title}</h2>
                   <p className="text-[10px] sm:text-xs text-gray-500 hidden sm:block">{activeReportInfo?.description}</p>
                 </div>
               </div>
             </div>
 
-            {/* انتخابگر بازه مشترک برای گزارش‌هایی که از sharedDateRange استفاده می‌کنند */}
-            {(activeReport === 'cashier-performance' || activeReport === 'installments' || activeReport === 'branch-consolidated') && (
-              <PersianDateRangePicker value={sharedDateRange} onChange={setSharedDateRange} size="sm" />
-            )}
+            <div className="hidden sm:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0">
+              {(activeReport === 'cashier-performance' || activeReport === 'installments' || activeReport === 'branch-consolidated') && (
+                <PersianDateRangePicker value={sharedDateRange} onChange={setSharedDateRange} size="sm" />
+              )}
+            </div>
+
+            <div className="sm:hidden w-full flex justify-center mt-1">
+              {(activeReport === 'cashier-performance' || activeReport === 'installments' || activeReport === 'branch-consolidated') && (
+                <PersianDateRangePicker value={sharedDateRange} onChange={setSharedDateRange} size="sm" />
+              )}
+            </div>
+
+            <div className="hidden sm:block w-[150px] shrink-0"></div>
           </div>
 
           {loading ? (
@@ -4218,3 +4244,4 @@ export default function ReportsPage() {
     </div>
   )
 }
+

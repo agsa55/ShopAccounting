@@ -1,11 +1,5 @@
 // ============================================================================
-// src/app/api/invoices/route.ts — GET/POST/PUT/DELETE (v7.4 ★★★ Complete Fixed)
-// ----------------------------------------------------------------------------
-// ★★★ v7.4: کد کامل بدون هیچ حذفیاتی + رفع باگ ثبت پیش‌پرداخت و اقساط
-//   ★ پشتیبانی همزمان از فرمت تو در تو (installmentData) و فرمت تخت
-//   ★ ثبت صحیح پیش‌پرداخت در InvoicePayment
-//   ★ تفکیک صحیح سند حسابداری (نقد برای پیش‌پرداخت، دریافتنی برای باقیمانده)
-//   ★ لاگ‌های دقیق برای عیب‌یابی داده‌های ارسالی از فرانت‌اند
+// src/app/api/invoices/route.ts — GET/POST/PUT/DELETE (v7.6 ★★★ Complete Fixed)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -56,12 +50,10 @@ async function createAutoJournalEntry(
     const netSales = invoice.subTotal - invoice.discountAmount
     const remainingAmount = totalAmount - paidAmount
 
-    // ثبت بدهکار نقد/بانک برای پیش‌پرداخت
     if (paidAmount > 0 && cashAccountId) {
       lines.push({ accountId: cashAccountId, debit: paidAmount, credit: 0, description: 'بدهکار: دریافت نقد/پیش‌پرداخت فاکتور' })
     }
     
-    // ثبت بدهکار حساب‌های دریافتنی برای باقیمانده
     if (remainingAmount > 0) {
       const debitAccountId = isCreditOrInstallment ? (receivablesAccountId || cashAccountId) : cashAccountId
       if (debitAccountId) {
@@ -167,8 +159,10 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const status = searchParams.get('status')
+    const paymentType = searchParams.get('paymentType')
 
     const where: any = { tenantId }
+    
     if (status) {
       const statusUpper = status.toUpperCase()
       where.OR = [
@@ -178,6 +172,19 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
         ...(statusUpper === 'PAID' ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card'] }, paidAmount: { gt: 0 } }] : []),
         ...(statusUpper === 'PARTIAL' ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }] : []),
       ]
+    }
+
+    // ★★★ v7.6: فیلتر paymentType با پشتیبانی از همه حالت‌ها
+    if (paymentType) {
+      const ptLower = paymentType.toLowerCase()
+      const ptUpper = paymentType.toUpperCase()
+      const ptCapitalized = ptLower.charAt(0).toUpperCase() + ptLower.slice(1)
+      
+      where.paymentType = {
+        in: [ptLower, ptUpper, ptCapitalized]
+      }
+      
+      console.log('[Invoices GET] Filtering by paymentType:', where.paymentType)
     }
 
     let invoices: any[] = []
@@ -226,6 +233,8 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
     const total = await tenantDb.invoice.count({ where })
 
+    console.log('[Invoices GET] Found invoices:', result.length, 'with paymentType filter:', paymentType)
+
     return NextResponse.json({
       success: true, data: result,
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
@@ -252,9 +261,6 @@ export const POST = withTenantAndPermission('pos')(async (
     const invoiceData = await req.json()
     const items = invoiceData.items || []
 
-    // ═══════════════════════════════════════════════════════════════
-    // ★★★ v7.4: لاگ دقیق برای عیب‌یابی داده‌های دریافتی از فرانت
-    // ═══════════════════════════════════════════════════════════════
     console.log('\n=== 🚨 [Invoices POST] DEBUG RECEIVED DATA 🚨 ===')
     console.log('paymentType:', invoiceData.paymentType)
     console.log('paidAmount:', invoiceData.paidAmount)
@@ -343,7 +349,6 @@ export const POST = withTenantAndPermission('pos')(async (
     let totalCogs = 0
 
     const result = await txClient.$transaction(async (tx: any) => {
-      // ۱. ایجاد فاکتور
       const inv = await tx.invoice.create({
         data: {
           number: invoiceNumber, customerId: invoiceData.customerId || null,
@@ -356,7 +361,6 @@ export const POST = withTenantAndPermission('pos')(async (
         },
       })
 
-      // ۲. ایجاد اقلام فاکتور و کسر موجودی
       for (const item of items) {
         if (!item.productId) continue
 
@@ -422,7 +426,7 @@ export const POST = withTenantAndPermission('pos')(async (
         }
       }
 
-      // ۳. ثبت پرداخت‌ها (شامل پیش‌پرداخت)
+           // ۳. ثبت پرداخت‌ها (شامل پیش‌پرداخت)
       const payments = invoiceData.payments || []
       
       // اگر پیش‌پرداخت وجود دارد اما در آرایه payments نیست، آن را به صورت خودکار اضافه کن
@@ -435,20 +439,23 @@ export const POST = withTenantAndPermission('pos')(async (
         })
       }
 
+      // ★★★ اصلاح: فقط پرداخت‌هایی با مبلغ بزرگتر از صفر را ثبت کن
       for (const p of payments) {
-        await tx.invoicePayment.create({
-          data: {
-            invoiceId: inv.id,
-            amount: p.amount,
-            paymentType: p.paymentType || 'cash',
-            paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
-            paymentRef: p.paymentRef || p.referenceNumber || null,
-            tenantId,
-          },
-        })
+        const paymentAmount = Number(p.amount)
+        if (paymentAmount > 0) {
+          await tx.invoicePayment.create({
+            data: {
+              invoiceId: inv.id,
+              amount: paymentAmount,
+              paymentType: p.paymentType || 'cash',
+              paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
+              paymentRef: p.paymentRef || p.referenceNumber || null,
+              tenantId,
+            },
+          })
+        }
       }
 
-      // ۴. ایجاد پلن قسطی (پشتیبانی از فرمت تو در تو و فرمت تخت در ریشه)
       const instData = invoiceData.installmentData || {
         downPayment: invoiceData.downPayment || paidAmount,
         numberOfInstallments: invoiceData.numberOfInstallments,
@@ -469,7 +476,6 @@ export const POST = withTenantAndPermission('pos')(async (
         console.log('[Invoices POST] ⚠️ Skipped installment plan creation. paymentType:', pt, 'hasInstallmentData:', !!invoiceData.installmentData, 'hasNumberOfInstallments:', !!invoiceData.numberOfInstallments)
       }
 
-      // ۵. به‌روزرسانی مانده حساب مشتری (فقط به اندازه باقیمانده بدهی)
       if (isCreditOrInstallment && invoiceData.customerId && remainingAmount > 0) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
@@ -480,7 +486,6 @@ export const POST = withTenantAndPermission('pos')(async (
       return inv
     })
 
-    // ۶. ایجاد سند حسابداری خودکار (با ارسال paidAmount برای تفکیک نقد و نسیه)
     const planTier = tenant.planTier || 'basic'
     await createAutoJournalEntry(tenantDb, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
 
