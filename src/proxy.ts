@@ -1,11 +1,14 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.2 ★★★ Portal Fix)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.3 ★★★ Admin Security Fix)
 // ============================================================================
-// ★★★ v3.2 تغییرات نسبت به v3.1:
-//   ★ اضافه شدن بخش اختصاصی برای مسیرهای پورتال مشتری
-//   ★ مسیرهای /portal, /portal-view, /portal/* مستقیماً عبور می‌کنند
-//   ★ پشتیبانی از توکن پورتال (portal_token) در کوکی
-//   ★ سازگار با local و production
+// ★★★ v3.3 تغییرات نسبت به v3.2:
+//   ★ بهبود کامل محافظت از پنل ادمین
+//   ★ جلوگیری از دسترسی به /admin/* بعد از logout
+//   ★ اضافه شدن پارامتر ?redirect= برای بازگشت به صفحه قبلی بعد از login
+//   ★ اگر کاربر لاگین باشد و به /admin/login برود → redirect به dashboard
+//   ★ اضافه شدن addNoCacheHeaders به پاسخ‌های محافظتی (جلوگیری از cache)
+//   ★ بررسی دقیق‌تر JWT و پاک کردن cookie در صورت خطا
+//   ★ پشتیبانی از هر دو cookie: token و admin_token
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -25,6 +28,8 @@ const PUBLIC_API_PATHS = [
   '/api/demo/recover-verify', '/api/cron/demo-cleanup', '/api/admin/auth/login',
   // ★★★ v3.2: مسیرهای API پورتال مشتری (بدون نیاز به توکن فروشگاه‌دار)
   '/api/portal/login', '/api/portal/invoices',
+  // ★★★ v3.3: مسیر عمومی محتوای سایت
+  '/api/site-content',
 ];
 
 const STATIC_BYPASS_PATHS = ['/sw.js', '/manifest.json', '/robots.txt', '/sitemap.xml', '/favicon.ico'];
@@ -43,11 +48,16 @@ const CUSTOMER_PORTAL_PATHS = [
   '/portal',
   '/portal-view',
   '/test-portal',
-  '/portal/',  // برای /portal/[token]
+  '/portal/',
 ];
 
 const VALID_SLUG_REGEX = /^[a-z0-9][a-z0-9-]*$/i;
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.3: نام کوکی‌های ادمین
+// ════════════════════════════════════════════════════════════════════════════
+const ADMIN_COOKIE_NAMES = ['token', 'admin_token', 'admin-token'];
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
@@ -69,10 +79,8 @@ function isPublicApiPath(pathname: string): boolean {
   });
 }
 
-// ★★★ v3.2: چک کردن اینکه مسیر متعلق به پورتال مشتری است
 function isCustomerPortalPath(pathname: string): boolean {
-  // بررسی exact match یا starts with
-  return CUSTOMER_PORTAL_PATHS.some(path => 
+  return CUSTOMER_PORTAL_PATHS.some(path =>
     pathname === path || pathname.startsWith(path + '/') || pathname.startsWith(path + '?')
   );
 }
@@ -102,6 +110,57 @@ function clearTenantCookies(response: NextResponse) {
   ['tenant-slug', 'tenant-view', 'token', 'refreshToken'].forEach(name => {
     response.cookies.set(name, '', { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 0 });
   });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.3: پاک کردن کوکی‌های ادمین (همه نام‌های ممکن)
+// ════════════════════════════════════════════════════════════════════════════
+function clearAdminCookies(response: NextResponse) {
+  ADMIN_COOKIE_NAMES.forEach(name => {
+    response.cookies.set(name, '', {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 0,
+      expires: new Date(0),
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.3: دریافت توکن ادمین از کوکی (با پشتیبانی از چند نام)
+// ════════════════════════════════════════════════════════════════════════════
+function getAdminToken(request: NextRequest): string | undefined {
+  for (const name of ADMIN_COOKIE_NAMES) {
+    const value = request.cookies.get(name)?.value;
+    if (value) return value;
+  }
+  return undefined;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.3: بررسی اینکه مسیر متعلق به پنل ادمین است یا خیر
+// ════════════════════════════════════════════════════════════════════════════
+function isAdminPath(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.3: Redirect به صفحه login ادمین با حفظ مسیر قبلی
+// ════════════════════════════════════════════════════════════════════════════
+function redirectToAdminLogin(request: NextRequest, originalPath: string): NextResponse {
+  const loginUrl = new URL('/admin/login', request.url);
+  // فقط اگر مسیر قبلی login نباشد، آن را به عنوان redirect اضافه کن
+  if (originalPath && originalPath !== '/admin/login' && originalPath !== '/admin') {
+    loginUrl.searchParams.set('redirect', originalPath);
+  }
+  const response = NextResponse.redirect(loginUrl);
+  // پاک کردن کوکی‌های نامعتبر ادمین
+  clearAdminCookies(response);
+  addNoCacheHeaders(response);
+  addSecurityHeaders(response);
+  return response;
 }
 
 function isLocalhost(request: NextRequest): boolean {
@@ -177,6 +236,17 @@ export default function proxy(request: NextRequest) {
     return response;
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★★★ v3.3: مسیر logout ادمین — پاک کردن کامل کوکی‌های ادمین
+  // ══════════════════════════════════════════════════════════════════════════
+  if (pathname === '/api/admin/auth/logout') {
+    console.log('[Proxy] 🚪 Admin logout requested');
+    const response = NextResponse.json({ success: true, message: 'admin logged out' });
+    clearAdminCookies(response);
+    addNoCacheHeaders(response);
+    return response;
+  }
+
   if (isRootWithLogout(request)) {
     const cleanUrl = new URL('/', request.url);
     const response = NextResponse.redirect(cleanUrl);
@@ -205,20 +275,17 @@ export default function proxy(request: NextRequest) {
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★★★ v3.2: بخش اختصاصی پورتال مشتری (Customer Portal)
-  //   قبل از تشخیص tenant، مسیرهای پورتال مشتری را عبور می‌دهیم
-  //   این مسیرها نیازی به tenant slug ندارند و از portal_token استفاده می‌کنند
   // ══════════════════════════════════════════════════════════════════════════
   if (isCustomerPortalPath(pathname)) {
     console.log('[Proxy] 🚪 Customer portal path detected, passing through:', pathname);
     const response = NextResponse.next();
     addSecurityHeaders(response);
-    
-    // ست کردن portal_token در header برای استفاده در API routes
+
     const portalTokenFromCookie = request.cookies.get('portal_token')?.value;
     if (portalTokenFromCookie) {
       response.headers.set('x-portal-token', portalTokenFromCookie);
     }
-    
+
     return response;
   }
 
@@ -324,45 +391,106 @@ export default function proxy(request: NextRequest) {
     return response;
   }
 
-  // ── ۷. محافظت از پنل ادمین ────────────────────────────────────────────────
-  if (pathname.startsWith('/admin/')) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── ۷. محافظت از پنل ادمین (بهبود یافته v3.3) ────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  if (isAdminPath(pathname)) {
+    // ── صفحه login ادمین ──
     if (pathname === '/admin/login') {
+      const adminToken = getAdminToken(request);
+
+      // ★★★ v3.3: اگر کاربر از قبل لاگین بود → redirect به dashboard
+      if (adminToken) {
+        try {
+          const secret = process.env.JWT_ACCESS_SECRET;
+          if (secret) {
+            const decoded = jwt.verify(adminToken, secret) as any;
+            const isAdmin = decoded.userType === 'admin'
+              || decoded.role === 'SuperAdmin'
+              || decoded.role === 'Admin';
+
+            if (isAdmin) {
+              console.log('[Proxy] ✅ Admin already logged in, redirecting to dashboard');
+              const dashboardUrl = new URL('/admin/dashboard', request.url);
+              // اگر پارامتر redirect داشت، به همان مسیر برو
+              const redirectTo = request.nextUrl.searchParams.get('redirect');
+              if (redirectTo && redirectTo.startsWith('/admin/')) {
+                const targetUrl = new URL(redirectTo, request.url);
+                const response = NextResponse.redirect(targetUrl);
+                addNoCacheHeaders(response);
+                addSecurityHeaders(response);
+                return response;
+              }
+              const response = NextResponse.redirect(dashboardUrl);
+              addNoCacheHeaders(response);
+              addSecurityHeaders(response);
+              return response;
+            }
+          }
+        } catch (e) {
+          // توکن نامعتبر است، اجازه بده به صفحه login برود
+          console.warn('[Proxy] ⚠️ Invalid admin token on /admin/login, clearing cookie');
+          const response = NextResponse.next();
+          clearAdminCookies(response);
+          addSecurityHeaders(response);
+          return response;
+        }
+      }
+
+      // کاربر لاگین نیست، اجازه بده صفحه login را ببیند
       const response = NextResponse.next();
+      addNoCacheHeaders(response);
       addSecurityHeaders(response);
       return response;
     }
 
-    const token = request.cookies.get('token')?.value;
-    if (!token) {
-      return NextResponse.redirect(new URL('/admin/login', request.url));
+    // ── سایر مسیرهای ادمین (/admin/dashboard, /admin/tenants, ...) ──
+    const adminToken = getAdminToken(request);
+
+    // ★★★ v3.3: اگر توکن وجود نداشت → redirect به login
+    if (!adminToken) {
+      console.warn(`[Proxy] 🔒 No admin token for ${pathname}, redirecting to login`);
+      return redirectToAdminLogin(request, pathname);
     }
 
+    // ── اعتبارسنجی JWT ──
     try {
       const secret = process.env.JWT_ACCESS_SECRET;
+
       if (!secret) {
-        console.error('[Proxy] JWT_ACCESS_SECRET is not set!');
-        return NextResponse.redirect(new URL('/admin/login', request.url));
+        console.error('[Proxy] ❌ JWT_ACCESS_SECRET is not set in environment!');
+        return redirectToAdminLogin(request, pathname);
       }
 
-      const decoded = jwt.verify(token, secret) as any;
+      const decoded = jwt.verify(adminToken, secret) as any;
 
+      // بررسی نقش ادمین
       const isAdmin = decoded.userType === 'admin'
         || decoded.role === 'SuperAdmin'
         || decoded.role === 'Admin';
 
       if (!isAdmin) {
-        return NextResponse.redirect(new URL('/', request.url));
+        console.warn(`[Proxy] ⛔ User is not admin (role: ${decoded.role}), redirecting to home`);
+        const homeUrl = new URL('/', request.url);
+        const response = NextResponse.redirect(homeUrl);
+        clearAdminCookies(response);
+        addNoCacheHeaders(response);
+        addSecurityHeaders(response);
+        return response;
       }
 
+      // ✅ توکن معتبر است، اجازه دسترسی بده
       const response = NextResponse.next();
+      addNoCacheHeaders(response);
       addSecurityHeaders(response);
-      response.headers.set('x-authorization', `Bearer ${token}`);
+      response.headers.set('x-authorization', `Bearer ${adminToken}`);
+      response.headers.set('x-admin-id', decoded.userId || decoded.id || '');
       return response;
+
     } catch (e: any) {
-      console.warn('[Proxy] Admin token verification failed:', e?.message);
-      const redirectResponse = NextResponse.redirect(new URL('/admin/login', request.url));
-      redirectResponse.cookies.set('token', '', { path: '/', httpOnly: true, maxAge: 0 });
-      return redirectResponse;
+      // توکن نامعتبر، منقضی شده یا تغییر کرده
+      console.warn(`[Proxy] 🔒 Admin token verification failed for ${pathname}:`, e?.message);
+      return redirectToAdminLogin(request, pathname);
     }
   }
 

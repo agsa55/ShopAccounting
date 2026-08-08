@@ -176,10 +176,40 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  const handleLogout = () => {
-    document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-    router.push('/admin/login');
-  };
+const handleLogout = async () => {
+  try {
+    // ★ فراخوانی API logout ادمین (برای پاک کردن سمت سرور)
+    await fetch('/api/admin/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (e) {
+    console.warn('[Logout] API call failed:', e);
+  }
+
+  // ★ پاک کردن کوکی در سمت کلاینت (backup)
+  const cookieNames = ['token', 'admin_token', 'admin-token'];
+  cookieNames.forEach(name => {
+    document.cookie = `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+    document.cookie = `${name}=; Path=/admin; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;`;
+    document.cookie = `${name}=; Path=/; Max-Age=-1;`;
+  });
+
+  // ★ پاک کردن localStorage و sessionStorage
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_user');
+    sessionStorage.clear();
+  }
+
+  // ★ هدایت به صفحه login با پاک کردن URL
+  router.replace('/admin/login');
+  // Force reload برای پاک کردن کامل state
+  setTimeout(() => {
+    window.location.href = '/admin/login';
+  }, 100);
+};
 
   const currentPageTitle = navSections
     .flatMap(s => s.items)
