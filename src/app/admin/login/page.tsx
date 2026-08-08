@@ -1,11 +1,11 @@
 'use client';
 
 // ============================================================================
-// src/app/admin/login/page.tsx (v2.0 — Smart Redirect + Security)
+// src/app/admin/login/page.tsx (v2.1 — Suspense Fix for Build)
 // صفحه ورود پنل ادمین با پشتیبانی از پارامتر redirect
 // ============================================================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Lock, User, Eye, EyeOff, Shield, AlertCircle, CheckCircle2,
@@ -31,7 +31,40 @@ const getPersianDate = (): string => {
   return `${toFaNum(weekday)} ${toFaNum(day)} ${toFaNum(month)} ${toFaNum(year)}`;
 };
 
+// ═══════════════════════════════════════════════════════════════
+//  ★ Fallback برای Suspense (نمایش داده می‌شود هنگام لود)
+// ═══════════════════════════════════════════════════════════════
+function LoginFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-purple-50/30 to-indigo-50/20 p-4 font-['Peyda']" dir="rtl">
+      <div className="text-center">
+        <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-[#7C7BEB] to-[#5B5AC7] rounded-3xl shadow-2xl shadow-purple-300/50 mb-4 animate-pulse">
+          <span className="text-4xl font-black text-white">S</span>
+        </div>
+        <div className="flex items-center gap-2 text-gray-500 text-sm">
+          <Loader2 className="w-4 h-4 animate-spin text-[#7C7BEB]" />
+          <span>در حال بارگذاری...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ کامپوننت اصلی صفحه (Export Default) — فقط wrapper
+// ═══════════════════════════════════════════════════════════════
 export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginFormContent />
+    </Suspense>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ محتوای اصلی فرم (شامل useSearchParams)
+// ═══════════════════════════════════════════════════════════════
+function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -44,7 +77,7 @@ export default function AdminLoginPage() {
   const [persianDate, setPersianDate] = useState('');
 
   // ★ مسیر قبلی برای redirect (ست شده توسط middleware)
-  const redirectTo = searchParams.get('redirect');
+  const redirectTo = searchParams?.get('redirect') || null;
 
   // ★ بارگذاری تاریخ شمسی (جلوگیری از hydration mismatch)
   useEffect(() => {
@@ -56,10 +89,8 @@ export default function AdminLoginPage() {
   //  ★ اعتبارسنجی مسیر redirect — فقط مسیرهای امن /admin/*
   // ═══════════════════════════════════════════════════════════════
   const getSafeRedirectUrl = (): string => {
-    // اگر redirect ست نشده باشد
     if (!redirectTo) return '/admin/dashboard';
 
-    // بررسی امنیتی: فقط مسیرهای /admin/* مجاز هستند
     if (
       redirectTo.startsWith('/admin/') &&
       redirectTo !== '/admin/login' &&
@@ -99,7 +130,6 @@ export default function AdminLoginPage() {
     setLoading(true);
     setError('');
 
-    // ★ اعتبارسنجی اولیه
     if (!username.trim() || !password.trim()) {
       setError('لطفاً نام کاربری و رمز عبور را وارد کنید');
       setLoading(false);
@@ -110,17 +140,14 @@ export default function AdminLoginPage() {
       const res = await fetch('/api/admin/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // مهم: برای ارسال کوکی
+        credentials: 'include',
         body: JSON.stringify({ username: username.trim(), password }),
       });
 
       const data = await res.json();
 
       if (data.success) {
-        // ★ هدایت به مسیر امن (قبلی یا داشبورد)
         const safeRedirect = getSafeRedirectUrl();
-        
-        // Force reload برای پاک کردن state و بارگذاری مجدد با cookie جدید
         window.location.href = safeRedirect;
       } else {
         setError(getErrorMessage(data.errorCode, data.error));
@@ -140,13 +167,12 @@ export default function AdminLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-purple-50/30 to-indigo-50/20 p-4 relative overflow-hidden font-['Peyda']" dir="rtl">
       
-      {/* ═══════════════════════ پس‌زمینه دکوراتیو ═══════════════════════ */}
+      {/* پس‌زمینه دکوراتیو */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-200/30 rounded-full blur-[120px] animate-pulse" />
         <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-indigo-200/30 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '1s' }} />
         <div className="absolute top-1/2 left-1/4 w-[300px] h-[300px] bg-violet-200/20 rounded-full blur-[80px]" />
         
-        {/* Dot grid */}
         <div
           className="absolute inset-0 opacity-30"
           style={{
@@ -158,7 +184,7 @@ export default function AdminLoginPage() {
 
       <div className="relative w-full max-w-md z-10">
 
-        {/* ═══════════════════════ تاریخ فارسی ═══════════════════════ */}
+        {/* تاریخ فارسی */}
         {mounted && persianDate && (
           <div className="text-center mb-4 animate-in fade-in slide-in-from-top-2 duration-500">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/70 backdrop-blur-sm border border-white/60 rounded-full shadow-sm">
@@ -170,7 +196,7 @@ export default function AdminLoginPage() {
           </div>
         )}
 
-        {/* ═══════════════════════ لوگو و عنوان ═══════════════════════ */}
+        {/* لوگو و عنوان */}
         <div className="text-center mb-6 animate-in fade-in slide-in-from-top-2 duration-700">
           <div className="inline-flex items-center justify-center relative mb-4">
             <div className="w-20 h-20 bg-gradient-to-br from-[#7C7BEB] to-[#5B5AC7] rounded-3xl shadow-2xl shadow-purple-300/50 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
@@ -189,7 +215,6 @@ export default function AdminLoginPage() {
             ShopAccounting نسخه {toFaNum('8.8.5')}
           </p>
 
-          {/* ★ پیام خوش‌آمد ویژه هنگام redirect */}
           {redirectTo && redirectTo !== '/admin/dashboard' && (
             <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-[11px] font-bold">
               <AlertCircle className="w-3.5 h-3.5" />
@@ -198,10 +223,9 @@ export default function AdminLoginPage() {
           )}
         </div>
 
-        {/* ═══════════════════════ کارت فرم ═══════════════════════ */}
+        {/* کارت فرم */}
         <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl shadow-purple-500/10 border border-white/60 p-6 sm:p-8 animate-in fade-in slide-in-from-top-4 duration-700">
           
-          {/* هدر فرم */}
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-l from-[#EEEDFD] to-[#F5F4FF] rounded-full text-[11px] font-bold text-[#7C7BEB] mb-3">
               <Lock className="w-3 h-3" />
@@ -211,16 +235,14 @@ export default function AdminLoginPage() {
             <p className="text-[11px] text-gray-500 mt-1">برای ادامه، اطلاعات کاربری خود را وارد کنید</p>
           </div>
 
-          {/* پیام خطا */}
           {error && (
-            <div className="mb-4 p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 flex items-start gap-2 animate-in fade-in shake duration-300">
+            <div className="mb-4 p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-100 flex items-start gap-2 animate-in fade-in duration-300">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span className="font-medium">{error}</span>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* نام کاربری */}
             <div>
               <label className="flex items-center gap-1.5 text-xs font-bold text-gray-700 mb-1.5">
                 <User className="w-3.5 h-3.5 text-[#7C7BEB]" />
@@ -242,7 +264,6 @@ export default function AdminLoginPage() {
               </div>
             </div>
 
-            {/* رمز عبور */}
             <div>
               <label className="flex items-center gap-1.5 text-xs font-bold text-gray-700 mb-1.5">
                 <Lock className="w-3.5 h-3.5 text-[#7C7BEB]" />
@@ -272,7 +293,6 @@ export default function AdminLoginPage() {
               </div>
             </div>
 
-            {/* دکمه ورود */}
             <button
               type="submit"
               disabled={loading || !username.trim() || !password.trim()}
@@ -292,7 +312,6 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* اطلاعات امنیتی */}
           <div className="mt-6 pt-5 border-t border-gray-100">
             <div className="flex items-center justify-center gap-4 text-[10px] text-gray-500">
               <div className="flex items-center gap-1">
@@ -308,7 +327,7 @@ export default function AdminLoginPage() {
           </div>
         </div>
 
-        {/* ═══════════════════════ فوتر ═══════════════════════ */}
+        {/* فوتر */}
         <div className="text-center mt-6 space-y-1">
           <p className="text-[11px] text-gray-500">
             © {toFaNum(new Date().getFullYear())} ShopAccounting — تمامی حقوق محفوظ است
@@ -320,7 +339,6 @@ export default function AdminLoginPage() {
         </div>
       </div>
 
-      {/* ═══════════════════════ استایل‌های کمکی ═══════════════════════ */}
       <style jsx>{`
         @keyframes fade-in {
           from { opacity: 0; }
@@ -339,13 +357,6 @@ export default function AdminLoginPage() {
           to { opacity: 1; transform: translateY(0); }
         }
         .slide-in-from-top-4 { animation: slide-in-from-top-4 0.7s ease-out; }
-
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-4px); }
-          75% { transform: translateX(4px); }
-        }
-        .shake { animation: shake 0.3s ease-in-out; }
       `}</style>
     </div>
   );
