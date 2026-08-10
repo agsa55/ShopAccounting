@@ -489,6 +489,26 @@ export const POST = withTenantAndPermission('pos')(async (
     const planTier = tenant.planTier || 'basic'
     await createAutoJournalEntry(tenantDb, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
 
+    // ═══════════════════════════════════════════════════════════════
+    //  ★★★ v9.4.0: ارسال خودکار به مودیان (اگر تنظیم شده باشد)
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      // فقط برای فاکتورهای sale (نه service)
+      if (result && result.invoiceType !== 'service') {
+        const { autoSubmitInvoiceIfNeeded } = await import('@/lib/moidian/index')
+        // اجرای non-blocking (await نمی‌کنیم تا UI را کند نکنیم)
+        autoSubmitInvoiceIfNeeded(tenantId, result.id).catch((err: any) =>
+          console.warn('[Invoices] Auto-submit to moidian failed (non-blocking):', err?.message)
+        )
+      }
+    } catch (err: any) {
+      console.warn('[Invoices] Moidian auto-submit hook failed:', err?.message)
+    }
+    // ═══════════════════════════════════════════════════════════════
+
+    return NextResponse.json({ success: true, data: result, message: 'فاکتور با موفقیت ثبت شد' }, { status: 201 })
+
+
     return NextResponse.json({ success: true, data: result, message: 'فاکتور با موفقیت ثبت شد' }, { status: 201 })
   } catch (error: any) {
     console.error('[Invoices POST] Error:', error)

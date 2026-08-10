@@ -1,9 +1,10 @@
 'use client'
 
 // ============================================================================
-// src/components/pos/pos-page.tsx — v9.1 ★ OFFLINE-OPTIMIZED
+// src/components/pos/pos-page.tsx — v11.1 ★ POS INTEGRATION SUPPORT
 // ★ جستجوی آفلاین از IndexedDB + localStorage
 // ★ بارگذاری محصولات، مشتریان، انبارها از cache
+// ★ v11.1: یکپارچه‌سازی با کارتخوان (نمایش/مخفی کردن دکمه Card)
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
@@ -464,7 +465,6 @@ function toFaNum(n: number | string): string {
 function toEnNum(s: string): string {
   return s.replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
 }
-
 // ============ Jalali Date Conversion ============
 
 function div(a: number, b: number): number { return Math.floor(a / b) }
@@ -799,13 +799,61 @@ const isProcessingScan = useRef(false);
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
 
+  // ═══════════════════════════════════════════════════════════════
+  //  ★★★ v11.1: یکپارچه‌سازی با کارتخوان
+  //  خواندن وضعیت از localStorage + گوش دادن به تغییرات
+  // ═══════════════════════════════════════════════════════════════
+  const [posIntegrationEnabled, setPosIntegrationEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    const cached = localStorage.getItem('pos_integration_enabled')
+    return cached !== null ? cached === 'true' : true
+  })
+
+  // گوش دادن به تغییرات از تب کارتخوان
+ // گوش دادن به تغییرات از تب کارتخوان
+   useEffect(() => {
+    const handleIntegrationChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>
+      if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
+        setPosIntegrationEnabled(customEvent.detail.enabled)
+        console.log('[POS] 🔄 یکپارچه‌سازی کارتخوان تغییر کرد:', customEvent.detail.enabled)
+      }
+    }
+    
+    window.addEventListener('pos-integration-changed', handleIntegrationChange)
+    
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'pos_integration_enabled' && e.newValue !== null) {
+        setPosIntegrationEnabled(e.newValue === 'true')
+      }
+    }
+    window.addEventListener('storage', handleStorageChange)
+    
+    const handleFocus = () => {
+      const cached = localStorage.getItem('pos_integration_enabled')
+      if (cached !== null) {
+        setPosIntegrationEnabled(cached === 'true')
+      }
+    }
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      window.removeEventListener('pos-integration-changed', handleIntegrationChange)
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+  
+  // ★★★ v11.1: فیلتر روش‌های پرداخت بر اساس یکپارچه‌سازی با کارتخوان
   const allowedPaymentTypes = useMemo(() => {
     const allowed = planFeatures.posPaymentTypes
     return paymentTypeConfig.filter((pt) => {
       const key = pt.value.toLowerCase()
+      // اگر یکپارچه‌سازی غیرفعال است، دکمه Card را حذف کن
+      if (key === 'card' && !posIntegrationEnabled) return false
       return allowed.includes(key as any)
     })
-  }, [planFeatures])
+  }, [planFeatures, posIntegrationEnabled])
 
   // Data state
   const [products, setProducts] = useState<Product[]>([])
@@ -935,7 +983,7 @@ const isProcessingScan = useRef(false);
     recentsLoading: posRecentsLoading,
   } = usePosProductSearch()
 
-  // ★ OFFLINE-OPTIMIZED: بارگذاری داده‌ها از cache یا سرور
+    // ★ OFFLINE-OPTIMIZED: بارگذاری داده‌ها از cache یا سرور
   const loadData = useCallback(async () => {
     console.log('[POS] 🔄 شروع بارگذاری داده‌ها...')
     setLoading(true)
@@ -1652,6 +1700,7 @@ const handleQuantityChange = useCallback(
   },
   [cart, products, toast]
 )
+
   const handleUnitPriceChange = useCallback(
     (productId: string, newPrice: number) => {
       if (isNaN(newPrice) || newPrice < 0) return
@@ -1914,7 +1963,7 @@ const handleSearchKeyDown = useCallback(
     }
   }, [])
 
-  const openCardPaymentDialog = useCallback(async () => {
+   const openCardPaymentDialog = useCallback(async () => {
     setCardPaymentResult(null)
     setManualReferenceNumber('')
     setManualReferenceType('rrn')
@@ -1933,8 +1982,144 @@ const handleSearchKeyDown = useCallback(
     }
 
     setActivePosDevice(device)
-    console.log('[POS] Active POS device:', { id: device.id, name: device.name, type: device.terminalType })
+    console.log('[POS] Active POS device:', { 
+      id: device.id, 
+      name: device.name, 
+      type: device.terminalType,
+      config: device.config 
+    })
 
+    // ═══════════════════════════════════════════════════════════════
+    //  ★★★ v11.1: چک شبیه‌ساز (قبل از هر چیز دیگری!)
+    //  دو روش تشخیص:
+    //  ۱. فیلد config شامل isSimulator: true
+    //  ۲. نام دستگاه شامل "شبیه‌ساز" یا "Simulator"
+    // ═══════════════════════════════════════════════════════════════
+    let isSimulatorDevice = false
+    
+    // روش ۱: چک config
+    try {
+      if (device.config) {
+        const deviceConfig = typeof device.config === 'string' 
+          ? JSON.parse(device.config) 
+          : device.config
+        if (deviceConfig?.isSimulator === true) {
+          isSimulatorDevice = true
+        }
+      }
+    } catch (e) {
+      console.warn('[POS] Failed to parse device config:', e)
+    }
+    
+    // روش ۲: چک نام دستگاه (backup)
+    if (!isSimulatorDevice && device.name) {
+      const nameLower = device.name.toLowerCase()
+      if (nameLower.includes('شبیه‌ساز') || nameLower.includes('simulator') || nameLower.includes('🧪')) {
+        isSimulatorDevice = true
+      }
+    }
+
+    console.log('[POS] isSimulatorDevice:', isSimulatorDevice)
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ★★★ اگر شبیه‌ساز است، شبیه‌سازی اجرا کن
+    // ═══════════════════════════════════════════════════════════════
+    if (isSimulatorDevice) {
+      console.log('[POS] 🧪 حالت شبیه‌سازی فعال است — بدون نیاز به دستگاه واقعی')
+      
+      try {
+        // شبیه‌سازی مرحله به مرحله
+        setCardPaymentStatus('connecting')
+        setCardPaymentMessage('🧪 در حال اتصال به شبیه‌ساز کارتخوان...')
+        await new Promise(resolve => setTimeout(resolve, 800))
+
+        setCardPaymentStatus('connecting')
+        setCardPaymentMessage(`🧪 مبلغ ${formatPrice(cartTotals.totalAmount)} ریال به شبیه‌ساز ارسال شد`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        setCardPaymentStatus('waiting_card')
+        setCardPaymentMessage('🧪 شبیه‌سازی: کارت را بکشید و رمز را وارد کنید... (۲ ثانیه صبر کنید)')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        setCardPaymentStatus('verifying')
+        setCardPaymentMessage('🧪 در حال پردازش تراکنش...')
+        await new Promise(resolve => setTimeout(resolve, 1500))
+
+        // تولید نتیجه تصادفی (۹۰٪ موفق)
+        const isSuccess = Math.random() * 100 < 90
+        
+        if (isSuccess) {
+          // تولید اطلاعات تراکنش موفق
+          const referenceNumber = String(Math.floor(100000 + Math.random() * 900000))
+          const traceNumber = String(Math.floor(100000 + Math.random() * 900000))
+          const cardPrefixes = ['6037', '6221', '6274', '6279', '5022']
+          const cardPrefix = cardPrefixes[Math.floor(Math.random() * cardPrefixes.length)]
+          const cardLast4 = String(Math.floor(1000 + Math.random() * 9000))
+          const bankNames: Record<string, string> = {
+            '6037': 'بانک ملی',
+            '6221': 'بانک سپه',
+            '6274': 'بانک صادرات',
+            '6279': 'بانک ملت',
+            '5022': 'بانک پاسارگاد',
+          }
+          const cardType = bankNames[cardPrefix] || 'بانک نامشخص'
+
+          setCardPaymentStatus('success')
+          setCardPaymentMessage(
+            `🧪 شبیه‌سازی موفق!\nشماره پیرو: ${referenceNumber}\nکارت: ****${cardLast4} (${cardType})`
+          )
+
+          // ثبت تراکنش در دیتابیس (مثل تراکنش واقعی)
+          const tid = getTenantIdFromStore()
+          try {
+            await fetch(`/api/payments/card?tenantId=${tid}`, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                amount: cartTotals.totalAmount,
+                referenceNumber: referenceNumber,
+                referenceType: 'rrn',
+                traceNumber: traceNumber,
+                cardNumber: cardLast4,
+                cardType: cardType,
+                status: 'successful',
+                posDeviceId: device.id,
+                description: '🧪 تراکنش شبیه‌سازی شده (تست)',
+              }),
+            })
+            console.log('[POS Simulator] ✅ Transaction recorded in database')
+          } catch (err) {
+            console.warn('[POS Simulator] Failed to record transaction:', err)
+          }
+
+          // بعد از ۲ ثانیه، dialog را ببند و فاکتور را تأیید کن
+          setTimeout(() => {
+            setCardPaymentDialogOpen(false)
+            setConfirmDialogOpen(true)
+          }, 2000)
+        } else {
+          // تراکنش ناموفق
+          const errors = [
+            'عدم موجودی کافی',
+            'رمز اشتباه است',
+            'کارت منقضی شده است',
+            'خطا در ارتباط با بانک',
+          ]
+          const randomError = errors[Math.floor(Math.random() * errors.length)]
+          setCardPaymentStatus('failed')
+          setCardPaymentMessage(`🧪 شبیه‌سازی ناموفق: ${randomError}`)
+        }
+      } catch (err: any) {
+        console.error('[POS Simulator] Error:', err)
+        setCardPaymentStatus('failed')
+        setCardPaymentMessage('خطا در شبیه‌سازی: ' + (err?.message || 'خطای ناشناخته'))
+      }
+      return // ★★★ مهم: اینجا return می‌کنیم تا کد اصلی اجرا نشود
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ادامه کد اصلی (برای دستگاه‌های واقعی)
+    // ═══════════════════════════════════════════════════════════════
     const support = checkBrowserSupport(device.terminalType)
     if (!support.supported) {
       setCardPaymentStatus('failed')
@@ -2786,8 +2971,7 @@ const handleSearchKeyDown = useCallback(
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleConfirmInvoice, posSearchSetQuery])
-
-  // ============ Render ============
+    // ============ Render ============
 
   if (!hasHydrated) {
     return (
@@ -3210,12 +3394,29 @@ const handleSearchKeyDown = useCallback(
             <span className="text-[10px] sm:text-xs font-bold text-slate-700">نوع پرداخت <span className="text-red-500">*</span></span>
           </div>
 
+          {/* ★★★ v11.1: بنر اطلاع‌رسانی غیرفعال بودن یکپارچه‌سازی کارتخوان */}
+          {!posIntegrationEnabled && (
+            <div className="mb-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-[10px] text-amber-800 leading-relaxed">
+                <strong>پرداخت با کارتخوان غیرفعال است.</strong> برای فعال کردن، به تنظیمات → کارتخوان مراجعه کنید.
+              </div>
+            </div>
+          )}
+
           {/* Radio Buttons */}
           <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap flex-1">
             {paymentTypeConfig.map((pt) => {
               const Icon = pt.icon
               const isActive = paymentType === pt.value
-              const isAllowed = planFeatures.posPaymentTypes.includes(pt.value.toLowerCase() as any)
+              // ★★★ v11.1: بررسی مجوز بر اساس پلن + یکپارچه‌سازی کارتخوان
+              const isAllowedByPlan = planFeatures.posPaymentTypes.includes(pt.value.toLowerCase() as any)
+              const isAllowedByIntegration = pt.value.toLowerCase() === 'card' ? posIntegrationEnabled : true
+              const isAllowed = isAllowedByPlan && isAllowedByIntegration
+              
+              // ★★★ v11.1: اگر مجاز نیست، اصلاً رندر نکن (مخفی کردن کامل دکمه)
+              if (!isAllowed) return null
+              
               return (
                 <label
                   key={pt.value}
@@ -3227,7 +3428,11 @@ const handleSearchKeyDown = useCallback(
                         ? `${pt.activeBg} ${pt.activeBorder} ${pt.activeText} shadow-sm cursor-pointer`
                         : `${pt.inactiveBg} ${pt.inactiveBorder} ${pt.inactiveText} ${pt.hoverBg} cursor-pointer`
                   }`}
-                  title={pt.label}
+                  title={
+                    !isAllowedByIntegration 
+                      ? 'کارتخوان غیرفعال است - از تنظیمات فعال کنید' 
+                      : pt.label
+                  }
                 >
                   {/* Radio Circle */}
                   {!isAllowed ? (
@@ -3373,8 +3578,7 @@ const handleSearchKeyDown = useCallback(
           </div>
         </div>
       </div>
-
-      {/* ==================== MODALS ==================== */}
+            {/* ==================== MODALS ==================== */}
 
       {/* Card Payment */}
       <Dialog open={cardPaymentDialogOpen} onOpenChange={(open) => {

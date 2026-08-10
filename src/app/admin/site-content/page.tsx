@@ -2,7 +2,7 @@
 
 // ============================================================================
 // src/app/admin/site-content/page.tsx
-// مدیریت پلن‌ها و قیمت‌ها — با Accordion (جمع‌شونده)
+// مدیریت پلن‌ها و قیمت‌ها — با Accordion + نمایش محدودیت‌های واقعی
 // ============================================================================
 
 import { useState, useEffect } from 'react'
@@ -10,9 +10,13 @@ import {
   Save, RefreshCw, Crown, Zap, Building2, Percent, Plus,
   Trash2, Check, AlertCircle, CheckCircle2, RotateCcw,
   ChevronDown, ChevronUp, Wallet, Sparkles, Settings,
-  TrendingUp, DollarSign, Eye
+  TrendingUp, DollarSign, Eye, Users, Package, FileText,
+  Warehouse, CreditCard, Receipt, BookOpen, BarChart3,
+  Building, ShieldCheck, Calculator, Network, Printer,
+  Edit, X as XIcon, Info
 } from 'lucide-react'
 import { useAdminSiteContent, DEFAULT_SITE_CONTENT, type SiteContent, type PlanTierData } from '@/lib/site-content'
+import { PLANS, getPlanFeatures, resolvePlanTier, type PlanFeatureSet } from '@/lib/plan-features'
 
 const formatPrice = (n: number) => new Intl.NumberFormat('fa-IR').format(n)
 const toFaNum = (n: number | string) => String(n || 0).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
@@ -54,12 +58,251 @@ function getPlanStyle(name: string) {
   return PLAN_STYLES[name as keyof typeof PLAN_STYLES] || PLAN_STYLES.simple
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  Component: نمایش محدودیت‌های واقعی پلن (Read-only)
+// ═══════════════════════════════════════════════════════════════
+function PlanRealLimitsDisplay({ planName }: { planName: string }) {
+  const [expanded, setExpanded] = useState(false)
+  
+  // دریافت اطلاعات واقعی از plan-features.ts
+  const planInfo = PLANS[planName as keyof typeof PLANS]
+  const tier = resolvePlanTier(planName)
+const features = getPlanFeatures(tier)
+  const style = getPlanStyle(planName)
+
+  if (!planInfo || !features) {
+    return (
+      <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+        <AlertCircle className="w-4 h-4 inline-block ml-2" />
+        اطلاعات پلن یافت نشد
+      </div>
+    )
+  }
+
+  // دسته‌بندی قابلیت‌ها
+  const capabilityGroups = [
+    {
+      title: 'فروش و فاکتور',
+      icon: Receipt,
+      items: [
+        { label: 'ویرایش مالیات', value: features.canEditTax },
+        { label: 'حذف فاکتور', value: features.canDeleteInvoice },
+        { label: 'چاپ فاکتور', value: features.canPrintInvoice },
+        { label: 'درگاه پرداخت آنلاین', value: features.canOnlinePayment },
+      ]
+    },
+    {
+      title: 'حسابداری',
+      icon: BookOpen,
+      items: [
+        { label: 'گزارش ساده درآمد/هزینه', value: features.canViewSimpleReport },
+        { label: 'مشاهده اسناد حسابداری', value: features.canViewJournals },
+        { label: 'چارت حساب‌ها', value: features.canViewAccounts },
+        { label: 'ایجاد سند دستی', value: features.canCreateJournal },
+        { label: 'ایجاد حساب جدید', value: features.canCreateAccount },
+        { label: 'تراز آزمایشی', value: features.canTrialBalance },
+        { label: 'دفتر کل', value: features.canGeneralLedger },
+        { label: 'دفتر روزنامه', value: features.canJournalBook },
+      ]
+    },
+    {
+      title: 'فروش اعتباری',
+      icon: CreditCard,
+      items: [
+        { label: 'مدیریت اقساط', value: features.canAccessInstallments },
+        { label: 'فروش نسیه', value: features.canAccessCredit },
+      ]
+    },
+    {
+      title: 'انبارداری',
+      icon: Warehouse,
+      items: [
+        { label: 'فاکتور خرید و تامین‌کنندگان', value: features.canPurchaseInvoice },
+        { label: 'چند انباری', value: features.canMultiWarehouse },
+        { label: 'انتقال بین انبارها', value: features.canStockTransfer },
+        { label: 'انبارگردانی', value: features.canStockCount },
+      ]
+    },
+    {
+      title: 'پیشرفته',
+      icon: ShieldCheck,
+      items: [
+        { label: 'حسابداری شعب', value: features.canMultiBranch },
+        { label: 'گزارش‌های تلفیقی', value: features.canConsolidatedReports },
+        { label: 'بستن سال مالی', value: features.canCloseFiscalYear },
+        { label: 'مدیریت سال مالی', value: features.canFiscalYearManagement },
+        { label: 'اتصال سامانه مودیان', value: features.canMoidianIntegration },
+        { label: 'چند صندوق فروش', value: features.canMultiCashRegister },
+      ]
+    },
+  ]
+
+  return (
+    <div className="space-y-3">
+      {/* دکمه باز/بسته کردن */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all ${
+          expanded
+            ? `${style.bg} ${style.border}`
+            : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <Info className={`w-4 h-4 ${expanded ? style.text : 'text-gray-500'}`} />
+          <span className="text-xs font-bold text-gray-800">
+            مشاهده محدودیت‌های واقعی پلن (از فایل plan-features.ts)
+          </span>
+        </div>
+        <ChevronDown
+          className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {/* محتوای قابل گسترش */}
+      {expanded && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+          
+          {/* محدودیت‌های کمی */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div className="bg-white p-3 rounded-lg border border-gray-200">
+    <div className="flex items-center gap-2 mb-1">
+      <Users className="w-3.5 h-3.5 text-blue-600" />
+      <span className="text-[10px] text-gray-500">کاربران</span>
+    </div>
+    <p className="text-sm font-black text-gray-900">
+      {planInfo.maxUsers === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxUsers)}
+    </p>
+  </div>
+  <div className="bg-white p-3 rounded-lg border border-gray-200">
+    <div className="flex items-center gap-2 mb-1">
+      <Package className="w-3.5 h-3.5 text-emerald-600" />
+      <span className="text-[10px] text-gray-500">محصولات</span>
+    </div>
+    <p className="text-sm font-black text-gray-900">
+      {planInfo.maxProducts === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxProducts)}
+    </p>
+  </div>
+  <div className="bg-white p-3 rounded-lg border border-gray-200">
+    <div className="flex items-center gap-2 mb-1">
+      <FileText className="w-3.5 h-3.5 text-purple-600" />
+      <span className="text-[10px] text-gray-500">فاکتور</span>  {/* ★ تغییر: حذف "/ماه" */}
+    </div>
+    <p className="text-sm font-black text-gray-900">
+      {planInfo.maxInvoicesPerMonth === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxInvoicesPerMonth)}
+    </p>
+  </div>
+  <div className="bg-white p-3 rounded-lg border border-gray-200">
+    <div className="flex items-center gap-2 mb-1">
+      <Warehouse className="w-3.5 h-3.5 text-amber-600" />
+      <span className="text-[10px] text-gray-500">انبارها</span>
+    </div>
+    <p className="text-sm font-black text-gray-900">
+      {features.maxWarehouses === 0 ? '♾️ نامحدود' : toFaNum(features.maxWarehouses)}
+    </p>
+  </div>
+</div>
+
+          {/* روش‌های پرداخت */}
+          <div className="bg-gradient-to-l from-slate-50 to-white rounded-xl border border-gray-200 p-4">
+            <h6 className="text-xs font-black text-gray-800 mb-3 flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-emerald-600" />
+              روش‌های پرداخت مجاز
+            </h6>
+            <div className="flex flex-wrap gap-2">
+              {features.posPaymentTypes.map((type) => (
+                <span
+                  key={type}
+                  className={`px-2.5 py-1 ${style.bg} ${style.text} rounded-lg text-[11px] font-bold`}
+                >
+                  {type === 'cash' && '💵 نقدی'}
+                  {type === 'card' && '💳 کارتی'}
+                  {type === 'credit' && '📝 نسیه'}
+                  {type === 'installment' && '📊 اقساطی'}
+                  {type === 'check' && '📄 چک'}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* قابلیت‌های سیستم */}
+          <div className="space-y-3">
+            <h6 className="text-xs font-black text-gray-800 flex items-center gap-2">
+              <Settings className="w-4 h-4 text-violet-600" />
+              قابلیت‌های سیستم
+            </h6>
+
+            {capabilityGroups.map((group, idx) => {
+              const GroupIcon = group.icon
+              return (
+                <div
+                  key={idx}
+                  className="bg-white rounded-xl border border-gray-200 p-4 space-y-2"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-7 h-7 rounded-lg ${style.bg} flex items-center justify-center`}>
+                      <GroupIcon className={`w-4 h-4 ${style.text}`} />
+                    </div>
+                    <h6 className="text-[11px] font-black text-gray-800">{group.title}</h6>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {group.items.map((item, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-2 p-2 rounded-lg ${
+                          item.value ? 'bg-emerald-50' : 'bg-red-50'
+                        }`}
+                      >
+                        {item.value ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <XIcon className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                        )}
+                        <span className="text-[11px] text-gray-700">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* توضیحات پلن */}
+          <div className="bg-gradient-to-l from-violet-50 to-purple-50 rounded-xl border border-violet-200 p-4">
+            <h6 className="text-xs font-black text-gray-800 mb-2 flex items-center gap-2">
+              <Info className="w-4 h-4 text-violet-600" />
+              توضیحات پلن
+            </h6>
+            <p className="text-[11px] text-gray-700 leading-relaxed">
+              {planInfo.description}
+            </p>
+          </div>
+
+          {/* هشدار */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-[10px] text-amber-800 leading-relaxed">
+                <p className="font-bold mb-1">توجه:</p>
+                <p>
+                  این اطلاعات از فایل <code className="bg-amber-100 px-1 rounded">src/lib/plan-features.ts</code> خوانده شده‌اند و
+                  فقط برای <strong>نمایش</strong> هستند. برای تغییر محدودیت‌های واقعی، باید فایل مذکور را ویرایش کنید.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AdminSiteContentPage() {
   const { content, setContent, loading, saving, error, saveContent } = useAdminSiteContent()
   const [showSuccess, setShowSuccess] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // ★ Accordion state — کدام پلن‌ها باز هستند
   const [expandedPlans, setExpandedPlans] = useState<string[]>([])
 
   const togglePlan = (planId: string) => {
@@ -194,7 +437,6 @@ export default function AdminSiteContentPage() {
         {/* ═══════════════════ PLANS EDITOR ═══════════════════ */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-          {/* Header پلن‌ها با دکمه باز/بسته کردن همه */}
           <div className="p-5 border-b border-gray-100 bg-gradient-to-l from-slate-50 to-white flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
@@ -231,7 +473,6 @@ export default function AdminSiteContentPage() {
             </div>
           </div>
 
-          {/* Accordion پلن‌ها */}
           <div className="p-5 space-y-3">
             {content.plans.map((plan) => {
               const isExpanded = expandedPlans.includes(plan.id)
@@ -250,19 +491,16 @@ export default function AdminSiteContentPage() {
                       : 'border-gray-200 hover:border-gray-300 hover:shadow-md'
                   }`}
                 >
-                  {/* ═══════════════════ Accordion Header ═══════════════════ */}
                   <button
                     onClick={() => togglePlan(plan.id)}
                     className={`w-full p-4 flex items-center gap-3 transition-all ${
                       isExpanded ? `${style.bg}` : 'bg-white hover:bg-gray-50/50'
                     }`}
                   >
-                    {/* آیکون پلن */}
                     <div className={`w-12 h-12 rounded-xl ${style.iconBg} flex items-center justify-center shadow-lg shrink-0`}>
                       <PlanIcon className="w-6 h-6 text-white" />
                     </div>
 
-                    {/* اطلاعات خلاصه */}
                     <div className="flex-1 min-w-0 text-right">
                       <div className="flex items-center gap-2 mb-0.5">
                         <h4 className="text-base font-black text-gray-900">{plan.nameFa}</h4>
@@ -301,7 +539,6 @@ export default function AdminSiteContentPage() {
                       </div>
                     </div>
 
-                    {/* فلش Accordion */}
                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-all duration-300 ${
                       isExpanded
                         ? `${style.bg} ${style.text}`
@@ -315,7 +552,6 @@ export default function AdminSiteContentPage() {
                     </div>
                   </button>
 
-                  {/* ═══════════════════ Accordion Body ═══════════════════ */}
                   <div
                     className={`grid transition-all duration-500 ease-in-out ${
                       isExpanded
@@ -326,7 +562,6 @@ export default function AdminSiteContentPage() {
                     <div className="overflow-hidden">
                       <div className="p-5 pt-0 space-y-4 border-t border-gray-100">
 
-                        {/* توضیح پلن */}
                         <div className="pt-4">
                           <p className="text-xs text-gray-600 leading-relaxed">{plan.description}</p>
                         </div>
@@ -382,7 +617,6 @@ export default function AdminSiteContentPage() {
                             </div>
                           </div>
 
-                          {/* پیش‌نمایش قیمت */}
                           <div className="bg-gradient-to-l from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-3">
                             <div className="flex items-center gap-2 mb-2">
                               <Eye className="w-3.5 h-3.5 text-emerald-600" />
@@ -466,6 +700,9 @@ export default function AdminSiteContentPage() {
                             ))}
                           </div>
                         </div>
+
+                        {/* ═══════════════════ بخش جدید: نمایش محدودیت‌های واقعی ═══════════════════ */}
+                        <PlanRealLimitsDisplay planName={plan.name} />
                       </div>
                     </div>
                   </div>
@@ -475,13 +712,11 @@ export default function AdminSiteContentPage() {
           </div>
         </div>
 
-        {/* ═══════════════════ فوتر ═══════════════════ */}
         <div className="text-center text-[9px] text-gray-400 pt-3">
           <p>مدیریت محتوای سایت — نسخه {toFaNum('10.0.0')}</p>
         </div>
       </div>
 
-      {/* ═══════════════════ استایل‌های کمکی ═══════════════════ */}
       <style jsx>{`
         @keyframes fade-in {
           from { opacity: 0; }

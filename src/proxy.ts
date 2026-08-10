@@ -1,6 +1,11 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.3 ★★★ Admin Security Fix)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.4 ★★★ Auto-Cleanup)
 // ============================================================================
+// ★★★ v3.4 تغییرات نسبت به v3.3:
+//   ★ اضافه شدن Auto-Cleanup خودکار در background
+//   ★ هر ۱۰ دقیقه یکبار tenant های منقضی را پاک می‌کند
+//   ★ در لندینگ پیج و مسیرهای پرکاربرد چک می‌شود
+//   ★ Request کاربر را بلاک نمی‌کند (non-blocking)
 // ★★★ v3.3 تغییرات نسبت به v3.2:
 //   ★ بهبود کامل محافظت از پنل ادمین
 //   ★ جلوگیری از دسترسی به /admin/* بعد از logout
@@ -53,6 +58,66 @@ const CUSTOMER_PORTAL_PATHS = [
 
 const VALID_SLUG_REGEX = /^[a-z0-9][a-z0-9-]*$/i;
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'shopaccounting.ir';
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.4: Auto-Cleanup System (خودکار در background)
+// ════════════════════════════════════════════════════════════════════════════
+let lastCleanupTime = 0;
+let isCleanupRunning = false;
+
+// ★ هر ۱۰ دقیقه یکبار cleanup اجرا شود (۶۰۰,۰۰۰ میلی‌ثانیه)
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+
+// ★ مسیرهایی که باید cleanup در آنها چک شود
+const CLEANUP_TRIGGER_PATHS = [
+  '/',                    // لندینگ پیج
+  '/auth/login',          // صفحه login
+  '/auth/register',       // صفحه ثبت‌نام
+  '/dashboard',           // داشبورد (برای کاربران لاگین شده)
+];
+
+/**
+ * ★ اجرای cleanup در background (non-blocking)
+ * این تابع request کاربر را بلاک نمی‌کند
+ */
+function triggerBackgroundCleanup(requestUrl: string): void {
+  const now = Date.now();
+  
+  // اگر ۱۰ دقیقه نگذشته یا cleanup در حال اجراست، skip کن
+  if (now - lastCleanupTime < CLEANUP_INTERVAL_MS || isCleanupRunning) {
+    return;
+  }
+  
+  lastCleanupTime = now;
+  isCleanupRunning = true;
+  
+  // ★ اجرای cleanup در background با setImmediate (غیر بلاک‌کننده)
+  setImmediate(async () => {
+    try {
+      const { cleanupExpiredDemoTenants } = await import('@/lib/demo-cleanup');
+      const result = await cleanupExpiredDemoTenants();
+      
+      if (result.deletedCount > 0) {
+        console.log(
+          `[AutoCleanup] 🧹 Background cleanup: ${result.deletedCount} tenants, ${result.totalRecordsDeleted} records deleted`
+        );
+      }
+    } catch (err: any) {
+      // خطا را فقط لاگ می‌کنیم، نباید request کاربر را تحت تأثیر قرار دهد
+      console.error('[AutoCleanup] ❌ Background cleanup error:', err?.message || err);
+    } finally {
+      isCleanupRunning = false;
+    }
+  });
+}
+
+/**
+ * ★ بررسی اینکه آیا مسیر فعلی باید cleanup را trigger کند
+ */
+function shouldTriggerCleanup(pathname: string): boolean {
+  return CLEANUP_TRIGGER_PATHS.some(path => pathname === path);
+}
+// ════════════════════════════════════════════════════════════════════════════
 
 // ════════════════════════════════════════════════════════════════════════════
 // ★★★ v3.3: نام کوکی‌های ادمین
@@ -227,6 +292,14 @@ export default function proxy(request: NextRequest) {
   // ── ۱. Bypass فایل‌های استاتیک ──────────────────────────────────────────────
   if (shouldBypassStatic(pathname)) {
     return NextResponse.next();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★★★ v3.4: اجرای Auto-Cleanup در background (non-blocking)
+  // این بخش هیچ تأخیری در پاسخ به کاربر ایجاد نمی‌کند
+  // ══════════════════════════════════════════════════════════════════════════
+  if (shouldTriggerCleanup(pathname)) {
+    triggerBackgroundCleanup(request.url);
   }
 
   // ── ۲. مدیریت Logout ──────────────────────────────────────────────────────

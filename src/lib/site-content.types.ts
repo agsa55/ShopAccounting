@@ -11,8 +11,13 @@ export interface PlanTierData {
   annualPrice: number
   lifetimePrice: number
   discountPercent: number
-  features: string[]
+  icon: string              // ★ اضافه شد: نام آیکون (Zap, Crown, Building2)
   popular?: boolean
+  color: string             // ★ اضافه شد: رنگ متن (text-blue-600)
+  bgColor: string           // ★ اضافه شد: رنگ پس‌زمینه (bg-blue-50)
+  borderColor: string       // ★ اضافه شد: رنگ حاشیه (border-blue-200)
+  gradient: string          // ★ اضافه شد: گرادیانت (from-blue-500 to-cyan-500)
+  features: string[]
   order: number
 }
 
@@ -69,29 +74,35 @@ export interface SiteContent {
 //  DEFAULTS — دقیقاً مطابق مقادیر لاندینگ پیج اصلی
 // ═══════════════════════════════════════════════════════════════
 export const DEFAULT_SITE_CONTENT: SiteContent = {
-  plans: [
-    {
-      id: 'simple', name: 'simple', nameFa: 'پایه',
-      description: 'مناسب فروشگاه‌های کوچک و فردی',
-      annualPrice: 1_590_000, lifetimePrice: 16_000_000,
-      discountPercent: 0, popular: false, order: 1,
-      features: ['تا ۲ کاربر', 'تا ۲۰۰ محصول', 'تا ۵۰۰ فاکتور', 'داشبورد مالی', 'مدیریت اقساط'],
-    },
-    {
-      id: 'professional', name: 'professional', nameFa: 'پیشرفته',
-      description: 'فروشگاه‌های متوسط و در حال رشد',
-      annualPrice: 2_760_000, lifetimePrice: 28_000_000,
-      discountPercent: 0, popular: true, order: 2,
-      features: ['تا ۵ کاربر', 'تا ۲,۰۰۰ محصول', 'تا ۵,۰۰۰ فاکتور', 'حسابداری دوطرفه', 'گزارشات مالی', 'درگاه پرداخت', 'پشتیبانی اولویت‌دار'],
-    },
-    {
-      id: 'enterprise', name: 'enterprise', nameFa: 'حرفه‌ای',
-      description: 'کسب‌وکارهای بزرگ و سازمان‌ها',
-      annualPrice: 3_550_000, lifetimePrice: 36_000_000,
-      discountPercent: 0, popular: false, order: 3,
-      features: ['کاربر نامحدود', 'محصول نامحدود', 'فاکتور نامحدود', 'تمام امکانات پیشرفته', 'حسابداری شعب', 'اتصال سامانه مودیان', 'پشتیبانی ۲۴/۷ اختصاصی'],
-    },
-  ],
+ plans: [
+  {
+    id: 'p1', name: 'simple', nameFa: 'پایه',
+    description: 'مناسب فروشگاه‌های کوچک و فردی',
+    annualPrice: 1590000, lifetimePrice: 16000000,
+    discountPercent: 0, icon: 'Zap', popular: false,
+    color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200',
+    gradient: 'from-blue-500 to-cyan-500', order: 1,
+    features: ['تا ۲ کاربر', 'محصول نامحدود', 'فاکتور نامحدود', '۱ انبار', 'داشبورد مالی', 'مدیریت اقساط'],  // ★ تغییر
+  },
+  {
+    id: 'p2', name: 'professional', nameFa: 'پیشرفته',
+    description: 'فروشگاه‌های متوسط و در حال رشد',
+    annualPrice: 2760000, lifetimePrice: 28000000,
+    discountPercent: 0, icon: 'Crown', popular: true,
+    color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-300',
+    gradient: 'from-emerald-500 to-teal-500', order: 2,
+    features: ['تا ۵ کاربر', 'محصول نامحدود', 'فاکتور نامحدود', '۲ انبار', 'حسابداری دوطرفه', 'گزارشات مالی', 'درگاه پرداخت', 'پشتیبانی اولویت‌دار'],  // ★ تغییر
+  },
+  {
+    id: 'p3', name: 'enterprise', nameFa: 'حرفه‌ای',
+    description: 'کسب‌وکارهای بزرگ و سازمان‌ها',
+    annualPrice: 3550000, lifetimePrice: 36000000,
+    discountPercent: 0, icon: 'Building2', popular: false,
+    color: 'text-purple-600', bgColor: 'bg-purple-50', borderColor: 'border-purple-200',
+    gradient: 'from-purple-500 to-fuchsia-500', order: 3,
+    features: ['کاربر نامحدود', 'محصول نامحدود', 'فاکتور نامحدود', 'انبار نامحدود', 'تمام امکانات پیشرفته', 'حسابداری شعب', 'اتصال سامانه مودیان', 'پشتیبانی ۲۴/۷ اختصاصی'],  // ★ تغییر
+  },
+],
 
   features: [
     { id: 'f1', iconName: 'ShoppingCart', title: 'صندوق فروش', desc: 'ثبت سریع فاکتور، مدیریت نقدی و نسیه با رابطی روان', color: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-600', light: 'bg-violet-50', order: 1 },

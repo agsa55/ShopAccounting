@@ -432,10 +432,25 @@ export async function checkSubscriptionStatus(tenantId: string): Promise<Subscri
     if (daysRemaining > 0 && daysRemaining <= 7) {
       status = 'warning';
       message = `اشتراک شما ${daysRemaining} روز دیگر منقضی می‌شود. لطفاً برای تمدید اقدام کنید.`;
-    } else if (daysRemaining <= 0 && daysRemaining >= -7) {
-      status = 'grace_period';
-      message = `اشتراک شما منقضی شده است. شما ${Math.abs(daysRemaining)} روز فرصت دارید برای تمدید و حفظ دسترسی کامل.`;
-    } else if (daysRemaining < -7) {
+    } 
+   else if (daysRemaining <= 0 && daysRemaining >= -7) {
+  status = 'grace_period';
+  
+  // ★★★ بهبود پیام برای پلن‌های پیشرفته و حرفه‌ای (که سال مالی و سند اختتامیه دارند)
+  if (tierName === 'professional' || tierName === 'enterprise') {
+    const daysLeft = Math.abs(daysRemaining);
+    if (daysLeft >= 5) {
+      message = `اشتراک سالانه شما به پایان رسیده است. ${daysLeft} روز فرصت دارید تا حساب‌های سال مالی را جمع‌بندی کرده و سند اختتامیه صادر نمایید. پس از اتمام این مهلت، سیستم فقط در حالت خواندنی قابل استفاده خواهد بود.`;
+    } else if (daysLeft >= 2) {
+      message = `⚠️ فقط ${daysLeft} روز تا پایان مهلت سال مالی باقی مانده است. لطفاً نسبت به صدور سند اختتامیه و جمع‌بندی حساب‌ها اقدام کنید.`;
+    } else {
+      message = `🚨 هشدار: کمتر از ${daysLeft === 1 ? '۲۴ ساعت' : '۴۸ ساعت'} تا پایان مهلت سال مالی. لطفاً فوراً سند اختتامیه را صادر کنید.`;
+    }
+  } else {
+    message = `اشتراک شما منقضی شده است. شما ${Math.abs(daysRemaining)} روز فرصت دارید برای تمدید و حفظ دسترسی کامل.`;
+  }
+}
+    else if (daysRemaining < -7) {
       status = 'read_only';
       canCreate = false;
       message = 'اشتراک شما منقضی شده است. شما در حالت فقط خواندنی هستید. برای ثبت اطلاعات جدید، لطفاً اشتراک خود را تمدید کنید.';
