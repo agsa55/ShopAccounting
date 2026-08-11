@@ -689,102 +689,139 @@ const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.on
   // ★ بارگذاری داده‌ها
   // ══════════════════════════════════════════════════════════════════════════
 
-  const loadData = useCallback(async (showLoader = true) => {
-    if (showLoader) setLoading(true)
-    const tid = tenantId || useAppStore.getState().currentTenant?.id
-    if (!tid) { setLoading(false); return }
+const loadData = useCallback(async (showLoader = true) => {
+  console.log('[loadData] Starting...', { showLoader, tenantId, isOnline })
+  
+  if (showLoader) setLoading(true)
+  const tid = tenantId || useAppStore.getState().currentTenant?.id
+  
+  console.log('[loadData] tenantId resolved:', tid)
+  
+  if (!tid) {
+    console.warn('[loadData] ⚠️ No tenantId found!')
+    setLoading(false)
+    return
+  }
 
-    const trulyOnline = isOnline && navigator.onLine
+  const trulyOnlineLocal = isOnline && (typeof navigator !== 'undefined' ? navigator.onLine : true)
+  console.log('[loadData] trulyOnline:', trulyOnlineLocal, 'navigator.onLine:', typeof navigator !== 'undefined' ? navigator.onLine : 'N/A')
 
-    if (!trulyOnline) {
+  if (!trulyOnlineLocal) {
+    console.log('[loadData] Using offline cache')
+    const cachedInvoices = loadOfflineInvoices()
+    const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
+    const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
+    console.log('[loadData] Loaded from cache:', { invoices: cachedInvoices.length, suppliers: cachedSuppliers.length, warehouses: cachedWarehouses.length })
+    setInvoices(cachedInvoices)
+    setSuppliers(cachedSuppliers)
+    setWarehouses(cachedWarehouses)
+    const defaultWh = cachedWarehouses.find(w => w.isDefault)
+    if (defaultWh) setWarehouseId(defaultWh.id)
+    else if (cachedWarehouses.length > 0) setWarehouseId(cachedWarehouses[0].id)
+    
+    const queue = loadSyncQueue()
+    setSyncQueue(queue)
+    setLoading(false)
+    if (cachedInvoices.length === 0 && cachedSuppliers.length === 0) {
+      toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه محلی یافت نشد. لطفاً یک‌بار آنلاین وارد شوید.' })
+    }
+    return
+  }
+
+  try {
+    console.log('[loadData] Fetching from server...')
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+    
+    console.log('[loadData] Making requests:', {
+      invoices: `/api/purchase-invoices?tenantId=${tid}`,
+      suppliers: `/api/suppliers?tenantId=${tid}&activeOnly=true`,
+      warehouses: `/api/warehouses?tenantId=${tid}`,
+    })
+
+    const [invRes, supRes, whRes] = await Promise.all([
+      fetch(`/api/purchase-invoices?tenantId=${tid}`, { headers }),
+      fetch(`/api/suppliers?tenantId=${tid}&activeOnly=true`, { headers }),
+      fetch(`/api/warehouses?tenantId=${tid}`, { headers }),
+    ])
+
+    console.log('[loadData] Response statuses:', {
+      invoices: invRes.status,
+      suppliers: supRes.status,
+      warehouses: whRes.status,
+    })
+
+    const [invData, supData, whData] = await Promise.all([
+      invRes.json(), supRes.json(), whRes.json(),
+    ])
+
+    console.log('[loadData] Parsed data:', {
+      invoicesSuccess: invData.success,
+      invoicesCount: invData.data?.length || 0,
+      suppliersSuccess: supData.success,
+      suppliersCount: supData.data?.length || 0,
+      warehousesSuccess: whData.success,
+      warehousesCount: whData.data?.length || 0,
+    })
+
+    let serverInvoices: PurchaseInvoice[] = []
+    if (invData.success) serverInvoices = invData.data || []
+    
+    let serverSuppliers: Supplier[] = []
+    if (supData.success) {
+      serverSuppliers = supData.data || []
+      saveToStorage(STORAGE_KEYS.SUPPLIERS, serverSuppliers)
+    }
+    
+    let serverWarehouses: Warehouse[] = []
+    if (whData.success) {
+      serverWarehouses = whData.data || []
+      saveToStorage(STORAGE_KEYS.WAREHOUSES, serverWarehouses)
+      const defaultWh = serverWarehouses.find(w => w.isDefault)
+      if (defaultWh) setWarehouseId(defaultWh.id)
+      else if (serverWarehouses.length > 0) setWarehouseId(serverWarehouses[0].id)
+    }
+    
+    setSuppliers(serverSuppliers)
+    setWarehouses(serverWarehouses)
+    
+    const offlineInvoices = loadOfflineInvoices()
+    const merged = mergeInvoices(serverInvoices, offlineInvoices)
+    console.log('[loadData] Merged invoices:', { server: serverInvoices.length, offline: offlineInvoices.length, merged: merged.length })
+    setInvoices(merged)
+    
+    saveOfflineInvoices([
+      ...offlineInvoices.filter(o => o._isOffline),
+      ...serverInvoices,
+    ])
+    
+    const now = new Date().toISOString()
+    saveToStorage(STORAGE_KEYS.LAST_SYNC, now)
+    setLastSyncTime(now)
+    
+    const queue = loadSyncQueue()
+    setSyncQueue(queue)
+    
+    console.log('[loadData] ✅ Completed successfully')
+  } catch (err: any) {
+    console.error('[loadData] ❌ Error:', err)
+    if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
+      console.warn('[loadData] Network unavailable, switching to offline mode')
       const cachedInvoices = loadOfflineInvoices()
       const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
       const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
       setInvoices(cachedInvoices)
       setSuppliers(cachedSuppliers)
       setWarehouses(cachedWarehouses)
-      const defaultWh = cachedWarehouses.find(w => w.isDefault)
-      if (defaultWh) setWarehouseId(defaultWh.id)
-      else if (cachedWarehouses.length > 0) setWarehouseId(cachedWarehouses[0].id)
-      
-      const queue = loadSyncQueue()
-      setSyncQueue(queue)
-      setLoading(false)
-      if (cachedInvoices.length === 0 && cachedSuppliers.length === 0) {
-        toast({ title: 'حالت آفلاین', description: 'داده‌ای در حافظه محلی یافت نشد. لطفاً یک‌بار آنلاین وارد شوید.' })
-      }
-      return
     }
-
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      }
-      
-      const [invRes, supRes, whRes] = await Promise.all([
-        fetch(`/api/purchase-invoices?tenantId=${tid}`, { headers }),
-        fetch(`/api/suppliers?tenantId=${tid}&activeOnly=true`, { headers }),
-        fetch(`/api/warehouses?tenantId=${tid}`, { headers }),
-      ])
-
-      const [invData, supData, whData] = await Promise.all([
-        invRes.json(), supRes.json(), whRes.json(),
-      ])
-
-      let serverInvoices: PurchaseInvoice[] = []
-      if (invData.success) serverInvoices = invData.data || []
-      
-      let serverSuppliers: Supplier[] = []
-      if (supData.success) {
-        serverSuppliers = supData.data || []
-        saveToStorage(STORAGE_KEYS.SUPPLIERS, serverSuppliers)
-      }
-      
-      let serverWarehouses: Warehouse[] = []
-      if (whData.success) {
-        serverWarehouses = whData.data || []
-        saveToStorage(STORAGE_KEYS.WAREHOUSES, serverWarehouses)
-        const defaultWh = serverWarehouses.find(w => w.isDefault)
-        if (defaultWh) setWarehouseId(defaultWh.id)
-        else if (serverWarehouses.length > 0) setWarehouseId(serverWarehouses[0].id)
-      }
-      
-      setSuppliers(serverSuppliers)
-      setWarehouses(serverWarehouses)
-      
-      const offlineInvoices = loadOfflineInvoices()
-      const merged = mergeInvoices(serverInvoices, offlineInvoices)
-      setInvoices(merged)
-      
-      saveOfflineInvoices([
-        ...offlineInvoices.filter(o => o._isOffline),
-        ...serverInvoices,
-      ])
-      
-      const now = new Date().toISOString()
-      saveToStorage(STORAGE_KEYS.LAST_SYNC, now)
-      setLastSyncTime(now)
-      
-      const queue = loadSyncQueue()
-      setSyncQueue(queue)
-    } catch (err: any) {
-      if (err?.message?.includes('Failed to fetch') || err?.name === 'TypeError') {
-        console.warn('[PurchaseInvoicesPage] شبکه در دسترس نیست، سوئیچ خودکار به حالت آفلاین')
-        const cachedInvoices = loadOfflineInvoices()
-        const cachedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.SUPPLIERS, [])
-        const cachedWarehouses = loadFromStorage<Warehouse[]>(STORAGE_KEYS.WAREHOUSES, [])
-        setInvoices(cachedInvoices)
-        setSuppliers(cachedSuppliers)
-        setWarehouses(cachedWarehouses)
-      } else {
-        console.error('Error loading data:', err)
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [tenantId, isOnline, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
+  } finally {
+    setLoading(false)
+    console.log('[loadData] Finished, loading = false')
+  }
+}, [tenantId, isOnline, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -1210,21 +1247,38 @@ const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.on
       throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`)
     }
 
-    const data = await res.json()
-    console.log('[Purchase Submit] Server response:', data)
+  const data = await res.json()
+console.log('[Purchase Submit] Server response:', {
+  success: data.success,
+  message: data.message,
+  error: data.error,
+  data: data.data,
+  full: data,
+})
 
-    if (data.success) {
-      toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
-      if (editingOfflineId) {
-        const queue = loadSyncQueue()
-        saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
-        const offlineInvs = loadOfflineInvoices()
-        saveOfflineInvoices(offlineInvs.filter(i => i._offlineId !== editingOfflineId))
-      }
-      closeDialog()
-      // ★ بارگذاری مجدد با force
-      await loadData(false)
-    } else {
+ if (data.success) {
+  console.log('[handleSubmit] ✅ Invoice created successfully:', data.data)
+  toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
+  if (editingOfflineId) {
+    const queue = loadSyncQueue()
+    saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
+    const offlineInvs = loadOfflineInvoices()
+    saveOfflineInvoices(offlineInvs.filter(i => i._offlineId !== editingOfflineId))
+  }
+  closeDialog()
+  
+  // ★ صبر کردن قبل از بارگذاری مجدد (برای اطمینان از ثبت در سرور)
+  console.log('[handleSubmit] Waiting 500ms before reload...')
+  await new Promise(resolve => setTimeout(resolve, 500))
+  
+  // ★ بارگذاری مجدد با force (showLoader = true)
+  console.log('[handleSubmit] Calling loadData(true)...')
+  await loadData(true)
+  
+  console.log('[handleSubmit] ✅ Reload completed')
+}
+    
+    else {
       console.error('[Purchase Submit] Server returned error:', data.error)
       toast({ title: 'خطا', description: data.error || 'خطا در ثبت فاکتور', variant: 'destructive' })
     }
