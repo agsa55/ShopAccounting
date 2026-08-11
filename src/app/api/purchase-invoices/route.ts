@@ -131,22 +131,18 @@ async function buildAndSaveJournal(opts: {
 // ═══════════════════════════════════════════════════════════════
 //  GET — لیست فاکتورهای خرید (با لاگ کامل)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  GET — لیست فاکتورهای خرید (v8.8.7 — استفاده از db.client مستقیم)
+// ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('accounting')(
   async (req: NextRequest, _ctx: any, tenant: any) => {
     try {
-      const tenantDb = tenant.tenantDb
-      const tenantId = tenant.tenantId
       const { searchParams } = new URL(req.url)
-
-      // ★ لاگ‌های کامل برای debug
-      console.log('[PurchaseInvoices GET] ═══ START ═══')
-      console.log('[PurchaseInvoices GET] tenant.tenantId from middleware:', tenantId)
-      console.log('[PurchaseInvoices GET] tenant object keys:', Object.keys(tenant || {}))
-      console.log('[PurchaseInvoices GET] tenantDb type:', typeof tenantDb)
       
-      // بررسی tenantId از query param
-      const queryTenantId = searchParams.get('tenantId')
-      console.log('[PurchaseInvoices GET] tenantId from query param:', queryTenantId)
+      // ★ استفاده از tenantId از query param (نه middleware)
+      const tenantId = searchParams.get('tenantId') || tenant.tenantId
+
+      console.log('[PurchaseInvoices GET] Using tenantId:', tenantId)
 
       const page       = parseInt(searchParams.get('page')       || '1')
       const limit      = parseInt(searchParams.get('limit')      || '50')
@@ -164,44 +160,16 @@ export const GET = withTenantAndPermission('accounting')(
         ]
       }
 
-      console.log('[PurchaseInvoices GET] Query where:', JSON.stringify(where, null, 2))
-
-      // ★ بررسی count از DB قبل از query اصلی
-      try {
-        const totalCount = await tenantDb.purchaseInvoice.count({ where: {} })
-        console.log('[PurchaseInvoices GET] Total invoices in tenantDb (no filter):', totalCount)
-        
-        const countWithTenant = await tenantDb.purchaseInvoice.count({ where: { tenantId } })
-        console.log('[PurchaseInvoices GET] Invoices with tenantId filter:', countWithTenant)
-        
-        // ★ اگر tenantId متفاوت است، بررسی کنیم
-        if (queryTenantId && queryTenantId !== tenantId) {
-          const countWithQueryTenant = await tenantDb.purchaseInvoice.count({ 
-            where: { tenantId: queryTenantId } 
-          })
-          console.log('[PurchaseInvoices GET] Invoices with query param tenantId:', countWithQueryTenant)
-        }
-      } catch (countErr: any) {
-        console.error('[PurchaseInvoices GET] Count error:', countErr?.message)
-      }
-
+      // ★ استفاده از db.client مستقیم (نه tenant.tenantDb)
       const [invoices, total] = await Promise.all([
         safeInvoiceFindMany(
-          tenantDb, where,
+          db.client, where,
           { createdAt: 'desc' },
           (page - 1) * limit,
           limit
         ),
-        tenantDb.purchaseInvoice.count({ where }),
+        db.client.purchaseInvoice.count({ where }),
       ])
-
-      console.log('[PurchaseInvoices GET] Result:', {
-        invoicesCount: invoices.length,
-        total,
-        page,
-        limit,
-      })
-      console.log('[PurchaseInvoices GET] ═══ END ═══')
 
       return NextResponse.json({
         success: true,
@@ -224,12 +192,18 @@ export const GET = withTenantAndPermission('accounting')(
 // ═══════════════════════════════════════════════════════════════
 //  POST — ایجاد فاکتور خرید
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  POST — ایجاد فاکتور خرید (v8.8.7 — استفاده از db.client مستقیم)
+// ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('accounting')(
   async (req: NextRequest, _ctx: any, tenant: any) => {
     try {
-      const tenantDb = tenant.tenantDb
-      const tenantId = tenant.tenantId
-      const body     = await req.json()
+      const body = await req.json()
+
+      // ★ استفاده از tenantId از body (نه middleware)
+      const tenantId = body.tenantId || tenant.tenantId
+      
+      console.log('[PurchaseInvoice POST] Using tenantId:', tenantId)
 
       const {
         items,
@@ -254,7 +228,8 @@ export const POST = withTenantAndPermission('accounting')(
         )
       }
 
-      const warehouse = await tenantDb.warehouse.findFirst({
+      // ★ استفاده از db.client مستقیم
+      const warehouse = await db.client.warehouse.findFirst({
         where: { id: warehouseId, tenantId },
       })
       if (!warehouse) {
@@ -265,7 +240,7 @@ export const POST = withTenantAndPermission('accounting')(
       }
 
       // ── شماره فاکتور ────────────────────────────────────────────
-      const count         = await tenantDb.purchaseInvoice.count({ where: { tenantId } })
+      const count = await db.client.purchaseInvoice.count({ where: { tenantId } })
       const invoiceNumber = `PUR-${(count + 1).toString().padStart(5, '0')}`
 
       // ── محاسبه مبالغ ────────────────────────────────────────────
@@ -296,24 +271,19 @@ export const POST = withTenantAndPermission('accounting')(
       const remainingAmount = isCredit ? totalAmount  : 0
 
       // ── ★★★ گرفتن حساب‌ها قبل از transaction ──────────────────
-      // ensureDefaultAccounts اول seed می‌کنه، بعد getStandardAccountIds
-      // می‌خونه — این تضمین می‌کنه همیشه حساب درست برگردونه
       await ensureDefaultAccounts(tenantId)
       const accIds = await getStandardAccountIds(tenantId)
 
-      // ★★★ لاگ کامل برای debug
       console.log('[PurchaseInvoice POST] Resolved account IDs:', {
-        cash:            accIds.cashAccountId,        // باید 1010 باشه
-        inventory:       accIds.inventoryAccountId,   // باید 1200 باشه
-        tradePayable:    accIds.tradePurchasableId,   // باید 2010 باشه (نسیه)
-        generalPayable:  accIds.payablesAccountId,    // باید 2000 باشه
-        tax:             accIds.taxAccountId,          // باید 2150 باشه
+        cash:            accIds.cashAccountId,
+        inventory:       accIds.inventoryAccountId,
+        tradePayable:    accIds.tradePurchasableId,
+        generalPayable:  accIds.payablesAccountId,
+        tax:             accIds.taxAccountId,
       })
 
-      // ── Transaction ─────────────────────────────────────────────
-      const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
-
-      const result = await txClient.$transaction(async (tx: any) => {
+      // ── Transaction با db.client مستقیم ─────────────────────────
+      const result = await db.client.$transaction(async (tx: any) => {
 
         // ─── ۱. ایجاد فاکتور ─────────────────────────────────────
         const invoice = await tx.purchaseInvoice.create({
@@ -336,9 +306,14 @@ export const POST = withTenantAndPermission('accounting')(
           },
         })
 
+        console.log('[PurchaseInvoice POST] ✅ Invoice created:', {
+          id: invoice.id,
+          number: invoice.number,
+          tenantId: invoice.tenantId,
+        })
+
         // ─── ۲. آیتم‌ها + موجودی انبار ──────────────────────────
         for (const item of invoiceItems) {
-          // ثبت آیتم فاکتور
           await tx.purchaseInvoiceItem.create({
             data: {
               purchaseInvoiceId: invoice.id,
@@ -353,7 +328,6 @@ export const POST = withTenantAndPermission('accounting')(
           })
 
           if (item.productId) {
-            // ★ میانگین وزنی
             const netUnitCost =
               item.quantity > 0
                 ? (item.unitPrice * item.quantity - item.discountAmount) / item.quantity
@@ -398,7 +372,6 @@ export const POST = withTenantAndPermission('accounting')(
               })
             }
 
-            // ★ حرکت انبار
             await tx.stockMovement.create({
               data: {
                 tenantId,
@@ -413,7 +386,6 @@ export const POST = withTenantAndPermission('accounting')(
               },
             })
 
-            // ★ به‌روزرسانی Product
             await tx.product.update({
               where: { id: item.productId },
               data: {
@@ -435,7 +407,6 @@ export const POST = withTenantAndPermission('accounting')(
 
           const netAmount = subTotal - discountAmount
 
-          // ★★★ بدهکار: موجودی کالا (1200)
           if (!accIds.inventoryAccountId) {
             throw new Error('حساب موجودی کالا (1200) یافت نشد')
           }
@@ -446,7 +417,6 @@ export const POST = withTenantAndPermission('accounting')(
             description: `بدهکار: خرید کالا — ${invoiceNumber}`,
           })
 
-          // ★★★ بدهکار: مالیات (2150) — فقط اگه مالیات داشت
           if (taxAmount > 0 && accIds.taxAccountId) {
             lines.push({
               accountId:   accIds.taxAccountId,
@@ -456,22 +426,17 @@ export const POST = withTenantAndPermission('accounting')(
             })
           }
 
-          // ★★★ بستانکار: انتخاب حساب درست
-          //   نقدی  → 1010 صندوق فروشگاه (cashAccountId)
-          //   نسیه  → 2010 بستانکاران تجاری (tradePurchasableId)
-          //          fallback: 2000 پرداختنی (payablesAccountId)
-          //          fallback نهایی: 1010 صندوق
           let creditAccountId: string | null = null
           let creditLabel = ''
 
           if (isCredit) {
             creditAccountId =
-              accIds.tradePurchasableId   // 2010 بستانکاران تجاری ← درست
-              ?? accIds.payablesAccountId // 2000 پرداختنی ← fallback
-              ?? accIds.cashAccountId     // 1010 ← آخرین راه
+              accIds.tradePurchasableId
+              ?? accIds.payablesAccountId
+              ?? accIds.cashAccountId
             creditLabel = 'بستانکاران تجاری (نسیه)'
           } else {
-            creditAccountId = accIds.cashAccountId  // 1010 صندوق ← همیشه
+            creditAccountId = accIds.cashAccountId
             creditLabel = 'صندوق فروشگاه'
           }
 
@@ -490,41 +455,33 @@ export const POST = withTenantAndPermission('accounting')(
             description: `بستانکار: ${creditLabel} — ${invoiceNumber}`,
           })
 
-          console.log('[PurchaseInvoice POST] Journal lines:', lines.map(l => ({
-            accountId: l.accountId,
-            debit:     l.debit,
-            credit:    l.credit,
-          })))
+          const number = await nextJENumber(tenantId, tx)
 
-          // ★ ساخت سند
-          const journalEntry = await buildAndSaveJournal({
-            tenantId,
-            tx,
-            date:        invoice.invoiceDate || new Date(),
-            description: `سند خودکار — فاکتور خرید ${invoiceNumber}`,
-            sourceType:  'purchase_invoice',
-            sourceId:    invoice.id,
-            createdBy:   tenant.user?.id || null,
-            lines,
+          const journalEntry = await tx.journalEntry.create({
+            data: {
+              tenantId,
+              number,
+              date: invoice.invoiceDate || new Date(),
+              description: `سند خودکار — فاکتور خرید ${invoiceNumber}`,
+              status: 'posted',
+              sourceType: 'purchase_invoice',
+              sourceId: invoice.id,
+              totalDebit: totalAmount,
+              totalCredit: totalAmount,
+              createdBy: tenant.user?.id || null,
+              lines: { create: lines },
+            },
           })
 
-          // ★ ربط سند به فاکتور
+          console.log(`[PurchaseInvoice POST] ✅ Journal ${journalEntry.number} created`)
+
           await tx.purchaseInvoice.update({
             where: { id: invoice.id },
             data:  { journalEntryId: journalEntry.id },
           })
 
-          console.log(
-            `[PurchaseInvoice POST] سند ${journalEntry.number} ثبت شد:`,
-            `Dr.1200(${netAmount}) / Cr.${isCredit ? '2010' : '1010'}(${totalAmount})`
-          )
-
         } catch (jeErr: any) {
-          // سند اختیاری — فاکتور ذخیره می‌شه
-          console.warn(
-            '[PurchaseInvoice POST] Journal failed (non-blocking):',
-            jeErr?.message
-          )
+          console.warn('[PurchaseInvoice POST] Journal failed (non-blocking):', jeErr?.message)
         }
 
         // ─── ۴. به‌روزرسانی مانده تامین‌کننده (نسیه) ────────────
@@ -535,10 +492,7 @@ export const POST = withTenantAndPermission('accounting')(
               data:  { currentBalance: { increment: totalAmount } },
             })
           } catch (supErr: any) {
-            console.warn(
-              '[PurchaseInvoice POST] Supplier balance failed:',
-              supErr?.message
-            )
+            console.warn('[PurchaseInvoice POST] Supplier balance failed:', supErr?.message)
           }
         }
 
