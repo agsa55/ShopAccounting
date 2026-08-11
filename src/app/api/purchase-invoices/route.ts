@@ -128,12 +128,25 @@ async function buildAndSaveJournal(opts: {
 // ═══════════════════════════════════════════════════════════════
 //  GET — لیست فاکتورهای خرید
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  GET — لیست فاکتورهای خرید (با لاگ کامل)
+// ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('accounting')(
   async (req: NextRequest, _ctx: any, tenant: any) => {
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
       const { searchParams } = new URL(req.url)
+
+      // ★ لاگ‌های کامل برای debug
+      console.log('[PurchaseInvoices GET] ═══ START ═══')
+      console.log('[PurchaseInvoices GET] tenant.tenantId from middleware:', tenantId)
+      console.log('[PurchaseInvoices GET] tenant object keys:', Object.keys(tenant || {}))
+      console.log('[PurchaseInvoices GET] tenantDb type:', typeof tenantDb)
+      
+      // بررسی tenantId از query param
+      const queryTenantId = searchParams.get('tenantId')
+      console.log('[PurchaseInvoices GET] tenantId from query param:', queryTenantId)
 
       const page       = parseInt(searchParams.get('page')       || '1')
       const limit      = parseInt(searchParams.get('limit')      || '50')
@@ -151,6 +164,27 @@ export const GET = withTenantAndPermission('accounting')(
         ]
       }
 
+      console.log('[PurchaseInvoices GET] Query where:', JSON.stringify(where, null, 2))
+
+      // ★ بررسی count از DB قبل از query اصلی
+      try {
+        const totalCount = await tenantDb.purchaseInvoice.count({ where: {} })
+        console.log('[PurchaseInvoices GET] Total invoices in tenantDb (no filter):', totalCount)
+        
+        const countWithTenant = await tenantDb.purchaseInvoice.count({ where: { tenantId } })
+        console.log('[PurchaseInvoices GET] Invoices with tenantId filter:', countWithTenant)
+        
+        // ★ اگر tenantId متفاوت است، بررسی کنیم
+        if (queryTenantId && queryTenantId !== tenantId) {
+          const countWithQueryTenant = await tenantDb.purchaseInvoice.count({ 
+            where: { tenantId: queryTenantId } 
+          })
+          console.log('[PurchaseInvoices GET] Invoices with query param tenantId:', countWithQueryTenant)
+        }
+      } catch (countErr: any) {
+        console.error('[PurchaseInvoices GET] Count error:', countErr?.message)
+      }
+
       const [invoices, total] = await Promise.all([
         safeInvoiceFindMany(
           tenantDb, where,
@@ -160,6 +194,14 @@ export const GET = withTenantAndPermission('accounting')(
         ),
         tenantDb.purchaseInvoice.count({ where }),
       ])
+
+      console.log('[PurchaseInvoices GET] Result:', {
+        invoicesCount: invoices.length,
+        total,
+        page,
+        limit,
+      })
+      console.log('[PurchaseInvoices GET] ═══ END ═══')
 
       return NextResponse.json({
         success: true,
