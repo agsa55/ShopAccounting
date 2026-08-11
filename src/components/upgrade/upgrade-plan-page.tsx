@@ -1,14 +1,11 @@
 'use client'
 
 // ============================================================================
-// src/components/upgrade/upgrade-plan-page.tsx (v9.6.1 ★★★)
-// ShopAccounting — صفحه ارتقای پلن
-// ============================================================================
-// ★ نمایش ۳ پلن (پایه، پیشرفته، حرفه‌ای) با قابلیت‌ها و قیمت‌ها
-// ★ رفع خطای TypeScript در FEATURE_MATRIX (استفاده از 'basic' به جای 'simple')
-// ★ مقایسه قابلیت‌ها بین پلن‌ها
+// src/components/upgrade/upgrade-plan-page.tsx (v9.7 ★★★)
+// ShopAccounting — صفحه ارتقای پلن (با دکمه تمدید)
 // ============================================================================
 
+import { useState, useEffect } from 'react'
 import { useStore } from '@/lib/store'
 import { PLANS, resolvePlan, type PlanName, type PlanTier } from '@/lib/plan-features'
 import { Button } from '@/components/ui/button'
@@ -16,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   CheckCircle2, Lock, Crown, ChevronLeft, Shield, Zap, Building2,
-  Database, Users, ShoppingCart, FileText, BarChart3, Star
+  Database, Users, ShoppingCart, FileText, BarChart3, Star, RefreshCw,
 } from 'lucide-react'
 
 // ═══════════════════════════════════════════════════════════════
@@ -60,8 +57,7 @@ const PLAN_STYLES: Record<PlanName, {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  قابلیت‌های هر پلن — برای نمایش در مقایسه
-//  ★★★ اصلاح: استفاده از 'basic' به جای 'simple' برای سازگاری با تایپ PlanTier
+//  قابلیت‌های هر پلن
 // ═══════════════════════════════════════════════════════════════
 
 const FEATURE_MATRIX: { key: string; label: string; tiers: PlanTier[] }[] = [
@@ -94,9 +90,29 @@ export default function UpgradePlanPage() {
   const setCurrentView = useStore((s) => s.setCurrentView)
   const storeName = useStore((s) => s.storeName)
 
+  // ★ State برای وضعیت اشتراک
+  const [subscription, setSubscription] = useState<any>(null)
+
+  // ★ بارگذاری وضعیت اشتراک
+  useEffect(() => {
+    async function fetchSub() {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) return
+        const res = await fetch('/api/subscription/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json()
+        if (data.success) setSubscription(data.data)
+      } catch (err) {
+        console.error('Error fetching subscription:', err)
+      }
+    }
+    fetchSub()
+  }, [])
+
   const currentPlan = resolvePlan(planName)
-  // currentPlanName یکی از مقادیر معتبر PlanName است (simple, professional, enterprise)
-  const currentPlanName = currentPlan.planName 
+  const currentPlanName = currentPlan.planName
 
   return (
     <div className="min-h-full bg-gradient-to-b from-slate-50 to-white" dir="rtl">
@@ -132,8 +148,7 @@ export default function UpgradePlanPage() {
             const style = PLAN_STYLES[planKey]
             const Icon = style.icon
             const isCurrent = planKey === currentPlanName
-            
-            // ★★★ منطق ارتقا فقط برای ۳ پلن موجود
+
             const canUpgrade = !isCurrent && (
               (currentPlanName === 'simple' && (planKey === 'professional' || planKey === 'enterprise')) ||
               (currentPlanName === 'professional' && planKey === 'enterprise')
@@ -144,14 +159,14 @@ export default function UpgradePlanPage() {
                 key={planKey}
                 className={`relative overflow-hidden transition-all hover:shadow-md ${style.border} ${style.featured ? 'ring-2 ring-blue-400' : ''} ${isCurrent ? 'ring-2 ring-emerald-400' : ''}`}
               >
-                {/* ★ برچسب پلن فعلی */}
+                {/* برچسب پلن فعلی */}
                 {isCurrent && (
                   <div className="absolute top-0 left-0 right-0 bg-emerald-500 text-white text-center text-[10px] font-bold py-1 z-10">
                     پلن فعلی شما
                   </div>
                 )}
 
-                {/* ★ برچسب پیشنهادی */}
+                {/* برچسب پیشنهادی */}
                 {style.featured && !isCurrent && (
                   <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-center text-[10px] font-bold py-1 z-10">
                     پیشنهادی
@@ -215,12 +230,23 @@ export default function UpgradePlanPage() {
                     </div>
                   </div>
 
-                  {/* دکمه */}
+                  {/* ★ دکمه‌ها */}
                   {isCurrent ? (
-                    <Button className="w-full gap-2 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 cursor-default" disabled>
-                      <CheckCircle2 className="w-4 h-4" />
-                      پلن فعلی
-                    </Button>
+                    <div className="space-y-2">
+                      <Button className="w-full gap-2 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 cursor-default" disabled>
+                        <CheckCircle2 className="w-4 h-4" />
+                        پلن فعلی
+                      </Button>
+                      {subscription?.isExpired && (
+                        <Button
+                          className="w-full gap-2 bg-gradient-to-l from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white"
+                          onClick={() => typeof window !== 'undefined' && (window.location.href = '/renewal')}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          تمدید اشتراک
+                        </Button>
+                      )}
+                    </div>
                   ) : canUpgrade ? (
                     <Button className={`w-full gap-2 ${style.buttonClass}`}>
                       <Crown className="w-4 h-4" />
@@ -264,7 +290,6 @@ export default function UpgradePlanPage() {
                       <tr key={feat.key} className={`border-b border-gray-100 ${rowBg}`}>
                         <td className="px-4 py-2 text-gray-700 text-xs sticky right-0 bg-inherit z-10 font-medium">{feat.label}</td>
                         <td className="text-center px-3 py-2">
-                          {/* بررسی 'basic' برای سازگاری با تایپ PlanTier */}
                           {feat.tiers.includes('basic' as PlanTier) ? (
                             <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
                           ) : (

@@ -1,9 +1,11 @@
 'use client'
 
 // ============================================================================
-// src/app/subscription/result/page.tsx (v9.4.0 ⚡⚡⚡)
+// src/app/subscription/result/page.tsx (v9.5.0 ⚡⚡⚡)
 // ShopAccounting — Subscription Payment Result Page
 // ----------------------------------------------------------------------------
+// ⚡ v9.5.0: پشتیبانی از تمدید (renewal) + شمارش معکوس + redirect به dashboard
+// ⚡ v9.4.0: نسخه پایه
 // ⚡ این صفحه پس از بازگشت از درگاه زرین‌پال نمایش داده می‌شود.
 // ⚡ پارامترهای query:
 //   - status: success | cancelled | failed | error | apply_failed | already_paid
@@ -13,15 +15,17 @@
 //   - billingCycle: دوره (annual/lifetime)
 //   - isLifetime: 1 اگر مادام‌العمر
 //   - expiresAt: تاریخ انقضا (در صورت موفقیت)
+//   - action: new | renew | upgrade (نوع عملیات)
 // ============================================================================
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   CheckCircle2, XCircle, AlertCircle, Loader2, ArrowLeft,
-  ShoppingCart, Clock, Sparkles, Crown,
+  ShoppingCart, Clock, Sparkles, Crown, Home, RefreshCw, Zap,
 } from 'lucide-react'
 
 type ResultStatus = 'success' | 'cancelled' | 'failed' | 'error' | 'apply_failed' | 'already_paid' | 'loading'
@@ -35,6 +39,7 @@ function ResultContent() {
 
   const [status, setStatus] = useState<ResultStatus>('loading')
   const [data, setData] = useState<any>({})
+  const [countdown, setCountdown] = useState(5)
 
   useEffect(() => {
     const statusParam = searchParams.get('status') as ResultStatus
@@ -47,8 +52,37 @@ function ResultContent() {
       billingCycle: searchParams.get('billingCycle'),
       isLifetime: searchParams.get('isLifetime') === '1',
       expiresAt: searchParams.get('expiresAt'),
+      action: searchParams.get('action') || 'new', // ★ v9.5: نوع عملیات
     })
   }, [searchParams])
+
+  // ⚡ v9.5: شمارش معکوس و redirect خودکار به dashboard
+  useEffect(() => {
+    if (status !== 'success' && status !== 'already_paid') return
+
+    // پاک کردن کش wizard برای باز شدن Wizard تمدید
+    if (typeof window !== 'undefined') {
+      Object.keys(localStorage).forEach(key => {
+        if (key.includes('wizard') || key.includes('setup')) {
+          localStorage.removeItem(key)
+        }
+      })
+    }
+
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          // ⚡ redirect به dashboard (نه لندینگ پیج!)
+          router.push('/dashboard')
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [status, router])
 
   // ─── اگر در حال بارگذاری ─────────────────────────────────────────────────
   if (status === 'loading') {
@@ -62,14 +96,26 @@ function ResultContent() {
     )
   }
 
+  // ⚡ v9.5: تشخیص نوع عملیات برای نمایش پیام مناسب
+  const isRenewal = data.action === 'renew'
+  const isUpgrade = data.action === 'upgrade'
+
   // ─── پیکربندی بر اساس status ─────────────────────────────────────────────
   const config = {
     success: {
       icon: CheckCircle2,
       iconColor: 'text-emerald-600',
       bgIconColor: 'bg-emerald-100',
-      title: 'پرداخت با موفقیت انجام شد!',
-      message: 'اشتراک شما با موفقیت فعال شد.',
+      title: isRenewal 
+        ? '🎉 تمدید با موفقیت انجام شد!' 
+        : isUpgrade 
+        ? '🚀 ارتقا با موفقیت انجام شد!' 
+        : '🎉 پرداخت با موفقیت انجام شد!',
+      message: isRenewal
+        ? 'اشتراک شما با موفقیت تمدید شد. در حال انتقال به داشبورد...'
+        : isUpgrade
+        ? 'پلن شما با موفقیت ارتقا یافت. در حال انتقال به داشبورد...'
+        : 'اشتراک شما با موفقیت فعال شد. در حال انتقال به داشبورد...',
       showDetails: true,
     },
     cancelled: {
@@ -109,7 +155,7 @@ function ResultContent() {
       iconColor: 'text-emerald-600',
       bgIconColor: 'bg-emerald-100',
       title: 'این پرداخت قبلاً پردازش شده',
-      message: 'این تراکنش قبلاً پردازش شده است.',
+      message: 'این تراکنش قبلاً پردازش شده است. در حال انتقال به داشبورد...',
       showDetails: true,
     },
   }
@@ -125,6 +171,13 @@ function ResultContent() {
     return 'پایه'
   })()
 
+  // ⚡ v9.5: برچسب نوع عملیات
+  const actionBadge = isRenewal 
+    ? { label: 'تمدید', icon: RefreshCw, color: 'bg-blue-100 text-blue-700' }
+    : isUpgrade
+    ? { label: 'ارتقا', icon: Zap, color: 'bg-amber-100 text-amber-700' }
+    : { label: 'ثبت‌نام', icon: ShoppingCart, color: 'bg-emerald-100 text-emerald-700' }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
       <div className="w-full max-w-md">
@@ -137,6 +190,14 @@ function ResultContent() {
               </div>
               <h1 className="text-xl font-bold text-gray-900 mb-2">{c.title}</h1>
               <p className="text-sm text-gray-600">{c.message}</p>
+              
+              {/* ⚡ v9.5: برچسب نوع عملیات */}
+              {c.showDetails && (
+                <Badge className={`${actionBadge.color} mt-3`}>
+                  <actionBadge.icon className="w-3 h-3 ml-1" />
+                  {actionBadge.label}
+                </Badge>
+              )}
             </div>
 
             {/* ─── Details (فقط در صورت موفقیت) ─── */}
@@ -144,7 +205,7 @@ function ResultContent() {
               <div className="space-y-3 mb-6">
                 <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">پلن خریداری شده</span>
+                    <span className="text-xs text-gray-500">پلن {isRenewal ? 'تمدید شده' : isUpgrade ? 'جدید' : 'خریداری شده'}</span>
                     <span className="text-sm font-bold text-gray-900 flex items-center gap-1">
                       <Crown className="w-3.5 h-3.5 text-amber-500" />
                       {tierNameFa}
@@ -204,27 +265,47 @@ function ResultContent() {
               </div>
             )}
 
+            {/* ⚡ v9.5: شمارش معکوس برای redirect خودکار */}
+            {(status === 'success' || status === 'already_paid') && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center justify-center gap-2 text-sm text-blue-800">
+                  <Clock className="w-4 h-4" />
+                  <span>
+                    انتقال به داشبورد در{' '}
+                    <strong className="text-lg">{countdown}</strong> ثانیه...
+                  </span>
+                </div>
+                {(isRenewal || data.action === 'renew') && (
+                  <p className="text-xs text-blue-600 mt-2 text-center">
+                    🧙 Wizard راه‌اندازی سال مالی جدید به‌صورت خودکار باز می‌شود
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* ─── Actions ─── */}
             <div className="space-y-2">
               {status === 'success' || status === 'already_paid' ? (
                 <Button
                   onClick={() => {
-                    // ⚡ هدایت به داشبورد
-                    if (data.tenantId) {
-                      // ⚡ در محیط localhost
-                      window.location.href = `/?demo_purchased=1`
-                    } else {
-                      window.location.href = '/'
-                    }
+                    // ⚡ v9.5: redirect مستقیم به dashboard (نه لندینگ!)
+                    router.push('/dashboard')
                   }}
                   className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white"
                 >
-                  <ShoppingCart className="w-4 h-4 ml-2" />
-                  ورود به فروشگاه
+                  <Home className="w-4 h-4 ml-2" />
+                  ورود فوری به داشبورد
                 </Button>
               ) : (
                 <Button
-                  onClick={() => router.push('/subscription/renew')}
+                  onClick={() => {
+                    // ⚡ v9.5: بازگشت به صفحه مناسب بر اساس نوع عملیات
+                    if (isRenewal) {
+                      router.push('/renewal')
+                    } else {
+                      router.push('/auth/register')
+                    }
+                  }}
                   className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white"
                 >
                   تلاش مجدد
@@ -244,7 +325,7 @@ function ResultContent() {
         </Card>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          ShopAccounting v9.4.0 — سیستم حسابداری فروشگاهی
+          ShopAccounting v9.5.0 — سیستم حسابداری فروشگاهی
         </p>
       </div>
     </div>

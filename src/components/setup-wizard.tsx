@@ -1,16 +1,18 @@
-// src/components/setup-wizard.tsx
-// ============================================================================
-// ★★★ ویزارد راه‌اندازی اولیه — v2.0
-// - نمایش فقط یک‌بار بعد از ورود به داشبورد
-// - Auto-default: سال مالی + انبار اگر ثبت نشد
-// - سند افتتاحیه اختیاری
-// ============================================================================
 'use client'
+
+// ============================================================================
+// src/components/setup-wizard.tsx — v3.0 Wizard هوشمند
+// ============================================================================
+// ★ v3.0: پشتیبانی از دو حالت:
+//   - first_setup: راه‌اندازی اولیه (بدون تغییر)
+//   - renewal_setup: تمدید هوشمند با استفاده از سند اختتامیه سال قبل
+// ★ محدودیت‌های پلن در هر دو حالت رعایت می‌شود
+// ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName, type PlanName } from '@/lib/plan-features'
-import { useDemoStatus } from '@/lib/use-demo-status' // ✅ اضافه شده برای شناسایی حساب دمو
+import { useDemoStatus } from '@/lib/use-demo-status'
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogDescription, DialogFooter,
@@ -29,6 +31,7 @@ import {
   ChevronRight, ChevronLeft, Calendar, Package,
   Wallet, Zap, Trash2, Plus, Info, Building2,
   TrendingUp, TrendingDown, ArrowLeft, SkipForward,
+  RefreshCw, Archive,
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,7 +111,6 @@ function getJalaliYearName(iso:string):string{
   return `سال مالی ${toFa(j[0])}`
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  کلید localStorage برای یک‌بار نمایش
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +133,18 @@ function markWizardDone(tenantId: string) {
 function getToken(): Record<string, string> {
   const t = typeof window !== 'undefined' ? localStorage.getItem('token') : null
   return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return { 'Content-Type': 'application/json' }
+  const token = localStorage.getItem('token')
+  if (!token) {
+    console.warn('[SetupWizard] No token found in localStorage!')
+  }
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,93 +174,150 @@ const BAL_COLORS: Record<BalanceType,string> = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Hook اصلی — useSetupWizard
-//  برای استفاده در داشبورد یا app-shell
 // ─────────────────────────────────────────────────────────────────────────────
-// src/components/setup-wizard.tsx
-
 export function useSetupWizard() {
   const currentTenant = useAppStore((s) => s.currentTenant)
-  const tenantId = useAppStore((s) => s.tenantId)
-    || (currentTenant as any)?.id
-    || ''
-
-  // ✅ دریافت وضعیت دمو - این هوک منبع حقیقت است
+  const tenantId = useAppStore((s) => s.tenantId) || (currentTenant as any)?.id || ''
   const { isDemo } = useDemoStatus()
-  
-  // ✅ خواندن مستقیم از استور برای اطمینان ۱۰۰٪
   const planName = useAppStore((s) => s.planName)
   const billingCycle = useAppStore((s) => s.selectedBillingCycle)
 
   const [open, setOpen] = useState(false)
   const [checked, setChecked] = useState(false)
+  const [wizardMode, setWizardMode] = useState<'first_setup' | 'renewal_setup' | null>(null)
+  const [renewalData, setRenewalData] = useState<any>(null)
 
    useEffect(() => {
     if (!tenantId || checked) return
 
-    // ✅ اصلاح قطعی: اگر هر یک از این شرایط برقرار باشد، حساب دمو/تستی است و ویزارد نباید باز شود
     const isActuallyDemo = isDemo || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
 
     if (isActuallyDemo) {
-      console.log('[useSetupWizard] 🚫 Blocked: Demo/Trial account detected (plan:', planName, 'cycle:', billingCycle, ')')
+      console.log('[useSetupWizard] 🚫 Blocked: Demo/Trial account')
       setChecked(true)
       return
     }
 
-    // ★ اصلاح حیاتی: ابتدا چک کنیم آیا کاربر قبلاً ویزارد را تکمیل یا رد کرده است
-    if (isWizardDone(tenantId)) {
-      return // اگر قبلاً انجام شده، دیگر هیچ کاری نکن و ویزارد را باز نکن
+    const checkWizardStatus = async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) {
+          setChecked(true)
+          return
+        }
+
+        const res = await fetch('/api/setup-wizard/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (!res.ok) {
+          console.warn('[useSetupWizard] Status API failed:', res.status)
+          setChecked(true)
+          return
+        }
+
+        const data = await res.json()
+        if (!data.success) {
+          setChecked(true)
+          return
+        }
+
+        const status = data.data.status
+        const subscription = data.data.subscription
+
+        // ✅ حالت ready → کاری لازم نیست
+        if (status === 'ready') {
+          console.log('[useSetupWizard] ✅ Ready — no wizard needed')
+          setChecked(true)
+          return
+        }
+
+        // 🆕 حالت first_setup → Wizard بار اول
+        if (status === 'first_setup') {
+          if (isWizardDone(tenantId)) {
+            setChecked(true)
+            return
+          }
+          console.log('[useSetupWizard] 🆕 Opening first_setup wizard')
+          setWizardMode('first_setup')
+          setTimeout(() => setOpen(true), 600)
+          return
+        }
+
+        // 🔒 حالت locked_after_close → redirect فوری به صفحه تمدید
+        if (status === 'locked_after_close') {
+          console.log('[useSetupWizard] 🔒 Locked after close — redirect to /renewal')
+          if (typeof window !== 'undefined') {
+            window.location.replace('/renewal?reason=locked_after_close')
+          }
+          setChecked(true)
+          return
+        }
+
+        // 🔄 حالت renewal_setup → Wizard تمدید هوشمند
+        if (status === 'renewal_setup') {
+          const renewalKey = `renewal_wizard_done_${tenantId}_${data.data.wizardData?.lastClosedYear?.id}`
+          if (typeof window !== 'undefined' && localStorage.getItem(renewalKey) === 'true') {
+            console.log('[useSetupWizard] ✅ Renewal wizard already done')
+            setChecked(true)
+            return
+          }
+
+          // اگر پلن هنوز منقضی است، redirect به /renewal
+          const isExpired = subscription?.isExpired || subscription?.status === 'read_only'
+          if (isExpired && !subscription?.isLifetime) {
+            console.log('[useSetupWizard] 💳 Plan expired — redirect to /renewal')
+            if (typeof window !== 'undefined') {
+              window.location.replace('/renewal?reason=expired')
+            }
+            setChecked(true)
+            return
+          }
+
+          console.log('[useSetupWizard] 🔄 Opening renewal_setup wizard')
+          setWizardMode('renewal_setup')
+          setRenewalData(data.data.wizardData)
+          setTimeout(() => setOpen(true), 600)
+          return
+        }
+
+        // no_subscription → redirect به upgrade
+        if (status === 'no_subscription') {
+          console.log('[useSetupWizard] ⚠️ No subscription — redirect to /upgrade')
+          if (typeof window !== 'undefined') {
+            window.location.replace('/upgrade')
+          }
+          setChecked(true)
+          return
+        }
+      } catch (err) {
+        console.error('[useSetupWizard] Status check error:', err)
+        setChecked(true)
+      }
     }
-    // ★ بررسی سریع بدون await
-    Promise.all([
-      fetch('/api/fiscal-years', { 
-        headers: typeof window !== 'undefined' && localStorage.getItem('token')
-          ? { Authorization: `Bearer ${localStorage.getItem('token')}` }
-          : {}
-      }).then(r => r.json()).catch(() => ({})),
-      fetch('/api/warehouses', { 
-        headers: typeof window !== 'undefined' && localStorage.getItem('token')
-          ? { Authorization: `Bearer ${localStorage.getItem('token')}` }
-          : {}
-      }).then(r => r.json()).catch(() => ({})),
-    ]).then(([fyData, whData]) => {
-      const years = fyData?.data?.years || fyData?.data || []
-      const whs = whData?.data || []
-      
-      // ★ دقیق‌تر: سال مالی **فعال** و **حداقل ۱ انبار**
-      const hasActiveFY = Array.isArray(years) && years.some((y: any) => y.isActive)
-      const hasWH = Array.isArray(whs) && whs.length > 0
 
-      // ★ اگر هر دو موجود → ویزارد انجام شده
-      if (hasActiveFY && hasWH) {
-        markWizardDone(tenantId)
-        return
-      }
-
-      // ✅ چک نهایی قبل از باز کردن ویزارد (در صورتی که در این فاصله استور آپدیت شده باشد)
-      // ✅ اصلاح خطای useStore به useAppStore
-      const currentState = useAppStore.getState()
-      if (currentState.planName === 'demo' || currentState.planName === 'trial' || currentState.selectedBillingCycle === 'trial') {
-        console.log('[useSetupWizard] 🚫 Blocked at last moment before opening')
-        return
-      }
-
-      // ★ اگر یکی هم نیست → ویزارد نشان بده
-      console.log('[useSetupWizard] Opening wizard:', { hasActiveFY, hasWH })
-      setTimeout(() => setOpen(true), 600)
-    }).catch(err => {
-      console.error('[useSetupWizard] Check error:', err)
-      // ★ درصورت خطا → ویزارد نشان بده
-      setTimeout(() => setOpen(true), 600)
-    })
-  }, [tenantId, checked, isDemo, planName, billingCycle]) // ✅ planName و billingCycle به وابستگی‌ها اضافه شد
+    checkWizardStatus()
+  }, [tenantId, checked, isDemo, planName, billingCycle])
 
   const handleComplete = useCallback(() => {
-    if (tenantId) markWizardDone(tenantId)
+    if (tenantId) {
+      if (wizardMode === 'renewal_setup' && renewalData?.lastClosedYear?.id) {
+        const renewalKey = `renewal_wizard_done_${tenantId}_${renewalData.lastClosedYear.id}`
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(renewalKey, 'true')
+        }
+      } else {
+        markWizardDone(tenantId)
+      }
+    }
     setOpen(false)
-  }, [tenantId])
+    setWizardMode(null)
+    setRenewalData(null)
+  }, [tenantId, wizardMode, renewalData])
 
-  return { open, setOpen, handleComplete }
+  return { open, setOpen, handleComplete, wizardMode, renewalData }
 }
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  کامپوننت اصلی SetupWizard
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,36 +325,51 @@ export interface SetupWizardProps {
   open: boolean
   onOpenChange: (v: boolean) => void
   onComplete?: () => void
+  wizardMode?: 'first_setup' | 'renewal_setup' | null
+  renewalData?: any
 }
 
-export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps) {
-  const currentTenant = useAppStore((s) => s.currentTenant)
+export function SetupWizard(props: SetupWizardProps) {
+  const { open, onOpenChange, onComplete } = props
   const planName = useAppStore((s) => s.planName)
   const { toast } = useToast()
 
   const features = useMemo(
-    ()=>getFeaturesByPlanName((planName||'simple') as PlanName),
+    () => getFeaturesByPlanName((planName || 'simple') as PlanName),
     [planName]
   )
-  const maxWarehouses = useMemo(()=>{
-    if(features.tier==='enterprise') return Infinity
-    if(features.tier==='professional') return 2
+  const maxWarehouses = useMemo(() => {
+    if (features.tier === 'enterprise') return Infinity
+    if (features.tier === 'professional') return 2
     return 1
-  },[features])
+  }, [features])
 
-  // ── مرحله: 0=سال‌مالی | 1=انبار | 2=سند‌افتتاحیه | 3=پایان
+  // ★ حالت تمدید
+  const isRenewalMode = props.wizardMode === 'renewal_setup' && !!props.renewalData
+  const renewalData = props.renewalData || null
+
+  // ═══ State های حالت تمدید ═══
+  const [renewalSaving, setRenewalSaving] = useState(false)
+  const [renewalFYName, setRenewalFYName] = useState('')
+  const [renewalFYStart, setRenewalFYStart] = useState('')
+  const [renewalFYEnd, setRenewalFYEnd] = useState('')
+  const [renewalWarehouses, setRenewalWarehouses] = useState<any[]>([])
+  const [renewalNewWhName, setRenewalNewWhName] = useState('')
+  const [renewalNewWhCode, setRenewalNewWhCode] = useState('')
+  const [renewalError, setRenewalError] = useState('')
+  const [renewalSuccess, setRenewalSuccess] = useState(false)
+
+  // ═══ State های حالت بار اول ═══
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
 
-  // ── سال مالی
   const [fyName, setFyName] = useState('')
   const [fyStart, setFyStart] = useState(todayISO())
-  const [fyEnd, setFyEnd] = useState(addDays(todayISO(),364))
+  const [fyEnd, setFyEnd] = useState(addDays(todayISO(), 364))
   const [fyDone, setFyDone] = useState(false)
   const [fyExisting, setFyExisting] = useState<any[]>([])
   const [fyError, setFyError] = useState('')
 
-  // ── انبار
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [whName, setWhName] = useState('')
   const [whCode, setWhCode] = useState('')
@@ -291,7 +377,6 @@ export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps
   const [whError, setWhError] = useState('')
   const [whLoading, setWhLoading] = useState(false)
 
-  // ── سند افتتاحیه
   const [balItems, setBalItems] = useState<BalanceItem[]>([])
   const [balType, setBalType] = useState<BalanceType>('cash')
   const [balTitle, setBalTitle] = useState('')
@@ -300,925 +385,1205 @@ export function SetupWizard({ open, onOpenChange, onComplete }: SetupWizardProps
   const [balError, setBalError] = useState('')
   const [balIsPosted, setBalIsPosted] = useState(false)
 
-  // ── لود اولیه
-  useEffect(()=>{
-    if(!open)return
+  // ═══ مقداردهی اولیه برای حالت تمدید ═══
+  useEffect(() => {
+    if (isRenewalMode && renewalData) {
+      setRenewalFYName(renewalData.suggestedNewYear?.name || '')
+      setRenewalFYStart(renewalData.suggestedNewYear?.startDate || '')
+      setRenewalFYEnd(renewalData.suggestedNewYear?.endDate || '')
+      setRenewalWarehouses(renewalData.existingWarehouses || [])
+      setRenewalNewWhName('')
+      setRenewalNewWhCode('')
+      setRenewalError('')
+      setRenewalSuccess(false)
+    }
+  }, [isRenewalMode, renewalData])
+
+  // ═══ لود اولیه برای حالت بار اول ═══
+  useEffect(() => {
+    if (!open || isRenewalMode) return
     setStep(0)
     setSaving(false)
     setFyError('')
     setWhError('')
     setBalError('')
     loadAll()
-  },[open])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isRenewalMode])
 
   const loadAll = async () => {
-    // سال مالی
-    try{
-      const r=await fetch('/api/fiscal-years',{headers:getToken()})
-      const d=await r.json()
-      const ys=d?.data?.years||d?.data||[]
-      setFyExisting(Array.isArray(ys)?ys:[])
-      if(ys.some((y:any)=>y.isActive))setFyDone(true)
-    }catch{}
+    try {
+      const r = await fetch('/api/fiscal-years', { headers: getToken() })
+      const d = await r.json()
+      const ys = d?.data?.years || d?.data || []
+      setFyExisting(Array.isArray(ys) ? ys : [])
+      if (ys.some((y: any) => y.isActive)) setFyDone(true)
+    } catch {}
 
-    // انبار
     setWhLoading(true)
-    try{
-      const r=await fetch('/api/warehouses',{headers:getToken()})
-      const d=await r.json()
-      const ws=d?.data||[]
-      setWarehouses(Array.isArray(ws)?ws:[])
-      if(ws.length>0)setWhDone(true)
-    }catch{}
+    try {
+      const r = await fetch('/api/warehouses', { headers: getToken() })
+      const d = await r.json()
+      const ws = d?.data || []
+      setWarehouses(Array.isArray(ws) ? ws : [])
+      if (ws.length > 0) setWhDone(true)
+    } catch {}
     setWhLoading(false)
 
-    // سند افتتاحیه
-    try{
-      const r=await fetch('/api/initial-balance',{headers:getToken()})
-      const d=await r.json()
-      if(d.success&&d.data?.length>0){
-        setBalItems(d.data.map((b:any)=>({
-          type:b.type as BalanceType,
-          title:b.title,
-          amount:b.amount,
-          description:b.description,
+    try {
+      const r = await fetch('/api/initial-balance', { headers: getToken() })
+      const d = await r.json()
+      if (d.success && d.data?.length > 0) {
+        setBalItems(d.data.map((b: any) => ({
+          type: b.type as BalanceType,
+          title: b.title,
+          amount: b.amount,
+          description: b.description,
         })))
-        setBalIsPosted(d.summary?.isPosted||false)
+        setBalIsPosted(d.summary?.isPosted || false)
       }
-    }catch{}
+    } catch {}
   }
 
-  // ── اسم پیش‌فرض سال مالی
-  useEffect(()=>{
-    setFyName(getJalaliYearName(fyStart))
-    setFyEnd(addDays(fyStart,364))
-  },[fyStart])
+  // ═══ اسم پیش‌فرض سال مالی ═══
+  useEffect(() => {
+    if (!isRenewalMode) {
+      setFyName(getJalaliYearName(fyStart))
+      setFyEnd(addDays(fyStart, 364))
+    }
+  }, [fyStart, isRenewalMode])
 
-  // ── ذخیره سال مالی
+  // ═══ توابع ذخیره برای حالت بار اول ═══
   const saveFY = async (): Promise<boolean> => {
-  setFyError('')
-  if (!fyName.trim()) { setFyError('نام سال مالی الزامی است'); return false }
-  
-  try {
-    const r = await fetch('/api/fiscal-years', {
-      method: 'POST',
-      headers: getAuthHeaders(), // ★ جایگزین شد
-      body: JSON.stringify({
-        name: fyName.trim(),
-        startDate: fyStart,
-        endDate: fyEnd,
-        activate: true,
-      }),
-    })
-    const d = await r.json()
-    if (d.success) {
-      setFyDone(true)
-      const ys = d.data?.year ? [d.data.year] : []
-      if (ys.length) setFyExisting(p => [...p, ...ys])
-      return true
-    }
-    setFyError(d.error || 'خطا در ایجاد سال مالی')
-    return false
-  } catch {
-    setFyError('خطا در ارتباط با سرور')
-    return false
-  }
-}
+    setFyError('')
+    if (!fyName.trim()) { setFyError('نام سال مالی الزامی است'); return false }
 
-
-  // ── سال مالی پیش‌فرض (auto)
-  const autoCreateFY = async (): Promise<boolean> => {
-    try{
-      const name=getJalaliYearName(todayISO())
-      const r=await fetch('/api/fiscal-years',{
-        method:'POST',
-        headers:{'Content-Type':'application/json',...getToken()},
-        body:JSON.stringify({name,startDate:todayISO(),endDate:addDays(todayISO(),364),activate:true}),
+    try {
+      const r = await fetch('/api/fiscal-years', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: fyName.trim(),
+          startDate: fyStart,
+          endDate: fyEnd,
+          activate: true,
+        }),
       })
-      const d=await r.json()
-      return d.success
-    }catch{return false}
-  }
-
- // ── ذخیره انبار
-const saveWH = async (name: string, code?: string): Promise<boolean> => {
-  setWhError('')
-  try {
-    const r = await fetch('/api/warehouses', {
-      method: 'POST',
-      headers: getAuthHeaders(), // ★ جایگزین شد
-      body: JSON.stringify({
-        name: name.trim(),
-        code: code?.trim() || undefined,
-      }),
-    })
-    const d = await r.json()
-    if (d.success) {
-      setWhDone(true)
-      setWarehouses(p => [...p, d.data])
-      return true
-    }
-    setWhError(d.error || 'خطا در ایجاد انبار')
-    return false
-  } catch {
-    setWhError('خطا در ارتباط با سرور')
-    return false
-  }
-}
-  // ── حذف انبار
-  const deleteWH = async (id:string) => {
-    try{
-      const r=await fetch(`/api/warehouses?id=${id}`,{method:'DELETE',headers:getToken()})
-      const d=await r.json()
-      if(d.success){
-        setWarehouses(p=>p.filter(w=>w.id!==id))
-        if(warehouses.length<=1)setWhDone(false)
-      }else{
-        toast({title:'خطا',description:d.error,variant:'destructive'})
+      const d = await r.json()
+      if (d.success) {
+        setFyDone(true)
+        const ys = d.data?.year ? [d.data.year] : []
+        if (ys.length) setFyExisting(p => [...p, ...ys])
+        return true
       }
-    }catch{}
-  }
-
- // ─────────────────────────────────────────────────────────────────────────────
-//  افزودن آیتم — اصلاح‌شده (اطمینان از number بودن amount)
-// ─────────────────────────────────────────────────────────────────────────────
-const addBalItem = () => {
-  setBalError('')
-
-  if (!balTitle.trim()) {
-    setBalError('عنوان الزامی است')
-    return
-  }
-
-  const amt = parseFloat(balAmount)
-  if (isNaN(amt) || amt <= 0) {  // ★ 0 هم مجاز نیست
-    setBalError('مبلغ باید عدد مثبت باشد')
-    return
-  }
-
-  setBalItems(prev => [
-    ...prev,
-    {
-      type: balType,
-      title: balTitle.trim(),
-      amount: amt,            // ★ number خالص
-      description: balDesc.trim() || undefined,
-    }
-  ])
-
-  // ★ پاک کردن فرم
-  setBalTitle('')
-  setBalAmount('')
-  setBalDesc('')
-  setBalError('')
-}
-
-
-  function getAuthHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return { 'Content-Type': 'application/json' }
-  
-  const token = localStorage.getItem('token')
-  if (!token) {
-    console.warn('[SetupWizard] No token found in localStorage!')
-  }
-  
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
-}
-
-
- // src/components/setup-wizard.tsx
-// ─────────────────────────────────────────────────────────────────────────────
-//  ثبت سند افتتاحیه — FIX v2
-// ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-//  ثبت سند افتتاحیه — دو مرحله‌ای (مثل InitialBalanceTab در تنظیمات)
-//  مرحله ۱: ذخیره آیتم‌ها در DB
-//  مرحله ۲: صدور سند (postToJournal: true)
-// ─────────────────────────────────────────────────────────────────────────────
-const saveBalance = async (): Promise<boolean> => {
-  // اگه آیتمی نیست → رد شو (اختیاری)
-  if (balItems.length === 0) return true
-
-  setBalError('')
-
-  // ★ اعتبارسنجی آیتم‌ها قبل از ارسال
-  for (const item of balItems) {
-    if (!item.title?.trim()) {
-      setBalError('عنوان همه آیتم‌ها الزامی است')
+      setFyError(d.error || 'خطا در ایجاد سال مالی')
       return false
-    }
-    if (typeof item.amount !== 'number' || item.amount <= 0) {
-      setBalError(`مبلغ آیتم "${item.title}" نامعتبر است`)
+    } catch {
+      setFyError('خطا در ارتباط با سرور')
       return false
     }
   }
 
-  const requestBody = {
-    items: balItems.map((b) => ({
-      type: b.type,
-      title: b.title.trim(),
-      amount: Number(b.amount), // ★ اطمینان از number بودن
-      description: b.description?.trim() || '',
-    })),
-    postToJournal: false, // ★ ذخیره به‌صورت پیش‌نویس (ثبت نهایی در تب راه‌اندازیِ تنظیمات)
+  const autoCreateFY = async (): Promise<boolean> => {
+    try {
+      const name = getJalaliYearName(todayISO())
+      const r = await fetch('/api/fiscal-years', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getToken() },
+        body: JSON.stringify({ name, startDate: todayISO(), endDate: addDays(todayISO(), 364), activate: true }),
+      })
+      const d = await r.json()
+      return d.success
+    } catch { return false }
   }
 
-  console.log('[SetupWizard] saveBalance - request:', {
-    itemsCount: requestBody.items.length,
-    postToJournal: requestBody.postToJournal,
-    items: requestBody.items,
-  })
+  const saveWH = async (name: string, code?: string): Promise<boolean> => {
+    setWhError('')
+    try {
+      const r = await fetch('/api/warehouses', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: name.trim(),
+          code: code?.trim() || undefined,
+        }),
+      })
+      const d = await r.json()
+      if (d.success) {
+        setWhDone(true)
+        setWarehouses(p => [...p, d.data])
+        return true
+      }
+      setWhError(d.error || 'خطا در ایجاد انبار')
+      return false
+    } catch {
+      setWhError('خطا در ارتباط با سرور')
+      return false
+    }
+  }
 
-  try {
-    const res = await fetch('/api/initial-balance', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(requestBody),
-    })
+  const deleteWH = async (id: string) => {
+    try {
+      const r = await fetch(`/api/warehouses?id=${id}`, { method: 'DELETE', headers: getToken() })
+      const d = await r.json()
+      if (d.success) {
+        setWarehouses(p => p.filter(w => w.id !== id))
+        if (warehouses.length <= 1) setWhDone(false)
+      } else {
+        toast({ title: 'خطا', description: d.error, variant: 'destructive' })
+      }
+    } catch {}
+  }
 
-    // ★ بررسی status قبل از parse
-    if (!res.ok && res.status !== 200) {
-      const text = await res.text()
-      console.error('[SetupWizard] saveBalance - HTTP error:', res.status, text)
-      const errMsg = `خطای سرور (${res.status})`
+  const addBalItem = () => {
+    setBalError('')
+    if (!balTitle.trim()) {
+      setBalError('عنوان الزامی است')
+      return
+    }
+    const amt = parseFloat(balAmount)
+    if (isNaN(amt) || amt <= 0) {
+      setBalError('مبلغ باید عدد مثبت باشد')
+      return
+    }
+    setBalItems(prev => [
+      ...prev,
+      {
+        type: balType,
+        title: balTitle.trim(),
+        amount: amt,
+        description: balDesc.trim() || undefined,
+      }
+    ])
+    setBalTitle('')
+    setBalAmount('')
+    setBalDesc('')
+    setBalError('')
+  }
+
+  const saveBalance = async (): Promise<boolean> => {
+    if (balItems.length === 0) return true
+    setBalError('')
+    for (const item of balItems) {
+      if (!item.title?.trim()) {
+        setBalError('عنوان همه آیتم‌ها الزامی است')
+        return false
+      }
+      if (typeof item.amount !== 'number' || item.amount <= 0) {
+        setBalError(`مبلغ آیتم "${item.title}" نامعتبر است`)
+        return false
+      }
+    }
+    const requestBody = {
+      items: balItems.map((b) => ({
+        type: b.type,
+        title: b.title.trim(),
+        amount: Number(b.amount),
+        description: b.description?.trim() || '',
+      })),
+      postToJournal: false,
+    }
+    try {
+      const res = await fetch('/api/initial-balance', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(requestBody),
+      })
+      if (!res.ok && res.status !== 200) {
+        const text = await res.text()
+        const errMsg = `خطای سرور (${res.status})`
+        setBalError(errMsg)
+        toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
+        return false
+      }
+      const data = await res.json()
+      if (data.success) {
+        setBalIsPosted(false)
+        toast({
+          title: '✅ پیش‌نویس سند افتتاحیه ذخیره شد',
+          description: 'برای بررسی، ویرایش یا ثبت نهایی، به تنظیمات ← راه‌اندازی مراجعه کنید.',
+        })
+        return true
+      }
+      const errMsg = data.error || 'خطا در ثبت سند افتتاحیه'
+      setBalError(errMsg)
+      toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
+      return false
+    } catch (err: any) {
+      const errMsg = 'خطا در ارتباط با سرور'
       setBalError(errMsg)
       toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
       return false
     }
-
-    const data = await res.json()
-    console.log('[SetupWizard] saveBalance - response:', data)
-
-     if (data.success) {
-      // ★ v2.1: سند به‌صورت پیش‌نویس ذخیره شد (postToJournal: false)
-      //   ثبت نهایی و صدور سند در «تنظیمات ← راه‌اندازی» انجام می‌شود
-      setBalIsPosted(false)
-      toast({
-        title: '✅ پیش‌نویس سند افتتاحیه ذخیره شد',
-        description: 'برای بررسی، ویرایش یا ثبت نهایی و صدور سند، به تنظیمات ← راه‌اندازی مراجعه کنید.',
-      })
-      return true
-    }
-
-    // ★ خطای API
-    const errMsg = data.error || 'خطا در ثبت سند افتتاحیه'
-    console.error('[SetupWizard] saveBalance - API error:', errMsg)
-    setBalError(errMsg)
-    toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
-    return false
-
-  } catch (err: any) {
-    const errMsg = 'خطا در ارتباط با سرور'
-    console.error('[SetupWizard] saveBalance - catch:', err)
-    setBalError(errMsg)
-    toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
-    return false
   }
-}
-  // ── محاسبات سند
-  const totalAssets=balItems.filter(b=>['cash','bank','inventory','fixed_asset'].includes(b.type)).reduce((s,b)=>s+b.amount,0)
-  const totalLiab=balItems.filter(b=>b.type==='liability').reduce((s,b)=>s+b.amount,0)
-  const totalEquity=totalAssets-totalLiab
 
-  // ─────────────────────────────────────────────────────────────────────────────
-//  handleNext — اصلاح‌شده برای مرحله ۲
-// ─────────────────────────────────────────────────────────────────────────────
-const handleNext = async () => {
-  setSaving(true)
-  setFyError('')
-  setWhError('')
-  setBalError('')
+  const totalAssets = balItems.filter(b => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type)).reduce((s, b) => s + b.amount, 0)
+  const totalLiab = balItems.filter(b => b.type === 'liability').reduce((s, b) => s + b.amount, 0)
+  const totalEquity = totalAssets - totalLiab
 
-  try {
-    // ── مرحله ۰: سال مالی
-    if (step === 0) {
-      if (fyDone) {
-        setStep(1)
+  // ═══ Navigation برای حالت بار اول ═══
+  const handleNext = async () => {
+    setSaving(true)
+    setFyError('')
+    setWhError('')
+    setBalError('')
+    try {
+      if (step === 0) {
+        if (fyDone) { setStep(1); return }
+        const ok = await saveFY()
+        if (ok) setStep(1)
         return
       }
-      const ok = await saveFY()
-      if (ok) setStep(1)
-      return
-    }
-
-    // ── مرحله ۱: انبار
-    if (step === 1) {
-      if (whDone || warehouses.length > 0) {
-        if (whName.trim()) {
-          await saveWH(whName, whCode)
-          setWhName('')
-          setWhCode('')
-        }
-        setStep(2)
-        return
-      }
-      if (whName.trim()) {
-        const ok = await saveWH(whName, whCode)
-        if (ok) {
-          setWhName('')
-          setWhCode('')
+      if (step === 1) {
+        if (whDone || warehouses.length > 0) {
+          if (whName.trim()) {
+            await saveWH(whName, whCode)
+            setWhName('')
+            setWhCode('')
+          }
           setStep(2)
+          return
         }
-      } else {
-        setWhError('حداقل یک انبار ایجاد کنید یا روی «رد کردن» کلیک کنید')
-      }
-      return
-    }
-
-    // ── مرحله ۲: سند افتتاحیه
-    if (step === 2) {
-      // ★ اگه آیتمی در فرم هنوز اضافه نشده، هشدار بده
-      if (balTitle.trim() && balAmount) {
-        setBalError('آیتم در حال ورود را ابتدا با دکمه «افزودن» اضافه کنید')
+        if (whName.trim()) {
+          const ok = await saveWH(whName, whCode)
+          if (ok) { setWhName(''); setWhCode(''); setStep(2) }
+        } else {
+          setWhError('حداقل یک انبار ایجاد کنید یا روی «رد کردن» کلیک کنید')
+        }
         return
       }
-
-      if (balItems.length === 0) {
-        // هیچ آیتمی نیست → رد شو به مرحله بعد
-        setStep(3)
+      if (step === 2) {
+        if (balTitle.trim() && balAmount) {
+          setBalError('آیتم در حال ورود را ابتدا با دکمه «افزودن» اضافه کنید')
+          return
+        }
+        if (balItems.length === 0) { setStep(3); return }
+        const ok = await saveBalance()
+        if (ok) setStep(3)
         return
       }
-
-      // ★ ثبت سند
-      const ok = await saveBalance()
-      if (ok) setStep(3)
-      return
+    } finally {
+      setSaving(false)
     }
-
-  } finally {
-    setSaving(false)
   }
-}
-  // ──────────────────────────────────────────────────────────────────────────
-  //  handleSkip — رد کردن مرحله با ثبت پیش‌فرض
-  // ──────────────────────────────────────────────────────────────────────────
+
   const handleSkip = async () => {
     setSaving(true)
-    try{
-      if(step===0&&!fyDone){
-        // Auto: سال مالی پیش‌فرض
-        toast({title:'سال مالی پیش‌فرض ایجاد شد',description:'یک سال از امروز'})
+    try {
+      if (step === 0 && !fyDone) {
+        toast({ title: 'سال مالی پیش‌فرض ایجاد شد', description: 'یک سال از امروز' })
         await autoCreateFY()
         setFyDone(true)
         setStep(1)
         return
       }
-      if(step===1&&warehouses.length===0){
-        // Auto: انبار پیش‌فرض
-        toast({title:'انبار پیش‌فرض ایجاد شد',description:'انبار فروشگاه'})
-        await saveWH('انبار فروشگاه','WH-01')
+      if (step === 1 && warehouses.length === 0) {
+        toast({ title: 'انبار پیش‌فرض ایجاد شد', description: 'انبار فروشگاه' })
+        await saveWH('انبار فروشگاه', 'WH-01')
         setStep(2)
         return
       }
-      if(step===2){
-        // سند افتتاحیه اختیاری است
-        setStep(3)
-        return
-      }
-    }finally{
+      if (step === 2) { setStep(3); return }
+    } finally {
       setSaving(false)
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  //  handleFinish — پایان ویزارد
-  // ──────────────────────────────────────────────────────────────────────────
   const handleFinish = async () => {
     setSaving(true)
-    try{
-      // اگه سال مالی هنوز نداریم → auto
-      if(!fyDone){
-        await autoCreateFY()
-      }
-      // اگه انبار هنوز نداریم → auto
-      if(warehouses.length===0){
-        await saveWH('انبار فروشگاه','WH-01')
-      }
-      toast({
-        title:'🎉 راه‌اندازی کامل شد!',
-        description:'فروشگاه شما آماده‌ی استفاده است',
-      })
+    try {
+      if (!fyDone) await autoCreateFY()
+      if (warehouses.length === 0) await saveWH('انبار فروشگاه', 'WH-01')
+      toast({ title: '🎉 راه‌اندازی کامل شد!', description: 'فروشگاه شما آماده‌ی استفاده است' })
       onOpenChange(false)
       onComplete?.()
-    }finally{
+    } finally {
       setSaving(false)
     }
   }
 
-  // ─── Progress
-  const STEPS = [
-    {label:'سال مالی',icon:<Calendar className="w-4 h-4"/>,done:fyDone},
-    {label:'انبار',icon:<Building2 className="w-4 h-4"/>,done:whDone||warehouses.length>0},
-    {label:'سند افتتاحیه',icon:<Wallet className="w-4 h-4"/>,done:balIsPosted||balItems.length>0},
-  ]
-  const pct = step>=3 ? 100 : Math.round((step/3)*100)
+  // ═══ افزودن انبار جدید در حالت تمدید ═══
+  const handleAddRenewalWarehouse = async () => {
+    if (!renewalNewWhName.trim()) {
+      setRenewalError('نام انبار الزامی است')
+      return
+    }
+    if (renewalWarehouses.length >= maxWarehouses && maxWarehouses !== Infinity) {
+      setRenewalError(`حداکثر ${maxWarehouses} انبار مجاز است`)
+      return
+    }
+    setRenewalError('')
+    try {
+      const res = await fetch('/api/warehouses', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: renewalNewWhName.trim(),
+          code: renewalNewWhCode.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setRenewalWarehouses(prev => [...prev, {
+          id: data.data.id,
+          name: data.data.name,
+          code: data.data.code,
+          isDefault: false,
+        }])
+        setRenewalNewWhName('')
+        setRenewalNewWhCode('')
+        toast({ title: '✅ انبار جدید اضافه شد' })
+      } else {
+        setRenewalError(data.error || 'خطا در ایجاد انبار')
+      }
+    } catch {
+      setRenewalError('خطا در ارتباط با سرور')
+    }
+  }
 
-  // ────────────────────────────────────────────────────────────────────────
+  const handleDeleteRenewalWarehouse = async (id: string) => {
+    try {
+      const res = await fetch(`/api/warehouses?id=${id}`, {
+        method: 'DELETE',
+        headers: getToken(),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setRenewalWarehouses(prev => prev.filter(w => w.id !== id))
+      } else {
+        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+      }
+    } catch {}
+  }
+
+  // ═══ اجرای نهایی حالت تمدید ═══
+  const handleRenewalFinish = async () => {
+    setRenewalSaving(true)
+    setRenewalError('')
+    try {
+      const res = await fetch('/api/setup-wizard/auto-opening', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          newYearName: renewalFYName,
+          startDate: renewalFYStart,
+          endDate: renewalFYEnd,
+          warehouseUpdates: renewalWarehouses,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setRenewalSuccess(true)
+        toast({
+          title: '🎉 سال مالی جدید ایجاد شد!',
+          description: `سال «${data.data.newYear.name}» فعال و سند افتتاحیه صادر شد`,
+        })
+        setTimeout(() => {
+          onOpenChange(false)
+          onComplete?.()
+        }, 2000)
+      } else {
+        setRenewalError(data.error || 'خطا در ایجاد سال جدید')
+        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+      }
+    } catch (err: any) {
+      setRenewalError('خطا در ارتباط با سرور')
+      toast({ title: 'خطا', description: err?.message || 'خطای شبکه', variant: 'destructive' })
+    } finally {
+      setRenewalSaving(false)
+    }
+  }
+
+  // ═══ Progress برای حالت بار اول ═══
+  const STEPS = [
+    { label: 'سال مالی', icon: <Calendar className="w-4 h-4" />, done: fyDone },
+    { label: 'انبار', icon: <Building2 className="w-4 h-4" />, done: whDone || warehouses.length > 0 },
+    { label: 'سند افتتاحیه', icon: <Wallet className="w-4 h-4" />, done: balIsPosted || balItems.length > 0 },
+  ]
+  const pct = step >= 3 ? 100 : Math.round((step / 3) * 100)
+
+  // ═══════════════════════════════════════════════════════════════
+  //  RENDER
+  // ═══════════════════════════════════════════════════════════════
   return (
-    <Dialog open={open} onOpenChange={v=>{
-      // اگه بستن دیالوگ → پیش‌فرض‌ها رو ثبت کن
-      if(!v)handleFinish()
-      else onOpenChange(true)
+    <Dialog open={open} onOpenChange={v => {
+      if (!v) {
+        if (isRenewalMode && !renewalSuccess) return
+        handleFinish()
+      } else {
+        onOpenChange(true)
+      }
     }}>
       <DialogContent
         className="max-w-xl w-[95vw] max-h-[92vh] overflow-y-auto"
         dir="rtl"
-        // ★ جلوگیری از بسته شدن با کلیک بیرون
-        onInteractOutside={e=>e.preventDefault()}
-        onEscapeKeyDown={e=>e.preventDefault()}
+        onInteractOutside={e => isRenewalMode && e.preventDefault()}
+        onEscapeKeyDown={e => isRenewalMode && e.preventDefault()}
       >
-        {/* ═══ هدر ═══ */}
-        <DialogHeader className="pb-0">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-violet-600"/>
-            </div>
-            ویزارد راه‌اندازی فروشگاه
-            <Badge className="bg-violet-100 text-violet-700 text-[10px] mr-auto">
-              {features.tier==='enterprise'?'سازمانی':features.tier==='professional'?'حرفه‌ای':'پایه'}
-            </Badge>
-          </DialogTitle>
-          <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
-            این ویزارد فقط یک‌بار نمایش داده می‌شود. می‌توانید هر مرحله را رد کنید.
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* ═══ Stepper ═══ */}
-        {step < 3 && (
-          <div className="space-y-2 pt-1">
-            {/* Progress bar */}
-            <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-              <div
-                className="bg-violet-500 h-full rounded-full transition-all duration-500"
-                style={{width:`${pct}%`}}
-              />
-            </div>
-            {/* Step tabs */}
-            <div className="grid grid-cols-3 gap-1.5">
-              {STEPS.map((s,idx)=>(
-                <div key={idx} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] transition-all ${
-                  idx===step
-                    ?'border-violet-400 bg-violet-50 text-violet-700 font-bold'
-                    :s.done
-                    ?'border-emerald-300 bg-emerald-50 text-emerald-700'
-                    :'border-gray-200 bg-gray-50 text-gray-400'
-                }`}>
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
-                    s.done?'bg-emerald-500 text-white':idx===step?'bg-violet-500 text-white':'bg-gray-300 text-gray-500'
-                  }`}>
-                    {s.done?<CheckCircle2 className="w-3 h-3"/>:idx+1}
-                  </div>
-                  <span className="truncate">{s.label}</span>
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/*  حالت تمدید هوشمند (renewal_setup)                              */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {isRenewalMode ? (
+          <>
+            <DialogHeader className="pb-0">
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+                  <RefreshCw className="w-4 h-4 text-emerald-600" />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ═══ محتوا ═══ */}
-        <div className="min-h-[260px] py-1">
-
-          {/* ─── مرحله ۰: سال مالی ─── */}
-          {step===0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-violet-600"/>
-                <h3 className="text-sm font-bold text-gray-900">تعریف سال مالی</h3>
-              </div>
-
-              {/* اگه قبلاً ثبت شده */}
-              {fyExisting.some((y:any)=>y.isActive) ? (
-                <Alert className="border-emerald-200 bg-emerald-50 py-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600"/>
-                  <AlertDescription className="text-xs text-emerald-800 mr-2">
-                    <p className="font-medium">سال مالی فعال موجود است:</p>
-                    {fyExisting.filter((y:any)=>y.isActive).map((y:any)=>(
-                      <p key={y.id} className="mt-1">
-                        <strong>{y.name}</strong> — {isoToJalaliFa(y.startDate)} تا {isoToJalaliFa(y.endDate)}
-                      </p>
-                    ))}
-                    <p className="mt-1.5 text-emerald-600 text-[11px]">می‌توانید ادامه دهید.</p>
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <>
-                  <Alert className="border-blue-200 bg-blue-50 py-2">
-                    <Info className="h-3.5 w-3.5 text-blue-600"/>
-                    <AlertDescription className="text-[11px] text-blue-800 mr-2">
-                      سال مالی دوره‌ای است که تمام اسناد حسابداری در آن ثبت می‌شوند.
-                      اگر رد کنید، یک سال مالی از امروز به‌صورت پیش‌فرض ثبت می‌شود.
-                    </AlertDescription>
-                  </Alert>
-
-                  <div className="space-y-2">
-                    <div>
-                      <Label className="text-[11px] text-gray-600">نام سال مالی</Label>
-                      <Input
-                        value={fyName}
-                        onChange={e=>setFyName(e.target.value)}
-                        placeholder="مثلاً: سال مالی ۱۴۰۳"
-                        className="h-8 text-xs mt-1"
-                      />
-                    </div>
-                                     <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-gray-600">تاریخ شروع (شمسی)</Label>
-                      {/* ★ Datepicker شمسی */}
-                      <PersianDatePicker
-                        value={fyStart}
-                        onChange={(iso) => {
-                          if (iso) setFyStart(iso)
-                        }}
-                        placeholder="انتخاب تاریخ"
-                        label=""
-                      />
-                      <p className="text-[10px] text-gray-500 mt-0.5">{isoToJalaliFa(fyStart)}</p>
-                    </div>
-                    <div>
-                      <Label className="text-[11px] text-gray-600">تاریخ پایان (خودکار)</Label>
-                      <div className="mt-0.5 h-9 px-2 py-1.5 border border-gray-100 rounded-md bg-gray-50 flex items-center text-xs text-gray-500">
-                        {isoToJalaliFa(fyEnd)}
-                      </div>
-                      <p className="text-[10px] text-gray-500 mt-0.5">
-                        {formatNum(daysBetween(fyStart,fyEnd))} روز
-                      </p>
-                    </div>
-                  </div>
-                  </div>
-                </>
-              )}
-
-              {fyError && (
-                <Alert className="border-red-200 bg-red-50 py-1.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-red-600"/>
-                  <AlertDescription className="text-xs text-red-700 mr-2">{fyError}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          )}
-
-          {/* ─── مرحله ۱: انبار ─── */}
-          {step===1 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-violet-600"/>
-                  <h3 className="text-sm font-bold text-gray-900">تعریف انبار</h3>
-                </div>
-                <Badge className="bg-gray-100 text-gray-600 text-[10px]">
-                  {warehouses.length} / {maxWarehouses===Infinity?'∞':maxWarehouses}
+                شروع سال مالی جدید
+                <Badge className="bg-emerald-100 text-emerald-700 text-[10px] mr-auto">
+                  تمدید هوشمند
                 </Badge>
+              </DialogTitle>
+              <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
+                سال مالی قبل بسته شده. سال جدید را بررسی و تأیید کنید.
+              </DialogDescription>
+            </DialogHeader>
+
+            {renewalSuccess ? (
+              <div className="py-8 text-center space-y-3">
+                <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900">🎉 سال مالی جدید آماده است!</h3>
+                <p className="text-xs text-gray-500">
+                  سند افتتاحیه از سال قبل منتقل شد. می‌توانید کار کنید.
+                </p>
               </div>
-
-              <Alert className="border-blue-200 bg-blue-50 py-2">
-                <Info className="h-3.5 w-3.5 text-blue-600"/>
-                <AlertDescription className="text-[11px] text-blue-800 mr-2">
-                  {features.tier==='professional'
-                    ?'پلن حرفه‌ای: تا ۲ انبار مجاز. '
-                    :features.tier==='enterprise'
-                    ?'پلن سازمانی: انبار نامحدود. '
-                    :'پلن پایه: ۱ انبار مجاز. '}
-                  اگر رد کنید، «انبار فروشگاه» پیش‌فرض ایجاد می‌شود.
-                </AlertDescription>
-              </Alert>
-
-              {/* انبارهای موجود */}
-              {whLoading ? (
-                <div className="flex items-center gap-2 py-3 justify-center text-xs text-gray-500">
-                  <Loader2 className="w-4 h-4 animate-spin text-violet-500"/>
-                  در حال بارگذاری...
-                </div>
-              ) : warehouses.length>0 ? (
-                <div className="space-y-1.5">
-                  {warehouses.map((wh:any)=>(
-                    <div key={wh.id}
-                      className="flex items-center justify-between gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Package className="w-4 h-4 text-emerald-500 shrink-0"/>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-gray-800 truncate">{wh.name}</p>
-                          <p className="text-[10px] text-gray-500">کد: {wh.code}</p>
-                        </div>
-                        {wh.isDefault&&(
-                          <Badge className="bg-emerald-200 text-emerald-800 text-[9px]">پیش‌فرض</Badge>
-                        )}
-                      </div>
-                      {!wh.isDefault&&(
-                        <Button variant="ghost" size="sm"
-                          className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
-                          onClick={()=>deleteWH(wh.id)}
-                        >
-                          <Trash2 className="w-3.5 h-3.5"/>
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {/* فرم انبار جدید */}
-              {warehouses.length < maxWarehouses && (
-                <Card className="border-violet-200 bg-violet-50/30">
+            ) : (
+              <div className="space-y-4 py-2">
+                {/* ─── خلاصه سال قبل ─── */}
+                <Card className="border-blue-200 bg-blue-50/30">
                   <CardContent className="p-3 space-y-2">
-                    <p className="text-[11px] font-medium text-violet-700">
-                      {warehouses.length===0?'★ اولین انبار را تعریف کنید':'+ انبار جدید اضافه کنید'}
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-[11px] text-gray-600">نام انبار</Label>
-                        <Input
-                          value={whName}
-                          onChange={e=>setWhName(e.target.value)}
-                          placeholder="مثلاً: انبار اصلی"
-                          className="h-8 text-xs mt-0.5"
-                          onKeyDown={e=>{
-                            if(e.key==='Enter'&&whName.trim()){
-                              saveWH(whName,whCode).then(ok=>{
-                                if(ok){setWhName('');setWhCode('')}
-                              })
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-[11px] text-gray-600">کد (اختیاری)</Label>
-                        <Input
-                          value={whCode}
-                          onChange={e=>setWhCode(e.target.value)}
-                          placeholder="WH-01"
-                          className="h-8 text-xs mt-0.5"
-                          dir="ltr"
-                        />
-                      </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Archive className="w-4 h-4 text-blue-600" />
+                      <span className="text-xs font-bold text-blue-800">
+                        سال مالی قبل: {renewalData.lastClosedYear.name}
+                      </span>
                     </div>
-                    {whName.trim()&&(
-                      <Button
-                        variant="outline" size="sm"
-                        className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
-                        onClick={async()=>{
-                          const ok=await saveWH(whName,whCode)
-                          if(ok){setWhName('');setWhCode('')}
-                        }}
-                        disabled={saving}
-                      >
-                        <Plus className="w-3.5 h-3.5 ml-1"/>
-                        اضافه کردن انبار
-                      </Button>
+                    <div className="text-[10px] text-gray-600" dir="ltr">
+                      {isoToJalaliFa(renewalData.lastClosedYear.startDate)} — {isoToJalaliFa(renewalData.lastClosedYear.endDate)}
+                    </div>
+                    {renewalData.closingEntry && (
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-blue-100">
+                        <div className="text-center">
+                          <div className="text-[9px] text-gray-500">سند اختتامیه</div>
+                          <div className="text-[10px] font-mono font-bold text-blue-700">
+                            {renewalData.closingEntry.number}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[9px] text-gray-500">
+                            {renewalData.closingEntry.netProfit >= 0 ? 'سود' : 'زیان'}
+                          </div>
+                          <div className={`text-[10px] font-bold font-mono ${renewalData.closingEntry.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {formatNum(Math.abs(renewalData.closingEntry.netProfit))}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[9px] text-gray-500">بسته شده</div>
+                          <div className="text-[10px] font-bold text-gray-700">
+                            {isoToJalaliFa(renewalData.lastClosedYear.closedAt)}
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
-              )}
 
-              {warehouses.length>=maxWarehouses&&maxWarehouses!==Infinity&&(
-                <Alert className="border-amber-200 bg-amber-50 py-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-600"/>
-                  <AlertDescription className="text-xs text-amber-700 mr-2">
-                    به سقف {maxWarehouses} انبار مجاز رسیدید.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {whError&&(
-                <Alert className="border-red-200 bg-red-50 py-1.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-red-600"/>
-                  <AlertDescription className="text-xs text-red-700 mr-2">{whError}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          )}
-
-          {/* ─── مرحله ۲: سند افتتاحیه ─── */}
-          {step===2 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-violet-600"/>
-                <h3 className="text-sm font-bold text-gray-900">موجودی‌های اولیه</h3>
-                <Badge className="text-[9px] bg-gray-100 text-gray-600">اختیاری</Badge>
-                                {balIsPosted ? (
-                  <Badge className="text-[9px] bg-emerald-100 text-emerald-700">سند صادر شده ✓</Badge>
-                ) : balItems.length > 0 ? (
-                  <Badge className="text-[9px] bg-amber-100 text-amber-700">پیش‌نویس</Badge>
-                ) : null}
-              </div>
-
-              <Alert className="border-amber-200 bg-amber-50 py-2">
-                <Info className="h-3.5 w-3.5 text-amber-600"/>
-                <AlertDescription className="text-[11px] text-amber-800 mr-2">
-                                   <strong>این مرحله اختیاری است.</strong> موجودی‌های واردشده به‌صورت
-                  <span className="font-medium"> پیش‌نویس</span> ذخیره می‌شوند. برای
-                  <span className="font-medium"> ثبت نهایی و صدور سند قطعی</span>، بعداً به
-                  <span className="font-medium"> تنظیمات ← راه‌اندازی</span> مراجعه کنید.
-                </AlertDescription>
-              </Alert>
-
-              {/* فرم */}
-              <Card className="border-violet-200 bg-violet-50/20">
-                <CardContent className="p-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-gray-600">نوع</Label>
-                      <select
-                        value={balType}
-                        onChange={e=>setBalType(e.target.value as BalanceType)}
-                        className="w-full mt-0.5 h-8 text-xs border border-gray-200 rounded-md px-2 bg-white"
-                      >
-                        {(Object.keys(BAL_LABELS) as BalanceType[]).map(t=>(
-                          <option key={t} value={t}>{BAL_LABELS[t]}</option>
-                        ))}
-                      </select>
+                {/* ─── سال جدید ─── */}
+                <Card className="border-emerald-200 bg-emerald-50/30">
+                  <CardContent className="p-3 space-y-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Calendar className="w-4 h-4 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-800">سال مالی جدید (پیشنهادی)</span>
                     </div>
                     <div>
-                      <Label className="text-[11px] text-gray-600">عنوان</Label>
+                      <Label className="text-[11px] text-gray-600">نام سال مالی</Label>
                       <Input
-                        value={balTitle}
-                        onChange={e=>setBalTitle(e.target.value)}
-                        placeholder={
-                          balType==='cash'?'صندوق فروشگاه'
-                          :balType==='bank'?'بانک ملت'
-                          :balType==='liability'?'وام بانک'
-                          :'عنوان'
-                        }
-                        className="h-8 text-xs mt-0.5"
+                        value={renewalFYName}
+                        onChange={e => setRenewalFYName(e.target.value)}
+                        className="h-8 text-xs mt-1 font-bold"
                       />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-gray-600">مبلغ (ریال)</Label>
-                      <Input
-                        type="number"
-                        value={balAmount}
-                        onChange={e=>setBalAmount(e.target.value)}
-                        placeholder="مثلاً: 5000000"
-                        className="h-8 text-xs mt-0.5"
-                        dir="ltr"
-                        onKeyDown={e=>e.key==='Enter'&&addBalItem()}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-[11px] text-gray-600">توضیح (اختیاری)</Label>
-                      <Input
-                        value={balDesc}
-                        onChange={e=>setBalDesc(e.target.value)}
-                        placeholder="یادداشت"
-                        className="h-8 text-xs mt-0.5"
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline" size="sm"
-                    className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
-                    onClick={addBalItem}
-                    disabled={!balTitle.trim()||!balAmount}
-                  >
-                    <Plus className="w-3.5 h-3.5 ml-1"/>
-                    افزودن
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* لیست آیتم‌ها */}
-              {balItems.length>0&&(
-                <div className="space-y-1">
-                  <div className="max-h-36 overflow-y-auto space-y-1 rounded-lg">
-                    {balItems.map((item,idx)=>(
-                      <div key={idx}
-                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${BAL_COLORS[item.type]}`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="shrink-0">{BAL_LABELS[item.type].split(' ')[0]}</span>
-                          <span className="font-medium truncate">{item.title}</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-[11px] text-gray-600">شروع</Label>
+                        <div className="mt-1 h-8 px-2 py-1.5 border border-gray-100 rounded-md bg-gray-50 flex items-center text-xs text-gray-700 font-mono">
+                          {isoToJalaliFa(renewalFYStart)}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-bold font-mono">{formatNum(item.amount)}﷼</span>
-                          <Button variant="ghost" size="sm"
-                            className="h-5 w-5 p-0 hover:text-red-600 hover:bg-red-50"
-                            onClick={()=>setBalItems(p=>p.filter((_,i)=>i!==idx))}
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-gray-600">پایان</Label>
+                        <div className="mt-1 h-8 px-2 py-1.5 border border-gray-100 rounded-md bg-gray-50 flex items-center text-xs text-gray-700 font-mono">
+                          {isoToJalaliFa(renewalFYEnd)}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* ─── انبارها ─── */}
+                <Card className="border-purple-200 bg-purple-50/30">
+                  <CardContent className="p-3 space-y-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-purple-600" />
+                        <span className="text-xs font-bold text-purple-800">انبارها</span>
+                      </div>
+                      <Badge className="bg-purple-100 text-purple-700 text-[9px]">
+                        {renewalWarehouses.length} / {maxWarehouses === Infinity ? '∞' : maxWarehouses}
+                      </Badge>
+                    </div>
+
+                    <Alert className="border-blue-200 bg-blue-50 py-1.5">
+                      <Info className="h-3.5 w-3.5 text-blue-600" />
+                      <AlertDescription className="text-[10px] text-blue-800 mr-2">
+                        {features.tier === 'professional'
+                          ? 'پلن پیشرفته: تا ۲ انبار مجاز.'
+                          : features.tier === 'enterprise'
+                          ? 'پلن حرفه‌ای: انبار نامحدود.'
+                          : 'پلن پایه: ۱ انبار مجاز.'}
+                      </AlertDescription>
+                    </Alert>
+
+                    {renewalWarehouses.map((wh: any, idx: number) => (
+                      <div key={wh.id} className="flex items-center gap-2 p-2 bg-white border border-purple-100 rounded-lg">
+                        <Package className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                        <Input
+                          value={wh.name}
+                          onChange={e => {
+                            const updated = [...renewalWarehouses]
+                            updated[idx] = { ...updated[idx], name: e.target.value, code: e.target.value }
+                            setRenewalWarehouses(updated)
+                          }}
+                          className="h-7 text-xs flex-1"
+                        />
+                        {wh.isDefault && (
+                          <Badge className="bg-emerald-100 text-emerald-700 text-[8px]">پیش‌فرض</Badge>
+                        )}
+                        {!wh.isDefault && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                            onClick={() => handleDeleteRenewalWarehouse(wh.id)}
                           >
-                            <Trash2 className="w-3 h-3"/>
+                            <Trash2 className="w-3 h-3" />
                           </Button>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* افزودن انبار جدید (با رعایت محدودیت پلن) */}
+                    {(maxWarehouses === Infinity || renewalWarehouses.length < maxWarehouses) && (
+                      <div className="bg-white border border-dashed border-purple-300 rounded-lg p-2 space-y-1.5">
+                        <Label className="text-[10px] text-purple-700 font-bold">+ افزودن انبار جدید</Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            value={renewalNewWhName}
+                            onChange={e => setRenewalNewWhName(e.target.value)}
+                            placeholder="نام انبار"
+                            className="h-7 text-xs"
+                          />
+                          <Input
+                            value={renewalNewWhCode}
+                            onChange={e => setRenewalNewWhCode(e.target.value)}
+                            placeholder="کد (اختیاری)"
+                            className="h-7 text-xs"
+                            dir="ltr"
+                          />
+                        </div>
+                        {renewalNewWhName.trim() && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-50"
+                            onClick={handleAddRenewalWarehouse}
+                            disabled={renewalSaving}
+                          >
+                            <Plus className="w-3 h-3 ml-1" />
+                            اضافه کردن
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    {renewalWarehouses.length >= maxWarehouses && maxWarehouses !== Infinity && (
+                      <Alert className="border-amber-200 bg-amber-50 py-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                        <AlertDescription className="text-[10px] text-amber-700 mr-2">
+                          به سقف {maxWarehouses} انبار مجاز رسیدید.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    <p className="text-[9px] text-gray-500 mt-1">
+                      💡 موجودی انبارها از سال قبل منتقل می‌شود.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                {/* ─── سند افتتاحیه خودکار ─── */}
+                {renewalData.closingDetails && (
+                  <Card className="border-amber-200 bg-amber-50/30">
+                    <CardContent className="p-3 space-y-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Wallet className="w-4 h-4 text-amber-600" />
+                        <span className="text-xs font-bold text-amber-800">سند افتتاحیه (خودکار)</span>
+                        <Badge className="bg-emerald-100 text-emerald-700 text-[9px]">اتوماتیک</Badge>
+                      </div>
+
+                      <p className="text-[10px] text-gray-600 mb-2">
+                        مانده حساب‌های دائمی از سال قبل به‌صورت خودکار منتقل می‌شود:
+                      </p>
+
+                      <div className="space-y-1 text-[10px]">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">جمع دارایی‌ها:</span>
+                          <span className="font-bold text-emerald-700 font-mono">
+                            {formatNum(renewalData.closingDetails.totalAssets)} ﷼
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">جمع بدهی‌ها:</span>
+                          <span className="font-bold text-red-600 font-mono">
+                            {formatNum(renewalData.closingDetails.totalLiabilities)} ﷼
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-t border-amber-100 pt-1 font-bold">
+                          <span className="text-gray-900">سرمایه:</span>
+                          <span className="text-blue-700 font-mono">
+                            {formatNum(renewalData.closingDetails.totalEquity)} ﷼
+                          </span>
+                        </div>
+                      </div>
+
+                      {renewalData.closingDetails.openingItems?.length > 0 && (
+                        <details className="mt-2">
+                          <summary className="text-[10px] text-amber-700 cursor-pointer hover:text-amber-800">
+                            مشاهده {renewalData.closingDetails.openingItems.length} حساب
+                          </summary>
+                          <div className="mt-1 max-h-32 overflow-y-auto space-y-0.5 text-[9px]">
+                            {renewalData.closingDetails.openingItems.slice(0, 20).map((item: any) => (
+                              <div key={item.accountId} className="flex justify-between px-1 py-0.5 bg-white rounded">
+                                <span className="truncate text-gray-700">
+                                  <span className="font-mono text-gray-400 ml-1">{item.accountCode}</span>
+                                  {item.accountName}
+                                </span>
+                                <span className={`font-mono font-bold ${item.balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                  {formatNum(Math.abs(item.balance))}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* ─── خطا ─── */}
+                {renewalError && (
+                  <Alert className="border-red-200 bg-red-50 py-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+                    <AlertDescription className="text-xs text-red-700 mr-2">{renewalError}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
+
+            <DialogFooter className="flex items-center gap-2 pt-3 border-t border-gray-100">
+              {!renewalSuccess && (
+                <Button
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 min-w-[140px]"
+                  onClick={handleRenewalFinish}
+                  disabled={renewalSaving || !renewalFYName.trim() || renewalWarehouses.length === 0}
+                >
+                  {renewalSaving ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  )}
+                  {renewalSaving ? 'در حال ایجاد...' : 'تأیید و شروع سال جدید'}
+                </Button>
+              )}
+            </DialogFooter>
+          </>
+        ) : (
+          /* ═══════════════════════════════════════════════════════════════ */
+          /*  حالت بار اول (first_setup) — بدون تغییر                        */
+          /* ═══════════════════════════════════════════════════════════════ */
+          <>
+            <DialogHeader className="pb-0">
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-violet-600" />
+                </div>
+                ویزارد راه‌اندازی فروشگاه
+                <Badge className="bg-violet-100 text-violet-700 text-[10px] mr-auto">
+                  {features.tier === 'enterprise' ? 'حرفه‌ای' : features.tier === 'professional' ? 'پیشرفته' : 'پایه'}
+                </Badge>
+              </DialogTitle>
+              <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
+                این ویزارد فقط یک‌بار نمایش داده می‌شود. می‌توانید هر مرحله را رد کنید.
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Stepper */}
+            {step < 3 && (
+              <div className="space-y-2 pt-1">
+                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-violet-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {STEPS.map((s, idx) => (
+                    <div key={idx} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] transition-all ${
+                      idx === step
+                        ? 'border-violet-400 bg-violet-50 text-violet-700 font-bold'
+                        : s.done
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-gray-200 bg-gray-50 text-gray-400'
+                    }`}>
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
+                        s.done ? 'bg-emerald-500 text-white' : idx === step ? 'bg-violet-500 text-white' : 'bg-gray-300 text-gray-500'
+                      }`}>
+                        {s.done ? <CheckCircle2 className="w-3 h-3" /> : idx + 1}
+                      </div>
+                      <span className="truncate">{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="min-h-[260px] py-1">
+              {/* ─── مرحله ۰: سال مالی ─── */}
+              {step === 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-violet-600" />
+                    <h3 className="text-sm font-bold text-gray-900">تعریف سال مالی</h3>
+                  </div>
+
+                  {fyExisting.some((y: any) => y.isActive) ? (
+                    <Alert className="border-emerald-200 bg-emerald-50 py-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <AlertDescription className="text-xs text-emerald-800 mr-2">
+                        <p className="font-medium">سال مالی فعال موجود است:</p>
+                        {fyExisting.filter((y: any) => y.isActive).map((y: any) => (
+                          <p key={y.id} className="mt-1">
+                            <strong>{y.name}</strong> — {isoToJalaliFa(y.startDate)} تا {isoToJalaliFa(y.endDate)}
+                          </p>
+                        ))}
+                        <p className="mt-1.5 text-emerald-600 text-[11px]">می‌توانید ادامه دهید.</p>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <>
+                      <Alert className="border-blue-200 bg-blue-50 py-2">
+                        <Info className="h-3.5 w-3.5 text-blue-600" />
+                        <AlertDescription className="text-[11px] text-blue-800 mr-2">
+                          سال مالی دوره‌ای است که تمام اسناد حسابداری در آن ثبت می‌شوند.
+                          اگر رد کنید، یک سال مالی از امروز به‌صورت پیش‌فرض ثبت می‌شود.
+                        </AlertDescription>
+                      </Alert>
+                      <div className="space-y-2">
+                        <div>
+                          <Label className="text-[11px] text-gray-600">نام سال مالی</Label>
+                          <Input
+                            value={fyName}
+                            onChange={e => setFyName(e.target.value)}
+                            placeholder="مثلاً: سال مالی ۱۴۰۴"
+                            className="h-8 text-xs mt-1"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-[11px] text-gray-600">تاریخ شروع (شمسی)</Label>
+                            <PersianDatePicker
+                              value={fyStart}
+                              onChange={(iso) => { if (iso) setFyStart(iso) }}
+                              placeholder="انتخاب تاریخ"
+                              label=""
+                            />
+                            <p className="text-[10px] text-gray-500 mt-0.5">{isoToJalaliFa(fyStart)}</p>
+                          </div>
+                          <div>
+                            <Label className="text-[11px] text-gray-600">تاریخ پایان (خودکار)</Label>
+                            <div className="mt-0.5 h-9 px-2 py-1.5 border border-gray-100 rounded-md bg-gray-50 flex items-center text-xs text-gray-500">
+                              {isoToJalaliFa(fyEnd)}
+                            </div>
+                            <p className="text-[10px] text-gray-500 mt-0.5">
+                              {formatNum(daysBetween(fyStart, fyEnd))} روز
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {fyError && (
+                    <Alert className="border-red-200 bg-red-50 py-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+                      <AlertDescription className="text-xs text-red-700 mr-2">{fyError}</AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+
+              {/* ─── مرحله ۱: انبار ─── */}
+              {step === 1 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-violet-600" />
+                      <h3 className="text-sm font-bold text-gray-900">تعریف انبار</h3>
+                    </div>
+                    <Badge className="bg-gray-100 text-gray-600 text-[10px]">
+                      {warehouses.length} / {maxWarehouses === Infinity ? '∞' : maxWarehouses}
+                    </Badge>
+                  </div>
+
+                  <Alert className="border-blue-200 bg-blue-50 py-2">
+                    <Info className="h-3.5 w-3.5 text-blue-600" />
+                    <AlertDescription className="text-[11px] text-blue-800 mr-2">
+                      {features.tier === 'professional'
+                        ? 'پلن پیشرفته: تا ۲ انبار مجاز. '
+                        : features.tier === 'enterprise'
+                        ? 'پلن حرفه‌ای: انبار نامحدود. '
+                        : 'پلن پایه: ۱ انبار مجاز. '}
+                      اگر رد کنید، «انبار فروشگاه» پیش‌فرض ایجاد می‌شود.
+                    </AlertDescription>
+                  </Alert>
+
+                  {whLoading ? (
+                    <div className="flex items-center gap-2 py-3 justify-center text-xs text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+                      در حال بارگذاری...
+                    </div>
+                  ) : warehouses.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {warehouses.map((wh: any) => (
+                        <div key={wh.id} className="flex items-center justify-between gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Package className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-gray-800 truncate">{wh.name}</p>
+                              <p className="text-[10px] text-gray-500">کد: {wh.code}</p>
+                            </div>
+                            {wh.isDefault && (
+                              <Badge className="bg-emerald-200 text-emerald-800 text-[9px]">پیش‌فرض</Badge>
+                            )}
+                          </div>
+                          {!wh.isDefault && (
+                            <Button variant="ghost" size="sm"
+                              className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                              onClick={() => deleteWH(wh.id)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {warehouses.length < maxWarehouses && (
+                    <Card className="border-violet-200 bg-violet-50/30">
+                      <CardContent className="p-3 space-y-2">
+                        <p className="text-[11px] font-medium text-violet-700">
+                          {warehouses.length === 0 ? '★ اولین انبار را تعریف کنید' : '+ انبار جدید اضافه کنید'}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-[11px] text-gray-600">نام انبار</Label>
+                            <Input
+                              value={whName}
+                              onChange={e => setWhName(e.target.value)}
+                              placeholder="مثلاً: انبار اصلی"
+                              className="h-8 text-xs mt-0.5"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && whName.trim()) {
+                                  saveWH(whName, whCode).then(ok => {
+                                    if (ok) { setWhName(''); setWhCode('') }
+                                  })
+                                }
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-[11px] text-gray-600">کد (اختیاری)</Label>
+                            <Input
+                              value={whCode}
+                              onChange={e => setWhCode(e.target.value)}
+                              placeholder="WH-01"
+                              className="h-8 text-xs mt-0.5"
+                              dir="ltr"
+                            />
+                          </div>
+                        </div>
+                        {whName.trim() && (
+                          <Button
+                            variant="outline" size="sm"
+                            className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
+                            onClick={async () => {
+                              const ok = await saveWH(whName, whCode)
+                              if (ok) { setWhName(''); setWhCode('') }
+                            }}
+                            disabled={saving}
+                          >
+                            <Plus className="w-3.5 h-3.5 ml-1" />
+                            اضافه کردن انبار
+                          </Button>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {warehouses.length >= maxWarehouses && maxWarehouses !== Infinity && (
+                    <Alert className="border-amber-200 bg-amber-50 py-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                      <AlertDescription className="text-xs text-amber-700 mr-2">
+                        به سقف {maxWarehouses} انبار مجاز رسیدید.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {whError && (
+                    <Alert className="border-red-200 bg-red-50 py-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+                      <AlertDescription className="text-xs text-red-700 mr-2">{whError}</AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+
+              {/* ─── مرحله ۲: سند افتتاحیه ─── */}
+              {step === 2 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-violet-600" />
+                    <h3 className="text-sm font-bold text-gray-900">موجودی‌های اولیه</h3>
+                    <Badge className="text-[9px] bg-gray-100 text-gray-600">اختیاری</Badge>
+                    {balIsPosted ? (
+                      <Badge className="text-[9px] bg-emerald-100 text-emerald-700">سند صادر شده ✓</Badge>
+                    ) : balItems.length > 0 ? (
+                      <Badge className="text-[9px] bg-amber-100 text-amber-700">پیش‌نویس</Badge>
+                    ) : null}
+                  </div>
+
+                  <Alert className="border-amber-200 bg-amber-50 py-2">
+                    <Info className="h-3.5 w-3.5 text-amber-600" />
+                    <AlertDescription className="text-[11px] text-amber-800 mr-2">
+                      <strong>این مرحله اختیاری است.</strong> موجودی‌های واردشده به‌صورت
+                      <span className="font-medium"> پیش‌نویس</span> ذخیره می‌شوند. برای
+                      <span className="font-medium"> ثبت نهایی و صدور سند قطعی</span>، بعداً به
+                      <span className="font-medium"> تنظیمات ← راه‌اندازی</span> مراجعه کنید.
+                    </AlertDescription>
+                  </Alert>
+
+                  <Card className="border-violet-200 bg-violet-50/20">
+                    <CardContent className="p-3 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[11px] text-gray-600">نوع</Label>
+                          <select
+                            value={balType}
+                            onChange={e => setBalType(e.target.value as BalanceType)}
+                            className="w-full mt-0.5 h-8 text-xs border border-gray-200 rounded-md px-2 bg-white"
+                          >
+                            {(Object.keys(BAL_LABELS) as BalanceType[]).map(t => (
+                              <option key={t} value={t}>{BAL_LABELS[t]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-[11px] text-gray-600">عنوان</Label>
+                          <Input
+                            value={balTitle}
+                            onChange={e => setBalTitle(e.target.value)}
+                            placeholder={
+                              balType === 'cash' ? 'صندوق فروشگاه'
+                              : balType === 'bank' ? 'بانک ملت'
+                              : balType === 'liability' ? 'وام بانک'
+                              : 'عنوان'
+                            }
+                            className="h-8 text-xs mt-0.5"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[11px] text-gray-600">مبلغ (ریال)</Label>
+                          <Input
+                            type="number"
+                            value={balAmount}
+                            onChange={e => setBalAmount(e.target.value)}
+                            placeholder="مثلاً: 5000000"
+                            className="h-8 text-xs mt-0.5"
+                            dir="ltr"
+                            onKeyDown={e => e.key === 'Enter' && addBalItem()}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[11px] text-gray-600">توضیح (اختیاری)</Label>
+                          <Input
+                            value={balDesc}
+                            onChange={e => setBalDesc(e.target.value)}
+                            placeholder="یادداشت"
+                            className="h-8 text-xs mt-0.5"
+                          />
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline" size="sm"
+                        className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
+                        onClick={addBalItem}
+                        disabled={!balTitle.trim() || !balAmount}
+                      >
+                        <Plus className="w-3.5 h-3.5 ml-1" />
+                        افزودن
+                      </Button>
+                    </CardContent>
+                  </Card>
+
+                  {balItems.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="max-h-36 overflow-y-auto space-y-1 rounded-lg">
+                        {balItems.map((item, idx) => (
+                          <div key={idx}
+                            className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${BAL_COLORS[item.type]}`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="shrink-0">{BAL_LABELS[item.type].split(' ')[0]}</span>
+                              <span className="font-medium truncate">{item.title}</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-bold font-mono">{formatNum(item.amount)}﷼</span>
+                              <Button variant="ghost" size="sm"
+                                className="h-5 w-5 p-0 hover:text-red-600 hover:bg-red-50"
+                                onClick={() => setBalItems(p => p.filter((_, i) => i !== idx))}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">جمع دارایی‌ها:</span>
+                          <span className="font-bold text-emerald-700">{formatNum(totalAssets)}﷼</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">جمع بدهی‌ها:</span>
+                          <span className="font-bold text-red-600">{formatNum(totalLiab)}﷼</span>
+                        </div>
+                        <div className="flex justify-between border-t border-gray-200 pt-1 font-bold">
+                          <span className="text-gray-900">سرمایه مالک:</span>
+                          <span className={totalEquity >= 0 ? 'text-blue-700' : 'text-red-700'}>
+                            {formatNum(totalEquity)}﷼
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {balError && (
+                    <Alert className="border-red-200 bg-red-50 py-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+                      <AlertDescription className="text-xs text-red-700 mr-2">{balError}</AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+
+              {/* ─── مرحله ۳: پایان ─── */}
+              {step === 3 && (
+                <div className="space-y-4 py-4 text-center">
+                  <div className="w-20 h-20 rounded-full bg-violet-100 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-10 h-10 text-violet-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">🎉 فروشگاه آماده‌ است!</h3>
+                    <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                      راه‌اندازی اولیه تکمیل شد. می‌توانید فاکتور صادر کنید.
+                    </p>
+                  </div>
+                  <div className="text-right space-y-1.5 max-w-xs mx-auto">
+                    {[
+                      { done: fyDone, label: 'سال مالی', sub: fyExisting.find((y: any) => y.isActive)?.name || fyName || 'ثبت شد' },
+                      { done: whDone || warehouses.length > 0, label: 'انبار', sub: `${warehouses.length || 1} انبار` },
+                      { done: balIsPosted || balItems.length > 0, label: 'سند افتتاحیه', sub: balIsPosted ? `${balItems.length} آیتم — سند صادر شد` : balItems.length > 0 ? `${balItems.length} آیتم — پیش‌نویس (ثبت نهایی در تنظیمات)` : 'می‌توانید بعداً ثبت کنید' },
+                    ].map((s, i) => (
+                      <div key={i} className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
+                        s.done ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'
+                      }`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                          s.done ? 'bg-emerald-500' : 'bg-gray-300'
+                        }`}>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-800">{s.label}</p>
+                          <p className="text-[10px] text-gray-500">{s.sub}</p>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {/* خلاصه */}
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">جمع دارایی‌ها:</span>
-                      <span className="font-bold text-emerald-700">{formatNum(totalAssets)}﷼</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">جمع بدهی‌ها:</span>
-                      <span className="font-bold text-red-600">{formatNum(totalLiab)}﷼</span>
-                    </div>
-                    <div className="flex justify-between border-t border-gray-200 pt-1 font-bold">
-                      <span className="text-gray-900">سرمایه مالک:</span>
-                      <span className={totalEquity>=0?'text-blue-700':'text-red-700'}>
-                        {formatNum(totalEquity)}﷼
-                      </span>
-                    </div>
-                  </div>
                 </div>
               )}
+            </div>
 
-              {balError&&(
-                <Alert className="border-red-200 bg-red-50 py-1.5">
-                  <AlertCircle className="h-3.5 w-3.5 text-red-600"/>
-                  <AlertDescription className="text-xs text-red-700 mr-2">{balError}</AlertDescription>
-                </Alert>
+            {/* دکمه‌ها برای حالت بار اول */}
+            <DialogFooter className="flex items-center gap-2 pt-3 border-t border-gray-100">
+              {step > 0 && step < 3 && (
+                <Button variant="ghost" size="sm" onClick={() => setStep(s => s - 1)}
+                  disabled={saving} className="text-xs gap-1 text-gray-500"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  قبلی
+                </Button>
               )}
-            </div>
-          )}
 
-          {/* ─── مرحله ۳: پایان ─── */}
-          {step===3 && (
-            <div className="space-y-4 py-4 text-center">
-              <div className="w-20 h-20 rounded-full bg-violet-100 flex items-center justify-center mx-auto">
-                <CheckCircle2 className="w-10 h-10 text-violet-600"/>
+              {step < 3 && (
+                <Button variant="ghost" size="sm" onClick={handleSkip}
+                  disabled={saving}
+                  className="text-xs gap-1 text-gray-400 hover:text-gray-600 mr-auto"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SkipForward className="w-3.5 h-3.5" />}
+                  {step === 2 ? 'رد کردن (بعداً)' : 'رد کردن (پیش‌فرض)'}
+                </Button>
+              )}
+
+              <div className="mr-auto">
+                {step < 3 ? (
+                  <Button
+                    className="bg-violet-600 hover:bg-violet-700 text-white text-xs gap-1 min-w-[100px]"
+                    onClick={handleNext}
+                    disabled={saving}
+                  >
+                    {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    {step === 0 && fyDone ? 'ادامه →' : step === 1 && (warehouses.length > 0) ? 'ادامه →' : 'ثبت و ادامه →'}
+                  </Button>
+                ) : (
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1 min-w-[120px]"
+                    onClick={handleFinish}
+                    disabled={saving}
+                  >
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                    شروع کار با سیستم
+                  </Button>
+                )}
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">🎉 فروشگاه آماده‌ است!</h3>
-                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
-                  راه‌اندازی اولیه تکمیل شد. می‌توانید فاکتور صادر کنید.
-                </p>
-              </div>
-              {/* خلاصه */}
-              <div className="text-right space-y-1.5 max-w-xs mx-auto">
-                {[
-                  {done:fyDone,label:'سال مالی',sub:fyExisting.find((y:any)=>y.isActive)?.name||fyName||'ثبت شد'},
-                  {done:whDone||warehouses.length>0,label:'انبار',sub:`${warehouses.length||1} انبار`},
-                                  {done:balIsPosted||balItems.length>0,label:'سند افتتاحیه',sub:balIsPosted?`${balItems.length} آیتم — سند صادر شد`:balItems.length>0?`${balItems.length} آیتم — پیش‌نویس (ثبت نهایی در تنظیمات)`:'می‌توانید بعداً ثبت کنید'},
-                ].map((s,i)=>(
-                  <div key={i} className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
-                    s.done?'border-emerald-200 bg-emerald-50':'border-gray-200 bg-gray-50'
-                  }`}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                      s.done?'bg-emerald-500':'bg-gray-300'
-                    }`}>
-                      <CheckCircle2 className="w-3.5 h-3.5 text-white"/>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">{s.label}</p>
-                      <p className="text-[10px] text-gray-500">{s.sub}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-        </div>
-
-        {/* ═══ دکمه‌ها ═══ */}
-        <DialogFooter className="flex items-center gap-2 pt-3 border-t border-gray-100">
-          {/* قبلی */}
-          {step>0&&step<3&&(
-            <Button variant="ghost" size="sm" onClick={()=>setStep(s=>s-1)}
-              disabled={saving} className="text-xs gap-1 text-gray-500"
-            >
-              <ChevronLeft className="w-3.5 h-3.5"/>
-              قبلی
-            </Button>
-          )}
-
-          {/* رد کردن */}
-          {step<3&&(
-            <Button variant="ghost" size="sm" onClick={handleSkip}
-              disabled={saving}
-              className="text-xs gap-1 text-gray-400 hover:text-gray-600 mr-auto"
-            >
-              {saving?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<SkipForward className="w-3.5 h-3.5"/>}
-              {step===2?'رد کردن (بعداً)':'رد کردن (پیش‌فرض)'}
-            </Button>
-          )}
-
-          {/* بعدی / پایان */}
-          <div className="mr-auto">
-            {step<3?(
-              <Button
-                className="bg-violet-600 hover:bg-violet-700 text-white text-xs gap-1 min-w-[100px]"
-                onClick={handleNext}
-                disabled={saving}
-              >
-                {saving&&<Loader2 className="w-3.5 h-3.5 animate-spin"/>}
-                {step===0&&fyDone?'ادامه →':step===1&&(warehouses.length>0)?'ادامه →':'ثبت و ادامه →'}
-              </Button>
-            ):(
-              <Button
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1 min-w-[120px]"
-                onClick={handleFinish}
-                disabled={saving}
-              >
-                {saving?<Loader2 className="w-3.5 h-3.5 animate-spin"/>:<CheckCircle2 className="w-3.5 h-3.5"/>}
-                شروع کار با سیستم
-              </Button>
-            )}
-          </div>
-        </DialogFooter>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )

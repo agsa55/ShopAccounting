@@ -1,6 +1,10 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.4 ★★★ Auto-Cleanup)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.5 ★★★ Renewal Route)
 // ============================================================================
+// ★★★ v3.5 تغییرات نسبت به v3.4:
+//   ★ اضافه شدن مسیر /renewal برای صفحه تمدید اشتراک
+//   ★ جلوگیری از rewrite شدن /renewal به لندینگ پیج
+//   ★ اضافه شدن /renewal به RESERVED_PATHS
 // ★★★ v3.4 تغییرات نسبت به v3.3:
 //   ★ اضافه شدن Auto-Cleanup خودکار در background
 //   ★ هر ۱۰ دقیقه یکبار tenant های منقضی را پاک می‌کند
@@ -35,17 +39,23 @@ const PUBLIC_API_PATHS = [
   '/api/portal/login', '/api/portal/invoices',
   // ★★★ v3.3: مسیر عمومی محتوای سایت
   '/api/site-content',
+  // ★★★ v3.5: API های تمدید اشتراک و setup wizard
+  '/api/subscription/status',
+  '/api/subscription/renew',
+  '/api/setup-wizard/status',
 ];
 
 const STATIC_BYPASS_PATHS = ['/sw.js', '/manifest.json', '/robots.txt', '/sitemap.xml', '/favicon.ico'];
 const STATIC_BYPASS_PREFIXES = ['/icons/', '/fonts/', '/images/', '/_next/', '/.well-known/'];
 
+// ★★★ v3.5: اضافه شدن 'renewal' به RESERVED_PATHS
 // ★★★ v3.2: اضافه شدن 'portal-view' و 'test-portal' به RESERVED_PATHS
 const RESERVED_PATHS = new Set([
   'auth', 'admin', 'api', '_next', 'static', 'favicon.ico',
   'login', 'register', 'landing', 'dashboard', 'products', 'invoices',
   'employees', 'settings', 'reports', 'accounts', 'store-setting',
   'portal', 'portal-view', 'test-portal', 'subscription', 'demo', 'payment-result',
+  'renewal', // ★★★ v3.5: صفحه تمدید اشتراک
 ]);
 
 // ★★★ v3.2: مسیرهای پورتال مشتری (بدون نیاز به احراز هویت storeUser)
@@ -74,6 +84,7 @@ const CLEANUP_TRIGGER_PATHS = [
   '/auth/login',          // صفحه login
   '/auth/register',       // صفحه ثبت‌نام
   '/dashboard',           // داشبورد (برای کاربران لاگین شده)
+  '/renewal',             // ★★★ v3.5: صفحه تمدید
 ];
 
 /**
@@ -115,7 +126,7 @@ function triggerBackgroundCleanup(requestUrl: string): void {
  * ★ بررسی اینکه آیا مسیر فعلی باید cleanup را trigger کند
  */
 function shouldTriggerCleanup(pathname: string): boolean {
-  return CLEANUP_TRIGGER_PATHS.some(path => pathname === path);
+  return CLEANUP_TRIGGER_PATHS.some(path => pathname === path || pathname.startsWith(path + '?'));
 }
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -148,6 +159,23 @@ function isCustomerPortalPath(pathname: string): boolean {
   return CUSTOMER_PORTAL_PATHS.some(path =>
     pathname === path || pathname.startsWith(path + '/') || pathname.startsWith(path + '?')
   );
+}
+
+// ★★★ v3.5: بررسی مسیرهای عمومی صفحه‌ای
+function isPublicPagePath(pathname: string): boolean {
+  // بررسی دقیق مسیر (بدون query string)
+  const cleanPath = pathname.split('?')[0];
+  
+  // لندینگ پیج
+  if (cleanPath === '/') return true;
+  
+  // صفحات auth
+  if (cleanPath.startsWith('/auth/')) return true;
+  
+  // ★★★ v3.5: صفحه تمدید
+  if (cleanPath === '/renewal') return true;
+  
+  return false;
 }
 
 function setTenantCookies(response: NextResponse, tenantSlug: string, tenantView?: string) {
@@ -328,19 +356,23 @@ export default function proxy(request: NextRequest) {
     return response;
   }
 
-  // ── ۳. خروج زودهنگام برای صفحات عمومی (لندینگ و Auth) ─────────────────────
-  if (pathname === '/' || pathname.startsWith('/auth/')) {
+  // ── ۳. ★★★ v3.5: خروج زودهنگام برای صفحات عمومی (لندینگ، Auth و Renewal) ──
+  if (isPublicPagePath(pathname)) {
     const response = NextResponse.next();
     addSecurityHeaders(response);
 
-    const hasTenantCookie = request.cookies.get('tenant-slug')?.value;
-    const hasTenantView = request.cookies.get('tenant-view')?.value;
+    // فقط برای لندینگ پیج و auth، کوکی tenant را پاک کن
+    // برای /renewal کوکی tenant را نگه دار (چون کاربر لاگین است و نیاز به tenant context دارد)
+    if (pathname === '/' || pathname.startsWith('/auth/')) {
+      const hasTenantCookie = request.cookies.get('tenant-slug')?.value;
+      const hasTenantView = request.cookies.get('tenant-view')?.value;
 
-    if (hasTenantCookie) {
-      response.cookies.set('tenant-slug', '', { path: '/', maxAge: 0, httpOnly: true });
-    }
-    if (hasTenantView) {
-      response.cookies.set('tenant-view', '', { path: '/', maxAge: 0, httpOnly: true });
+      if (hasTenantCookie) {
+        response.cookies.set('tenant-slug', '', { path: '/', maxAge: 0, httpOnly: true });
+      }
+      if (hasTenantView) {
+        response.cookies.set('tenant-view', '', { path: '/', maxAge: 0, httpOnly: true });
+      }
     }
 
     return response;

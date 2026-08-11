@@ -1,10 +1,11 @@
 // ============================================================================
-// src/app/api/subscription/checkout/route.ts (v9.4.2 ★★★)
+// src/app/api/subscription/checkout/route.ts (v9.5 ★★★)
 // ShopAccounting — Subscription Checkout API
 // ----------------------------------------------------------------------------
-// ★★★ v9.4.2: FIX قطعی آدرس localhost در دیپلوی
-//   - بهبود تابع resolveAppUrl برای اولویت‌دهی هوشمند به NEXT_PUBLIC_APP_URL
-//   - اگر env var مقدار localhost داشت، به طور خودکار از هدرهای درخواست استفاده می‌کند
+// ★★★ v9.5: پشتیبانی کامل از تمدید (renew) و ارتقا (upgrade)
+//   - اضافه شدن action: 'renew' برای تمدید پلن
+//   - اضافه شدن action: 'upgrade' برای ارتقا پلن
+//   - بهبود لاگ‌ها برای debug
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -48,11 +49,14 @@ function resolveAppUrl(req: NextRequest): string {
 
 export const POST = withTenantIsolation(
   async (req: NextRequest, ctx: any, tenant: any) => {
-    console.log('[Subscription Checkout] POST — tenant:', tenant.tenantId)
+    const tenantId = tenant.tenantId
+    console.log('[Subscription Checkout] POST — tenant:', tenantId)
 
     try {
       const body: CheckoutBody = await req.json()
       const { tierName, billingCycle, action = 'renew' } = body
+
+      console.log('[Subscription Checkout] Request params:', { tierName, billingCycle, action })
 
       // ─── ۱. اعتبارسنجی ─────────────────────────────────────────
       if (!tierName || !billingCycle) {
@@ -81,7 +85,7 @@ export const POST = withTenantIsolation(
 
       // ─── ۲. بررسی وضعیت Tenant ─────────────────────────────────
       const currentTenant = await db.client.tenant.findUnique({
-        where: { id: tenant.tenantId },
+        where: { id: tenantId },
         select: {
           id: true,
           status: true,
@@ -89,6 +93,7 @@ export const POST = withTenantIsolation(
           companyName: true,
           planName: true,
           billingCycle: true,
+          expiresAt: true,
         },
       })
 
@@ -100,7 +105,13 @@ export const POST = withTenantIsolation(
       }
 
       const isDemo = isDemoTenant(currentTenant)
-      console.log(`[Subscription Checkout] Tenant isDemo: ${isDemo}, status: ${currentTenant.status}`)
+      console.log(`[Subscription Checkout] Tenant info:`, {
+        isDemo,
+        status: currentTenant.status,
+        currentPlan: currentTenant.planName,
+        currentCycle: currentTenant.billingCycle,
+        expiresAt: currentTenant.expiresAt,
+      })
 
       // ─── ۳. محاسبه مبلغ ─────────────────────────────────────────
       const amount = calculateCheckoutAmount(tierName, billingCycle as BillingCycle, action)
@@ -112,7 +123,7 @@ export const POST = withTenantIsolation(
         )
       }
 
-      console.log(`[Subscription Checkout] Amount: ${amount} (tier: ${tierName}, cycle: ${billingCycle})`)
+      console.log(`[Subscription Checkout] Amount: ${amount} (tier: ${tierName}, cycle: ${billingCycle}, action: ${action})`)
 
       // ─── ۴. ایجاد درگاه زرین‌پال ─────────────────────────────────
       const merchantId = process.env.ZARINPAL_MERCHANT_ID
@@ -130,17 +141,28 @@ export const POST = withTenantIsolation(
         )
       }
 
+      // ★ ساخت description بر اساس نوع عملیات
       const cycleLabel = isLifetimeCycle(billingCycle) ? 'مادام‌العمر' : 'سالانه'
-      const description = `خرید پلن ${tierName} (${cycleLabel}) - ${currentTenant.companyName || ''}`
+      let actionLabel = 'خرید'
+      if (action === 'renew') actionLabel = 'تمدید'
+      else if (action === 'upgrade') actionLabel = 'ارتقا'
+      
+      const description = `${actionLabel} پلن ${tierName} (${cycleLabel}) - ${currentTenant.companyName || ''}`
 
       // ★ Callback URL — پس از پرداخت، کاربر به این آدرس برمی‌گردد
-      const callbackUrl = `${appUrl}/api/subscription/verify?tenantId=${currentTenant.id}`
+      // پارامتر action را هم ارسال می‌کنیم تا verify بداند چه کاری انجام دهد
+      const callbackUrl = `${appUrl}/api/subscription/verify?tenantId=${currentTenant.id}&action=${action}`
 
       const apiRequestUrl = isSandbox
         ? 'https://sandbox.zarinpal.com/pg/v4/payment/request.json'
         : 'https://api.zarinpal.com/pg/v4/payment/request.json'
 
-      console.log('[Subscription Checkout] Requesting Zarinpal authority...')
+      console.log('[Subscription Checkout] Requesting Zarinpal authority...', {
+        merchantId: merchantId.substring(0, 6) + '...',
+        amount: Math.round(amount),
+        callbackUrl,
+        sandbox: isSandbox,
+      })
 
       const zarinpalResponse = await fetch(apiRequestUrl, {
         method: 'POST',
@@ -153,6 +175,12 @@ export const POST = withTenantIsolation(
           amount: Math.round(amount),
           description,
           callback_url: callbackUrl,
+          metadata: {
+            tenant_id: tenantId,
+            tier_name: tierName,
+            billing_cycle: billingCycle,
+            action,
+          },
         }),
       })
 
@@ -165,15 +193,21 @@ export const POST = withTenantIsolation(
       if (code !== 100 && code !== 200) {
         console.error('[Subscription Checkout] Zarinpal request failed:', zarinpalData)
         return NextResponse.json(
-          { success: false, error: 'خطا در ایجاد درخواست پرداخت' },
+          { 
+            success: false, 
+            error: 'خطا در ایجاد درخواست پرداخت',
+            details: zarinpalData?.errors || zarinpalData 
+          },
           { status: 500 }
         )
       }
 
       // ─── ۵. ایجاد رکورد pending در دیتابیس ──────────────────────
       const paymentMethod = buildPaymentMethodMetadata(tierName, billingCycle as BillingCycle)
+      
+      console.log('[Subscription Checkout] Creating pending subscription...')
       const pendingResult = await createPendingSubscription(
-        currentTenant.id,
+        tenantId,
         tierName,
         billingCycle as BillingCycle,
         amount,
@@ -188,12 +222,17 @@ export const POST = withTenantIsolation(
         )
       }
 
-      console.log('[Subscription Checkout] ✓ Pending subscription created:', pendingResult.subscriptionId)
+      console.log('[Subscription Checkout] ✓ Pending subscription created:', {
+        subscriptionId: pendingResult.subscriptionId,
+        paymentId: pendingResult.paymentId,
+      })
 
       // ─── ۶. ساخت URL پرداخت ──────────────────────────────────────
       const paymentUrl = isSandbox
         ? `https://sandbox.zarinpal.com/pg/StartPay/${authority}`
         : `https://www.zarinpal.com/pg/StartPay/${authority}`
+
+      console.log('[Subscription Checkout] ✓ Payment URL created:', paymentUrl)
 
       // ─── ۷. بازگشت نتیجه ─────────────────────────────────────────
       return NextResponse.json({
@@ -204,13 +243,16 @@ export const POST = withTenantIsolation(
           amount,
           tierName,
           billingCycle,
+          action,
           description,
           subscriptionPaymentId: pendingResult.paymentId,
+          subscriptionId: pendingResult.subscriptionId,
           isDemo,
         },
+        message: `درخواست ${actionLabel} با موفقیت ایجاد شد`,
       })
     } catch (error: any) {
-      console.error('[Subscription Checkout] Error:', error)
+      console.error('[Subscription Checkout] Unexpected error:', error)
       return NextResponse.json(
         { success: false, error: 'خطا در سرور: ' + (error?.message || 'unknown') },
         { status: 500 }

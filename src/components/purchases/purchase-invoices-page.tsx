@@ -566,7 +566,7 @@ export function PurchaseInvoicesPage() {
   const tenantId = useAppStore(s => s.tenantId)
   const setCurrentView = useAppStore(s => s.setCurrentView)
   const isOnline = useAppStore(s => s.isOnline)
-
+const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -1087,109 +1087,77 @@ export function PurchaseInvoicesPage() {
   // ★ ثبت فاکتور (آنلاین / آفلاین)
   // ══════════════════════════════════════════════════════════════════════════
 
-  const handleSubmit = useCallback(async () => {
-    if (cart.length === 0) {
-      toast({ title: 'خطا', description: 'سبد خرید خالی است', variant: 'destructive' })
-      return
-    }
-    if (!warehouseId || warehouseId === 'none') {
-      toast({ title: 'خطا', description: 'انتخاب انبار الزامی است', variant: 'destructive' })
-      return
-    }
+ const handleSubmit = useCallback(async () => {
+  if (cart.length === 0) {
+    toast({ title: 'خطا', description: 'سبد خرید خالی است', variant: 'destructive' })
+    return
+  }
+  if (!warehouseId || warehouseId === 'none') {
+    toast({ title: 'خطا', description: 'انتخاب انبار الزامی است', variant: 'destructive' })
+    return
+  }
 
-    setSubmitting(true)
-    const tid = tenantId || useAppStore.getState().currentTenant?.id
+  setSubmitting(true)
+  const tid = tenantId || useAppStore.getState().currentTenant?.id
 
-    const payload = {
-      tenantId: tid,
-      supplierId: supplierId === 'none' ? undefined : (supplierId || undefined),
-      warehouseId: warehouseId === 'none' ? undefined : warehouseId,
-      paymentType,
-      description,
-      invoiceDate,
-      items: cart,
-    }
+  // ★ اعتبارسنجی tenantId
+  if (!tid) {
+    toast({ 
+      title: 'خطا', 
+      description: 'شناسه فروشگاه یافت نشد. لطفاً دوباره وارد شوید.', 
+      variant: 'destructive' 
+    })
+    setSubmitting(false)
+    return
+  }
 
-    if (!isOnline) {
-      const offlineId = editingOfflineId || generateOfflineId()
-      if (editingInvoiceId && !editingOfflineId) {
-        const offlineInvs = loadOfflineInvoices()
-        const updated = offlineInvs.map(inv =>
-          inv.id === editingInvoiceId
-            ? { ...inv, ...payload, _isOffline: true, _syncStatus: 'pending' as const, _offlineAction: 'update' as const, _offlineId: editingInvoiceId, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
-            : inv
-        )
-        saveOfflineInvoices(updated)
-        setInvoices(updated)
-        addToSyncQueue({ offlineId: editingInvoiceId, serverId: editingInvoiceId, action: 'update', payload })
-      } else if (editingOfflineId) {
-        const offlineInvs = loadOfflineInvoices()
-        const updated = offlineInvs.map(inv =>
-          inv._offlineId === editingOfflineId
-            ? { ...inv, ...payload, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
-            : inv
-        )
-        saveOfflineInvoices(updated)
-        setInvoices(updated)
-        const queue = loadSyncQueue()
-        saveSyncQueue(queue.map(q => q.offlineId === editingOfflineId ? { ...q, payload } : q))
-      } else {
-        const newInvoice: PurchaseInvoice = {
-          id: offlineId,
-          number: `OFFLINE-${Date.now()}`,
-          invoiceDate,
-          status: 'draft',
-          paymentType,
-          totalAmount: totals.total,
-          paidAmount: 0,
-          supplierId: supplierId === 'none' ? null : (supplierId || null),
-          warehouseId: warehouseId === 'none' ? null : warehouseId,
-          supplier: suppliers.find(s => s.id === supplierId) || null,
-          warehouse: warehouses.find(w => w.id === warehouseId) || null,
-          items: cart,
-          description,
-          _isOffline: true,
-          _offlineId: offlineId,
-          _syncStatus: 'pending',
-          _offlineAction: 'create',
-        }
-        const offlineInvs = loadOfflineInvoices()
-        const updated = [newInvoice, ...offlineInvs]
-        saveOfflineInvoices(updated)
-        setInvoices(updated)
-        addToSyncQueue({ offlineId, action: 'create', payload })
-      }
-      toast({ title: 'ذخیره آفلاین ✓', description: 'فاکتور در حافظه محلی ذخیره شد و پس از اتصال همگام‌سازی می‌شود' })
-      closeDialog()
-      setSubmitting(false)
-      return
-    }
+  const payload = {
+    tenantId: tid,
+    supplierId: supplierId === 'none' ? undefined : (supplierId || undefined),
+    warehouseId: warehouseId === 'none' ? undefined : warehouseId,
+    paymentType,
+    description,
+    invoiceDate,
+    items: cart,
+  }
 
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      }
-      const url = editingInvoiceId ? `/api/purchase-invoices/${editingInvoiceId}` : '/api/purchase-invoices'
-      const method = editingInvoiceId ? 'PUT' : 'POST'
-      const res = await fetch(url, { method, headers, body: JSON.stringify(payload) })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message })
-        if (editingOfflineId) {
-          const queue = loadSyncQueue()
-          saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
-          const offlineInvs = loadOfflineInvoices()
-          saveOfflineInvoices(offlineInvs.filter(i => i._offlineId !== editingOfflineId))
-        }
-        closeDialog()
-        await loadData(false)
-      } else {
-        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
-      }
-    } catch (err: any) {
-      const offlineId = generateOfflineId()
+  // ★ لاگ برای debug
+  console.log('[Purchase Submit] Submitting:', {
+    isOnline,
+    trulyOnline,
+    navigatorOnline: typeof navigator !== 'undefined' ? navigator.onLine : 'N/A',
+    tid,
+    warehouseId,
+    cartLength: cart.length,
+    editingInvoiceId,
+    editingOfflineId,
+  })
+
+  // ★ استفاده از trulyOnline به جای isOnline
+  if (!trulyOnline) {
+    const offlineId = editingOfflineId || generateOfflineId()
+    if (editingInvoiceId && !editingOfflineId) {
+      const offlineInvs = loadOfflineInvoices()
+      const updated = offlineInvs.map(inv =>
+        inv.id === editingInvoiceId
+          ? { ...inv, ...payload, _isOffline: true, _syncStatus: 'pending' as const, _offlineAction: 'update' as const, _offlineId: editingInvoiceId, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
+          : inv
+      )
+      saveOfflineInvoices(updated)
+      setInvoices(updated)
+      addToSyncQueue({ offlineId: editingInvoiceId, serverId: editingInvoiceId, action: 'update', payload })
+    } else if (editingOfflineId) {
+      const offlineInvs = loadOfflineInvoices()
+      const updated = offlineInvs.map(inv =>
+        inv._offlineId === editingOfflineId
+          ? { ...inv, ...payload, totalAmount: totals.total, supplier: suppliers.find(s => s.id === supplierId) || inv.supplier, warehouse: warehouses.find(w => w.id === warehouseId) || inv.warehouse }
+          : inv
+      )
+      saveOfflineInvoices(updated)
+      setInvoices(updated)
+      const queue = loadSyncQueue()
+      saveSyncQueue(queue.map(q => q.offlineId === editingOfflineId ? { ...q, payload } : q))
+    } else {
       const newInvoice: PurchaseInvoice = {
         id: offlineId,
         number: `OFFLINE-${Date.now()}`,
@@ -1212,13 +1180,94 @@ export function PurchaseInvoicesPage() {
       const offlineInvs = loadOfflineInvoices()
       const updated = [newInvoice, ...offlineInvs]
       saveOfflineInvoices(updated)
-      setInvoices(prev => [newInvoice, ...prev])
+      setInvoices(updated)
       addToSyncQueue({ offlineId, action: 'create', payload })
-      toast({ title: 'ذخیره آفلاین ✓', description: 'اتصال قطع شد. فاکتور آفلاین ذخیره شد.' })
-      closeDialog()
     }
+    toast({ title: 'ذخیره آفلاین ✓', description: 'فاکتور در حافظه محلی ذخیره شد و پس از اتصال همگام‌سازی می‌شود' })
+    closeDialog()
     setSubmitting(false)
-  }, [cart, warehouseId, tenantId, supplierId, paymentType, description, invoiceDate, totals, isOnline, editingInvoiceId, editingOfflineId, suppliers, warehouses, loadOfflineInvoices, saveOfflineInvoices, addToSyncQueue, loadSyncQueue, saveSyncQueue, loadData, toast])
+    return
+  }
+
+  // ★ شاخه آنلاین
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+
+    console.log('[Purchase Submit] Sending request to server...', { url: editingInvoiceId ? `/api/purchase-invoices/${editingInvoiceId}` : '/api/purchase-invoices' })
+
+    const url = editingInvoiceId ? `/api/purchase-invoices/${editingInvoiceId}` : '/api/purchase-invoices'
+    const method = editingInvoiceId ? 'PUT' : 'POST'
+    const res = await fetch(url, { method, headers, body: JSON.stringify(payload) })
+
+    // ★ بررسی وضعیت HTTP
+    if (!res.ok) {
+      const errorText = await res.text()
+      console.error('[Purchase Submit] HTTP error:', res.status, errorText)
+      throw new Error(`HTTP ${res.status}: ${errorText || res.statusText}`)
+    }
+
+    const data = await res.json()
+    console.log('[Purchase Submit] Server response:', data)
+
+    if (data.success) {
+      toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
+      if (editingOfflineId) {
+        const queue = loadSyncQueue()
+        saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
+        const offlineInvs = loadOfflineInvoices()
+        saveOfflineInvoices(offlineInvs.filter(i => i._offlineId !== editingOfflineId))
+      }
+      closeDialog()
+      // ★ بارگذاری مجدد با force
+      await loadData(false)
+    } else {
+      console.error('[Purchase Submit] Server returned error:', data.error)
+      toast({ title: 'خطا', description: data.error || 'خطا در ثبت فاکتور', variant: 'destructive' })
+    }
+  } catch (err: any) {
+    console.error('[Purchase Submit] Network error:', err)
+    
+    // ★ ذخیره آفلاین در صورت خطای شبکه
+    const offlineId = generateOfflineId()
+    const newInvoice: PurchaseInvoice = {
+      id: offlineId,
+      number: `OFFLINE-${Date.now()}`,
+      invoiceDate,
+      status: 'draft',
+      paymentType,
+      totalAmount: totals.total,
+      paidAmount: 0,
+      supplierId: supplierId === 'none' ? null : (supplierId || null),
+      warehouseId: warehouseId === 'none' ? null : warehouseId,
+      supplier: suppliers.find(s => s.id === supplierId) || null,
+      warehouse: warehouses.find(w => w.id === warehouseId) || null,
+      items: cart,
+      description,
+      _isOffline: true,
+      _offlineId: offlineId,
+      _syncStatus: 'pending',
+      _offlineAction: 'create',
+    }
+    const offlineInvs = loadOfflineInvoices()
+    const updated = [newInvoice, ...offlineInvs]
+    saveOfflineInvoices(updated)
+    setInvoices(prev => [newInvoice, ...prev])
+    addToSyncQueue({ offlineId, action: 'create', payload })
+    
+    toast({ 
+      title: 'ذخیره آفلاین ✓', 
+      description: `خطا در ارتباط با سرور: ${err?.message || 'نامشخص'}. فاکتور آفلاین ذخیره شد.`,
+      variant: 'destructive'
+    })
+    closeDialog()
+  } finally {
+    setSubmitting(false)
+  }
+}, [cart, warehouseId, tenantId, supplierId, paymentType, description, invoiceDate, totals, isOnline, trulyOnline, editingInvoiceId, editingOfflineId, suppliers, warehouses, loadOfflineInvoices, saveOfflineInvoices, addToSyncQueue, loadSyncQueue, saveSyncQueue, loadData, toast])
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★ حذف فاکتور

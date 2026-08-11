@@ -164,15 +164,12 @@ export default function LoginPage() {
 
   function handleGoToLanding() { window.location.href = '/' }
 
-    function handleLoginSuccess(data: LoginResponse['data']) {
+     async function handleLoginSuccess(data: LoginResponse['data']) {
     if (!data) return
     console.log('[DEBUG] handleLoginSuccess شروع شد', data)
 
     const isPortalUser = data.user.userType === 'portalUser'
-    
-    // ★★★ v3.40: دریافت portalToken
     const portalToken = isPortalUser ? (data.user as any).portalToken : null
-    console.log('[DEBUG] isPortalUser:', isPortalUser, 'portalToken:', portalToken?.substring(0, 8) + '...')
 
     const userObj = {
       id: data.user.id,
@@ -195,13 +192,12 @@ export default function LoginPage() {
     }
 
     setAccessToken(data.token)
-    
+
     if (typeof window !== 'undefined') {
       localStorage.setItem('refreshToken', data.refreshToken)
 
       if (portalToken) {
         localStorage.setItem('portal_token', portalToken)
-        console.log('[DEBUG] ✅ portal_token saved to localStorage:', portalToken.substring(0, 8) + '...')
       }
     }
 
@@ -215,37 +211,73 @@ export default function LoginPage() {
       }
     }
 
-    console.log('[DEBUG] قبل از storeLogin')
     storeLogin(userObj, data.token, data.refreshToken)
-    console.log('[DEBUG] بعد از storeLogin')
 
     if (data.tenant) {
       setCurrentTenant(data.tenant)
       setPlanName(data.tenant.planName || '')
     }
 
-    // ★★★ v3.40: برای portalUser، مستقیم redirect کن (بدون تغییر currentView)
+    // برای portalUser، مستقیم redirect کن
     if (isPortalUser && portalToken) {
       const portalPath = `/portal-view?token=${portalToken}`
-      console.log('[DEBUG] 🚪 Redirecting customer to:', portalPath)
       if (typeof window !== 'undefined') {
         window.location.replace(portalPath)
       }
       return
     }
 
-    // برای storeUser، به داشبورد برو
+    // ★★★ برای storeUser: قبل از redirect به dashboard، وضعیت را چک کن
+    if (typeof window !== 'undefined') {
+      try {
+        const statusRes = await fetch('/api/setup-wizard/status', {
+          headers: { Authorization: `Bearer ${data.token}` },
+        })
+
+        if (statusRes.ok) {
+          const statusData = await statusRes.json()
+          if (statusData.success) {
+            const status = statusData.data.status
+            const subscription = statusData.data.subscription
+
+            console.log('[DEBUG] Status after login:', status, 'Subscription:', subscription)
+
+            // ★★ اگر سال بسته شده و پلن منقضی است → redirect به /renewal
+            if (status === 'locked_after_close') {
+              console.log('[DEBUG] 🔒 Locked after close — redirect to /renewal')
+              window.location.replace('/renewal?reason=after_login_locked')
+              return
+            }
+
+            // اگر renewal_setup است ولی پلن هنوز منقضی است → /renewal
+            if (status === 'renewal_setup') {
+              const isExpired = subscription?.isExpired || subscription?.status === 'read_only'
+              if (isExpired && !subscription?.isLifetime) {
+                console.log('[DEBUG] 💳 Plan expired — redirect to /renewal')
+                window.location.replace('/renewal?reason=after_login_expired')
+                return
+              }
+              // اگر پلن فعال است (مادام‌العمر یا تازه تمدید شده) → /dashboard (Wizard تمدید باز می‌شود)
+            }
+
+            // برای first_setup یا ready → /dashboard
+          }
+        }
+      } catch (err) {
+        console.error('[DEBUG] Error checking status after login:', err)
+        // در صورت خطا، به داشبورد برو
+      }
+    }
+
+    // redirect به داشبورد
     const subDomain = data.tenant?.subDomain
-    console.log('[DEBUG] subDomain =', subDomain)
     if (subDomain) {
       document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`
-      console.log('[DEBUG] 🚪 Redirecting store user to /dashboard')
       if (typeof window !== 'undefined') {
         window.location.replace('/dashboard')
       }
     }
   }
-
   async function handlePasswordLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')

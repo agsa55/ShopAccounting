@@ -212,7 +212,7 @@ export default function DashboardPage() {
   const planName = useAppStore((s) => s.planName)
   const isOnline = useAppStore((s) => s.isOnline)
   const plan = resolvePlan(planName)
-  const { open, setOpen, handleComplete } = useSetupWizard()
+ const { open, setOpen, handleComplete, wizardMode, renewalData } = useSetupWizard()
 
   // ✅ ✅ ✅ اصلاح قطعی: بستن اجباری ویزارد اگر پلن دمو یا تستی است (جلوگیری از Race Condition)
   useEffect(() => {
@@ -724,11 +724,13 @@ export default function DashboardPage() {
 
       {/* ★★★ ویزارد راه‌اندازی — فقط در حالت آنلاین و برای پلن‌های غیر دمو */}
       {isOnline && planName !== 'demo' && planName !== 'trial' && (
-        <SetupWizard
-          open={open}
-          onOpenChange={setOpen}
-          onComplete={handleComplete}
-        />
+       <SetupWizard 
+  open={open} 
+  onOpenChange={setOpen} 
+  onComplete={handleComplete} 
+  wizardMode={wizardMode}
+  renewalData={renewalData}
+/>
       )}
     </div>
   )
