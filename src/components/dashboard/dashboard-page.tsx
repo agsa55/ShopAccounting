@@ -24,7 +24,7 @@ import { SetupWizard, useSetupWizard } from '@/components/setup-wizard'
 import {
   TrendingUp, FileText, AlertCircle, AlertTriangle,
   ShoppingCart, CreditCard, Package, ArrowLeft,
-  RefreshCw, Loader2, Wallet, WifiOff, CloudOff, Wifi,
+  RefreshCw, Loader2, Wallet, WifiOff, CloudOff, Wifi, Users, BarChart3,
 } from 'lucide-react'
 import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
@@ -407,9 +407,9 @@ export default function DashboardPage() {
           </Button>
           <Button
             onClick={() => setCurrentView('pos')}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 h-8 text-xs"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2.5 h-8 text-xs"
           >
-            <ShoppingCart className="size-3.5" /> فاکتور جدید
+            <ShoppingCart className="size-3.5" />صندوق فروش
           </Button>
         </div>
       </div>
@@ -494,6 +494,69 @@ export default function DashboardPage() {
           }
           onClick={() => setCurrentView('products')}
         />
+      </div>
+
+            {/* ★ دسترسی سریع — ۴ دکمه ظریف و حرفه‌ای */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {/* فاکتورها */}
+        <button
+          onClick={() => setCurrentView('invoices-hub' as any)}
+          className="group flex items-center gap-2.5 p-3 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/60 hover:border-emerald-300 hover:shadow-md hover:shadow-emerald-100/50 transition-all duration-200"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+            <FileText className="w-4 h-4 text-white" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-sm font-bold text-slate-800 truncate">فاکتورها</p>
+            <p className="text-[10px] text-slate-500">فروش و خرید</p>
+          </div>
+          <ArrowLeft className="w-3.5 h-3.5 text-emerald-500 group-hover:-translate-x-0.5 transition-transform shrink-0" />
+        </button>
+
+        {/* نسیه و اقساط */}
+        <button
+          onClick={() => setCurrentView('installments')}
+          className="group flex items-center gap-2.5 p-3 rounded-xl bg-gradient-to-br from-blue-50 to-sky-50 border border-blue-200/60 hover:border-blue-300 hover:shadow-md hover:shadow-blue-100/50 transition-all duration-200"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+            <CreditCard className="w-4 h-4 text-white" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-sm font-bold text-slate-800 truncate">نسیه و اقساط</p>
+            <p className="text-[10px] text-slate-500">مدیریت بدهی‌ها</p>
+          </div>
+          <ArrowLeft className="w-3.5 h-3.5 text-blue-500 group-hover:-translate-x-0.5 transition-transform shrink-0" />
+        </button>
+
+        {/* طرف حساب */}
+        <button
+          onClick={() => setCurrentView('contacts' as any)}
+          className="group flex items-center gap-2.5 p-3 rounded-xl bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200/60 hover:border-purple-300 hover:shadow-md hover:shadow-purple-100/50 transition-all duration-200"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+            <Users className="w-4 h-4 text-white" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-sm font-bold text-slate-800 truncate">طرف حساب</p>
+            <p className="text-[10px] text-slate-500">مشتریان و تامین‌کنندگان</p>
+          </div>
+          <ArrowLeft className="w-3.5 h-3.5 text-purple-500 group-hover:-translate-x-0.5 transition-transform shrink-0" />
+        </button>
+
+        {/* گزارشات */}
+        <button
+          onClick={() => setCurrentView('reports')}
+          className="group flex items-center gap-2.5 p-3 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/60 hover:border-amber-300 hover:shadow-md hover:shadow-amber-100/50 transition-all duration-200"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+            <BarChart3 className="w-4 h-4 text-white" />
+          </div>
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-sm font-bold text-slate-800 truncate">گزارش‌ها</p>
+            <p className="text-[10px] text-slate-500">آمار و تحلیل</p>
+          </div>
+          <ArrowLeft className="w-3.5 h-3.5 text-amber-500 group-hover:-translate-x-0.5 transition-transform shrink-0" />
+        </button>
       </div>
 
       {/* ★ هشدار اقساط سررسید (اگه هست) */}

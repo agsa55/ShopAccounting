@@ -287,7 +287,7 @@ const viewLabels: Record<string, string> = {
   'settings-pos': 'تنظیمات صندوق',
   'settings-invoice': 'تنظیمات فاکتور',
   'settings-backup': 'پشتیبان‌گیری',
-  'settings-subscription': 'اشتراک',
+  'subscription-tab': 'اشتراک',
   'settings-employees': 'کارکنان',
   reports: 'گزارش‌ها',
   'upgrade-plan': 'ارتقای پلن',
@@ -369,7 +369,7 @@ function renderCurrentView(view: AppView) {
     case 'settings-pos':
     case 'settings-invoice':
     case 'settings-backup':
-    case 'settings-subscription':
+    case 'subscription-tab':
     case 'settings-employees':    return <SettingsPage />
     case 'reports':               return <ReportsPage />
     case 'upgrade-plan':          return <SettingsPage />
@@ -491,7 +491,7 @@ function SubscriptionBanner() {
           href="/subscription/renew"
           onClick={(e) => {
             e.preventDefault()
-            useStore.getState().setCurrentView('settings-subscription' as AppView)
+            useStore.getState().setCurrentView('subscription-tab' as AppView)
           }}
           className={`${config.buttonBg} text-white text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-md transition-colors shrink-0 flex items-center gap-1 shadow-sm`}
         >
@@ -568,8 +568,17 @@ function AppSidebar() {
           }
 
           // ═══ v9.6.6: زمان باقی‌مانده (روز + ساعت) ═══
-          const dr = typeof d.daysRemaining === 'number' ? d.daysRemaining : 0
+                  // ═══ v9.6.7: زمان باقی‌مانده (روز + ساعت) با سقف یک سال ═══
+          let dr = typeof d.daysRemaining === 'number' ? d.daysRemaining : 0
           const hr = typeof d.hoursRemaining === 'number' ? d.hoursRemaining : 0
+          
+          // ★ پلن‌ها یک ساله هستند، پس حداکثر ۳۶۵ روز نمایش بده
+          // اگر بیشتر بود (چند دوره تمدید)، فقط یک دوره را نشان می‌دهیم
+          // نکته: برای مادام‌العمر (dr === -1) سقف اعمال نمی‌شود
+          if (dr > 0) {
+            dr = Math.min(dr, 365)
+          }
+          
           setDaysRemaining(dr)
           setHoursRemaining(hr)
 
@@ -598,15 +607,22 @@ function AppSidebar() {
           })
         } else {
           const { getCachedPlan } = await import('@/lib/offline-db')
-          const cachedPlan = await getCachedPlan()
+                const cachedPlan = await getCachedPlan()
           if (cachedPlan?.planName) {
             const cp = cachedPlan as any
             const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
             setIsDemoTenant(demoSignal)
             setRealPlanName(cp.planName)
             useStore.getState().setPlanName(cp.planName)
-            setDaysRemaining(cp.daysRemaining || 0)
+            
+            // ★ v9.6.7: اعمال سقف ۳۶۵ روز
+            let cachedDays = cp.daysRemaining || 0
+            if (cachedDays > 0) {
+              cachedDays = Math.min(cachedDays, 365)
+            }
+            setDaysRemaining(cachedDays)
             setHoursRemaining(cp.hoursRemaining || 0)
+            
             const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
             setIsLifetime(lifetime)
             const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
@@ -616,15 +632,22 @@ function AppSidebar() {
       } catch (err) {
         try {
           const { getCachedPlan } = await import('@/lib/offline-db')
-          const cachedPlan = await getCachedPlan()
+                  const cachedPlan = await getCachedPlan()
           if (cachedPlan?.planName) {
             const cp = cachedPlan as any
             const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
             setIsDemoTenant(demoSignal)
             setRealPlanName(cp.planName)
             useStore.getState().setPlanName(cp.planName)
-            setDaysRemaining(cp.daysRemaining || 0)
+            
+            // ★ v9.6.7: اعمال سقف ۳۶۵ روز
+            let cachedDays = cp.daysRemaining || 0
+            if (cachedDays > 0) {
+              cachedDays = Math.min(cachedDays, 365)
+            }
+            setDaysRemaining(cachedDays)
             setHoursRemaining(cp.hoursRemaining || 0)
+            
             const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
             setIsLifetime(lifetime)
             const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
@@ -686,9 +709,13 @@ function AppSidebar() {
   }, [user])
 
   // ✅ v9.6.6: نمایش ماه/روز/ساعت برای پلن‌های مختلف
+   // ✅ v9.6.7: فرمت زمان باقی‌مانده (اصلاح‌شده برای پلن‌های یک ساله)
   const formatRemainingTime = (days: number, hours: number = 0, demoMode: boolean = false) => {
     if (days === -1) return 'مادام‌العمر';
     if (days <= 0 && hours <= 0) return 'منقضی شده';
+
+    // ★ پلن‌ها یک ساله هستند، پس اگر ۳۶۰ روز به بالا بود → "۱ سال کامل"
+    if (days >= 360) return '۱ سال کامل';
 
     // برای پلن‌های دمو یا کوتاه‌مدت (زیر ۳۰ روز): روز + ساعت
     if (demoMode || days < 30) {
@@ -766,7 +793,7 @@ function AppSidebar() {
                 href="/subscription/renew"
                 onClick={(e) => {
                   e.preventDefault()
-                  setCurrentView('settings-subscription' as AppView)
+                  setCurrentView('subscription-tab' as AppView)
                 }}
                 className="mt-1.5 w-full text-[10px] py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors flex items-center justify-center gap-1"
               >
@@ -777,7 +804,7 @@ function AppSidebar() {
           ) : (
             // ─── کارت پلن‌های عادی ───
             <div 
-              onClick={() => setCurrentView('settings-subscription' as AppView)}
+              onClick={() => setCurrentView('subscription-tab' as AppView)}
               className="cursor-pointer group p-2.5 bg-white border border-slate-200 rounded-xl hover:shadow-md hover:border-indigo-200 transition-all duration-200"
             >
               <div className="flex items-center justify-between mb-1.5">
@@ -1216,7 +1243,7 @@ function AppHeader() {
             )}
             {canAccessSettings && (
               <DropdownMenuItem
-                onClick={() => useStore.getState().setCurrentView('settings-subscription' as AppView)}
+                onClick={() => useStore.getState().setCurrentView('subscription-tab' as AppView)}
                 className="text-slate-700 hover:bg-slate-50"
               >
                 <CreditCard className="size-4 ms-2" />

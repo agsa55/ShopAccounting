@@ -103,7 +103,7 @@ export async function ensureDefaultAccounts(tenantId: string): Promise<SeedResul
     // ─── مرحله ۲: بررسی و ساخت/به‌روزرسانی حساب‌های استاندارد ──
     const existingAccounts = await db.client.account.findMany({
       where: { tenantId },
-      select: { code: true, id: true, name: true, type: string, level: number },
+      select: { code: true, id: true, name: true, type: true, level: true },  // ✅ اصلاح شد
     })
     const existingByCode = new Map(existingAccounts.map(a => [a.code, a]))
 

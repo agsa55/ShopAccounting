@@ -20,8 +20,13 @@ async function createAutoJournalEntry(
   paidAmount: number = 0
 ) {
   try {
+    console.log('[Invoices] 🚀 createAutoJournalEntry started for invoice:', invoice.number)
+    
     const totalAmount = invoice.totalAmount || 0
-    if (totalAmount <= 0) return
+    if (totalAmount <= 0) {
+      console.log('[Invoices] ⏭️ Skipped: totalAmount <= 0')
+      return
+    }
 
     const jeCount = await tx.journalEntry.count({ where: { tenantId } })
     const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
@@ -34,7 +39,15 @@ async function createAutoJournalEntry(
     let vatAccountId: string | null = null
 
     try {
+      console.log('[Invoices] 📋 Fetching standard account IDs...')
       const accountIds = await getStandardAccountIds(tenantId)
+      console.log('[Invoices] ✅ Account IDs fetched:', {
+        cash: accountIds.cashAccountId ? '✓' : '✗',
+        sales: accountIds.salesAccountId ? '✓' : '✗',
+        cogs: accountIds.cogsAccountId ? '✓' : '✗',
+        inventory: accountIds.inventoryAccountId ? '✓' : '✗',
+      })
+      
       cashAccountId = accountIds.cashAccountId
       salesAccountId = accountIds.salesAccountId
       cogsAccountId = accountIds.cogsAccountId
@@ -42,7 +55,9 @@ async function createAutoJournalEntry(
       receivablesAccountId = accountIds.receivablesAccountId
       vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
     } catch (err: any) {
-      console.warn('[Invoices] Could not find/seed accounts for journal entry:', err?.message)
+      console.error('[Invoices] ❌ Failed to get account IDs:', err?.message)
+      console.error('[Invoices] ❌ Error stack:', err?.stack)
+      return // ← بدون حساب‌ها نمی‌توانیم سند بزنیم
     }
 
     const lines: any[] = []
@@ -73,9 +88,18 @@ async function createAutoJournalEntry(
       lines.push({ accountId: inventoryAccountId, debit: 0, credit: totalCogs, description: 'بستانکار: خروج از موجودی کالا' })
     }
 
+    console.log('[Invoices] 📝 Journal lines created:', lines.length)
+
     if (lines.length >= 2) {
       const totalDebit = lines.reduce((sum: number, l: any) => sum + l.debit, 0)
       const totalCredit = lines.reduce((sum: number, l: any) => sum + l.credit, 0)
+
+      console.log('[Invoices] 💾 Creating journal entry:', {
+        number: jeNumber,
+        totalDebit,
+        totalCredit,
+        balanced: Math.abs(totalDebit - totalCredit) < 0.01,
+      })
 
       await tx.journalEntry.create({
         data: {
@@ -87,9 +111,14 @@ async function createAutoJournalEntry(
           lines: { create: lines },
         },
       })
+
+      console.log('[Invoices] ✅ Journal entry created successfully:', jeNumber)
+    } else {
+      console.warn('[Invoices] ⚠️ Not enough lines to create journal entry:', lines.length)
     }
   } catch (error: any) {
-    console.error('[Invoices] Failed to create auto journal entry:', error?.message)
+    console.error('[Invoices] ❌ Failed to create auto journal entry:', error?.message)
+    console.error('[Invoices] ❌ Error stack:', error?.stack)
   }
 }
 
