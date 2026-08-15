@@ -401,9 +401,10 @@ export default function LandingPage() {
     router.push(`/auth/register?plan=${tierName}`)
   }
 
-  // ★ شروع رایگان (بدون انتخاب پلن خاص)
+   // ★ v6.1: شروع رایگان → هدایت به بخش پلن‌ها (کاربر خودش پلن را انتخاب می‌کند)
   const handleStartFree = () => {
-    router.push('/auth/register?plan=simple')
+    setMobileMenuOpen(false)
+    pricingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const scrollToPricing = () => {
@@ -475,13 +476,12 @@ export default function LandingPage() {
               <span>ورود</span>
             </button>
 
-            {/* ★ دکمه شروع رایگان */}
-            <button
+                      <button
               onClick={handleStartFree}
               className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-gradient-to-l from-amber-500 to-orange-500 rounded-xl hover:shadow-lg hover:shadow-amber-200/60 hover:scale-105 transition-all whitespace-nowrap"
             >
               <Sparkles className="w-4 h-4" />
-              شروع رایگان
+              انتخاب پلن
             </button>
 
             <button
@@ -529,12 +529,12 @@ export default function LandingPage() {
                   <LogIn className="w-4 h-4" />
                   ورود به حساب
                 </button>
-                <button
-                  onClick={() => { handleStartFree(); setMobileMenuOpen(false); }}
+                              <button
+                  onClick={handleStartFree}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white bg-gradient-to-l from-amber-500 to-orange-500 rounded-xl font-bold text-sm hover:shadow-lg transition-all"
                 >
                   <Sparkles className="w-4 h-4" />
-                  شروع رایگان
+                  انتخاب پلن
                 </button>
               </div>
             </nav>
@@ -586,12 +586,12 @@ export default function LandingPage() {
               className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start animate-fade-in-up pt-2"
               style={{ animationDelay: '0.3s' }}
             >
-              <button
+                          <button
                 onClick={handleStartFree}
                 className="group relative px-7 py-4 bg-gradient-to-l from-amber-500 to-orange-500 text-white rounded-2xl font-bold text-base hover:shadow-2xl hover:shadow-amber-500/30 hover:scale-105 transition-all animate-pulse-glow flex items-center justify-center gap-2.5 overflow-hidden"
               >
                 <Sparkles className="w-5 h-5" />
-                شروع رایگان
+                انتخاب پلن و شروع رایگان
                 <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl" />
               </button>
               <button
@@ -928,12 +928,12 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
-            <button
+                       <button
               onClick={handleStartFree}
               className="group px-8 sm:px-10 py-4 bg-gradient-to-l from-amber-500 to-orange-500 text-white rounded-2xl font-black text-base sm:text-lg hover:shadow-2xl hover:shadow-amber-500/30 hover:scale-105 transition-all flex items-center justify-center gap-3"
             >
               <Sparkles className="w-5 h-5" />
-              شروع رایگان
+              انتخاب پلن و شروع رایگان
             </button>
             <button
               onClick={() => router.push('/auth/login')}
