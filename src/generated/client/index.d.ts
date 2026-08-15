@@ -5865,10 +5865,12 @@ export namespace Prisma {
 
   export type CustomerCountOutputType = {
     invoices: number
+    Checks: number
   }
 
   export type CustomerCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     invoices?: boolean | CustomerCountOutputTypeCountInvoicesArgs
+    Checks?: boolean | CustomerCountOutputTypeCountChecksArgs
   }
 
   // Custom InputTypes
@@ -5887,6 +5889,13 @@ export namespace Prisma {
    */
   export type CustomerCountOutputTypeCountInvoicesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     where?: InvoiceWhereInput
+  }
+
+  /**
+   * CustomerCountOutputType without action
+   */
+  export type CustomerCountOutputTypeCountChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: CheckWhereInput
   }
 
 
@@ -6221,10 +6230,12 @@ export namespace Prisma {
 
   export type SupplierCountOutputType = {
     PurchaseInvoices: number
+    Checks: number
   }
 
   export type SupplierCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     PurchaseInvoices?: boolean | SupplierCountOutputTypeCountPurchaseInvoicesArgs
+    Checks?: boolean | SupplierCountOutputTypeCountChecksArgs
   }
 
   // Custom InputTypes
@@ -6243,6 +6254,13 @@ export namespace Prisma {
    */
   export type SupplierCountOutputTypeCountPurchaseInvoicesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     where?: PurchaseInvoiceWhereInput
+  }
+
+  /**
+   * SupplierCountOutputType without action
+   */
+  export type SupplierCountOutputTypeCountChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: CheckWhereInput
   }
 
 
@@ -6397,10 +6415,12 @@ export namespace Prisma {
 
   export type TenantAvgAggregateOutputType = {
     planTierId: number | null
+    discountApplied: Decimal | null
   }
 
   export type TenantSumAggregateOutputType = {
     planTierId: number | null
+    discountApplied: Decimal | null
   }
 
   export type TenantMinAggregateOutputType = {
@@ -6418,6 +6438,11 @@ export namespace Prisma {
     planTierId: number | null
     billingCycle: string | null
     expiresAt: Date | null
+    trialStartAt: Date | null
+    trialEndAt: Date | null
+    isPaid: boolean | null
+    paidAt: Date | null
+    discountApplied: Decimal | null
     createdAt: Date | null
     updatedAt: Date | null
     soldAt: Date | null
@@ -6440,6 +6465,11 @@ export namespace Prisma {
     planTierId: number | null
     billingCycle: string | null
     expiresAt: Date | null
+    trialStartAt: Date | null
+    trialEndAt: Date | null
+    isPaid: boolean | null
+    paidAt: Date | null
+    discountApplied: Decimal | null
     createdAt: Date | null
     updatedAt: Date | null
     soldAt: Date | null
@@ -6462,6 +6492,11 @@ export namespace Prisma {
     planTierId: number
     billingCycle: number
     expiresAt: number
+    trialStartAt: number
+    trialEndAt: number
+    isPaid: number
+    paidAt: number
+    discountApplied: number
     createdAt: number
     updatedAt: number
     soldAt: number
@@ -6473,10 +6508,12 @@ export namespace Prisma {
 
   export type TenantAvgAggregateInputType = {
     planTierId?: true
+    discountApplied?: true
   }
 
   export type TenantSumAggregateInputType = {
     planTierId?: true
+    discountApplied?: true
   }
 
   export type TenantMinAggregateInputType = {
@@ -6494,6 +6531,11 @@ export namespace Prisma {
     planTierId?: true
     billingCycle?: true
     expiresAt?: true
+    trialStartAt?: true
+    trialEndAt?: true
+    isPaid?: true
+    paidAt?: true
+    discountApplied?: true
     createdAt?: true
     updatedAt?: true
     soldAt?: true
@@ -6516,6 +6558,11 @@ export namespace Prisma {
     planTierId?: true
     billingCycle?: true
     expiresAt?: true
+    trialStartAt?: true
+    trialEndAt?: true
+    isPaid?: true
+    paidAt?: true
+    discountApplied?: true
     createdAt?: true
     updatedAt?: true
     soldAt?: true
@@ -6538,6 +6585,11 @@ export namespace Prisma {
     planTierId?: true
     billingCycle?: true
     expiresAt?: true
+    trialStartAt?: true
+    trialEndAt?: true
+    isPaid?: true
+    paidAt?: true
+    discountApplied?: true
     createdAt?: true
     updatedAt?: true
     soldAt?: true
@@ -6647,6 +6699,11 @@ export namespace Prisma {
     planTierId: number | null
     billingCycle: string
     expiresAt: Date | null
+    trialStartAt: Date
+    trialEndAt: Date | null
+    isPaid: boolean
+    paidAt: Date | null
+    discountApplied: Decimal | null
     createdAt: Date
     updatedAt: Date
     soldAt: Date | null
@@ -6688,6 +6745,11 @@ export namespace Prisma {
     planTierId?: boolean
     billingCycle?: boolean
     expiresAt?: boolean
+    trialStartAt?: boolean
+    trialEndAt?: boolean
+    isPaid?: boolean
+    paidAt?: boolean
+    discountApplied?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     soldAt?: boolean
@@ -6751,6 +6813,11 @@ export namespace Prisma {
     planTierId?: boolean
     billingCycle?: boolean
     expiresAt?: boolean
+    trialStartAt?: boolean
+    trialEndAt?: boolean
+    isPaid?: boolean
+    paidAt?: boolean
+    discountApplied?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     soldAt?: boolean
@@ -6774,6 +6841,11 @@ export namespace Prisma {
     planTierId?: boolean
     billingCycle?: boolean
     expiresAt?: boolean
+    trialStartAt?: boolean
+    trialEndAt?: boolean
+    isPaid?: boolean
+    paidAt?: boolean
+    discountApplied?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     soldAt?: boolean
@@ -6797,6 +6869,11 @@ export namespace Prisma {
     planTierId?: boolean
     billingCycle?: boolean
     expiresAt?: boolean
+    trialStartAt?: boolean
+    trialEndAt?: boolean
+    isPaid?: boolean
+    paidAt?: boolean
+    discountApplied?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     soldAt?: boolean
@@ -6804,7 +6881,7 @@ export namespace Prisma {
     soldToContact?: boolean
   }
 
-  export type TenantOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "subDomain" | "companyName" | "planName" | "status" | "ownerName" | "ownerMobile" | "ownerEmail" | "address" | "registrationNumber" | "logoUrl" | "planTierId" | "billingCycle" | "expiresAt" | "createdAt" | "updatedAt" | "soldAt" | "soldTo" | "soldToContact", ExtArgs["result"]["tenant"]>
+  export type TenantOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "subDomain" | "companyName" | "planName" | "status" | "ownerName" | "ownerMobile" | "ownerEmail" | "address" | "registrationNumber" | "logoUrl" | "planTierId" | "billingCycle" | "expiresAt" | "trialStartAt" | "trialEndAt" | "isPaid" | "paidAt" | "discountApplied" | "createdAt" | "updatedAt" | "soldAt" | "soldTo" | "soldToContact", ExtArgs["result"]["tenant"]>
   export type TenantInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     planTier?: boolean | Tenant$planTierArgs<ExtArgs>
     AuditLogs?: boolean | Tenant$AuditLogsArgs<ExtArgs>
@@ -6914,6 +6991,11 @@ export namespace Prisma {
       planTierId: number | null
       billingCycle: string
       expiresAt: Date | null
+      trialStartAt: Date
+      trialEndAt: Date | null
+      isPaid: boolean
+      paidAt: Date | null
+      discountApplied: Prisma.Decimal | null
       createdAt: Date
       updatedAt: Date
       soldAt: Date | null
@@ -7396,6 +7478,11 @@ export namespace Prisma {
     readonly planTierId: FieldRef<"Tenant", 'Int'>
     readonly billingCycle: FieldRef<"Tenant", 'String'>
     readonly expiresAt: FieldRef<"Tenant", 'DateTime'>
+    readonly trialStartAt: FieldRef<"Tenant", 'DateTime'>
+    readonly trialEndAt: FieldRef<"Tenant", 'DateTime'>
+    readonly isPaid: FieldRef<"Tenant", 'Boolean'>
+    readonly paidAt: FieldRef<"Tenant", 'DateTime'>
+    readonly discountApplied: FieldRef<"Tenant", 'Decimal'>
     readonly createdAt: FieldRef<"Tenant", 'DateTime'>
     readonly updatedAt: FieldRef<"Tenant", 'DateTime'>
     readonly soldAt: FieldRef<"Tenant", 'DateTime'>
@@ -18100,6 +18187,7 @@ export namespace Prisma {
     planTierId: number | null
     durationDays: number | null
     price: number | null
+    earlyBirdPrice: number | null
     discountPercent: number | null
   }
 
@@ -18108,6 +18196,7 @@ export namespace Prisma {
     planTierId: number | null
     durationDays: number | null
     price: number | null
+    earlyBirdPrice: number | null
     discountPercent: number | null
   }
 
@@ -18117,6 +18206,7 @@ export namespace Prisma {
     billingCycle: string | null
     durationDays: number | null
     price: number | null
+    earlyBirdPrice: number | null
     discountPercent: number | null
     isActive: boolean | null
     isPopular: boolean | null
@@ -18130,6 +18220,7 @@ export namespace Prisma {
     billingCycle: string | null
     durationDays: number | null
     price: number | null
+    earlyBirdPrice: number | null
     discountPercent: number | null
     isActive: boolean | null
     isPopular: boolean | null
@@ -18143,6 +18234,7 @@ export namespace Prisma {
     billingCycle: number
     durationDays: number
     price: number
+    earlyBirdPrice: number
     discountPercent: number
     isActive: number
     isPopular: number
@@ -18157,6 +18249,7 @@ export namespace Prisma {
     planTierId?: true
     durationDays?: true
     price?: true
+    earlyBirdPrice?: true
     discountPercent?: true
   }
 
@@ -18165,6 +18258,7 @@ export namespace Prisma {
     planTierId?: true
     durationDays?: true
     price?: true
+    earlyBirdPrice?: true
     discountPercent?: true
   }
 
@@ -18174,6 +18268,7 @@ export namespace Prisma {
     billingCycle?: true
     durationDays?: true
     price?: true
+    earlyBirdPrice?: true
     discountPercent?: true
     isActive?: true
     isPopular?: true
@@ -18187,6 +18282,7 @@ export namespace Prisma {
     billingCycle?: true
     durationDays?: true
     price?: true
+    earlyBirdPrice?: true
     discountPercent?: true
     isActive?: true
     isPopular?: true
@@ -18200,6 +18296,7 @@ export namespace Prisma {
     billingCycle?: true
     durationDays?: true
     price?: true
+    earlyBirdPrice?: true
     discountPercent?: true
     isActive?: true
     isPopular?: true
@@ -18300,6 +18397,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice: number | null
     discountPercent: number
     isActive: boolean
     isPopular: boolean
@@ -18332,6 +18430,7 @@ export namespace Prisma {
     billingCycle?: boolean
     durationDays?: boolean
     price?: boolean
+    earlyBirdPrice?: boolean
     discountPercent?: boolean
     isActive?: boolean
     isPopular?: boolean
@@ -18346,6 +18445,7 @@ export namespace Prisma {
     billingCycle?: boolean
     durationDays?: boolean
     price?: boolean
+    earlyBirdPrice?: boolean
     discountPercent?: boolean
     isActive?: boolean
     isPopular?: boolean
@@ -18360,6 +18460,7 @@ export namespace Prisma {
     billingCycle?: boolean
     durationDays?: boolean
     price?: boolean
+    earlyBirdPrice?: boolean
     discountPercent?: boolean
     isActive?: boolean
     isPopular?: boolean
@@ -18374,6 +18475,7 @@ export namespace Prisma {
     billingCycle?: boolean
     durationDays?: boolean
     price?: boolean
+    earlyBirdPrice?: boolean
     discountPercent?: boolean
     isActive?: boolean
     isPopular?: boolean
@@ -18381,7 +18483,7 @@ export namespace Prisma {
     updatedAt?: boolean
   }
 
-  export type PlanPriceOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "planTierId" | "billingCycle" | "durationDays" | "price" | "discountPercent" | "isActive" | "isPopular" | "createdAt" | "updatedAt", ExtArgs["result"]["planPrice"]>
+  export type PlanPriceOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "planTierId" | "billingCycle" | "durationDays" | "price" | "earlyBirdPrice" | "discountPercent" | "isActive" | "isPopular" | "createdAt" | "updatedAt", ExtArgs["result"]["planPrice"]>
   export type PlanPriceInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     planTier?: boolean | PlanTierDefaultArgs<ExtArgs>
   }
@@ -18403,6 +18505,7 @@ export namespace Prisma {
       billingCycle: string
       durationDays: number
       price: number
+      earlyBirdPrice: number | null
       discountPercent: number
       isActive: boolean
       isPopular: boolean
@@ -18837,6 +18940,7 @@ export namespace Prisma {
     readonly billingCycle: FieldRef<"PlanPrice", 'String'>
     readonly durationDays: FieldRef<"PlanPrice", 'Int'>
     readonly price: FieldRef<"PlanPrice", 'Int'>
+    readonly earlyBirdPrice: FieldRef<"PlanPrice", 'Int'>
     readonly discountPercent: FieldRef<"PlanPrice", 'Int'>
     readonly isActive: FieldRef<"PlanPrice", 'Boolean'>
     readonly isPopular: FieldRef<"PlanPrice", 'Boolean'>
@@ -24534,6 +24638,7 @@ export namespace Prisma {
     legalForm?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     invoices?: boolean | Customer$invoicesArgs<ExtArgs>
+    Checks?: boolean | Customer$ChecksArgs<ExtArgs>
     _count?: boolean | CustomerCountOutputTypeDefaultArgs<ExtArgs>
   }, ExtArgs["result"]["customer"]>
 
@@ -24606,6 +24711,7 @@ export namespace Prisma {
   export type CustomerInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     invoices?: boolean | Customer$invoicesArgs<ExtArgs>
+    Checks?: boolean | Customer$ChecksArgs<ExtArgs>
     _count?: boolean | CustomerCountOutputTypeDefaultArgs<ExtArgs>
   }
   export type CustomerIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
@@ -24620,6 +24726,7 @@ export namespace Prisma {
     objects: {
       Tenant: Prisma.$TenantPayload<ExtArgs>
       invoices: Prisma.$InvoicePayload<ExtArgs>[]
+      Checks: Prisma.$CheckPayload<ExtArgs>[]
     }
     scalars: $Extensions.GetPayloadResult<{
       id: string
@@ -25036,6 +25143,7 @@ export namespace Prisma {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     Tenant<T extends TenantDefaultArgs<ExtArgs> = {}>(args?: Subset<T, TenantDefaultArgs<ExtArgs>>): Prisma__TenantClient<$Result.GetResult<Prisma.$TenantPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
     invoices<T extends Customer$invoicesArgs<ExtArgs> = {}>(args?: Subset<T, Customer$invoicesArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$InvoicePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+    Checks<T extends Customer$ChecksArgs<ExtArgs> = {}>(args?: Subset<T, Customer$ChecksArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$CheckPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
      * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -25500,6 +25608,30 @@ export namespace Prisma {
     take?: number
     skip?: number
     distinct?: InvoiceScalarFieldEnum | InvoiceScalarFieldEnum[]
+  }
+
+  /**
+   * Customer.Checks
+   */
+  export type Customer$ChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Check
+     */
+    select?: CheckSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Check
+     */
+    omit?: CheckOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: CheckInclude<ExtArgs> | null
+    where?: CheckWhereInput
+    orderBy?: CheckOrderByWithRelationInput | CheckOrderByWithRelationInput[]
+    cursor?: CheckWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: CheckScalarFieldEnum | CheckScalarFieldEnum[]
   }
 
   /**
@@ -42078,6 +42210,7 @@ export namespace Prisma {
     dueDate: Date | null
     status: string | null
     customerId: string | null
+    supplierId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42097,6 +42230,7 @@ export namespace Prisma {
     dueDate: Date | null
     status: string | null
     customerId: string | null
+    supplierId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42116,6 +42250,7 @@ export namespace Prisma {
     dueDate: number
     status: number
     customerId: number
+    supplierId: number
     payeeName: number
     description: number
     journalEntryId: number
@@ -42145,6 +42280,7 @@ export namespace Prisma {
     dueDate?: true
     status?: true
     customerId?: true
+    supplierId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42164,6 +42300,7 @@ export namespace Prisma {
     dueDate?: true
     status?: true
     customerId?: true
+    supplierId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42183,6 +42320,7 @@ export namespace Prisma {
     dueDate?: true
     status?: true
     customerId?: true
+    supplierId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42289,6 +42427,7 @@ export namespace Prisma {
     dueDate: Date
     status: string
     customerId: string | null
+    supplierId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42327,12 +42466,15 @@ export namespace Prisma {
     dueDate?: boolean
     status?: boolean
     customerId?: boolean
+    supplierId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -42347,12 +42489,15 @@ export namespace Prisma {
     dueDate?: boolean
     status?: boolean
     customerId?: boolean
+    supplierId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -42367,12 +42512,15 @@ export namespace Prisma {
     dueDate?: boolean
     status?: boolean
     customerId?: boolean
+    supplierId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
     createdAt?: boolean
     updatedAt?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectScalar = {
@@ -42387,6 +42535,7 @@ export namespace Prisma {
     dueDate?: boolean
     status?: boolean
     customerId?: boolean
+    supplierId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
@@ -42394,21 +42543,29 @@ export namespace Prisma {
     updatedAt?: boolean
   }
 
-  export type CheckOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "tenantId" | "type" | "checkNumber" | "bankName" | "branchName" | "amount" | "issueDate" | "dueDate" | "status" | "customerId" | "payeeName" | "description" | "journalEntryId" | "createdAt" | "updatedAt", ExtArgs["result"]["check"]>
+  export type CheckOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "tenantId" | "type" | "checkNumber" | "bankName" | "branchName" | "amount" | "issueDate" | "dueDate" | "status" | "customerId" | "supplierId" | "payeeName" | "description" | "journalEntryId" | "createdAt" | "updatedAt", ExtArgs["result"]["check"]>
   export type CheckInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }
   export type CheckIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }
   export type CheckIncludeUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
+    customer?: boolean | Check$customerArgs<ExtArgs>
+    supplier?: boolean | Check$supplierArgs<ExtArgs>
   }
 
   export type $CheckPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     name: "Check"
     objects: {
       Tenant: Prisma.$TenantPayload<ExtArgs>
+      customer: Prisma.$CustomerPayload<ExtArgs> | null
+      supplier: Prisma.$SupplierPayload<ExtArgs> | null
     }
     scalars: $Extensions.GetPayloadResult<{
       id: string
@@ -42422,6 +42579,7 @@ export namespace Prisma {
       dueDate: Date
       status: string
       customerId: string | null
+      supplierId: string | null
       payeeName: string | null
       description: string | null
       journalEntryId: string | null
@@ -42822,6 +42980,8 @@ export namespace Prisma {
   export interface Prisma__CheckClient<T, Null = never, ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     Tenant<T extends TenantDefaultArgs<ExtArgs> = {}>(args?: Subset<T, TenantDefaultArgs<ExtArgs>>): Prisma__TenantClient<$Result.GetResult<Prisma.$TenantPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+    customer<T extends Check$customerArgs<ExtArgs> = {}>(args?: Subset<T, Check$customerArgs<ExtArgs>>): Prisma__CustomerClient<$Result.GetResult<Prisma.$CustomerPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+    supplier<T extends Check$supplierArgs<ExtArgs> = {}>(args?: Subset<T, Check$supplierArgs<ExtArgs>>): Prisma__SupplierClient<$Result.GetResult<Prisma.$SupplierPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
      * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -42862,6 +43022,7 @@ export namespace Prisma {
     readonly dueDate: FieldRef<"Check", 'DateTime'>
     readonly status: FieldRef<"Check", 'String'>
     readonly customerId: FieldRef<"Check", 'String'>
+    readonly supplierId: FieldRef<"Check", 'String'>
     readonly payeeName: FieldRef<"Check", 'String'>
     readonly description: FieldRef<"Check", 'String'>
     readonly journalEntryId: FieldRef<"Check", 'String'>
@@ -43260,6 +43421,44 @@ export namespace Prisma {
      * Limit how many Checks to delete.
      */
     limit?: number
+  }
+
+  /**
+   * Check.customer
+   */
+  export type Check$customerArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Customer
+     */
+    select?: CustomerSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Customer
+     */
+    omit?: CustomerOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: CustomerInclude<ExtArgs> | null
+    where?: CustomerWhereInput
+  }
+
+  /**
+   * Check.supplier
+   */
+  export type Check$supplierArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Supplier
+     */
+    select?: SupplierSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Supplier
+     */
+    omit?: SupplierOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: SupplierInclude<ExtArgs> | null
+    where?: SupplierWhereInput
   }
 
   /**
@@ -44694,7 +44893,7 @@ export namespace Prisma {
   export type OnlinePaymentGroupByOutputType = {
     id: string
     tenantId: string
-    invoiceId: string
+    invoiceId: string | null
     customerId: string | null
     amount: Decimal
     authority: string | null
@@ -44747,7 +44946,7 @@ export namespace Prisma {
     updatedAt?: boolean
     installmentId?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["onlinePayment"]>
 
   export type OnlinePaymentSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -44768,7 +44967,7 @@ export namespace Prisma {
     updatedAt?: boolean
     installmentId?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["onlinePayment"]>
 
   export type OnlinePaymentSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -44789,7 +44988,7 @@ export namespace Prisma {
     updatedAt?: boolean
     installmentId?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["onlinePayment"]>
 
   export type OnlinePaymentSelectScalar = {
@@ -44814,27 +45013,27 @@ export namespace Prisma {
   export type OnlinePaymentOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "tenantId" | "invoiceId" | "customerId" | "amount" | "authority" | "refId" | "status" | "gatewayType" | "gatewayId" | "gatewayUrl" | "description" | "paidAt" | "createdAt" | "updatedAt" | "installmentId", ExtArgs["result"]["onlinePayment"]>
   export type OnlinePaymentInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }
   export type OnlinePaymentIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }
   export type OnlinePaymentIncludeUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
-    Invoice?: boolean | InvoiceDefaultArgs<ExtArgs>
+    Invoice?: boolean | OnlinePayment$InvoiceArgs<ExtArgs>
   }
 
   export type $OnlinePaymentPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     name: "OnlinePayment"
     objects: {
       Tenant: Prisma.$TenantPayload<ExtArgs>
-      Invoice: Prisma.$InvoicePayload<ExtArgs>
+      Invoice: Prisma.$InvoicePayload<ExtArgs> | null
     }
     scalars: $Extensions.GetPayloadResult<{
       id: string
       tenantId: string
-      invoiceId: string
+      invoiceId: string | null
       customerId: string | null
       amount: Prisma.Decimal
       authority: string | null
@@ -45243,7 +45442,7 @@ export namespace Prisma {
   export interface Prisma__OnlinePaymentClient<T, Null = never, ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     Tenant<T extends TenantDefaultArgs<ExtArgs> = {}>(args?: Subset<T, TenantDefaultArgs<ExtArgs>>): Prisma__TenantClient<$Result.GetResult<Prisma.$TenantPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
-    Invoice<T extends InvoiceDefaultArgs<ExtArgs> = {}>(args?: Subset<T, InvoiceDefaultArgs<ExtArgs>>): Prisma__InvoiceClient<$Result.GetResult<Prisma.$InvoicePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+    Invoice<T extends OnlinePayment$InvoiceArgs<ExtArgs> = {}>(args?: Subset<T, OnlinePayment$InvoiceArgs<ExtArgs>>): Prisma__InvoiceClient<$Result.GetResult<Prisma.$InvoicePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
      * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -45682,6 +45881,25 @@ export namespace Prisma {
      * Limit how many OnlinePayments to delete.
      */
     limit?: number
+  }
+
+  /**
+   * OnlinePayment.Invoice
+   */
+  export type OnlinePayment$InvoiceArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Invoice
+     */
+    select?: InvoiceSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Invoice
+     */
+    omit?: InvoiceOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: InvoiceInclude<ExtArgs> | null
+    where?: InvoiceWhereInput
   }
 
   /**
@@ -54500,6 +54718,7 @@ export namespace Prisma {
     legalForm?: boolean
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     PurchaseInvoices?: boolean | Supplier$PurchaseInvoicesArgs<ExtArgs>
+    Checks?: boolean | Supplier$ChecksArgs<ExtArgs>
     _count?: boolean | SupplierCountOutputTypeDefaultArgs<ExtArgs>
   }, ExtArgs["result"]["supplier"]>
 
@@ -54566,6 +54785,7 @@ export namespace Prisma {
   export type SupplierInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     PurchaseInvoices?: boolean | Supplier$PurchaseInvoicesArgs<ExtArgs>
+    Checks?: boolean | Supplier$ChecksArgs<ExtArgs>
     _count?: boolean | SupplierCountOutputTypeDefaultArgs<ExtArgs>
   }
   export type SupplierIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
@@ -54580,6 +54800,7 @@ export namespace Prisma {
     objects: {
       Tenant: Prisma.$TenantPayload<ExtArgs>
       PurchaseInvoices: Prisma.$PurchaseInvoicePayload<ExtArgs>[]
+      Checks: Prisma.$CheckPayload<ExtArgs>[]
     }
     scalars: $Extensions.GetPayloadResult<{
       id: string
@@ -54994,6 +55215,7 @@ export namespace Prisma {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     Tenant<T extends TenantDefaultArgs<ExtArgs> = {}>(args?: Subset<T, TenantDefaultArgs<ExtArgs>>): Prisma__TenantClient<$Result.GetResult<Prisma.$TenantPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
     PurchaseInvoices<T extends Supplier$PurchaseInvoicesArgs<ExtArgs> = {}>(args?: Subset<T, Supplier$PurchaseInvoicesArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$PurchaseInvoicePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+    Checks<T extends Supplier$ChecksArgs<ExtArgs> = {}>(args?: Subset<T, Supplier$ChecksArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$CheckPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
      * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -55456,6 +55678,30 @@ export namespace Prisma {
     take?: number
     skip?: number
     distinct?: PurchaseInvoiceScalarFieldEnum | PurchaseInvoiceScalarFieldEnum[]
+  }
+
+  /**
+   * Supplier.Checks
+   */
+  export type Supplier$ChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Check
+     */
+    select?: CheckSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Check
+     */
+    omit?: CheckOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: CheckInclude<ExtArgs> | null
+    where?: CheckWhereInput
+    orderBy?: CheckOrderByWithRelationInput | CheckOrderByWithRelationInput[]
+    cursor?: CheckWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: CheckScalarFieldEnum | CheckScalarFieldEnum[]
   }
 
   /**
@@ -68021,6 +68267,11 @@ export namespace Prisma {
     planTierId: 'planTierId',
     billingCycle: 'billingCycle',
     expiresAt: 'expiresAt',
+    trialStartAt: 'trialStartAt',
+    trialEndAt: 'trialEndAt',
+    isPaid: 'isPaid',
+    paidAt: 'paidAt',
+    discountApplied: 'discountApplied',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     soldAt: 'soldAt',
@@ -68170,6 +68421,7 @@ export namespace Prisma {
     billingCycle: 'billingCycle',
     durationDays: 'durationDays',
     price: 'price',
+    earlyBirdPrice: 'earlyBirdPrice',
     discountPercent: 'discountPercent',
     isActive: 'isActive',
     isPopular: 'isPopular',
@@ -68552,6 +68804,7 @@ export namespace Prisma {
     dueDate: 'dueDate',
     status: 'status',
     customerId: 'customerId',
+    supplierId: 'supplierId',
     payeeName: 'payeeName',
     description: 'description',
     journalEntryId: 'journalEntryId',
@@ -69088,6 +69341,11 @@ export namespace Prisma {
     planTierId?: IntNullableFilter<"Tenant"> | number | null
     billingCycle?: StringFilter<"Tenant"> | string
     expiresAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    trialStartAt?: DateTimeFilter<"Tenant"> | Date | string
+    trialEndAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    isPaid?: BoolFilter<"Tenant"> | boolean
+    paidAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    discountApplied?: DecimalNullableFilter<"Tenant"> | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFilter<"Tenant"> | Date | string
     updatedAt?: DateTimeFilter<"Tenant"> | Date | string
     soldAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
@@ -69150,6 +69408,11 @@ export namespace Prisma {
     planTierId?: SortOrderInput | SortOrder
     billingCycle?: SortOrder
     expiresAt?: SortOrderInput | SortOrder
+    trialStartAt?: SortOrder
+    trialEndAt?: SortOrderInput | SortOrder
+    isPaid?: SortOrder
+    paidAt?: SortOrderInput | SortOrder
+    discountApplied?: SortOrderInput | SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     soldAt?: SortOrderInput | SortOrder
@@ -69215,6 +69478,11 @@ export namespace Prisma {
     planTierId?: IntNullableFilter<"Tenant"> | number | null
     billingCycle?: StringFilter<"Tenant"> | string
     expiresAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    trialStartAt?: DateTimeFilter<"Tenant"> | Date | string
+    trialEndAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    isPaid?: BoolFilter<"Tenant"> | boolean
+    paidAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    discountApplied?: DecimalNullableFilter<"Tenant"> | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFilter<"Tenant"> | Date | string
     updatedAt?: DateTimeFilter<"Tenant"> | Date | string
     soldAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
@@ -69277,6 +69545,11 @@ export namespace Prisma {
     planTierId?: SortOrderInput | SortOrder
     billingCycle?: SortOrder
     expiresAt?: SortOrderInput | SortOrder
+    trialStartAt?: SortOrder
+    trialEndAt?: SortOrderInput | SortOrder
+    isPaid?: SortOrder
+    paidAt?: SortOrderInput | SortOrder
+    discountApplied?: SortOrderInput | SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     soldAt?: SortOrderInput | SortOrder
@@ -69307,6 +69580,11 @@ export namespace Prisma {
     planTierId?: IntNullableWithAggregatesFilter<"Tenant"> | number | null
     billingCycle?: StringWithAggregatesFilter<"Tenant"> | string
     expiresAt?: DateTimeNullableWithAggregatesFilter<"Tenant"> | Date | string | null
+    trialStartAt?: DateTimeWithAggregatesFilter<"Tenant"> | Date | string
+    trialEndAt?: DateTimeNullableWithAggregatesFilter<"Tenant"> | Date | string | null
+    isPaid?: BoolWithAggregatesFilter<"Tenant"> | boolean
+    paidAt?: DateTimeNullableWithAggregatesFilter<"Tenant"> | Date | string | null
+    discountApplied?: DecimalNullableWithAggregatesFilter<"Tenant"> | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeWithAggregatesFilter<"Tenant"> | Date | string
     updatedAt?: DateTimeWithAggregatesFilter<"Tenant"> | Date | string
     soldAt?: DateTimeNullableWithAggregatesFilter<"Tenant"> | Date | string | null
@@ -70009,6 +70287,7 @@ export namespace Prisma {
     billingCycle?: StringFilter<"PlanPrice"> | string
     durationDays?: IntFilter<"PlanPrice"> | number
     price?: IntFilter<"PlanPrice"> | number
+    earlyBirdPrice?: IntNullableFilter<"PlanPrice"> | number | null
     discountPercent?: IntFilter<"PlanPrice"> | number
     isActive?: BoolFilter<"PlanPrice"> | boolean
     isPopular?: BoolFilter<"PlanPrice"> | boolean
@@ -70023,6 +70302,7 @@ export namespace Prisma {
     billingCycle?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrderInput | SortOrder
     discountPercent?: SortOrder
     isActive?: SortOrder
     isPopular?: SortOrder
@@ -70033,7 +70313,6 @@ export namespace Prisma {
 
   export type PlanPriceWhereUniqueInput = Prisma.AtLeast<{
     id?: number
-    planTierId_billingCycle?: PlanPricePlanTierIdBillingCycleCompoundUniqueInput
     AND?: PlanPriceWhereInput | PlanPriceWhereInput[]
     OR?: PlanPriceWhereInput[]
     NOT?: PlanPriceWhereInput | PlanPriceWhereInput[]
@@ -70041,13 +70320,14 @@ export namespace Prisma {
     billingCycle?: StringFilter<"PlanPrice"> | string
     durationDays?: IntFilter<"PlanPrice"> | number
     price?: IntFilter<"PlanPrice"> | number
+    earlyBirdPrice?: IntNullableFilter<"PlanPrice"> | number | null
     discountPercent?: IntFilter<"PlanPrice"> | number
     isActive?: BoolFilter<"PlanPrice"> | boolean
     isPopular?: BoolFilter<"PlanPrice"> | boolean
     createdAt?: DateTimeFilter<"PlanPrice"> | Date | string
     updatedAt?: DateTimeFilter<"PlanPrice"> | Date | string
     planTier?: XOR<PlanTierScalarRelationFilter, PlanTierWhereInput>
-  }, "id" | "planTierId_billingCycle">
+  }, "id">
 
   export type PlanPriceOrderByWithAggregationInput = {
     id?: SortOrder
@@ -70055,6 +70335,7 @@ export namespace Prisma {
     billingCycle?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrderInput | SortOrder
     discountPercent?: SortOrder
     isActive?: SortOrder
     isPopular?: SortOrder
@@ -70076,6 +70357,7 @@ export namespace Prisma {
     billingCycle?: StringWithAggregatesFilter<"PlanPrice"> | string
     durationDays?: IntWithAggregatesFilter<"PlanPrice"> | number
     price?: IntWithAggregatesFilter<"PlanPrice"> | number
+    earlyBirdPrice?: IntNullableWithAggregatesFilter<"PlanPrice"> | number | null
     discountPercent?: IntWithAggregatesFilter<"PlanPrice"> | number
     isActive?: BoolWithAggregatesFilter<"PlanPrice"> | boolean
     isPopular?: BoolWithAggregatesFilter<"PlanPrice"> | boolean
@@ -70489,6 +70771,7 @@ export namespace Prisma {
     legalForm?: StringNullableFilter<"Customer"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
     invoices?: InvoiceListRelationFilter
+    Checks?: CheckListRelationFilter
   }
 
   export type CustomerOrderByWithRelationInput = {
@@ -70512,6 +70795,7 @@ export namespace Prisma {
     legalForm?: SortOrderInput | SortOrder
     Tenant?: TenantOrderByWithRelationInput
     invoices?: InvoiceOrderByRelationAggregateInput
+    Checks?: CheckOrderByRelationAggregateInput
   }
 
   export type CustomerWhereUniqueInput = Prisma.AtLeast<{
@@ -70539,6 +70823,7 @@ export namespace Prisma {
     legalForm?: StringNullableFilter<"Customer"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
     invoices?: InvoiceListRelationFilter
+    Checks?: CheckListRelationFilter
   }, "id" | "portalToken" | "code_tenantId">
 
   export type CustomerOrderByWithAggregationInput = {
@@ -72048,12 +72333,15 @@ export namespace Prisma {
     dueDate?: DateTimeFilter<"Check"> | Date | string
     status?: StringFilter<"Check"> | string
     customerId?: StringNullableFilter<"Check"> | string | null
+    supplierId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
     createdAt?: DateTimeFilter<"Check"> | Date | string
     updatedAt?: DateTimeFilter<"Check"> | Date | string
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
+    customer?: XOR<CustomerNullableScalarRelationFilter, CustomerWhereInput> | null
+    supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
   }
 
   export type CheckOrderByWithRelationInput = {
@@ -72068,12 +72356,15 @@ export namespace Prisma {
     dueDate?: SortOrder
     status?: SortOrder
     customerId?: SortOrderInput | SortOrder
+    supplierId?: SortOrderInput | SortOrder
     payeeName?: SortOrderInput | SortOrder
     description?: SortOrderInput | SortOrder
     journalEntryId?: SortOrderInput | SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     Tenant?: TenantOrderByWithRelationInput
+    customer?: CustomerOrderByWithRelationInput
+    supplier?: SupplierOrderByWithRelationInput
   }
 
   export type CheckWhereUniqueInput = Prisma.AtLeast<{
@@ -72091,12 +72382,15 @@ export namespace Prisma {
     dueDate?: DateTimeFilter<"Check"> | Date | string
     status?: StringFilter<"Check"> | string
     customerId?: StringNullableFilter<"Check"> | string | null
+    supplierId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
     createdAt?: DateTimeFilter<"Check"> | Date | string
     updatedAt?: DateTimeFilter<"Check"> | Date | string
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
+    customer?: XOR<CustomerNullableScalarRelationFilter, CustomerWhereInput> | null
+    supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
   }, "id">
 
   export type CheckOrderByWithAggregationInput = {
@@ -72111,6 +72405,7 @@ export namespace Prisma {
     dueDate?: SortOrder
     status?: SortOrder
     customerId?: SortOrderInput | SortOrder
+    supplierId?: SortOrderInput | SortOrder
     payeeName?: SortOrderInput | SortOrder
     description?: SortOrderInput | SortOrder
     journalEntryId?: SortOrderInput | SortOrder
@@ -72138,6 +72433,7 @@ export namespace Prisma {
     dueDate?: DateTimeWithAggregatesFilter<"Check"> | Date | string
     status?: StringWithAggregatesFilter<"Check"> | string
     customerId?: StringNullableWithAggregatesFilter<"Check"> | string | null
+    supplierId?: StringNullableWithAggregatesFilter<"Check"> | string | null
     payeeName?: StringNullableWithAggregatesFilter<"Check"> | string | null
     description?: StringNullableWithAggregatesFilter<"Check"> | string | null
     journalEntryId?: StringNullableWithAggregatesFilter<"Check"> | string | null
@@ -72244,7 +72540,7 @@ export namespace Prisma {
     NOT?: OnlinePaymentWhereInput | OnlinePaymentWhereInput[]
     id?: StringFilter<"OnlinePayment"> | string
     tenantId?: StringFilter<"OnlinePayment"> | string
-    invoiceId?: StringFilter<"OnlinePayment"> | string
+    invoiceId?: StringNullableFilter<"OnlinePayment"> | string | null
     customerId?: StringNullableFilter<"OnlinePayment"> | string | null
     amount?: DecimalFilter<"OnlinePayment"> | Decimal | DecimalJsLike | number | string
     authority?: StringNullableFilter<"OnlinePayment"> | string | null
@@ -72259,13 +72555,13 @@ export namespace Prisma {
     updatedAt?: DateTimeFilter<"OnlinePayment"> | Date | string
     installmentId?: StringNullableFilter<"OnlinePayment"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
-    Invoice?: XOR<InvoiceScalarRelationFilter, InvoiceWhereInput>
+    Invoice?: XOR<InvoiceNullableScalarRelationFilter, InvoiceWhereInput> | null
   }
 
   export type OnlinePaymentOrderByWithRelationInput = {
     id?: SortOrder
     tenantId?: SortOrder
-    invoiceId?: SortOrder
+    invoiceId?: SortOrderInput | SortOrder
     customerId?: SortOrderInput | SortOrder
     amount?: SortOrder
     authority?: SortOrderInput | SortOrder
@@ -72289,7 +72585,7 @@ export namespace Prisma {
     OR?: OnlinePaymentWhereInput[]
     NOT?: OnlinePaymentWhereInput | OnlinePaymentWhereInput[]
     tenantId?: StringFilter<"OnlinePayment"> | string
-    invoiceId?: StringFilter<"OnlinePayment"> | string
+    invoiceId?: StringNullableFilter<"OnlinePayment"> | string | null
     customerId?: StringNullableFilter<"OnlinePayment"> | string | null
     amount?: DecimalFilter<"OnlinePayment"> | Decimal | DecimalJsLike | number | string
     authority?: StringNullableFilter<"OnlinePayment"> | string | null
@@ -72304,13 +72600,13 @@ export namespace Prisma {
     updatedAt?: DateTimeFilter<"OnlinePayment"> | Date | string
     installmentId?: StringNullableFilter<"OnlinePayment"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
-    Invoice?: XOR<InvoiceScalarRelationFilter, InvoiceWhereInput>
+    Invoice?: XOR<InvoiceNullableScalarRelationFilter, InvoiceWhereInput> | null
   }, "id">
 
   export type OnlinePaymentOrderByWithAggregationInput = {
     id?: SortOrder
     tenantId?: SortOrder
-    invoiceId?: SortOrder
+    invoiceId?: SortOrderInput | SortOrder
     customerId?: SortOrderInput | SortOrder
     amount?: SortOrder
     authority?: SortOrderInput | SortOrder
@@ -72337,7 +72633,7 @@ export namespace Prisma {
     NOT?: OnlinePaymentScalarWhereWithAggregatesInput | OnlinePaymentScalarWhereWithAggregatesInput[]
     id?: StringWithAggregatesFilter<"OnlinePayment"> | string
     tenantId?: StringWithAggregatesFilter<"OnlinePayment"> | string
-    invoiceId?: StringWithAggregatesFilter<"OnlinePayment"> | string
+    invoiceId?: StringNullableWithAggregatesFilter<"OnlinePayment"> | string | null
     customerId?: StringNullableWithAggregatesFilter<"OnlinePayment"> | string | null
     amount?: DecimalWithAggregatesFilter<"OnlinePayment"> | Decimal | DecimalJsLike | number | string
     authority?: StringNullableWithAggregatesFilter<"OnlinePayment"> | string | null
@@ -73076,6 +73372,7 @@ export namespace Prisma {
     legalForm?: StringNullableFilter<"Supplier"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
     PurchaseInvoices?: PurchaseInvoiceListRelationFilter
+    Checks?: CheckListRelationFilter
   }
 
   export type SupplierOrderByWithRelationInput = {
@@ -73097,6 +73394,7 @@ export namespace Prisma {
     legalForm?: SortOrderInput | SortOrder
     Tenant?: TenantOrderByWithRelationInput
     PurchaseInvoices?: PurchaseInvoiceOrderByRelationAggregateInput
+    Checks?: CheckOrderByRelationAggregateInput
   }
 
   export type SupplierWhereUniqueInput = Prisma.AtLeast<{
@@ -73122,6 +73420,7 @@ export namespace Prisma {
     legalForm?: StringNullableFilter<"Supplier"> | string | null
     Tenant?: XOR<TenantScalarRelationFilter, TenantWhereInput>
     PurchaseInvoices?: PurchaseInvoiceListRelationFilter
+    Checks?: CheckListRelationFilter
   }, "id" | "code_tenantId">
 
   export type SupplierOrderByWithAggregationInput = {
@@ -74278,6 +74577,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -74340,6 +74644,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -74400,6 +74709,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -74462,6 +74776,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -74523,6 +74842,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -74544,6 +74868,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -74566,6 +74895,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -75345,6 +75679,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -75359,6 +75694,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -75370,6 +75706,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -75384,6 +75721,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -75397,6 +75735,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -75408,6 +75747,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -75421,6 +75761,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -75874,6 +76215,7 @@ export namespace Prisma {
     legalForm?: string | null
     Tenant: TenantCreateNestedOneWithoutCustomersInput
     invoices?: InvoiceCreateNestedManyWithoutCustomerInput
+    Checks?: CheckCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerUncheckedCreateInput = {
@@ -75896,6 +76238,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     invoices?: InvoiceUncheckedCreateNestedManyWithoutCustomerInput
+    Checks?: CheckUncheckedCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerUpdateInput = {
@@ -75918,6 +76261,7 @@ export namespace Prisma {
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     Tenant?: TenantUpdateOneRequiredWithoutCustomersNestedInput
     invoices?: InvoiceUpdateManyWithoutCustomerNestedInput
+    Checks?: CheckUpdateManyWithoutCustomerNestedInput
   }
 
   export type CustomerUncheckedUpdateInput = {
@@ -75940,6 +76284,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     invoices?: InvoiceUncheckedUpdateManyWithoutCustomerNestedInput
+    Checks?: CheckUncheckedUpdateManyWithoutCustomerNestedInput
   }
 
   export type CustomerCreateManyInput = {
@@ -77654,13 +77999,14 @@ export namespace Prisma {
     issueDate: Date | string
     dueDate: Date | string
     status?: string
-    customerId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     Tenant: TenantCreateNestedOneWithoutChecksInput
+    customer?: CustomerCreateNestedOneWithoutChecksInput
+    supplier?: SupplierCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateInput = {
@@ -77675,6 +78021,7 @@ export namespace Prisma {
     dueDate: Date | string
     status?: string
     customerId?: string | null
+    supplierId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -77692,13 +78039,14 @@ export namespace Prisma {
     issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
-    customerId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
+    customer?: CustomerUpdateOneWithoutChecksNestedInput
+    supplier?: SupplierUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateInput = {
@@ -77713,6 +78061,7 @@ export namespace Prisma {
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -77732,6 +78081,7 @@ export namespace Prisma {
     dueDate: Date | string
     status?: string
     customerId?: string | null
+    supplierId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -77749,7 +78099,6 @@ export namespace Prisma {
     issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
-    customerId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -77769,6 +78118,7 @@ export namespace Prisma {
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -77900,13 +78250,13 @@ export namespace Prisma {
     updatedAt?: Date | string
     installmentId?: string | null
     Tenant: TenantCreateNestedOneWithoutOnlinePaymentsInput
-    Invoice: InvoiceCreateNestedOneWithoutOnlinePaymentsInput
+    Invoice?: InvoiceCreateNestedOneWithoutOnlinePaymentsInput
   }
 
   export type OnlinePaymentUncheckedCreateInput = {
     id?: string
     tenantId: string
-    invoiceId: string
+    invoiceId?: string | null
     customerId?: string | null
     amount: Decimal | DecimalJsLike | number | string
     authority?: string | null
@@ -77938,13 +78288,13 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     installmentId?: NullableStringFieldUpdateOperationsInput | string | null
     Tenant?: TenantUpdateOneRequiredWithoutOnlinePaymentsNestedInput
-    Invoice?: InvoiceUpdateOneRequiredWithoutOnlinePaymentsNestedInput
+    Invoice?: InvoiceUpdateOneWithoutOnlinePaymentsNestedInput
   }
 
   export type OnlinePaymentUncheckedUpdateInput = {
     id?: StringFieldUpdateOperationsInput | string
     tenantId?: StringFieldUpdateOperationsInput | string
-    invoiceId?: StringFieldUpdateOperationsInput | string
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     authority?: NullableStringFieldUpdateOperationsInput | string | null
@@ -77963,7 +78313,7 @@ export namespace Prisma {
   export type OnlinePaymentCreateManyInput = {
     id?: string
     tenantId: string
-    invoiceId: string
+    invoiceId?: string | null
     customerId?: string | null
     amount: Decimal | DecimalJsLike | number | string
     authority?: string | null
@@ -77999,7 +78349,7 @@ export namespace Prisma {
   export type OnlinePaymentUncheckedUpdateManyInput = {
     id?: StringFieldUpdateOperationsInput | string
     tenantId?: StringFieldUpdateOperationsInput | string
-    invoiceId?: StringFieldUpdateOperationsInput | string
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     authority?: NullableStringFieldUpdateOperationsInput | string | null
@@ -78822,6 +79172,7 @@ export namespace Prisma {
     legalForm?: string | null
     Tenant: TenantCreateNestedOneWithoutSuppliersInput
     PurchaseInvoices?: PurchaseInvoiceCreateNestedManyWithoutSupplierInput
+    Checks?: CheckCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierUncheckedCreateInput = {
@@ -78842,6 +79193,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     PurchaseInvoices?: PurchaseInvoiceUncheckedCreateNestedManyWithoutSupplierInput
+    Checks?: CheckUncheckedCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierUpdateInput = {
@@ -78862,6 +79214,7 @@ export namespace Prisma {
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     Tenant?: TenantUpdateOneRequiredWithoutSuppliersNestedInput
     PurchaseInvoices?: PurchaseInvoiceUpdateManyWithoutSupplierNestedInput
+    Checks?: CheckUpdateManyWithoutSupplierNestedInput
   }
 
   export type SupplierUncheckedUpdateInput = {
@@ -78882,6 +79235,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     PurchaseInvoices?: PurchaseInvoiceUncheckedUpdateManyWithoutSupplierNestedInput
+    Checks?: CheckUncheckedUpdateManyWithoutSupplierNestedInput
   }
 
   export type SupplierCreateManyInput = {
@@ -80217,6 +80571,22 @@ export namespace Prisma {
     not?: NestedDateTimeFilter<$PrismaModel> | Date | string
   }
 
+  export type BoolFilter<$PrismaModel = never> = {
+    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
+    not?: NestedBoolFilter<$PrismaModel> | boolean
+  }
+
+  export type DecimalNullableFilter<$PrismaModel = never> = {
+    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
+    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    not?: NestedDecimalNullableFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
+  }
+
   export type PlanTierNullableScalarRelationFilter = {
     is?: PlanTierWhereInput | null
     isNot?: PlanTierWhereInput | null
@@ -80622,6 +80992,11 @@ export namespace Prisma {
     planTierId?: SortOrder
     billingCycle?: SortOrder
     expiresAt?: SortOrder
+    trialStartAt?: SortOrder
+    trialEndAt?: SortOrder
+    isPaid?: SortOrder
+    paidAt?: SortOrder
+    discountApplied?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     soldAt?: SortOrder
@@ -80631,6 +81006,7 @@ export namespace Prisma {
 
   export type TenantAvgOrderByAggregateInput = {
     planTierId?: SortOrder
+    discountApplied?: SortOrder
   }
 
   export type TenantMaxOrderByAggregateInput = {
@@ -80648,6 +81024,11 @@ export namespace Prisma {
     planTierId?: SortOrder
     billingCycle?: SortOrder
     expiresAt?: SortOrder
+    trialStartAt?: SortOrder
+    trialEndAt?: SortOrder
+    isPaid?: SortOrder
+    paidAt?: SortOrder
+    discountApplied?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     soldAt?: SortOrder
@@ -80670,6 +81051,11 @@ export namespace Prisma {
     planTierId?: SortOrder
     billingCycle?: SortOrder
     expiresAt?: SortOrder
+    trialStartAt?: SortOrder
+    trialEndAt?: SortOrder
+    isPaid?: SortOrder
+    paidAt?: SortOrder
+    discountApplied?: SortOrder
     createdAt?: SortOrder
     updatedAt?: SortOrder
     soldAt?: SortOrder
@@ -80679,6 +81065,7 @@ export namespace Prisma {
 
   export type TenantSumOrderByAggregateInput = {
     planTierId?: SortOrder
+    discountApplied?: SortOrder
   }
 
   export type StringWithAggregatesFilter<$PrismaModel = never> = {
@@ -80761,9 +81148,28 @@ export namespace Prisma {
     _max?: NestedDateTimeFilter<$PrismaModel>
   }
 
-  export type BoolFilter<$PrismaModel = never> = {
+  export type BoolWithAggregatesFilter<$PrismaModel = never> = {
     equals?: boolean | BooleanFieldRefInput<$PrismaModel>
-    not?: NestedBoolFilter<$PrismaModel> | boolean
+    not?: NestedBoolWithAggregatesFilter<$PrismaModel> | boolean
+    _count?: NestedIntFilter<$PrismaModel>
+    _min?: NestedBoolFilter<$PrismaModel>
+    _max?: NestedBoolFilter<$PrismaModel>
+  }
+
+  export type DecimalNullableWithAggregatesFilter<$PrismaModel = never> = {
+    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
+    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    not?: NestedDecimalNullableWithAggregatesFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
+    _count?: NestedIntNullableFilter<$PrismaModel>
+    _avg?: NestedDecimalNullableFilter<$PrismaModel>
+    _sum?: NestedDecimalNullableFilter<$PrismaModel>
+    _min?: NestedDecimalNullableFilter<$PrismaModel>
+    _max?: NestedDecimalNullableFilter<$PrismaModel>
   }
 
   export type IntFilter<$PrismaModel = never> = {
@@ -80833,14 +81239,6 @@ export namespace Prisma {
 
   export type OtpCodeSumOrderByAggregateInput = {
     attemptCount?: SortOrder
-  }
-
-  export type BoolWithAggregatesFilter<$PrismaModel = never> = {
-    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
-    not?: NestedBoolWithAggregatesFilter<$PrismaModel> | boolean
-    _count?: NestedIntFilter<$PrismaModel>
-    _min?: NestedBoolFilter<$PrismaModel>
-    _max?: NestedBoolFilter<$PrismaModel>
   }
 
   export type IntWithAggregatesFilter<$PrismaModel = never> = {
@@ -81252,17 +81650,13 @@ export namespace Prisma {
     isNot?: PlanTierWhereInput
   }
 
-  export type PlanPricePlanTierIdBillingCycleCompoundUniqueInput = {
-    planTierId: number
-    billingCycle: string
-  }
-
   export type PlanPriceCountOrderByAggregateInput = {
     id?: SortOrder
     planTierId?: SortOrder
     billingCycle?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrder
     discountPercent?: SortOrder
     isActive?: SortOrder
     isPopular?: SortOrder
@@ -81275,6 +81669,7 @@ export namespace Prisma {
     planTierId?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrder
     discountPercent?: SortOrder
   }
 
@@ -81284,6 +81679,7 @@ export namespace Prisma {
     billingCycle?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrder
     discountPercent?: SortOrder
     isActive?: SortOrder
     isPopular?: SortOrder
@@ -81297,6 +81693,7 @@ export namespace Prisma {
     billingCycle?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrder
     discountPercent?: SortOrder
     isActive?: SortOrder
     isPopular?: SortOrder
@@ -81309,6 +81706,7 @@ export namespace Prisma {
     planTierId?: SortOrder
     durationDays?: SortOrder
     price?: SortOrder
+    earlyBirdPrice?: SortOrder
     discountPercent?: SortOrder
   }
 
@@ -82582,6 +82980,11 @@ export namespace Prisma {
     recordCount?: SortOrder
   }
 
+  export type SupplierNullableScalarRelationFilter = {
+    is?: SupplierWhereInput | null
+    isNot?: SupplierWhereInput | null
+  }
+
   export type CheckCountOrderByAggregateInput = {
     id?: SortOrder
     tenantId?: SortOrder
@@ -82594,6 +82997,7 @@ export namespace Prisma {
     dueDate?: SortOrder
     status?: SortOrder
     customerId?: SortOrder
+    supplierId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -82617,6 +83021,7 @@ export namespace Prisma {
     dueDate?: SortOrder
     status?: SortOrder
     customerId?: SortOrder
+    supplierId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -82636,6 +83041,7 @@ export namespace Prisma {
     dueDate?: SortOrder
     status?: SortOrder
     customerId?: SortOrder
+    supplierId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -83243,11 +83649,6 @@ export namespace Prisma {
     currentBalance?: SortOrder
   }
 
-  export type SupplierNullableScalarRelationFilter = {
-    is?: SupplierWhereInput | null
-    isNot?: SupplierWhereInput | null
-  }
-
   export type JournalEntryNullableScalarRelationFilter = {
     is?: JournalEntryWhereInput | null
     isNot?: JournalEntryWhereInput | null
@@ -83724,17 +84125,6 @@ export namespace Prisma {
     createdAt?: SortOrder
   }
 
-  export type DecimalNullableFilter<$PrismaModel = never> = {
-    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
-    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    not?: NestedDecimalNullableFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
-  }
-
   export type AccountNullableScalarRelationFilter = {
     is?: AccountWhereInput | null
     isNot?: AccountWhereInput | null
@@ -83796,22 +84186,6 @@ export namespace Prisma {
   export type InitialBalanceSumOrderByAggregateInput = {
     amount?: SortOrder
     quantity?: SortOrder
-  }
-
-  export type DecimalNullableWithAggregatesFilter<$PrismaModel = never> = {
-    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
-    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    not?: NestedDecimalNullableWithAggregatesFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
-    _count?: NestedIntNullableFilter<$PrismaModel>
-    _avg?: NestedDecimalNullableFilter<$PrismaModel>
-    _sum?: NestedDecimalNullableFilter<$PrismaModel>
-    _min?: NestedDecimalNullableFilter<$PrismaModel>
-    _max?: NestedDecimalNullableFilter<$PrismaModel>
   }
 
   export type AdminUserCountOrderByAggregateInput = {
@@ -84505,6 +84879,18 @@ export namespace Prisma {
 
   export type DateTimeFieldUpdateOperationsInput = {
     set?: Date | string
+  }
+
+  export type BoolFieldUpdateOperationsInput = {
+    set?: boolean
+  }
+
+  export type NullableDecimalFieldUpdateOperationsInput = {
+    set?: Decimal | DecimalJsLike | number | string | null
+    increment?: Decimal | DecimalJsLike | number | string
+    decrement?: Decimal | DecimalJsLike | number | string
+    multiply?: Decimal | DecimalJsLike | number | string
+    divide?: Decimal | DecimalJsLike | number | string
   }
 
   export type PlanTierUpdateOneWithoutTenantsNestedInput = {
@@ -85607,10 +85993,6 @@ export namespace Prisma {
     connect?: TenantWhereUniqueInput
   }
 
-  export type BoolFieldUpdateOperationsInput = {
-    set?: boolean
-  }
-
   export type IntFieldUpdateOperationsInput = {
     set?: number
     increment?: number
@@ -86444,11 +86826,25 @@ export namespace Prisma {
     connect?: InvoiceWhereUniqueInput | InvoiceWhereUniqueInput[]
   }
 
+  export type CheckCreateNestedManyWithoutCustomerInput = {
+    create?: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput> | CheckCreateWithoutCustomerInput[] | CheckUncheckedCreateWithoutCustomerInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutCustomerInput | CheckCreateOrConnectWithoutCustomerInput[]
+    createMany?: CheckCreateManyCustomerInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+  }
+
   export type InvoiceUncheckedCreateNestedManyWithoutCustomerInput = {
     create?: XOR<InvoiceCreateWithoutCustomerInput, InvoiceUncheckedCreateWithoutCustomerInput> | InvoiceCreateWithoutCustomerInput[] | InvoiceUncheckedCreateWithoutCustomerInput[]
     connectOrCreate?: InvoiceCreateOrConnectWithoutCustomerInput | InvoiceCreateOrConnectWithoutCustomerInput[]
     createMany?: InvoiceCreateManyCustomerInputEnvelope
     connect?: InvoiceWhereUniqueInput | InvoiceWhereUniqueInput[]
+  }
+
+  export type CheckUncheckedCreateNestedManyWithoutCustomerInput = {
+    create?: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput> | CheckCreateWithoutCustomerInput[] | CheckUncheckedCreateWithoutCustomerInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutCustomerInput | CheckCreateOrConnectWithoutCustomerInput[]
+    createMany?: CheckCreateManyCustomerInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
   }
 
   export type TenantUpdateOneRequiredWithoutCustomersNestedInput = {
@@ -86473,6 +86869,20 @@ export namespace Prisma {
     deleteMany?: InvoiceScalarWhereInput | InvoiceScalarWhereInput[]
   }
 
+  export type CheckUpdateManyWithoutCustomerNestedInput = {
+    create?: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput> | CheckCreateWithoutCustomerInput[] | CheckUncheckedCreateWithoutCustomerInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutCustomerInput | CheckCreateOrConnectWithoutCustomerInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutCustomerInput | CheckUpsertWithWhereUniqueWithoutCustomerInput[]
+    createMany?: CheckCreateManyCustomerInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutCustomerInput | CheckUpdateWithWhereUniqueWithoutCustomerInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutCustomerInput | CheckUpdateManyWithWhereWithoutCustomerInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
+  }
+
   export type InvoiceUncheckedUpdateManyWithoutCustomerNestedInput = {
     create?: XOR<InvoiceCreateWithoutCustomerInput, InvoiceUncheckedCreateWithoutCustomerInput> | InvoiceCreateWithoutCustomerInput[] | InvoiceUncheckedCreateWithoutCustomerInput[]
     connectOrCreate?: InvoiceCreateOrConnectWithoutCustomerInput | InvoiceCreateOrConnectWithoutCustomerInput[]
@@ -86485,6 +86895,20 @@ export namespace Prisma {
     update?: InvoiceUpdateWithWhereUniqueWithoutCustomerInput | InvoiceUpdateWithWhereUniqueWithoutCustomerInput[]
     updateMany?: InvoiceUpdateManyWithWhereWithoutCustomerInput | InvoiceUpdateManyWithWhereWithoutCustomerInput[]
     deleteMany?: InvoiceScalarWhereInput | InvoiceScalarWhereInput[]
+  }
+
+  export type CheckUncheckedUpdateManyWithoutCustomerNestedInput = {
+    create?: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput> | CheckCreateWithoutCustomerInput[] | CheckUncheckedCreateWithoutCustomerInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutCustomerInput | CheckCreateOrConnectWithoutCustomerInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutCustomerInput | CheckUpsertWithWhereUniqueWithoutCustomerInput[]
+    createMany?: CheckCreateManyCustomerInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutCustomerInput | CheckUpdateWithWhereUniqueWithoutCustomerInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutCustomerInput | CheckUpdateManyWithWhereWithoutCustomerInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
   }
 
   export type TenantCreateNestedOneWithoutAccountsInput = {
@@ -87449,12 +87873,44 @@ export namespace Prisma {
     connect?: TenantWhereUniqueInput
   }
 
+  export type CustomerCreateNestedOneWithoutChecksInput = {
+    create?: XOR<CustomerCreateWithoutChecksInput, CustomerUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: CustomerCreateOrConnectWithoutChecksInput
+    connect?: CustomerWhereUniqueInput
+  }
+
+  export type SupplierCreateNestedOneWithoutChecksInput = {
+    create?: XOR<SupplierCreateWithoutChecksInput, SupplierUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: SupplierCreateOrConnectWithoutChecksInput
+    connect?: SupplierWhereUniqueInput
+  }
+
   export type TenantUpdateOneRequiredWithoutChecksNestedInput = {
     create?: XOR<TenantCreateWithoutChecksInput, TenantUncheckedCreateWithoutChecksInput>
     connectOrCreate?: TenantCreateOrConnectWithoutChecksInput
     upsert?: TenantUpsertWithoutChecksInput
     connect?: TenantWhereUniqueInput
     update?: XOR<XOR<TenantUpdateToOneWithWhereWithoutChecksInput, TenantUpdateWithoutChecksInput>, TenantUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type CustomerUpdateOneWithoutChecksNestedInput = {
+    create?: XOR<CustomerCreateWithoutChecksInput, CustomerUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: CustomerCreateOrConnectWithoutChecksInput
+    upsert?: CustomerUpsertWithoutChecksInput
+    disconnect?: CustomerWhereInput | boolean
+    delete?: CustomerWhereInput | boolean
+    connect?: CustomerWhereUniqueInput
+    update?: XOR<XOR<CustomerUpdateToOneWithWhereWithoutChecksInput, CustomerUpdateWithoutChecksInput>, CustomerUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type SupplierUpdateOneWithoutChecksNestedInput = {
+    create?: XOR<SupplierCreateWithoutChecksInput, SupplierUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: SupplierCreateOrConnectWithoutChecksInput
+    upsert?: SupplierUpsertWithoutChecksInput
+    disconnect?: SupplierWhereInput | boolean
+    delete?: SupplierWhereInput | boolean
+    connect?: SupplierWhereUniqueInput
+    update?: XOR<XOR<SupplierUpdateToOneWithWhereWithoutChecksInput, SupplierUpdateWithoutChecksInput>, SupplierUncheckedUpdateWithoutChecksInput>
   }
 
   export type TenantCreateNestedOneWithoutFiscalYearsInput = {
@@ -87533,10 +87989,12 @@ export namespace Prisma {
     update?: XOR<XOR<TenantUpdateToOneWithWhereWithoutOnlinePaymentsInput, TenantUpdateWithoutOnlinePaymentsInput>, TenantUncheckedUpdateWithoutOnlinePaymentsInput>
   }
 
-  export type InvoiceUpdateOneRequiredWithoutOnlinePaymentsNestedInput = {
+  export type InvoiceUpdateOneWithoutOnlinePaymentsNestedInput = {
     create?: XOR<InvoiceCreateWithoutOnlinePaymentsInput, InvoiceUncheckedCreateWithoutOnlinePaymentsInput>
     connectOrCreate?: InvoiceCreateOrConnectWithoutOnlinePaymentsInput
     upsert?: InvoiceUpsertWithoutOnlinePaymentsInput
+    disconnect?: InvoiceWhereInput | boolean
+    delete?: InvoiceWhereInput | boolean
     connect?: InvoiceWhereUniqueInput
     update?: XOR<XOR<InvoiceUpdateToOneWithWhereWithoutOnlinePaymentsInput, InvoiceUpdateWithoutOnlinePaymentsInput>, InvoiceUncheckedUpdateWithoutOnlinePaymentsInput>
   }
@@ -87878,11 +88336,25 @@ export namespace Prisma {
     connect?: PurchaseInvoiceWhereUniqueInput | PurchaseInvoiceWhereUniqueInput[]
   }
 
+  export type CheckCreateNestedManyWithoutSupplierInput = {
+    create?: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput> | CheckCreateWithoutSupplierInput[] | CheckUncheckedCreateWithoutSupplierInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutSupplierInput | CheckCreateOrConnectWithoutSupplierInput[]
+    createMany?: CheckCreateManySupplierInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+  }
+
   export type PurchaseInvoiceUncheckedCreateNestedManyWithoutSupplierInput = {
     create?: XOR<PurchaseInvoiceCreateWithoutSupplierInput, PurchaseInvoiceUncheckedCreateWithoutSupplierInput> | PurchaseInvoiceCreateWithoutSupplierInput[] | PurchaseInvoiceUncheckedCreateWithoutSupplierInput[]
     connectOrCreate?: PurchaseInvoiceCreateOrConnectWithoutSupplierInput | PurchaseInvoiceCreateOrConnectWithoutSupplierInput[]
     createMany?: PurchaseInvoiceCreateManySupplierInputEnvelope
     connect?: PurchaseInvoiceWhereUniqueInput | PurchaseInvoiceWhereUniqueInput[]
+  }
+
+  export type CheckUncheckedCreateNestedManyWithoutSupplierInput = {
+    create?: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput> | CheckCreateWithoutSupplierInput[] | CheckUncheckedCreateWithoutSupplierInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutSupplierInput | CheckCreateOrConnectWithoutSupplierInput[]
+    createMany?: CheckCreateManySupplierInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
   }
 
   export type TenantUpdateOneRequiredWithoutSuppliersNestedInput = {
@@ -87907,6 +88379,20 @@ export namespace Prisma {
     deleteMany?: PurchaseInvoiceScalarWhereInput | PurchaseInvoiceScalarWhereInput[]
   }
 
+  export type CheckUpdateManyWithoutSupplierNestedInput = {
+    create?: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput> | CheckCreateWithoutSupplierInput[] | CheckUncheckedCreateWithoutSupplierInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutSupplierInput | CheckCreateOrConnectWithoutSupplierInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutSupplierInput | CheckUpsertWithWhereUniqueWithoutSupplierInput[]
+    createMany?: CheckCreateManySupplierInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutSupplierInput | CheckUpdateWithWhereUniqueWithoutSupplierInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutSupplierInput | CheckUpdateManyWithWhereWithoutSupplierInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
+  }
+
   export type PurchaseInvoiceUncheckedUpdateManyWithoutSupplierNestedInput = {
     create?: XOR<PurchaseInvoiceCreateWithoutSupplierInput, PurchaseInvoiceUncheckedCreateWithoutSupplierInput> | PurchaseInvoiceCreateWithoutSupplierInput[] | PurchaseInvoiceUncheckedCreateWithoutSupplierInput[]
     connectOrCreate?: PurchaseInvoiceCreateOrConnectWithoutSupplierInput | PurchaseInvoiceCreateOrConnectWithoutSupplierInput[]
@@ -87919,6 +88405,20 @@ export namespace Prisma {
     update?: PurchaseInvoiceUpdateWithWhereUniqueWithoutSupplierInput | PurchaseInvoiceUpdateWithWhereUniqueWithoutSupplierInput[]
     updateMany?: PurchaseInvoiceUpdateManyWithWhereWithoutSupplierInput | PurchaseInvoiceUpdateManyWithWhereWithoutSupplierInput[]
     deleteMany?: PurchaseInvoiceScalarWhereInput | PurchaseInvoiceScalarWhereInput[]
+  }
+
+  export type CheckUncheckedUpdateManyWithoutSupplierNestedInput = {
+    create?: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput> | CheckCreateWithoutSupplierInput[] | CheckUncheckedCreateWithoutSupplierInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutSupplierInput | CheckCreateOrConnectWithoutSupplierInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutSupplierInput | CheckUpsertWithWhereUniqueWithoutSupplierInput[]
+    createMany?: CheckCreateManySupplierInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutSupplierInput | CheckUpdateWithWhereUniqueWithoutSupplierInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutSupplierInput | CheckUpdateManyWithWhereWithoutSupplierInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
   }
 
   export type TenantCreateNestedOneWithoutPurchaseInvoicesInput = {
@@ -88371,14 +88871,6 @@ export namespace Prisma {
     connect?: JournalEntryWhereUniqueInput
   }
 
-  export type NullableDecimalFieldUpdateOperationsInput = {
-    set?: Decimal | DecimalJsLike | number | string | null
-    increment?: Decimal | DecimalJsLike | number | string
-    decrement?: Decimal | DecimalJsLike | number | string
-    multiply?: Decimal | DecimalJsLike | number | string
-    divide?: Decimal | DecimalJsLike | number | string
-  }
-
   export type TenantUpdateOneRequiredWithoutInitialBalancesNestedInput = {
     create?: XOR<TenantCreateWithoutInitialBalancesInput, TenantUncheckedCreateWithoutInitialBalancesInput>
     connectOrCreate?: TenantCreateOrConnectWithoutInitialBalancesInput
@@ -88556,6 +89048,22 @@ export namespace Prisma {
     not?: NestedDateTimeFilter<$PrismaModel> | Date | string
   }
 
+  export type NestedBoolFilter<$PrismaModel = never> = {
+    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
+    not?: NestedBoolFilter<$PrismaModel> | boolean
+  }
+
+  export type NestedDecimalNullableFilter<$PrismaModel = never> = {
+    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
+    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    not?: NestedDecimalNullableFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
+  }
+
   export type NestedStringWithAggregatesFilter<$PrismaModel = never> = {
     equals?: string | StringFieldRefInput<$PrismaModel>
     in?: string[] | ListStringFieldRefInput<$PrismaModel>
@@ -88656,17 +89164,28 @@ export namespace Prisma {
     _max?: NestedDateTimeFilter<$PrismaModel>
   }
 
-  export type NestedBoolFilter<$PrismaModel = never> = {
-    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
-    not?: NestedBoolFilter<$PrismaModel> | boolean
-  }
-
   export type NestedBoolWithAggregatesFilter<$PrismaModel = never> = {
     equals?: boolean | BooleanFieldRefInput<$PrismaModel>
     not?: NestedBoolWithAggregatesFilter<$PrismaModel> | boolean
     _count?: NestedIntFilter<$PrismaModel>
     _min?: NestedBoolFilter<$PrismaModel>
     _max?: NestedBoolFilter<$PrismaModel>
+  }
+
+  export type NestedDecimalNullableWithAggregatesFilter<$PrismaModel = never> = {
+    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
+    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
+    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
+    not?: NestedDecimalNullableWithAggregatesFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
+    _count?: NestedIntNullableFilter<$PrismaModel>
+    _avg?: NestedDecimalNullableFilter<$PrismaModel>
+    _sum?: NestedDecimalNullableFilter<$PrismaModel>
+    _min?: NestedDecimalNullableFilter<$PrismaModel>
+    _max?: NestedDecimalNullableFilter<$PrismaModel>
   }
 
   export type NestedIntWithAggregatesFilter<$PrismaModel = never> = {
@@ -88737,33 +89256,6 @@ export namespace Prisma {
     _sum?: NestedFloatFilter<$PrismaModel>
     _min?: NestedFloatFilter<$PrismaModel>
     _max?: NestedFloatFilter<$PrismaModel>
-  }
-
-  export type NestedDecimalNullableFilter<$PrismaModel = never> = {
-    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
-    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    not?: NestedDecimalNullableFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
-  }
-
-  export type NestedDecimalNullableWithAggregatesFilter<$PrismaModel = never> = {
-    equals?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel> | null
-    in?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    notIn?: Decimal[] | DecimalJsLike[] | number[] | string[] | ListDecimalFieldRefInput<$PrismaModel> | null
-    lt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    lte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gt?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    gte?: Decimal | DecimalJsLike | number | string | DecimalFieldRefInput<$PrismaModel>
-    not?: NestedDecimalNullableWithAggregatesFilter<$PrismaModel> | Decimal | DecimalJsLike | number | string | null
-    _count?: NestedIntNullableFilter<$PrismaModel>
-    _avg?: NestedDecimalNullableFilter<$PrismaModel>
-    _sum?: NestedDecimalNullableFilter<$PrismaModel>
-    _min?: NestedDecimalNullableFilter<$PrismaModel>
-    _max?: NestedDecimalNullableFilter<$PrismaModel>
   }
 
   export type PlanTierCreateWithoutTenantsInput = {
@@ -89183,6 +89675,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     invoices?: InvoiceCreateNestedManyWithoutCustomerInput
+    Checks?: CheckCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerUncheckedCreateWithoutTenantInput = {
@@ -89204,6 +89697,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     invoices?: InvoiceUncheckedCreateNestedManyWithoutCustomerInput
+    Checks?: CheckUncheckedCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerCreateOrConnectWithoutTenantInput = {
@@ -89706,12 +90200,13 @@ export namespace Prisma {
     issueDate: Date | string
     dueDate: Date | string
     status?: string
-    customerId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
     createdAt?: Date | string
     updatedAt?: Date | string
+    customer?: CustomerCreateNestedOneWithoutChecksInput
+    supplier?: SupplierCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateWithoutTenantInput = {
@@ -89725,6 +90220,7 @@ export namespace Prisma {
     dueDate: Date | string
     status?: string
     customerId?: string | null
+    supplierId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -89797,12 +90293,12 @@ export namespace Prisma {
     createdAt?: Date | string
     updatedAt?: Date | string
     installmentId?: string | null
-    Invoice: InvoiceCreateNestedOneWithoutOnlinePaymentsInput
+    Invoice?: InvoiceCreateNestedOneWithoutOnlinePaymentsInput
   }
 
   export type OnlinePaymentUncheckedCreateWithoutTenantInput = {
     id?: string
-    invoiceId: string
+    invoiceId?: string | null
     customerId?: string | null
     amount: Decimal | DecimalJsLike | number | string
     authority?: string | null
@@ -90123,6 +90619,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     PurchaseInvoices?: PurchaseInvoiceCreateNestedManyWithoutSupplierInput
+    Checks?: CheckCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierUncheckedCreateWithoutTenantInput = {
@@ -90142,6 +90639,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     PurchaseInvoices?: PurchaseInvoiceUncheckedCreateNestedManyWithoutSupplierInput
+    Checks?: CheckUncheckedCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierCreateOrConnectWithoutTenantInput = {
@@ -91312,6 +91810,7 @@ export namespace Prisma {
     dueDate?: DateTimeFilter<"Check"> | Date | string
     status?: StringFilter<"Check"> | string
     customerId?: StringNullableFilter<"Check"> | string | null
+    supplierId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
@@ -91375,7 +91874,7 @@ export namespace Prisma {
     NOT?: OnlinePaymentScalarWhereInput | OnlinePaymentScalarWhereInput[]
     id?: StringFilter<"OnlinePayment"> | string
     tenantId?: StringFilter<"OnlinePayment"> | string
-    invoiceId?: StringFilter<"OnlinePayment"> | string
+    invoiceId?: StringNullableFilter<"OnlinePayment"> | string | null
     customerId?: StringNullableFilter<"OnlinePayment"> | string | null
     amount?: DecimalFilter<"OnlinePayment"> | Decimal | DecimalJsLike | number | string
     authority?: StringNullableFilter<"OnlinePayment"> | string | null
@@ -91978,6 +92477,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92039,6 +92543,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92114,6 +92623,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92175,6 +92689,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92234,6 +92753,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92295,6 +92819,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92370,6 +92899,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92431,6 +92965,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92538,6 +93077,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92599,6 +93143,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92674,6 +93223,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92735,6 +93289,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -92821,6 +93380,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92882,6 +93446,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -92990,6 +93559,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93051,6 +93625,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93189,6 +93768,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93250,6 +93834,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93392,6 +93981,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93453,6 +94047,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93512,6 +94111,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93573,6 +94177,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93648,6 +94257,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93709,6 +94323,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -93758,6 +94377,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -93770,6 +94390,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -93801,6 +94422,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93861,6 +94487,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -93942,6 +94573,7 @@ export namespace Prisma {
     billingCycle?: StringFilter<"PlanPrice"> | string
     durationDays?: IntFilter<"PlanPrice"> | number
     price?: IntFilter<"PlanPrice"> | number
+    earlyBirdPrice?: IntNullableFilter<"PlanPrice"> | number | null
     discountPercent?: IntFilter<"PlanPrice"> | number
     isActive?: BoolFilter<"PlanPrice"> | boolean
     isPopular?: BoolFilter<"PlanPrice"> | boolean
@@ -93983,6 +94615,11 @@ export namespace Prisma {
     planTierId?: IntNullableFilter<"Tenant"> | number | null
     billingCycle?: StringFilter<"Tenant"> | string
     expiresAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    trialStartAt?: DateTimeFilter<"Tenant"> | Date | string
+    trialEndAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    isPaid?: BoolFilter<"Tenant"> | boolean
+    paidAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
+    discountApplied?: DecimalNullableFilter<"Tenant"> | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFilter<"Tenant"> | Date | string
     updatedAt?: DateTimeFilter<"Tenant"> | Date | string
     soldAt?: DateTimeNullableFilter<"Tenant"> | Date | string | null
@@ -94090,6 +94727,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -94151,6 +94793,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -94402,6 +95049,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -94463,6 +95115,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -94586,6 +95243,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -94647,6 +95309,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -94956,6 +95623,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95017,6 +95689,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95251,6 +95928,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -95312,6 +95994,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -95443,6 +96130,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95504,6 +96196,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95579,6 +96276,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -95640,6 +96342,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -95771,6 +96478,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95832,6 +96544,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -95907,6 +96624,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -95968,6 +96690,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -96104,6 +96831,54 @@ export namespace Prisma {
     skipDuplicates?: boolean
   }
 
+  export type CheckCreateWithoutCustomerInput = {
+    id?: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    Tenant: TenantCreateNestedOneWithoutChecksInput
+    supplier?: SupplierCreateNestedOneWithoutChecksInput
+  }
+
+  export type CheckUncheckedCreateWithoutCustomerInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    supplierId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+  }
+
+  export type CheckCreateOrConnectWithoutCustomerInput = {
+    where: CheckWhereUniqueInput
+    create: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput>
+  }
+
+  export type CheckCreateManyCustomerInputEnvelope = {
+    data: CheckCreateManyCustomerInput | CheckCreateManyCustomerInput[]
+    skipDuplicates?: boolean
+  }
+
   export type TenantUpsertWithoutCustomersInput = {
     update: XOR<TenantUpdateWithoutCustomersInput, TenantUncheckedUpdateWithoutCustomersInput>
     create: XOR<TenantCreateWithoutCustomersInput, TenantUncheckedCreateWithoutCustomersInput>
@@ -96129,6 +96904,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -96190,6 +96970,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -96251,6 +97036,22 @@ export namespace Prisma {
     data: XOR<InvoiceUpdateManyMutationInput, InvoiceUncheckedUpdateManyWithoutCustomerInput>
   }
 
+  export type CheckUpsertWithWhereUniqueWithoutCustomerInput = {
+    where: CheckWhereUniqueInput
+    update: XOR<CheckUpdateWithoutCustomerInput, CheckUncheckedUpdateWithoutCustomerInput>
+    create: XOR<CheckCreateWithoutCustomerInput, CheckUncheckedCreateWithoutCustomerInput>
+  }
+
+  export type CheckUpdateWithWhereUniqueWithoutCustomerInput = {
+    where: CheckWhereUniqueInput
+    data: XOR<CheckUpdateWithoutCustomerInput, CheckUncheckedUpdateWithoutCustomerInput>
+  }
+
+  export type CheckUpdateManyWithWhereWithoutCustomerInput = {
+    where: CheckScalarWhereInput
+    data: XOR<CheckUpdateManyMutationInput, CheckUncheckedUpdateManyWithoutCustomerInput>
+  }
+
   export type TenantCreateWithoutAccountsInput = {
     id: string
     subDomain: string
@@ -96265,6 +97066,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -96326,6 +97132,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -96621,6 +97432,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -96682,6 +97498,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -96805,6 +97626,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -96866,6 +97692,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -96935,6 +97766,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     Tenant: TenantCreateNestedOneWithoutCustomersInput
+    Checks?: CheckCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerUncheckedCreateWithoutInvoicesInput = {
@@ -96956,6 +97788,7 @@ export namespace Prisma {
     economicCode?: string | null
     companyName?: string | null
     legalForm?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutCustomerInput
   }
 
   export type CustomerCreateOrConnectWithoutInvoicesInput = {
@@ -97275,6 +98108,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -97336,6 +98174,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -97411,6 +98254,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     Tenant?: TenantUpdateOneRequiredWithoutCustomersNestedInput
+    Checks?: CheckUpdateManyWithoutCustomerNestedInput
   }
 
   export type CustomerUncheckedUpdateWithoutInvoicesInput = {
@@ -97432,6 +98276,7 @@ export namespace Prisma {
     economicCode?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutCustomerNestedInput
   }
 
   export type StoreUserUpsertWithoutInvoicesInput = {
@@ -97844,6 +98689,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -97905,6 +98755,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -98061,6 +98916,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -98122,6 +98982,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -98268,6 +99133,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -98329,6 +99199,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -98527,6 +99402,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -98588,6 +99468,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -98750,6 +99635,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -98811,6 +99701,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -98935,6 +99830,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -98996,6 +99896,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -99143,6 +100048,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -99204,6 +100114,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -99541,6 +100456,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -99602,6 +100522,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -99895,6 +100820,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -99956,6 +100886,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100031,6 +100966,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100092,6 +101032,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100151,6 +101096,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100212,6 +101162,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100287,6 +101242,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100348,6 +101308,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100455,6 +101420,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100516,6 +101486,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100607,6 +101582,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100668,6 +101648,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -100865,6 +101850,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -100926,6 +101916,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101151,6 +102146,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101212,6 +102212,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101271,6 +102276,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101332,6 +102342,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101407,6 +102422,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101468,6 +102488,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101527,6 +102552,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101588,6 +102618,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101638,6 +102673,100 @@ export namespace Prisma {
     create: XOR<TenantCreateWithoutChecksInput, TenantUncheckedCreateWithoutChecksInput>
   }
 
+  export type CustomerCreateWithoutChecksInput = {
+    id?: string
+    code: string
+    firstName: string
+    lastName: string
+    mobile?: string | null
+    nationalCode?: string | null
+    address?: string | null
+    creditLimit?: Decimal | DecimalJsLike | number | string
+    currentBalance?: Decimal | DecimalJsLike | number | string
+    isBlacklisted?: boolean
+    createdAt?: Date | string
+    lastPurchaseAt?: Date | string | null
+    portalToken?: string | null
+    personType?: string
+    economicCode?: string | null
+    companyName?: string | null
+    legalForm?: string | null
+    Tenant: TenantCreateNestedOneWithoutCustomersInput
+    invoices?: InvoiceCreateNestedManyWithoutCustomerInput
+  }
+
+  export type CustomerUncheckedCreateWithoutChecksInput = {
+    id?: string
+    code: string
+    firstName: string
+    lastName: string
+    mobile?: string | null
+    nationalCode?: string | null
+    address?: string | null
+    creditLimit?: Decimal | DecimalJsLike | number | string
+    currentBalance?: Decimal | DecimalJsLike | number | string
+    isBlacklisted?: boolean
+    tenantId: string
+    createdAt?: Date | string
+    lastPurchaseAt?: Date | string | null
+    portalToken?: string | null
+    personType?: string
+    economicCode?: string | null
+    companyName?: string | null
+    legalForm?: string | null
+    invoices?: InvoiceUncheckedCreateNestedManyWithoutCustomerInput
+  }
+
+  export type CustomerCreateOrConnectWithoutChecksInput = {
+    where: CustomerWhereUniqueInput
+    create: XOR<CustomerCreateWithoutChecksInput, CustomerUncheckedCreateWithoutChecksInput>
+  }
+
+  export type SupplierCreateWithoutChecksInput = {
+    id?: string
+    code: string
+    name: string
+    mobile?: string | null
+    nationalCode?: string | null
+    address?: string | null
+    creditLimit?: Decimal | DecimalJsLike | number | string
+    currentBalance?: Decimal | DecimalJsLike | number | string
+    isActive?: boolean
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    personType?: string
+    economicCode?: string | null
+    companyName?: string | null
+    legalForm?: string | null
+    Tenant: TenantCreateNestedOneWithoutSuppliersInput
+    PurchaseInvoices?: PurchaseInvoiceCreateNestedManyWithoutSupplierInput
+  }
+
+  export type SupplierUncheckedCreateWithoutChecksInput = {
+    id?: string
+    tenantId: string
+    code: string
+    name: string
+    mobile?: string | null
+    nationalCode?: string | null
+    address?: string | null
+    creditLimit?: Decimal | DecimalJsLike | number | string
+    currentBalance?: Decimal | DecimalJsLike | number | string
+    isActive?: boolean
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    personType?: string
+    economicCode?: string | null
+    companyName?: string | null
+    legalForm?: string | null
+    PurchaseInvoices?: PurchaseInvoiceUncheckedCreateNestedManyWithoutSupplierInput
+  }
+
+  export type SupplierCreateOrConnectWithoutChecksInput = {
+    where: SupplierWhereUniqueInput
+    create: XOR<SupplierCreateWithoutChecksInput, SupplierUncheckedCreateWithoutChecksInput>
+  }
+
   export type TenantUpsertWithoutChecksInput = {
     update: XOR<TenantUpdateWithoutChecksInput, TenantUncheckedUpdateWithoutChecksInput>
     create: XOR<TenantCreateWithoutChecksInput, TenantUncheckedCreateWithoutChecksInput>
@@ -101663,6 +102792,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101724,6 +102858,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -101769,6 +102908,112 @@ export namespace Prisma {
     FixedAssets?: FixedAssetUncheckedUpdateManyWithoutTenantNestedInput
   }
 
+  export type CustomerUpsertWithoutChecksInput = {
+    update: XOR<CustomerUpdateWithoutChecksInput, CustomerUncheckedUpdateWithoutChecksInput>
+    create: XOR<CustomerCreateWithoutChecksInput, CustomerUncheckedCreateWithoutChecksInput>
+    where?: CustomerWhereInput
+  }
+
+  export type CustomerUpdateToOneWithWhereWithoutChecksInput = {
+    where?: CustomerWhereInput
+    data: XOR<CustomerUpdateWithoutChecksInput, CustomerUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type CustomerUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    code?: StringFieldUpdateOperationsInput | string
+    firstName?: StringFieldUpdateOperationsInput | string
+    lastName?: StringFieldUpdateOperationsInput | string
+    mobile?: NullableStringFieldUpdateOperationsInput | string | null
+    nationalCode?: NullableStringFieldUpdateOperationsInput | string | null
+    address?: NullableStringFieldUpdateOperationsInput | string | null
+    creditLimit?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    currentBalance?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    isBlacklisted?: BoolFieldUpdateOperationsInput | boolean
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    lastPurchaseAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    portalToken?: NullableStringFieldUpdateOperationsInput | string | null
+    personType?: StringFieldUpdateOperationsInput | string
+    economicCode?: NullableStringFieldUpdateOperationsInput | string | null
+    companyName?: NullableStringFieldUpdateOperationsInput | string | null
+    legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    Tenant?: TenantUpdateOneRequiredWithoutCustomersNestedInput
+    invoices?: InvoiceUpdateManyWithoutCustomerNestedInput
+  }
+
+  export type CustomerUncheckedUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    code?: StringFieldUpdateOperationsInput | string
+    firstName?: StringFieldUpdateOperationsInput | string
+    lastName?: StringFieldUpdateOperationsInput | string
+    mobile?: NullableStringFieldUpdateOperationsInput | string | null
+    nationalCode?: NullableStringFieldUpdateOperationsInput | string | null
+    address?: NullableStringFieldUpdateOperationsInput | string | null
+    creditLimit?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    currentBalance?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    isBlacklisted?: BoolFieldUpdateOperationsInput | boolean
+    tenantId?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    lastPurchaseAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    portalToken?: NullableStringFieldUpdateOperationsInput | string | null
+    personType?: StringFieldUpdateOperationsInput | string
+    economicCode?: NullableStringFieldUpdateOperationsInput | string | null
+    companyName?: NullableStringFieldUpdateOperationsInput | string | null
+    legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    invoices?: InvoiceUncheckedUpdateManyWithoutCustomerNestedInput
+  }
+
+  export type SupplierUpsertWithoutChecksInput = {
+    update: XOR<SupplierUpdateWithoutChecksInput, SupplierUncheckedUpdateWithoutChecksInput>
+    create: XOR<SupplierCreateWithoutChecksInput, SupplierUncheckedCreateWithoutChecksInput>
+    where?: SupplierWhereInput
+  }
+
+  export type SupplierUpdateToOneWithWhereWithoutChecksInput = {
+    where?: SupplierWhereInput
+    data: XOR<SupplierUpdateWithoutChecksInput, SupplierUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type SupplierUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    code?: StringFieldUpdateOperationsInput | string
+    name?: StringFieldUpdateOperationsInput | string
+    mobile?: NullableStringFieldUpdateOperationsInput | string | null
+    nationalCode?: NullableStringFieldUpdateOperationsInput | string | null
+    address?: NullableStringFieldUpdateOperationsInput | string | null
+    creditLimit?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    currentBalance?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    isActive?: BoolFieldUpdateOperationsInput | boolean
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    personType?: StringFieldUpdateOperationsInput | string
+    economicCode?: NullableStringFieldUpdateOperationsInput | string | null
+    companyName?: NullableStringFieldUpdateOperationsInput | string | null
+    legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    Tenant?: TenantUpdateOneRequiredWithoutSuppliersNestedInput
+    PurchaseInvoices?: PurchaseInvoiceUpdateManyWithoutSupplierNestedInput
+  }
+
+  export type SupplierUncheckedUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    code?: StringFieldUpdateOperationsInput | string
+    name?: StringFieldUpdateOperationsInput | string
+    mobile?: NullableStringFieldUpdateOperationsInput | string | null
+    nationalCode?: NullableStringFieldUpdateOperationsInput | string | null
+    address?: NullableStringFieldUpdateOperationsInput | string | null
+    creditLimit?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    currentBalance?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    isActive?: BoolFieldUpdateOperationsInput | boolean
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    personType?: StringFieldUpdateOperationsInput | string
+    economicCode?: NullableStringFieldUpdateOperationsInput | string | null
+    companyName?: NullableStringFieldUpdateOperationsInput | string | null
+    legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    PurchaseInvoices?: PurchaseInvoiceUncheckedUpdateManyWithoutSupplierNestedInput
+  }
+
   export type TenantCreateWithoutFiscalYearsInput = {
     id: string
     subDomain: string
@@ -101783,6 +103028,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101844,6 +103094,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -101979,6 +103234,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102040,6 +103300,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102115,6 +103380,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102176,6 +103446,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102332,6 +103607,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102393,6 +103673,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102539,6 +103824,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102600,6 +103890,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102675,6 +103970,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102736,6 +104036,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102795,6 +104100,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102856,6 +104166,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -102931,6 +104246,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -102992,6 +104312,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -103051,6 +104376,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103112,6 +104442,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103187,6 +104522,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -103248,6 +104588,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -103307,6 +104652,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103368,6 +104718,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103443,6 +104798,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -103504,6 +104864,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -103563,6 +104928,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103624,6 +104994,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -103956,6 +105331,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104017,6 +105397,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104179,6 +105564,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -104240,6 +105630,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -104401,6 +105796,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104462,6 +105862,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104619,6 +106024,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -104680,6 +106090,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -104806,6 +106221,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104867,6 +106287,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -104983,6 +106408,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -105044,6 +106474,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -105154,6 +106589,54 @@ export namespace Prisma {
     skipDuplicates?: boolean
   }
 
+  export type CheckCreateWithoutSupplierInput = {
+    id?: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    Tenant: TenantCreateNestedOneWithoutChecksInput
+    customer?: CustomerCreateNestedOneWithoutChecksInput
+  }
+
+  export type CheckUncheckedCreateWithoutSupplierInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    customerId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+  }
+
+  export type CheckCreateOrConnectWithoutSupplierInput = {
+    where: CheckWhereUniqueInput
+    create: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput>
+  }
+
+  export type CheckCreateManySupplierInputEnvelope = {
+    data: CheckCreateManySupplierInput | CheckCreateManySupplierInput[]
+    skipDuplicates?: boolean
+  }
+
   export type TenantUpsertWithoutSuppliersInput = {
     update: XOR<TenantUpdateWithoutSuppliersInput, TenantUncheckedUpdateWithoutSuppliersInput>
     create: XOR<TenantCreateWithoutSuppliersInput, TenantUncheckedCreateWithoutSuppliersInput>
@@ -105179,6 +106662,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -105240,6 +106728,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -105301,6 +106794,22 @@ export namespace Prisma {
     data: XOR<PurchaseInvoiceUpdateManyMutationInput, PurchaseInvoiceUncheckedUpdateManyWithoutSupplierInput>
   }
 
+  export type CheckUpsertWithWhereUniqueWithoutSupplierInput = {
+    where: CheckWhereUniqueInput
+    update: XOR<CheckUpdateWithoutSupplierInput, CheckUncheckedUpdateWithoutSupplierInput>
+    create: XOR<CheckCreateWithoutSupplierInput, CheckUncheckedCreateWithoutSupplierInput>
+  }
+
+  export type CheckUpdateWithWhereUniqueWithoutSupplierInput = {
+    where: CheckWhereUniqueInput
+    data: XOR<CheckUpdateWithoutSupplierInput, CheckUncheckedUpdateWithoutSupplierInput>
+  }
+
+  export type CheckUpdateManyWithWhereWithoutSupplierInput = {
+    where: CheckScalarWhereInput
+    data: XOR<CheckUpdateManyMutationInput, CheckUncheckedUpdateManyWithoutSupplierInput>
+  }
+
   export type TenantCreateWithoutPurchaseInvoicesInput = {
     id: string
     subDomain: string
@@ -105315,6 +106824,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -105376,6 +106890,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -105443,6 +106962,7 @@ export namespace Prisma {
     companyName?: string | null
     legalForm?: string | null
     Tenant: TenantCreateNestedOneWithoutSuppliersInput
+    Checks?: CheckCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierUncheckedCreateWithoutPurchaseInvoicesInput = {
@@ -105462,6 +106982,7 @@ export namespace Prisma {
     economicCode?: string | null
     companyName?: string | null
     legalForm?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutSupplierInput
   }
 
   export type SupplierCreateOrConnectWithoutPurchaseInvoicesInput = {
@@ -105622,6 +107143,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -105683,6 +107209,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -105756,6 +107287,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     Tenant?: TenantUpdateOneRequiredWithoutSuppliersNestedInput
+    Checks?: CheckUpdateManyWithoutSupplierNestedInput
   }
 
   export type SupplierUncheckedUpdateWithoutPurchaseInvoicesInput = {
@@ -105775,6 +107307,7 @@ export namespace Prisma {
     economicCode?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutSupplierNestedInput
   }
 
   export type WarehouseUpsertWithoutPurchaseInvoicesInput = {
@@ -106133,6 +107666,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -106194,6 +107732,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -106340,6 +107883,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -106401,6 +107949,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -106713,6 +108266,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -106774,6 +108332,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -106949,6 +108512,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -107010,6 +108578,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -107101,6 +108674,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -107162,6 +108740,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -107316,6 +108899,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -107377,6 +108965,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -107707,6 +109300,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -107768,6 +109366,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -107984,6 +109587,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -108045,6 +109653,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -108263,6 +109876,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -108324,6 +109942,11 @@ export namespace Prisma {
     planTierId?: number | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -108559,6 +110182,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -108620,6 +110248,11 @@ export namespace Prisma {
     planTierId?: NullableIntFieldUpdateOperationsInput | number | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -109173,6 +110806,7 @@ export namespace Prisma {
     dueDate: Date | string
     status?: string
     customerId?: string | null
+    supplierId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -109196,7 +110830,7 @@ export namespace Prisma {
 
   export type OnlinePaymentCreateManyTenantInput = {
     id?: string
-    invoiceId: string
+    invoiceId?: string | null
     customerId?: string | null
     amount: Decimal | DecimalJsLike | number | string
     authority?: string | null
@@ -109830,6 +111464,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     invoices?: InvoiceUpdateManyWithoutCustomerNestedInput
+    Checks?: CheckUpdateManyWithoutCustomerNestedInput
   }
 
   export type CustomerUncheckedUpdateWithoutTenantInput = {
@@ -109851,6 +111486,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     invoices?: InvoiceUncheckedUpdateManyWithoutCustomerNestedInput
+    Checks?: CheckUncheckedUpdateManyWithoutCustomerNestedInput
   }
 
   export type CustomerUncheckedUpdateManyWithoutTenantInput = {
@@ -110438,12 +112074,13 @@ export namespace Prisma {
     issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
-    customerId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    customer?: CustomerUpdateOneWithoutChecksNestedInput
+    supplier?: SupplierUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateWithoutTenantInput = {
@@ -110457,6 +112094,7 @@ export namespace Prisma {
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -110475,6 +112113,7 @@ export namespace Prisma {
     dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -110541,12 +112180,12 @@ export namespace Prisma {
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     installmentId?: NullableStringFieldUpdateOperationsInput | string | null
-    Invoice?: InvoiceUpdateOneRequiredWithoutOnlinePaymentsNestedInput
+    Invoice?: InvoiceUpdateOneWithoutOnlinePaymentsNestedInput
   }
 
   export type OnlinePaymentUncheckedUpdateWithoutTenantInput = {
     id?: StringFieldUpdateOperationsInput | string
-    invoiceId?: StringFieldUpdateOperationsInput | string
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     authority?: NullableStringFieldUpdateOperationsInput | string | null
@@ -110564,7 +112203,7 @@ export namespace Prisma {
 
   export type OnlinePaymentUncheckedUpdateManyWithoutTenantInput = {
     id?: StringFieldUpdateOperationsInput | string
-    invoiceId?: StringFieldUpdateOperationsInput | string
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     authority?: NullableStringFieldUpdateOperationsInput | string | null
@@ -110818,6 +112457,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     PurchaseInvoices?: PurchaseInvoiceUpdateManyWithoutSupplierNestedInput
+    Checks?: CheckUpdateManyWithoutSupplierNestedInput
   }
 
   export type SupplierUncheckedUpdateWithoutTenantInput = {
@@ -110837,6 +112477,7 @@ export namespace Prisma {
     companyName?: NullableStringFieldUpdateOperationsInput | string | null
     legalForm?: NullableStringFieldUpdateOperationsInput | string | null
     PurchaseInvoices?: PurchaseInvoiceUncheckedUpdateManyWithoutSupplierNestedInput
+    Checks?: CheckUncheckedUpdateManyWithoutSupplierNestedInput
   }
 
   export type SupplierUncheckedUpdateManyWithoutTenantInput = {
@@ -111364,6 +113005,7 @@ export namespace Prisma {
     billingCycle: string
     durationDays: number
     price: number
+    earlyBirdPrice?: number | null
     discountPercent?: number
     isActive?: boolean
     isPopular?: boolean
@@ -111385,6 +113027,11 @@ export namespace Prisma {
     logoUrl?: string | null
     billingCycle?: string
     expiresAt?: Date | string | null
+    trialStartAt?: Date | string
+    trialEndAt?: Date | string | null
+    isPaid?: boolean
+    paidAt?: Date | string | null
+    discountApplied?: Decimal | DecimalJsLike | number | string | null
     createdAt?: Date | string
     updatedAt?: Date | string
     soldAt?: Date | string | null
@@ -111396,6 +113043,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -111408,6 +113056,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -111420,6 +113069,7 @@ export namespace Prisma {
     billingCycle?: StringFieldUpdateOperationsInput | string
     durationDays?: IntFieldUpdateOperationsInput | number
     price?: IntFieldUpdateOperationsInput | number
+    earlyBirdPrice?: NullableIntFieldUpdateOperationsInput | number | null
     discountPercent?: IntFieldUpdateOperationsInput | number
     isActive?: BoolFieldUpdateOperationsInput | boolean
     isPopular?: BoolFieldUpdateOperationsInput | boolean
@@ -111441,6 +113091,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -111501,6 +113156,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -111561,6 +113221,11 @@ export namespace Prisma {
     logoUrl?: NullableStringFieldUpdateOperationsInput | string | null
     billingCycle?: StringFieldUpdateOperationsInput | string
     expiresAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    trialStartAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    trialEndAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    isPaid?: BoolFieldUpdateOperationsInput | boolean
+    paidAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    discountApplied?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     soldAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -112317,6 +113982,25 @@ export namespace Prisma {
     warehouseId?: string | null
   }
 
+  export type CheckCreateManyCustomerInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    supplierId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+  }
+
   export type InvoiceUpdateWithoutCustomerInput = {
     id?: StringFieldUpdateOperationsInput | string
     number?: StringFieldUpdateOperationsInput | string
@@ -112424,6 +114108,63 @@ export namespace Prisma {
     moidianError?: NullableStringFieldUpdateOperationsInput | string | null
     moidianRetryCount?: IntFieldUpdateOperationsInput | number
     warehouseId?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type CheckUpdateWithoutCustomerInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
+    supplier?: SupplierUpdateOneWithoutChecksNestedInput
+  }
+
+  export type CheckUncheckedUpdateWithoutCustomerInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+  }
+
+  export type CheckUncheckedUpdateManyWithoutCustomerInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
   export type InitialBalanceCreateManyAccountInput = {
@@ -113926,6 +115667,25 @@ export namespace Prisma {
     originalPurchaseInvoiceId?: string | null
   }
 
+  export type CheckCreateManySupplierInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    customerId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+  }
+
   export type PurchaseInvoiceUpdateWithoutSupplierInput = {
     id?: StringFieldUpdateOperationsInput | string
     number?: StringFieldUpdateOperationsInput | string
@@ -113998,6 +115758,63 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type CheckUpdateWithoutSupplierInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
+    customer?: CustomerUpdateOneWithoutChecksNestedInput
+  }
+
+  export type CheckUncheckedUpdateWithoutSupplierInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+  }
+
+  export type CheckUncheckedUpdateManyWithoutSupplierInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
   export type PurchaseInvoiceItemCreateManyPurchaseInvoiceInput = {

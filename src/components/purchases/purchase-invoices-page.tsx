@@ -531,12 +531,22 @@ function MobileInvoiceCard({
             <p className="text-[9px] text-gray-400 leading-tight">انبار</p>
             <p className="text-[10px] font-bold text-blue-600 leading-tight mt-0.5 truncate">{inv.warehouse?.name || '—'}</p>
           </div>
-          <div className={`rounded p-1.5 text-center ${inv.paymentType === 'credit' ? 'bg-purple-50' : 'bg-emerald-50'}`}>
-            <p className="text-[9px] text-gray-400 leading-tight">پرداخت</p>
-            <p className={`text-[10px] font-bold leading-tight mt-0.5 ${inv.paymentType === 'credit' ? 'text-purple-600' : 'text-emerald-600'}`}>
-              {inv.paymentType === 'credit' ? 'نسیه' : 'نقدی'}
-            </p>
-          </div>
+      <div className={`rounded p-1.5 text-center ${
+  inv.paymentType === 'credit' ? 'bg-purple-50' :
+  inv.paymentType === 'check' ? 'bg-cyan-50' :
+  'bg-emerald-50'
+}`}>
+  <p className="text-[9px] text-gray-400 leading-tight">پرداخت</p>
+  <p className={`text-[10px] font-bold leading-tight mt-0.5 ${
+    inv.paymentType === 'credit' ? 'text-purple-600' :
+    inv.paymentType === 'check' ? 'text-cyan-600' :
+    'text-emerald-600'
+  }`}>
+    {inv.paymentType === 'credit' ? 'نسیه' :
+     inv.paymentType === 'check' ? '🏛️ چک' :
+     'نقدی'}
+  </p>
+</div>
         </div>
 
         <div className="flex items-center justify-end gap-0.5 pt-2 border-t border-gray-100">
@@ -555,6 +565,8 @@ function MobileInvoiceCard({
         </div>
       </CardContent>
     </Card>
+
+    
   )
 }
 
@@ -573,6 +585,11 @@ const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.on
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  // ★ صفحه‌بندی
+const [page, setPage] = useState(1)
+const [pageSize] = useState(10)
+const [totalCount, setTotalCount] = useState(0)
+const totalPages = Math.ceil(totalCount / pageSize)
 
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
@@ -584,6 +601,12 @@ const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.on
   const [supplierId, setSupplierId] = useState<string>('')
   const [warehouseId, setWarehouseId] = useState<string>('')
   const [paymentType, setPaymentType] = useState<string>('cash')
+  const [checkNumber, setCheckNumber] = useState('')
+const [checkBank, setCheckBank] = useState('')
+const [checkDueDate, setCheckDueDate] = useState<string>(
+  new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+)
+const [checkPayee, setCheckPayee] = useState('')
   const [description, setDescription] = useState('')
   const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [cart, setCart] = useState<CartItem[]>([])
@@ -743,7 +766,7 @@ const loadData = useCallback(async (showLoader = true) => {
     })
 
     const [invRes, supRes, whRes] = await Promise.all([
-      fetch(`/api/purchase-invoices?tenantId=${tid}`, { headers }),
+    fetch(`/api/purchase-invoices?tenantId=${tid}&page=${page}&limit=${pageSize}`, { headers }),
       fetch(`/api/suppliers?tenantId=${tid}&activeOnly=true`, { headers }),
       fetch(`/api/warehouses?tenantId=${tid}`, { headers }),
     ])
@@ -767,8 +790,12 @@ const loadData = useCallback(async (showLoader = true) => {
       warehousesCount: whData.data?.length || 0,
     })
 
-    let serverInvoices: PurchaseInvoice[] = []
-    if (invData.success) serverInvoices = invData.data || []
+  let serverInvoices: PurchaseInvoice[] = []
+if (invData.success) {
+  serverInvoices = invData.data || []
+  // ذخیره تعداد کل برای صفحه‌بندی
+  setTotalCount(invData.pagination?.total || serverInvoices.length)
+}
     
     let serverSuppliers: Supplier[] = []
     if (supData.success) {
@@ -821,9 +848,12 @@ const loadData = useCallback(async (showLoader = true) => {
     setLoading(false)
     console.log('[loadData] Finished, loading = false')
   }
-}, [tenantId, isOnline, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
+}, [tenantId, isOnline, page, pageSize, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // ★ ریست صفحه هنگام تغییر جستجو
+useEffect(() => { setPage(1) }, [search])
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★ همگام‌سازی خودکار
@@ -1134,6 +1164,25 @@ const loadData = useCallback(async (showLoader = true) => {
     return
   }
 
+  // ★ v8.9: اعتبارسنجی اطلاعات چک
+if (paymentType === 'check') {
+  if (!checkNumber.trim()) {
+    toast({ title: 'خطا', description: 'شماره چک الزامی است', variant: 'destructive' })
+    setSubmitting(false)
+    return
+  }
+  if (!checkBank.trim()) {
+    toast({ title: 'خطا', description: 'نام بانک الزامی است', variant: 'destructive' })
+    setSubmitting(false)
+    return
+  }
+  if (!checkDueDate) {
+    toast({ title: 'خطا', description: 'تاریخ سررسید الزامی است', variant: 'destructive' })
+    setSubmitting(false)
+    return
+  }
+}
+
   setSubmitting(true)
   const tid = tenantId || useAppStore.getState().currentTenant?.id
 
@@ -1148,16 +1197,26 @@ const loadData = useCallback(async (showLoader = true) => {
     return
   }
 
-  const payload = {
-    tenantId: tid,
-    supplierId: supplierId === 'none' ? undefined : (supplierId || undefined),
-    warehouseId: warehouseId === 'none' ? undefined : warehouseId,
-    paymentType,
-    description,
-    invoiceDate,
-    items: cart,
-  }
+const payload: any = {
+  tenantId: tid,
+  supplierId: supplierId === 'none' ? undefined : (supplierId || undefined),
+  warehouseId: warehouseId === 'none' ? undefined : warehouseId,
+  paymentType,
+  description,
+  invoiceDate,
+  items: cart,
+}
 
+// ★ v8.9: ارسال اطلاعات چک
+if (paymentType === 'check') {
+  payload.checkData = {
+    checkNumber: checkNumber.trim(),
+    bankName: checkBank.trim(),
+    dueDate: checkDueDate,
+    payeeName: checkPayee.trim() || null,
+    description: `چک پرداختنی بابت فاکتور خرید`,
+  }
+}
   // ★ لاگ برای debug
   console.log('[Purchase Submit] Submitting:', {
     isOnline,
@@ -1258,7 +1317,17 @@ console.log('[Purchase Submit] Server response:', {
 
  if (data.success) {
   console.log('[handleSubmit] ✅ Invoice created successfully:', data.data)
-  toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
+  
+  // ★ v8.9: toast متفاوت برای چک
+  if (paymentType === 'check' && data.data?.check) {
+    toast({ 
+      title: '✓ فاکتور و چک ثبت شد', 
+      description: `فاکتور ${data.data.number} + چک شماره ${checkNumber} (${checkBank})` 
+    })
+  } else {
+    toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
+  }
+  
   if (editingOfflineId) {
     const queue = loadSyncQueue()
     saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
@@ -1458,21 +1527,27 @@ console.log('[Purchase Submit] Server response:', {
     }
   }, [tenantId])
 
-  const closeDialog = useCallback(() => {
-    setDialogOpen(false)
-    setEditingInvoiceId(null)
-    setEditingOfflineId(null)
-    setCart([])
-    setSupplierId('')
-    setDescription('')
-    setInvoiceDate(new Date().toISOString().split('T')[0])
-    setLoadingEditItems(false)
-    const defaultWh = warehouses.find(w => w.isDefault)
-    if (defaultWh) setWarehouseId(defaultWh.id)
-    else if (warehouses.length > 0) setWarehouseId(warehouses[0].id)
-    else setWarehouseId('')
-  }, [warehouses])
-
+ const closeDialog = useCallback(() => {
+  setDialogOpen(false)
+  setEditingInvoiceId(null)
+  setEditingOfflineId(null)
+  setCart([])
+  setSupplierId('')
+  setDescription('')
+  setInvoiceDate(new Date().toISOString().split('T')[0])
+  setLoadingEditItems(false)
+  // ★ v8.9: ریست state های چک
+  setPaymentType('cash')
+  setCheckNumber('')
+  setCheckBank('')
+  setCheckDueDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+  setCheckPayee('')
+  
+  const defaultWh = warehouses.find(w => w.isDefault)
+  if (defaultWh) setWarehouseId(defaultWh.id)
+  else if (warehouses.length > 0) setWarehouseId(warehouses[0].id)
+  else setWarehouseId('')
+}, [warehouses])
   // ══════════════════════════════════════════════════════════════════════════
   // Return Invoice Handlers
   // ══════════════════════════════════════════════════════════════════════════
@@ -1669,10 +1744,18 @@ console.log('[Purchase Submit] Server response:', {
   // Computed Values
   // ══════════════════════════════════════════════════════════════════════════
 
-  const filteredInvoices = useMemo(() =>
-    invoices.filter(inv =>
-      (inv.number || '').includes(search) || (inv.supplier?.name || '').includes(search)
-    ), [invoices, search])
+const filteredInvoices = useMemo(() => {
+  // ابتدا فیلتر جستجو
+  const searched = invoices.filter(inv =>
+    (inv.number || '').includes(search) || (inv.supplier?.name || '').includes(search)
+  )
+  // سپس برش برای صفحه فعلی (فقط وقتی از سرور صفحه‌بندی شده)
+  // اگر در حالت آفلاین هستیم، همه را نمایش بده
+  if (search && searched.length < invoices.length) {
+    return searched
+  }
+  return searched
+}, [invoices, search])
 
   const pendingSyncCount = syncQueue.filter(q => q.retryCount < MAX_RETRY).length
   const failedSyncCount = syncQueue.filter(q => q.retryCount >= MAX_RETRY).length
@@ -1880,6 +1963,34 @@ console.log('[Purchase Submit] Server response:', {
               ))}
             </div>
 
+              {/* ★ صفحه‌بندی موبایل */}
+      {totalPages > 1 && (
+        <div className="md:hidden flex items-center justify-between mt-3 px-1">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs gap-1" 
+            disabled={page <= 1} 
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+          >
+            <ArrowLeft className="w-3 h-3" />قبلی
+          </Button>
+          <span className="text-xs text-gray-500">
+            صفحه {toFaNum(page)} از {toFaNum(totalPages)}
+          </span>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs gap-1" 
+            disabled={page >= totalPages} 
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+          >
+            بعدی<ArrowLeft className="w-3 h-3 rotate-180" />
+          </Button>
+        </div>
+      )}
+      {/* ═══ ★ پایان صفحه‌بندی موبایل ═══ */}
+
             <div className="hidden md:block">
               <Card>
                 <CardContent className="p-0">
@@ -1929,11 +2040,17 @@ console.log('[Purchase Submit] Server response:', {
                             <TableCell className="text-xs font-bold" dir="rtl">
                               {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal" dir="rtl">ریال</span>
                             </TableCell>
-                            <TableCell className="text-center hidden xl:table-cell">
-                              <div className="flex flex-col items-center gap-0.5">
-                                <Badge variant="outline" className="text-[9px]">
-                                  {inv.paymentType === 'credit' ? 'نسیه' : 'نقدی'}
-                                </Badge>
+                          <TableCell className="text-center hidden xl:table-cell">
+  <div className="flex flex-col items-center gap-0.5">
+    <Badge variant="outline" className={`text-[9px] ${
+      inv.paymentType === 'credit' ? 'border-purple-300 text-purple-700 bg-purple-50' :
+      inv.paymentType === 'check' ? 'border-cyan-300 text-cyan-700 bg-cyan-50' :
+      'border-emerald-300 text-emerald-700 bg-emerald-50'
+    }`}>
+      {inv.paymentType === 'credit' ? '⏰ نسیه' :
+       inv.paymentType === 'check' ? '🏛️ چک' :
+       '💵 نقدی'}
+    </Badge>
                                 {inv.invoiceType === 'service' && (
                                   <Badge className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200">خدمات</Badge>
                                 )}
@@ -2006,6 +2123,35 @@ console.log('[Purchase Submit] Server response:', {
                           </TableRow>
                         ))}
                       </TableBody>
+                      {/* ★ صفحه‌بندی Desktop */}
+{totalPages > 1 && (
+  <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-gray-100 gap-2">
+    <p className="text-xs text-gray-500 order-2 sm:order-1">
+      صفحه {toFaNum(page)} از {toFaNum(totalPages)} — {toFaNum(totalCount)} فاکتور
+    </p>
+    <div className="flex items-center gap-1 order-1 sm:order-2">
+      <Button 
+        variant="outline" 
+        size="sm" 
+        className="h-7 text-xs gap-1" 
+        disabled={page <= 1} 
+        onClick={() => setPage(p => Math.max(1, p - 1))}
+      >
+        <ArrowLeft className="w-3 h-3" />قبلی
+      </Button>
+      <span className="text-xs text-gray-400 px-1">{toFaNum(page)} / {toFaNum(totalPages)}</span>
+      <Button 
+        variant="outline" 
+        size="sm" 
+        className="h-7 text-xs gap-1" 
+        disabled={page >= totalPages} 
+        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+      >
+        بعدی<ArrowLeft className="w-3 h-3 rotate-180" />
+      </Button>
+    </div>
+  </div>
+)}
                     </Table>
                   </div>
                 </CardContent>
@@ -2049,181 +2195,293 @@ console.log('[Purchase Submit] Server response:', {
                 )}
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 min-h-0">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-                  <div>
-                    <Label className="text-[10px]">تامین‌کننده</Label>
-                    <Select value={supplierId || 'none'} onValueChange={setSupplierId}>
-                      <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                      <SelectContent className="z-[99999]">
-                        <SelectItem value="none">بدون تامین‌کننده</SelectItem>
-                        {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-[10px]">انبار <span className="text-red-500">*</span></Label>
-                    <Select value={warehouseId || 'none'} onValueChange={setWarehouseId}>
-                      <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
-                      <SelectContent className="z-[99999]">
-                        <SelectItem value="none">انتخاب کنید...</SelectItem>
-                        {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-[10px]">پرداخت</Label>
-                    <Select value={paymentType || 'cash'} onValueChange={setPaymentType}>
-                      <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent className="z-[99999]">
-                        <SelectItem value="cash">نقدی</SelectItem>
-                        <SelectItem value="credit">نسیه</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <PersianDatePicker value={invoiceDate} onChange={iso => setInvoiceDate(iso)} label="تاریخ" />
-                  </div>
-                </div>
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4 min-h-0">
+  {/* ═══ Grid اصلی: ۴ فیلد اصلی ═══ */}
+  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+    <div>
+      <Label className="text-[10px]">تامین‌کننده</Label>
+      <Select value={supplierId || 'none'} onValueChange={setSupplierId}>
+        <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
+        <SelectContent className="z-[99999]">
+          <SelectItem value="none">بدون تامین‌کننده</SelectItem>
+          {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+    <div>
+      <Label className="text-[10px]">انبار <span className="text-red-500">*</span></Label>
+      <Select value={warehouseId || 'none'} onValueChange={setWarehouseId}>
+        <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue placeholder="انتخاب..." /></SelectTrigger>
+        <SelectContent className="z-[99999]">
+          <SelectItem value="none">انتخاب کنید...</SelectItem>
+          {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+    <div>
+      <Label className="text-[10px]">پرداخت</Label>
+      <Select value={paymentType} onValueChange={(v) => {
+        setPaymentType(v)
+        // ★ ریست اطلاعات چک وقتی تغییر روش
+        if (v !== 'check') {
+          setCheckNumber('')
+          setCheckBank('')
+          setCheckPayee('')
+        }
+      }}>
+        <SelectTrigger className="mt-1 h-9 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent className="z-[99999]">
+          <SelectItem value="cash">💵 نقدی</SelectItem>
+          <SelectItem value="credit">⏰ نسیه</SelectItem>
+          <SelectItem value="check">🏛️ چک</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+    <div>
+      <PersianDatePicker value={invoiceDate} onChange={iso => setInvoiceDate(iso)} label="تاریخ" />
+    </div>
+  </div>
 
-                <div className="relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    ref={productSearchInputRef}
-                    placeholder="جستجو محصول / اسکن بارکد [Enter]"
-                    value={productSearch}
-                    onChange={e => setProductSearch(e.target.value)}
-                    onKeyDown={handleProductSearchKeyDown}
-                    className="pr-9 h-9 text-sm"
-                    disabled={!isOnline && !productSearch}
-                  />
-                  {!isOnline && (
-                    <p className="text-[10px] text-amber-500 mt-1">⚠ جستجوی محصول در حالت آفلاین ممکن نیست.</p>
+  {/* ★ v8.9: فرم اطلاعات چک پرداختنی — خارج از grid، با عرض کامل */}
+  {paymentType === 'check' && (
+    <div className="space-y-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+      <div className="flex items-center gap-2 text-purple-700 text-xs font-bold mb-2">
+        <div className="w-6 h-6 rounded bg-purple-500 flex items-center justify-center">
+          <Package className="w-3.5 h-3.5 text-white" />
+        </div>
+        اطلاعات چک پرداختنی
+      </div>
+
+      {/* نوع چک - فقط نمایشی */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          disabled
+          className="flex items-center gap-2 px-3 py-2 rounded-md border-2 bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed"
+        >
+          <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center">
+            <Package className="w-4 h-4 text-gray-400" />
+          </div>
+          <div className="text-right">
+            <span className="text-[11px] font-bold block text-gray-400">دریافتنی</span>
+            <span className="text-[9px] text-gray-400 block">از مشتری</span>
+          </div>
+        </button>
+        <button
+          type="button"
+          className="flex items-center gap-2 px-3 py-2 rounded-md border-2 bg-purple-50 border-purple-500 shadow-sm"
+        >
+          <div className="w-7 h-7 rounded-md bg-purple-500 flex items-center justify-center">
+            <Package className="w-4 h-4 text-white" />
+          </div>
+          <div className="text-right">
+            <span className="text-[11px] font-bold block text-purple-700">پرداختنی</span>
+            <span className="text-[9px] text-purple-500 block">به تامین‌کننده</span>
+          </div>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label className="text-[10px] font-medium">
+            شماره چک <span className="text-red-500">*</span>
+          </Label>
+          <Input
+            value={checkNumber}
+            onChange={(e) => setCheckNumber(e.target.value)}
+            placeholder="مثلاً: 123456"
+            dir="ltr"
+            className="h-9 text-xs mt-1"
+            autoFocus
+          />
+        </div>
+
+        <div>
+          <Label className="text-[10px] font-medium">
+            نام بانک <span className="text-red-500">*</span>
+          </Label>
+          <Input
+            value={checkBank}
+            onChange={(e) => setCheckBank(e.target.value)}
+            placeholder="مثلاً: بانک ملت"
+            className="h-9 text-xs mt-1"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label className="text-[10px] font-medium">
+            تاریخ سررسید <span className="text-red-500">*</span>
+          </Label>
+          <div className="mt-1">
+            <PersianDatePicker
+              value={checkDueDate}
+              onChange={setCheckDueDate}
+              placeholder="انتخاب تاریخ سررسید"
+            />
+          </div>
+        </div>
+
+        <div>
+          <Label className="text-[10px] font-medium">در وجه (اختیاری)</Label>
+          <Input
+            value={checkPayee}
+            onChange={(e) => setCheckPayee(e.target.value)}
+            placeholder="نام شخص یا شرکت"
+            className="h-9 text-xs mt-1"
+          />
+        </div>
+      </div>
+
+      {/* نمایش مبلغ چک */}
+      <div className="flex items-center justify-between p-2.5 bg-purple-100 rounded border border-purple-300">
+        <span className="text-xs text-purple-700 font-medium">مبلغ چک:</span>
+        <span className="font-black text-sm text-purple-900">
+          {formatNumber(totals.total)} ریال
+        </span>
+      </div>
+    </div>
+  )}
+
+  <div className="relative">
+    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+    <Input
+      ref={productSearchInputRef}
+      placeholder="جستجو محصول / اسکن بارکد [Enter]"
+      value={productSearch}
+      onChange={e => setProductSearch(e.target.value)}
+      onKeyDown={handleProductSearchKeyDown}
+      className="pr-9 h-9 text-sm"
+      disabled={!isOnline && !productSearch}
+    />
+    {!isOnline && (
+      <p className="text-[10px] text-amber-500 mt-1">⚠ جستجوی محصول در حالت آفلاین ممکن نیست.</p>
+    )}
+    {productSearchResults.length > 0 && (
+      <div className="absolute z-[99999] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+        {productSearchResults.map(p => (
+          <button key={p.id} onClick={() => handleAddProduct(p)}
+            className="w-full text-right p-2 hover:bg-emerald-50 border-b border-gray-100 last:border-0 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">{p.name}</span>
+              <span className="text-[10px] text-gray-400" dir="ltr">{p.code} • {p.unitLabel || 'عدد'}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+  
+  {!isOnline && (
+    <Button
+      variant="outline" size="sm"
+      onClick={() => setCart([...cart, { productId: undefined, productName: '', unitLabel: 'عدد', quantity: 1, unitPrice: 0, discountAmount: 0, taxAmount: 0, lineTotal: 0 }])}
+      className="w-full border-dashed border-amber-300 text-amber-700 hover:bg-amber-50 text-xs h-8"
+    >
+      <Plus className="w-3.5 h-3.5 ml-1" />
+      افزودن ردیف کالا (دستی — آفلاین)
+    </Button>
+  )}
+
+  {loadingEditItems ? (
+    <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2">
+      <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+      <p className="text-xs text-gray-500">در حال بارگذاری...</p>
+    </div>
+  ) : cart.length > 0 ? (
+    <>
+      <div className="border border-gray-200 rounded-lg overflow-auto max-h-60 sm:max-h-72 lg:max-h-80 bg-white">
+        <table className="w-full text-xs border-collapse">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-purple-100">
+              <th className="py-2 px-3 font-bold text-purple-900 border-b border-purple-300 text-right min-w-[120px]">نام محصول</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px]">واحد</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[70px]">مقدار</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[90px]">قیمت</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px] hidden sm:table-cell">تخفیف</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px] hidden sm:table-cell">مالیات</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[90px]">جمع</th>
+              <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cart.map((item, index) => (
+              <tr key={index} className="border-b border-gray-100 hover:bg-purple-50/30 transition-colors">
+                <td className="py-2 px-3 text-right">
+                  {(!isOnline || !item.productId) ? (
+                    <Input value={item.productName} onChange={e => handleUpdateItem(index, 'productName', e.target.value)} placeholder="نام کالا" className="h-7 text-xs w-28 sm:w-36" />
+                  ) : (
+                    <span className="text-xs">{item.productName}</span>
                   )}
-                  {productSearchResults.length > 0 && (
-                    <div className="absolute z-[99999] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {productSearchResults.map(p => (
-                        <button key={p.id} onClick={() => handleAddProduct(p)}
-                          className="w-full text-right p-2 hover:bg-emerald-50 border-b border-gray-100 last:border-0 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="font-medium">{p.name}</span>
-                            <span className="text-[10px] text-gray-400" dir="ltr">{p.code} • {p.unitLabel || 'عدد'}</span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                
-                {!isOnline && (
-                  <Button
-                    variant="outline" size="sm"
-                    onClick={() => setCart([...cart, { productId: undefined, productName: '', unitLabel: 'عدد', quantity: 1, unitPrice: 0, discountAmount: 0, taxAmount: 0, lineTotal: 0 }])}
-                    className="w-full border-dashed border-amber-300 text-amber-700 hover:bg-amber-50 text-xs h-8"
-                  >
-                    <Plus className="w-3.5 h-3.5 ml-1" />
-                    افزودن ردیف کالا (دستی — آفلاین)
+                </td>
+                <td className="py-2 px-2 text-center">
+                  <select value={item.unitLabel} onChange={e => handleUpdateItem(index, 'unitLabel', e.target.value)} className="h-7 text-xs border border-gray-200 rounded px-1 bg-white w-20">
+                    {DEFAULT_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </td>
+                <td className="py-2 px-2 text-center">
+                  <PersianNumberInput value={item.quantity} onChange={v => handleUpdateItem(index, 'quantity', v)} className="h-7 text-xs text-center w-16" step="0.01" />
+                </td>
+                <td className="py-2 px-2 text-center">
+                  <PersianNumberInput value={item.unitPrice} onChange={v => handleUpdateItem(index, 'unitPrice', v)} className="h-7 text-xs text-center w-24" dir="ltr" />
+                </td>
+                <td className="py-2 px-2 text-center hidden sm:table-cell">
+                  <PersianNumberInput value={item.discountAmount} onChange={v => handleUpdateItem(index, 'discountAmount', v)} className="h-7 text-xs text-center w-20" dir="ltr" />
+                </td>
+                <td className="py-2 px-2 text-center hidden sm:table-cell">
+                  <PersianNumberInput value={item.taxAmount} onChange={v => handleUpdateItem(index, 'taxAmount', v)} className="h-7 text-xs text-center w-20" dir="ltr" />
+                </td>
+                <td className="py-2 px-2 text-center font-bold text-emerald-700" dir="ltr">
+                  {formatNumber(item.lineTotal)}
+                </td>
+                <td className="py-2 px-2 text-center">
+                  <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(index)} className="text-red-500 p-0 h-6 w-6 hover:bg-red-50">
+                    <X className="w-3.5 h-3.5" />
                   </Button>
-                )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-                {loadingEditItems ? (
-                  <div className="border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
-                    <p className="text-xs text-gray-500">در حال بارگذاری...</p>
-                  </div>
-                ) : cart.length > 0 ? (
-                  <>
-                    <div className="border border-gray-200 rounded-lg overflow-auto max-h-60 sm:max-h-72 lg:max-h-80 bg-white">
-                      <table className="w-full text-xs border-collapse">
-                        <thead className="sticky top-0 z-10">
-                          <tr className="bg-purple-100">
-                            <th className="py-2 px-3 font-bold text-purple-900 border-b border-purple-300 text-right min-w-[120px]">نام محصول</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px]">واحد</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[70px]">مقدار</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[90px]">قیمت</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px] hidden sm:table-cell">تخفیف</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[80px] hidden sm:table-cell">مالیات</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center min-w-[90px]">جمع</th>
-                            <th className="py-2 px-2 font-bold text-purple-900 border-b border-purple-300 text-center w-8"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cart.map((item, index) => (
-                            <tr key={index} className="border-b border-gray-100 hover:bg-purple-50/30 transition-colors">
-                              <td className="py-2 px-3 text-right">
-                                {(!isOnline || !item.productId) ? (
-                                  <Input value={item.productName} onChange={e => handleUpdateItem(index, 'productName', e.target.value)} placeholder="نام کالا" className="h-7 text-xs w-28 sm:w-36" />
-                                ) : (
-                                  <span className="text-xs">{item.productName}</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-2 text-center">
-                                <select value={item.unitLabel} onChange={e => handleUpdateItem(index, 'unitLabel', e.target.value)} className="h-7 text-xs border border-gray-200 rounded px-1 bg-white w-20">
-                                  {DEFAULT_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                                </select>
-                              </td>
-                              <td className="py-2 px-2 text-center">
-                                <PersianNumberInput value={item.quantity} onChange={v => handleUpdateItem(index, 'quantity', v)} className="h-7 text-xs text-center w-16" step="0.01" />
-                              </td>
-                              <td className="py-2 px-2 text-center">
-                                <PersianNumberInput value={item.unitPrice} onChange={v => handleUpdateItem(index, 'unitPrice', v)} className="h-7 text-xs text-center w-24" dir="ltr" />
-                              </td>
-                              <td className="py-2 px-2 text-center hidden sm:table-cell">
-                                <PersianNumberInput value={item.discountAmount} onChange={v => handleUpdateItem(index, 'discountAmount', v)} className="h-7 text-xs text-center w-20" dir="ltr" />
-                              </td>
-                              <td className="py-2 px-2 text-center hidden sm:table-cell">
-                                <PersianNumberInput value={item.taxAmount} onChange={v => handleUpdateItem(index, 'taxAmount', v)} className="h-7 text-xs text-center w-20" dir="ltr" />
-                              </td>
-                              <td className="py-2 px-2 text-center font-bold text-emerald-700" dir="ltr">
-                                {formatNumber(item.lineTotal)}
-                              </td>
-                              <td className="py-2 px-2 text-center">
-                                <Button variant="ghost" size="sm" onClick={() => handleRemoveItem(index)} className="text-red-500 p-0 h-6 w-6 hover:bg-red-50">
-                                  <X className="w-3.5 h-3.5" />
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 sm:p-4 space-y-2">
+        <div className="flex justify-between text-xs">
+          <span className="text-gray-700 font-medium">جمع کل:</span>
+          <span className="font-bold text-gray-900" dir="rtl">{formatNumber(totals.subTotal)} ریال</span>
+        </div>
+        {totals.discount > 0 && (
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-700">تخفیف:</span>
+            <span className="text-red-600 font-bold" dir="rtl">-{formatNumber(totals.discount)} ریال</span>
+          </div>
+        )}
+        {totals.tax > 0 && (
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-700">مالیات:</span>
+            <span className="text-amber-600 font-bold" dir="rtl">+{formatNumber(totals.tax)} ریال</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm pt-2 border-t border-emerald-200 font-bold">
+          <span className="text-emerald-900">مبلغ نهایی:</span>
+          <span className="text-emerald-700" dir="rtl">{formatNumber(totals.total)} ریال</span>
+        </div>
+      </div>
+    </>
+  ) : (
+    <div className="border border-dashed border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2 text-center">
+      <Package className="w-8 h-8 text-gray-300" />
+      <p className="text-xs text-gray-500">{editingInvoiceId || editingOfflineId ? 'آیتمی ندارد' : 'سبد خالی است'}</p>
+      {!isOnline && <p className="text-[10px] text-amber-500">از دکمه «افزودن ردیف کالا» استفاده کنید</p>}
+    </div>
+  )}
 
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 sm:p-4 space-y-2">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-700 font-medium">جمع کل:</span>
-                        <span className="font-bold text-gray-900" dir="rtl">{formatNumber(totals.subTotal)} ریال</span>
-                      </div>
-                      {totals.discount > 0 && (
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-700">تخفیف:</span>
-                          <span className="text-red-600 font-bold" dir="rtl">-{formatNumber(totals.discount)} ریال</span>
-                        </div>
-                      )}
-                      {totals.tax > 0 && (
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-700">مالیات:</span>
-                          <span className="text-amber-600 font-bold" dir="rtl">+{formatNumber(totals.tax)} ریال</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-sm pt-2 border-t border-emerald-200 font-bold">
-                        <span className="text-emerald-900">مبلغ نهایی:</span>
-                        <span className="text-emerald-700" dir="rtl">{formatNumber(totals.total)} ریال</span>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="border border-dashed border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-2 text-center">
-                    <Package className="w-8 h-8 text-gray-300" />
-                    <p className="text-xs text-gray-500">{editingInvoiceId || editingOfflineId ? 'آیتمی ندارد' : 'سبد خالی است'}</p>
-                    {!isOnline && <p className="text-[10px] text-amber-500">از دکمه «افزودن ردیف کالا» استفاده کنید</p>}
-                  </div>
-                )}
-
-                <div>
-                  <Label className="text-[10px]">توضیحات</Label>
-                  <Input value={description} onChange={e => setDescription(e.target.value)} className="mt-1 h-9 text-sm" placeholder="اختیاری" />
-                </div>
-              </div>
+  <div>
+    <Label className="text-[10px]">توضیحات</Label>
+    <Input value={description} onChange={e => setDescription(e.target.value)} className="mt-1 h-9 text-sm" placeholder="اختیاری" />
+  </div>
+</div>
 
               <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-100 bg-white flex-shrink-0 flex items-center justify-between gap-2">
                 {cart.length > 0 ? (

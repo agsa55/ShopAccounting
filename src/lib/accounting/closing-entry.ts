@@ -5,6 +5,7 @@
 // ★ این ماژول دو نوع سند تولید می‌کند:
 //   ۱. سند اختتامیه: صفر کردن حساب‌های موقت (درآمد/هزینه) + انتقال سود/زیان
 //   ۲. سند افتتاحیه: انتقال مانده حساب‌های دائمی به سال جدید
+// ★ v2.1: اصلاح createOpeningEntry — حذف require('uuid') و nullable کردن fiscalYearId
 // ============================================================================
 
 import { db } from '@/lib/db'
@@ -155,12 +156,11 @@ export async function previewClosingEntry(
     })
 
     // ── ۳. یافتن حساب سود انباشته ──────────────────────────────
-     // ── ۳. یافتن حساب سود انباشته ──────────────────────────────
     // ★★★ FIX: اولویت با کد ۳۱۰۰، سپس نام شامل «سود» و «انباشته»
- const retainedEarnings =
-  accounts.find((a) => a.code === '3100') ||
-  accounts.find((a) => a.name.includes('سود') && a.name.includes('انباشته')) ||
-  accounts.find((a) => a.type === 'سرمایه' && a.code.startsWith('31'))
+    const retainedEarnings =
+      accounts.find((a) => a.code === '3100') ||
+      accounts.find((a) => a.name.includes('سود') && a.name.includes('انباشته')) ||
+      accounts.find((a) => a.type === 'سرمایه' && a.code.startsWith('31'))
     if (retainedEarnings) {
       result.retainedEarningsAccountId = retainedEarnings.id
       result.retainedEarningsAccountName = retainedEarnings.name
@@ -367,10 +367,10 @@ export async function createClosingEntry(
 
     // ── انتقال سود/زیان به سود انباشته ───────────────────────
     const netProfit = totalRevenue - totalExpense
-  const retainedEarnings =
-  accounts.find((a: any) => a.code === '3100') ||
-  accounts.find((a: any) => a.name.includes('سود') && a.name.includes('انباشته')) ||
-  accounts.find((a: any) => a.type === 'سرمایه' && a.code.startsWith('31'))
+    const retainedEarnings =
+      accounts.find((a: any) => a.code === '3100') ||
+      accounts.find((a: any) => a.name.includes('سود') && a.name.includes('انباشته')) ||
+      accounts.find((a: any) => a.type === 'سرمایه' && a.code.startsWith('31'))
     if (retainedEarnings && Math.abs(netProfit) > 0.01) {
       if (netProfit > 0) {
         // سود: بستانکار کردن سود انباشته
@@ -391,7 +391,7 @@ export async function createClosingEntry(
       }
     }
 
-      if (lines.length === 0) {
+    if (lines.length === 0) {
       return {
         success: true,
         totalRevenue: 0,
@@ -457,14 +457,15 @@ export async function createClosingEntry(
 // ═══════════════════════════════════════════════════════════════
 
 // ============================================================================
-// createOpeningEntry — v2.0 (اصلاح‌شده)
+// createOpeningEntry — v2.2 (اصلاح‌شده نهایی)
 // صدور سند افتتاحیه با انتقال صحیح مانده حساب‌های دائمی
+// ★ v2.2: حذف require('uuid') و nullable کردن fiscalYearId برای پلن پایه
 // ============================================================================
 
 export async function createOpeningEntry(
   tx: any,
   tenantId: string,
-  fiscalYearId: string,
+  fiscalYearId: string | null,  // ★ v2.2: nullable برای پلن پایه
   fiscalYearName: string,
   openingDate: Date
 ): Promise<{
@@ -701,39 +702,39 @@ export async function createOpeningEntry(
 
     const entryNumber = `JE-OPEN-${String(nextNumber).padStart(6, '0')}`
 
-   const journalEntry = await tx.journalEntry.create({
-  data: {
-    id: require('uuid').v4(),
-    tenantId,
-    fiscalYearId,
-    number: entryNumber,
-    date: openingDate,
-    description: `سند افتتاحیه سال مالی ${fiscalYearName} — انتقال مانده حساب‌های دائمی`,
-    status: 'posted',
-   
-    sourceType: 'fiscal_year_open',
-    totalDebit,
-    totalCredit,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-})
+    // ★ v2.2: حذف require('uuid') و id - Prisma خودش UUID تولید می‌کند
+    // ★ v2.2: fiscalYearId می‌تواند null باشد (برای پلن پایه)
+    const journalEntry = await tx.journalEntry.create({
+      data: {
+        // id: حذف شد - Prisma خودش تولید می‌کند
+        tenantId,
+        fiscalYearId,  // می‌تواند null باشد برای پلن پایه
+        number: entryNumber,
+        date: openingDate,
+        description: `سند افتتاحیه سال مالی ${fiscalYearName} — انتقال مانده حساب‌های دائمی`,
+        status: 'posted',
+        sourceType: 'fiscal_year_open',
+        totalDebit,
+        totalCredit,
+        // createdAt و updatedAt حذف شدند - Prisma خودش مدیریت می‌کند
+      },
+    })
 
     // ── ۶. ایجاد خطوط سند ─────────────────────────────────────────
-  for (const line of journalLines) {
-  await tx.journalEntryLine.create({
-    data: {
-      id: require('uuid').v4(),
-      journalEntryId: journalEntry.id,
-      accountId: line.accountId,
-      description: line.description,
-      debit: line.debit,
-      credit: line.credit,
-      createdAt: new Date(),
-      // updatedAt حذف شد (در مدل JournalEntryLine وجود ندارد)
-    },
-  })
-}
+    // ★ v2.2: حذف require('uuid') - Prisma خودش UUID تولید می‌کند
+    for (const line of journalLines) {
+      await tx.journalEntryLine.create({
+        data: {
+          // id: حذف شد - Prisma خودش تولید می‌کند
+          journalEntryId: journalEntry.id,
+          accountId: line.accountId,
+          description: line.description,
+          debit: line.debit,
+          credit: line.credit,
+          // createdAt حذف شد
+        },
+      })
+    }
 
     console.log(`[CreateOpeningEntry] ✅ Entry created: ${entryNumber}`)
 

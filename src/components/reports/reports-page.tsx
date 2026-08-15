@@ -3888,7 +3888,7 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
     description: 'وضعیت اقساط و سررسیدها با فیلتر وضعیت',
     icon: CalendarClock,
     color: 'bg-amber-100 text-amber-600',
-    minTier: 'professional',
+      minTier: 'basic', 
     requiresInstallments: true,
     category: 'financial',
   },

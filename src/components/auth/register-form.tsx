@@ -1,123 +1,62 @@
 'use client'
 
 // ============================================================================
-// src/components/auth/register-form.tsx (v9.2 ★★★)
-// ShopAccounting — Unified Single Database Architecture
-// ============================================================================
-// ★★★ v9.2: رفع خطای بیلد Next.js (Suspense Boundary)
-//   - جایگزینی useSearchParams با window.location.search در useEffect
-//   - این تغییر باعث می‌شود بیلد بدون خطا انجام شود و عملکرد کاملاً حفظ شود
-//
-// ★★★ v9.1: افزودن پشتیبانی کامل از پلن دمو (Demo/Trial) از طریق URL
-//   - خواندن پارامتر ?plan=demo از URL
-//   - تنظیم خودکار استور روی پلن دمو و دوره ۳ روزه
-//   - تغییر UI مرحله پرداخت برای نمایش "فعال‌سازی رایگان" به جای درگاه بانکی
-//
-// ★★★ v9.0: تغییر ساختار پلن‌ها
-//   - ۳ پلن: پایه / پیشرفته / حرفه‌ای  (نام کد: simple / professional / enterprise)
-//   - ۲ دوره: سالانه (۳۶۵ روز) / مادام‌العمر (بدون انقضا)
-//   - حذف پلن ماهانه
-//   - default billingCycle = 'annual' (نه 'monthly')
-//
-// ★★★ v5.1.5 (Phase 4): بازنویسی کامل با ۳ مرحله
-//   ۱. اطلاعات فروشگاه (نام، زیردامنه، نام کاربری، رمز عبور)
-//   ۲. تأیید شماره موبایل با OTP (IPPanel)
-//   ۳. پرداخت با زرین‌پال (sandbox برای تست) یا فعال‌سازی دمو
-//   ۴. پس از پرداخت موفق → داشبورد یا صفحه موفقیت
+// src/components/auth/register-form.tsx (v10.2 — Compact + Free Trial)
+// ★ فرم جمع‌وجور، بدون عنوان‌های اضافی
+// ★ ارسال startFreeTrial: true به سرور
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation' // ✅ useSearchParams حذف شد تا خطای بیلد رفع شود
+import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 import { setAccessToken, setRefreshToken, setStoredUser } from '@/lib/auth-client'
-import { getTenantUrl, isDevelopment } from '@/lib/tenant-resolver-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Progress } from '@/components/ui/progress'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
-  ShoppingCart, ArrowRight, ArrowLeft, Loader2, CheckCircle2, Store, Globe,
-  Phone, User, Lock, Check, Sparkles, Copy, AlertCircle, RefreshCw, Crown,
+  ShoppingCart, ArrowLeft, Loader2, CheckCircle2, Store, Globe,
+  Phone, User, Lock, Check, AlertCircle, RefreshCw,
 } from 'lucide-react'
 
-// ★★★ v5.1.5: ۳ مرحله
 const steps = [
   { id: 1, title: 'اطلاعات فروشگاه' },
   { id: 2, title: 'تأیید موبایل' },
-  { id: 3, title: 'فعال‌سازی' }, // ✅ تغییر عنوان مرحله ۳ برای سازگاری با دمو
 ]
 
-// ★★★ v9.1: PLAN_INFO با افزودن پلن دمو
-const PLAN_INFO: Record<string, { title: string; detail: string; isTrial: boolean; tierName: string; billingCycle: string }> = {
-  // ✅ پلن دمو / تست رایگان
-  demo: { title: 'تست ۳ روزه رایگان', detail: 'امکانات کامل پلن حرفه‌ای به مدت ۳ روز', isTrial: true, tierName: 'demo', billingCycle: 'trial' },
-  
-  // ★ پلن‌های پایه (default cycle = annual)
-  simple:             { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
-  professional:       { title: 'پلن پیشرفته',       detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول',   isTrial: false, tierName: 'professional', billingCycle: 'annual' },
-  enterprise:         { title: 'پلن حرفه‌ای',       detail: 'کاربر و محصول نامحدود',        isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
-  
-  // ★ ترکیب پلن + دوره (سالانه)
-  simple_annual:      { title: 'پلن پایه سالانه',  detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
-  professional_annual: { title: 'پلن پیشرفته سالانه', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'annual' },
-  enterprise_annual:  { title: 'پلن حرفه‌ای سالانه', detail: 'کاربر و محصول نامحدود',     isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
-  
-  // ★ ترکیب پلن + دوره (مادام‌العمر)
-  simple_lifetime:      { title: 'پلن پایه مادام‌العمر',    detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'lifetime' },
-  professional_lifetime: { title: 'پلن پیشرفته مادام‌العمر', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'lifetime' },
-  enterprise_lifetime:  { title: 'پلن حرفه‌ای مادام‌العمر',  detail: 'کاربر و محصول نامحدود',      isTrial: false, tierName: 'enterprise',   billingCycle: 'lifetime' },
-  
-  // ★ backward compatibility: پلن‌های قدیمی (ماهانه) → به سالانه تبدیل می‌شوند
-  simple_monthly:     { title: 'پلن پایه سالانه',  detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
-  professional_monthly: { title: 'پلن پیشرفته سالانه', detail: 'تا ۵ کاربر و ۲,۰۰۰ محصول', isTrial: false, tierName: 'professional', billingCycle: 'annual' },
-  enterprise_monthly: { title: 'پلن حرفه‌ای سالانه', detail: 'کاربر و محصول نامحدود',     isTrial: false, tierName: 'enterprise',   billingCycle: 'annual' },
-  
-  // ★ backward compatibility: پلن‌های قدیمی
-  free:               { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
-  trial:              { title: 'پلن پایه',          detail: 'تا ۲ کاربر و ۲۰۰ محصول',      isTrial: false, tierName: 'simple',       billingCycle: 'annual' },
-}
-
-const BILLING_CYCLE_FA: Record<string, string> = {
-  annual: 'سالانه',
-  lifetime: 'مادام‌العمر',
-  trial: '۳ روزه', // ✅ اضافه شده برای دمو
-  monthly: 'سالانه',
+const PLAN_INFO: Record<string, { title: string; tierName: string }> = {
+  simple:        { title: 'پلن پایه',    tierName: 'simple' },
+  professional:  { title: 'پلن پیشرفته', tierName: 'professional' },
+  enterprise:    { title: 'پلن حرفه‌ای', tierName: 'enterprise' },
+  demo:          { title: 'پلن پایه',    tierName: 'simple' },
+  free:          { title: 'پلن پایه',    tierName: 'simple' },
+  trial:         { title: 'پلن پایه',    tierName: 'simple' },
 }
 
 export default function RegisterForm() {
-  const { setCurrentView, login, selectedPlanId, setSelectedPlanId, selectedBillingCycle, setSelectedBillingCycle } = useAppStore()
+  const { selectedPlanId, setSelectedPlanId } = useAppStore()
   const router = useRouter()
   
   const [currentStep, setCurrentStep] = useState(1)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // ✅ همگام‌سازی استور با پارامتر URL (اگر plan=demo باشد)
-  // ✅ اصلاح شده: استفاده از window.location.search به جای useSearchParams برای رفع خطای بیلد Next.js
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search)
       const planParam = urlParams.get('plan')
-      if (planParam === 'demo') {
-        setSelectedPlanId('demo')
-        setSelectedBillingCycle('trial')
+      if (planParam && PLAN_INFO[planParam]) {
+        setSelectedPlanId(planParam)
+      } else if (!planParam) {
+        setSelectedPlanId('simple')
       }
     }
-  }, [setSelectedPlanId, setSelectedBillingCycle])
+  }, [setSelectedPlanId])
 
-  const compositeKey = selectedBillingCycle ? `${selectedPlanId}_${selectedBillingCycle}` : ''
-  const planName = compositeKey && PLAN_INFO[compositeKey]
-    ? compositeKey
-    : (selectedPlanId || 'simple')
-
+  const planName = selectedPlanId || 'simple'
   const planInfo = PLAN_INFO[planName] || PLAN_INFO.simple
-
   const effectiveTierName = planInfo.tierName || 'simple'
-  const effectiveBillingCycle = selectedBillingCycle || planInfo.billingCycle || 'annual'
 
-  // ─── فیلدهای فرم ──────────────────────────────────────────────
   const [storeName, setStoreName] = useState('')
   const [subdomain, setSubdomain] = useState('')
   const [username, setUsername] = useState('')
@@ -126,38 +65,17 @@ export default function RegisterForm() {
   const [subdomainAvailable, setSubdomainAvailable] = useState<boolean | null>(null)
   const [subdomainChecking, setSubdomainChecking] = useState(false)
 
-  // ★★★ v5.1.5: state برای OTP
   const [otpCode, setOtpCode] = useState('')
-  const [otpSent, setOtpSent] = useState(false)
   const [otpSending, setOtpSending] = useState(false)
   const [otpVerifying, setOtpVerifying] = useState(false)
   const [otpCooldown, setOtpCooldown] = useState(0)
   const [mobileVerified, setMobileVerified] = useState(false)
-  const [mockOtpCode, setMockOtpCode] = useState<string | null>(null) // برای نمایش در mock mode
+  const [mockOtpCode, setMockOtpCode] = useState<string | null>(null)
 
-  // ★★★ v5.1.5: state برای پرداخت
-  const [checkoutLoading, setCheckoutLoading] = useState(false)
-  const [registrationData, setRegistrationData] = useState<{
-    accessToken?: string
-    refreshToken?: string
-    user?: any
-    tenant?: any
-  } | null>(null)
-
-  const [successProgress, setSuccessProgress] = useState(0)
-  const [copied, setCopied] = useState(false)
-  const [registrationFailed, setRegistrationFailed] = useState(false)
-
-  const regResultRef = useRef<{
-    accessToken?: string
-    refreshToken?: string
-    user?: any
-    tenant?: any
-  } | null>(null)
+  const [activating, setActivating] = useState(false)
 
   const subdomainCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ─── بررسی زیردامنه ───────────────────────────────────────────
   const checkSubdomain = useCallback(async (value: string) => {
     if (!value || value.length < 3) {
       setSubdomainAvailable(null)
@@ -189,14 +107,12 @@ export default function RegisterForm() {
     subdomainCheckRef.current = setTimeout(() => checkSubdomain(value), 500)
   }, [checkSubdomain])
 
-  // ─── ارسال OTP ────────────────────────────────────────────────
   const handleSendOtp = async () => {
     setError('')
     if (!mobile || mobile.length < 11) {
       setError('شماره موبایل نامعتبر است')
       return
     }
-
     setOtpSending(true)
     try {
       const res = await fetch('/api/tenants/register-otp/send', {
@@ -204,13 +120,9 @@ export default function RegisterForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile }),
       })
-
       const data = await res.json()
-
       if (data.success) {
-        setOtpSent(true)
         setOtpCooldown(60)
-        // ★ در mock mode، کد را نمایش بده
         if (data.data?.mockMode && data.data?.devCode) {
           setMockOtpCode(data.data.devCode)
         } else {
@@ -219,14 +131,13 @@ export default function RegisterForm() {
       } else {
         setError(data.error || 'خطا در ارسال کد')
       }
-    } catch (err) {
+    } catch {
       setError('خطا در ارتباط با سرور')
     } finally {
       setOtpSending(false)
     }
   }
 
-  // ─── Countdown برای OTP ───────────────────────────────────────
   useEffect(() => {
     if (otpCooldown <= 0) return
     const timer = setInterval(() => {
@@ -235,8 +146,7 @@ export default function RegisterForm() {
     return () => clearInterval(timer)
   }, [otpCooldown])
 
-  // ─── تأیید OTP ────────────────────────────────────────────────
-  const handleVerifyOtp = async () => {
+  const handleVerifyOtpAndRegister = async () => {
     setError('')
     if (otpCode.length !== 6) {
       setError('کد باید ۶ رقم باشد')
@@ -245,35 +155,24 @@ export default function RegisterForm() {
 
     setOtpVerifying(true)
     try {
-      const res = await fetch('/api/tenants/register-otp/verify', {
+      const verifyRes = await fetch('/api/tenants/register-otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile, code: otpCode }),
       })
+      const verifyData = await verifyRes.json()
 
-      const data = await res.json()
-
-      if (data.success) {
-        setMobileVerified(true)
-        // ★ رفتن به مرحله ۳ (پرداخت/فعال‌سازی)
-        setTimeout(() => setCurrentStep(3), 1000)
-      } else {
-        setError(data.error || 'کد نامعتبر است')
+      if (!verifyData.success) {
+        setError(verifyData.error || 'کد نامعتبر است')
+        setOtpVerifying(false)
+        return
       }
-    } catch (err) {
-      setError('خطا در ارتباط با سرور')
-    } finally {
+
+      setMobileVerified(true)
       setOtpVerifying(false)
-    }
-  }
+      setActivating(true)
 
-  // ─── ثبت‌نام + Checkout ───────────────────────────────────────
-  const handleRegisterAndCheckout = async () => {
-    setError('')
-    setCheckoutLoading(true)
-
-    try {
-      // ★ ۱. ثبت‌نام Tenant
+      // ★ ثبت‌نام با startFreeTrial: true
       const regRes = await fetch('/api/tenants/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,229 +184,117 @@ export default function RegisterForm() {
           username,
           password,
           planTierName: effectiveTierName,
-          billingCycle: effectiveBillingCycle,
-          planName,
+          billingCycle: 'annual',    // ★ annual (نه trial)
+          planName: planName,
+          startFreeTrial: true,      // ★ علامت شروع دوره ۹۰ روزه رایگان
+          mobileVerified: true,
         }),
       })
 
       if (!regRes.ok) {
-        let errorMsg = 'خطا در ثبت‌نام فروشگاه'
+        let errorMsg = 'خطا در ثبت‌نام'
         try {
           const errData = await regRes.json()
           errorMsg = errData.error || errorMsg
-        } catch { /* */ }
+        } catch {}
         setError(errorMsg)
-        setCheckoutLoading(false)
+        setActivating(false)
         return
       }
 
       const regData = await regRes.json()
       if (!regData.success) {
         setError(regData.error || 'خطا در ثبت‌نام')
-        setCheckoutLoading(false)
+        setActivating(false)
         return
       }
 
       const { accessToken, refreshToken, user, tenant } = regData.data
-      regResultRef.current = { accessToken: accessToken || regData.data.token, refreshToken, user, tenant }
-      setRegistrationData(regResultRef.current)
 
-      // ★ ذخیره توکن در localStorage (برای فراخوانی checkout یا ورود مستقیم)
       if (typeof window !== 'undefined') {
         setAccessToken(accessToken || regData.data.token)
         if (refreshToken) setRefreshToken(refreshToken)
         if (user) setStoredUser(user)
       }
 
-      // ★ ۲. اگر پلن دمو نیست، checkout با زرین‌پال انجام شود
-      if (!planInfo.isTrial) {
-        const token = accessToken || regData.data.token
-        const checkoutRes = await fetch('/api/subscription/checkout', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            tierName: effectiveTierName,
-            billingCycle: effectiveBillingCycle,
-            action: 'new',
-          }),
-        })
-
-        const checkoutData = await checkoutRes.json()
-
-        if (checkoutData.success && checkoutData.data?.paymentUrl) {
-          // ★ هدایت به درگاه زرین‌پال
-          window.location.href = checkoutData.data.paymentUrl
-        } else {
-          setError(checkoutData.error || 'خطا در ایجاد درخواست پرداخت. فروشگاه ایجاد شد ولی پرداخت ناموفق بود.')
-          setCurrentStep(3)
-        }
-      } else {
-        // ✅ اگر پلن دمو است، مستقیماً به داشبورد هدایت شود (یا نمایش پیام موفقیت)
-        // فرض بر این است که بک‌اند توکن معتبر برای پلن دمو صادر کرده است
-        const tenantUrl = getTenantUrl(subdomain)
-        window.location.href = tenantUrl
-      }
+      // ★ Redirect به صفحه موفقیت
+    router.push(`/success?subdomain=${subdomain}&plan=${planName}&tenantId=${tenant?.id || ''}`)
     } catch (err) {
-      console.error('[Register] Network error:', err)
-      setError('خطا در ارتباط با سرور — لطفاً دوباره تلاش کنید')
-      setRegistrationFailed(true)
-    } finally {
-      setCheckoutLoading(false)
+      console.error('[Register] Error:', err)
+      setError('خطا در ارتباط با سرور')
+      setOtpVerifying(false)
+      setActivating(false)
     }
   }
 
   const handleBack = () => {
     setError('')
-    setRegistrationFailed(false)
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
   
-  const handleCancel = () => { 
-    // ✅ این دستور صفحه فعلی را از تاریخچه حذف کرده و مستقیم به لندینگ می‌رود
-    // بنابراین دکمه برگشت مرورگر دیگر گیج نمی‌شود.
-    router.replace('/') 
-  }
+  const handleCancel = () => router.replace('/')
 
-  // ─── canGoNext ────────────────────────────────────────────────
   const canGoNext = useCallback(() => {
-    switch (currentStep) {
-      case 1:
-        return !!(
-          storeName.trim() &&
-          subdomain.trim() && subdomain.trim().length >= 3 &&
-          subdomainAvailable !== false && !subdomainChecking &&
-          username.trim() && username.trim().length >= 3 &&
-          mobile.trim() && mobile.trim().length >= 10 &&
-          password.length >= 4
-        )
-      case 2:
-        return mobileVerified
-      default:
-        return false
+    if (currentStep === 1) {
+      return !!(
+        storeName.trim() &&
+        subdomain.trim() && subdomain.trim().length >= 3 &&
+        subdomainAvailable !== false && !subdomainChecking &&
+        username.trim() && username.trim().length >= 3 &&
+        mobile.trim() && mobile.trim().length >= 10 &&
+        password.length >= 4
+      )
     }
-  }, [currentStep, storeName, subdomain, subdomainAvailable, subdomainChecking, username, mobile, password, mobileVerified])
+    return false
+  }, [currentStep, storeName, subdomain, subdomainAvailable, subdomainChecking, username, mobile, password])
 
-  // ─── هندل مرحله بعد ──────────────────────────────────────────
   const handleNext = async () => {
     setError('')
-
     if (currentStep === 1) {
-      // ★ از مرحله ۱ به ۲ — ارسال خودکار OTP
       setCurrentStep(2)
-      // ★ ارسال OTP خودکار
       setTimeout(() => handleSendOtp(), 300)
-      return
-    }
-
-    if (currentStep === 2) {
-      // ★ تأیید OTP
-      if (!mobileVerified) {
-        await handleVerifyOtp()
-      }
-      return
     }
   }
-
-  const handleCopyUrl = () => {
-    const url = getTenantUrl(subdomain)
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {
-      const textArea = document.createElement('textarea')
-      textArea.value = url
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textArea)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  const handleGoToLogin = () => {
-    if (typeof window !== 'undefined') {
-      const loginUrl = getTenantUrl(subdomain, '/login')
-      window.location.href = loginUrl
-    }
-  }
-
-  const progressValue = ((currentStep - 1) / (steps.length - 1)) * 100
-  const tenantProdUrl = `${subdomain}.shopaccounting.ir`
-  const tenantDevUrl = `localhost:3000/${subdomain}`
-  const isLocalDev = isDevelopment()
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-emerald-50 via-white to-teal-50 px-4 py-8" dir="rtl">
-      <div className="w-full max-w-lg">
-        {/* ─── Header ─── */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
-              <ShoppingCart className="w-6 h-6 text-white" />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-emerald-50 via-white to-teal-50 px-4 py-4" dir="rtl">
+      <div className="w-full max-w-md">
+        {/* ─── Header فشرده ─── */}
+        <div className="text-center mb-4">
+          <div className="inline-flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow">
+              <ShoppingCart className="w-4 h-4 text-white" />
             </div>
-            <span className="text-xl font-bold text-gray-900">ShopAccounting</span>
-          </div>
-          <h1 className="text-xl font-bold text-gray-900">ثبت‌نام فروشگاه جدید</h1>
-          <p className="text-sm text-emerald-600 mt-1 flex items-center justify-center gap-1">
-            <Sparkles className="w-4 h-4" />
-            شروع فوری در کمتر از ۲ دقیقه
-          </p>
-          
-          {/* ★ نمایش پلن انتخاب‌شده (اصلاح‌شده برای نمایش صحیح دمو) */}
-          <div className={`mt-3 inline-flex items-center gap-2 border px-4 py-1.5 rounded-full ${
-            planInfo.isTrial 
-              ? 'bg-amber-50 border-amber-200' 
-              : 'bg-emerald-50 border-emerald-200'
-          }`}>
-            <CheckCircle2 className={`w-4 h-4 ${planInfo.isTrial ? 'text-amber-600' : 'text-emerald-600'}`} />
-            <span className={`text-sm font-medium ${planInfo.isTrial ? 'text-amber-700' : 'text-emerald-700'}`}>
-              پلن انتخابی: {planInfo.title} - {BILLING_CYCLE_FA[effectiveBillingCycle] || effectiveBillingCycle}
-            </span>
+            <span className="text-base font-bold text-gray-900">ثبت‌نام فروشگاه</span>
           </div>
         </div>
 
-        {/* ─── Progress ─── */}
-        <div className="mb-8">
-          <div className="flex justify-between mb-2">
-            {steps.map((step) => (
-              <div key={step.id} className={`flex items-center gap-1 text-xs ${step.id <= currentStep ? (planInfo.isTrial && step.id === 3 ? 'text-amber-600' : 'text-emerald-600') + ' font-semibold' : 'text-gray-400'}`}>
-                {step.id < currentStep ? (
-                  <CheckCircle2 className={`w-4 h-4 ${planInfo.isTrial && step.id === 3 ? 'text-amber-500' : 'text-emerald-500'}`} />
-                ) : (
-                  <span className={`w-6 h-6 rounded-full text-[10px] flex items-center justify-center transition-all ${
-                    step.id === currentStep 
-                      ? (planInfo.isTrial && step.id === 3 ? 'bg-amber-500' : 'bg-emerald-600') + ' text-white shadow-md' 
-                      : 'bg-gray-200 text-gray-500'
-                  }`}>
-                    {step.id}
-                  </span>
-                )}
-                <span className="hidden sm:inline">{step.title}</span>
-              </div>
-            ))}
-          </div>
-          <Progress value={progressValue} className="h-2" />
+        {/* ─── Steps ساده ─── */}
+        <div className="mb-4 flex justify-center gap-6">
+          {steps.map((step) => (
+            <div key={step.id} className={`flex items-center gap-1.5 text-xs ${step.id <= currentStep ? 'text-emerald-600 font-semibold' : 'text-gray-400'}`}>
+              {step.id < currentStep ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center ${
+                  step.id === currentStep ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
+                }`}>
+                  {step.id}
+                </span>
+              )}
+              <span>{step.title}</span>
+            </div>
+          ))}
         </div>
 
-        {/* ─── Card ─── */}
-        <Card className="border-gray-200 shadow-xl shadow-gray-200/50">
-          <CardContent className="pt-6">
-            {/* ═══ Step 1: Store Info ═══ */}
+        <Card className="border-gray-200 shadow-lg">
+          <CardContent className="pt-4 pb-4">
+            {/* ═══ Step 1 ═══ */}
             {currentStep === 1 && (
-              <div className="space-y-5">
-                <div className="text-center mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">اطلاعات فروشگاه</h2>
-                  <p className="text-sm text-gray-500">اطلاعات فروشگاه و حساب کاربری خود را وارد کنید</p>
-                </div>
-
-                {/* نام فروشگاه */}
-                <div className="space-y-2">
-                  <Label htmlFor="storeName" className="text-sm font-medium flex items-center gap-1">
-                    <Store className="w-3.5 h-3.5" />
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="storeName" className="text-xs font-medium flex items-center gap-1">
+                    <Store className="w-3 h-3" />
                     نام فروشگاه
                   </Label>
                   <Input
@@ -515,15 +302,14 @@ export default function RegisterForm() {
                     placeholder="مثال: فروشگاه اروندان"
                     value={storeName}
                     onChange={(e) => setStoreName(e.target.value)}
-                    className="h-10"
+                    className="h-9 text-sm"
                   />
                 </div>
 
-                {/* زیردامنه */}
-                <div className="space-y-2">
-                  <Label htmlFor="subdomain" className="text-sm font-medium flex items-center gap-1">
-                    <Globe className="w-3.5 h-3.5" />
-                    زیردامنه (آدرس اختصاصی فروشگاه)
+                <div className="space-y-1">
+                  <Label htmlFor="subdomain" className="text-xs font-medium flex items-center gap-1">
+                    <Globe className="w-3 h-3" />
+                    زیردامنه
                   </Label>
                   <div className="flex items-center gap-0">
                     <Input
@@ -531,53 +317,48 @@ export default function RegisterForm() {
                       placeholder="myshop"
                       value={subdomain}
                       onChange={(e) => handleSubdomainChange(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
-                      className="text-left rounded-l-none h-10"
+                      className="text-left rounded-l-none h-9 text-sm"
                       dir="ltr"
                     />
-                    <div className="h-10 px-3 bg-gray-100 border border-r-0 border-input rounded-l-md flex items-center text-sm text-gray-500 whitespace-nowrap">
+                    <div className="h-9 px-2 bg-gray-100 border border-r-0 border-input rounded-l-md flex items-center text-xs text-gray-500 whitespace-nowrap">
                       .shopaccounting.ir
                     </div>
                   </div>
                   {subdomainChecking && (
-                    <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      در حال بررسی...
+                    <p className="text-[10px] text-gray-400 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> بررسی...
                     </p>
                   )}
                   {subdomainAvailable === true && !subdomainChecking && (
-                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                      <Check className="w-3 h-3" /> این زیردامنه آزاد است
+                    <p className="text-[10px] text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> آزاد است
                     </p>
                   )}
                   {subdomainAvailable === false && !subdomainChecking && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> این زیردامنه قبلاً ثبت شده است
+                    <p className="text-[10px] text-red-500 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> قبلاً ثبت شده
                     </p>
                   )}
                 </div>
 
-                {/* نام کاربری */}
-                <div className="space-y-2">
-                  <Label htmlFor="username" className="text-sm font-medium flex items-center gap-1">
-                    <User className="w-3.5 h-3.5" />
+                <div className="space-y-1">
+                  <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
+                    <User className="w-3 h-3" />
                     نام کاربری
                   </Label>
                   <Input
                     id="username"
-                    type="text"
                     placeholder="مثال: admin"
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                    className="h-10"
+                    className="h-9 text-sm"
                     dir="ltr"
                   />
-                  <p className="text-xs text-gray-400">این نام برای ورود به سیستم استفاده می‌شود</p>
                 </div>
 
-                {/* شماره موبایل */}
-                <div className="space-y-2">
-                  <Label htmlFor="mobile" className="text-sm font-medium flex items-center gap-1">
-                    <Phone className="w-3.5 h-3.5" />
+                <div className="space-y-1">
+                  <Label htmlFor="mobile" className="text-xs font-medium flex items-center gap-1">
+                    <Phone className="w-3 h-3" />
                     شماره موبایل
                   </Label>
                   <Input
@@ -586,17 +367,15 @@ export default function RegisterForm() {
                     placeholder="09123456789"
                     value={mobile}
                     onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
-                    className="h-10"
+                    className="h-9 text-sm"
                     dir="ltr"
                     maxLength={11}
                   />
-                  <p className="text-xs text-gray-400">کد تأیید به این شماره ارسال می‌شود</p>
                 </div>
 
-                {/* رمز عبور */}
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-sm font-medium flex items-center gap-1">
-                    <Lock className="w-3.5 h-3.5" />
+                <div className="space-y-1">
+                  <Label htmlFor="password" className="text-xs font-medium flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
                     رمز عبور
                   </Label>
                   <Input
@@ -605,101 +384,84 @@ export default function RegisterForm() {
                     placeholder="حداقل ۴ کاراکتر"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-10"
+                    className="h-9 text-sm"
                     dir="ltr"
                   />
                 </div>
 
-                {/* خطا */}
                 {error && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm animate-fade-in">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                     <span>{error}</span>
                   </div>
                 )}
 
-                {/* دکمه‌ها */}
-                <div className="flex gap-2 pt-2">
-                  <Button variant="outline" onClick={handleCancel} className="flex-1 h-10">
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" onClick={handleCancel} className="flex-1 h-9 text-xs">
                     انصراف
                   </Button>
                   <Button
                     onClick={handleNext}
-                    disabled={!canGoNext() || loading}
-                    className="flex-1 h-10 gap-2 bg-emerald-600 hover:bg-emerald-700"
+                    disabled={!canGoNext()}
+                    className="flex-1 h-9 gap-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
                   >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    مرحله بعد
-                    <ArrowLeft className="w-4 h-4" />
+                    ادامه
+                    <ArrowLeft className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               </div>
             )}
 
-            {/* ═══ Step 2: OTP Verification ═══ */}
+            {/* ═══ Step 2 ═══ */}
             {currentStep === 2 && (
-              <div className="space-y-5">
-                <div className="text-center mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">تأیید شماره موبایل</h2>
-                  <p className="text-sm text-gray-500">کد ۶ رقمی ارسال شده به شماره موبایل خود را وارد کنید</p>
-                </div>
-
-                {/* نمایش شماره موبایل */}
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+              <div className="space-y-3">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-emerald-600" />
-                    <span className="text-sm text-gray-700">شماره موبایل:</span>
-                    <span className="text-sm font-bold text-gray-900" dir="ltr">{mobile}</span>
+                    <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-xs text-gray-700">شماره:</span>
+                    <span className="text-xs font-bold text-gray-900" dir="ltr">{mobile}</span>
                   </div>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-xs h-7 text-emerald-600"
-                    onClick={() => { setCurrentStep(1); setOtpSent(false); setMobileVerified(false); setOtpCode('') }}
+                    className="text-[10px] h-6 text-emerald-600 px-2"
+                    onClick={() => { setCurrentStep(1); setMobileVerified(false); setOtpCode('') }}
                   >
                     ویرایش
                   </Button>
                 </div>
 
-                {/* ★ نمایش کد تست در mock mode */}
                 {mockOtpCode && (
-                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div className="bg-amber-50 border border-amber-300 rounded-lg p-2 flex items-center gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     <div>
-                      <p className="text-xs font-bold text-amber-900">حالت تست — کد تأیید:</p>
-                      <p className="text-lg font-bold text-amber-700 font-mono tracking-widest" dir="ltr">{mockOtpCode}</p>
+                      <p className="text-[10px] font-bold text-amber-900">کد تست:</p>
+                      <p className="text-sm font-bold text-amber-700 font-mono" dir="ltr">{mockOtpCode}</p>
                     </div>
                   </div>
                 )}
 
-                {/* ورودی کد OTP */}
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">کد تأیید ۶ رقمی</Label>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">کد تأیید ۶ رقمی</Label>
                   <div className="flex justify-center" dir="ltr">
                     <InputOTP
                       value={otpCode}
                       onChange={(value) => setOtpCode(value)}
                       maxLength={6}
-                      disabled={mobileVerified}
+                      disabled={mobileVerified || activating}
                     >
                       <InputOTPGroup>
-                        <InputOTPSlot index={0} />
-                        <InputOTPSlot index={1} />
-                        <InputOTPSlot index={2} />
-                        <InputOTPSlot index={3} />
-                        <InputOTPSlot index={4} />
-                        <InputOTPSlot index={5} />
+                        {[0, 1, 2, 3, 4, 5].map(i => <InputOTPSlot key={i} index={i} />)}
                       </InputOTPGroup>
                     </InputOTP>
                   </div>
                 </div>
 
-                {/* دکمه ارسال مجدد */}
                 {!mobileVerified && (
                   <div className="text-center">
                     {otpCooldown > 0 ? (
-                      <p className="text-xs text-gray-400">
-                        ارسال مجدد کد تا {otpCooldown.toLocaleString('fa-IR')} ثانیه دیگر
+                      <p className="text-[10px] text-gray-400">
+                        ارسال مجدد تا {otpCooldown.toLocaleString('fa-IR')} ثانیه دیگر
                       </p>
                     ) : (
                       <Button
@@ -707,169 +469,118 @@ export default function RegisterForm() {
                         size="sm"
                         onClick={handleSendOtp}
                         disabled={otpSending}
-                        className="text-xs text-emerald-600 gap-1"
+                        className="text-[10px] text-emerald-600 gap-1 h-6"
                       >
                         {otpSending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                        ارسال مجدد کد
+                        ارسال مجدد
                       </Button>
                     )}
                   </div>
                 )}
 
-                {/* تأیید موفق */}
-                {mobileVerified && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <p className="text-sm font-bold text-emerald-700">شماره موبایل تأیید شد!</p>
+                {mobileVerified && !activating && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span className="text-xs font-bold text-emerald-700">موبایل تأیید شد</span>
+                    </div>
+                    <div className="text-[11px] text-emerald-700 space-y-0.5 pr-6">
+                      <div>• فروشگاه <b>{storeName}</b> ایجاد می‌شود</div>
+                      <div>• دسترسی کامل به پلن <b>{planInfo.title}</b></div>
+                      <div>• پشتیبانی و به‌روزرسانی فعال</div>
+                    </div>
                   </div>
                 )}
 
-                {/* خطا */}
                 {error && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm animate-fade-in">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                     <span>{error}</span>
                   </div>
                 )}
 
-                {/* دکمه‌ها */}
-                <div className="flex gap-2 pt-2">
-                  <Button variant="outline" onClick={handleBack} className="flex-1 h-10">
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" onClick={handleBack} disabled={activating} className="flex-1 h-9 text-xs">
                     بازگشت
                   </Button>
-                  {!mobileVerified ? (
-                    <Button
-                      onClick={handleVerifyOtp}
-                      disabled={otpCode.length !== 6 || otpVerifying}
-                      className="flex-1 h-10 gap-2 bg-emerald-600 hover:bg-emerald-700"
-                    >
-                      {otpVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                      تأیید کد
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => setCurrentStep(3)}
-                      className="flex-1 h-10 gap-2 bg-emerald-600 hover:bg-emerald-700"
-                    >
-                      ادامه به فعال‌سازی
-                      <ArrowLeft className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* ═══ Step 3: Payment / Activation ═══ */}
-            {currentStep === 3 && (
-              <div className="space-y-5">
-                <div className="text-center mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    {planInfo.isTrial ? 'فعال‌سازی حساب تستی' : 'پرداخت اشتراک'}
-                  </h2>
-                  <p className="text-sm text-gray-500">
-                    {planInfo.isTrial 
-                      ? 'فروشگاه شما بلافاصله و بدون نیاز به پرداخت فعال می‌شود' 
-                      : 'برای فعال‌سازی فروشگاه خود، پرداخت را تکمیل کنید'}
-                  </p>
-                </div>
-
-                {/* خلاصه سفارش */}
-                <div className={`rounded-xl p-5 space-y-3 border ${
-                  planInfo.isTrial 
-                    ? 'bg-gradient-to-bl from-amber-50 to-orange-50 border-amber-100' 
-                    : 'bg-gradient-to-bl from-emerald-50 to-teal-50 border-emerald-100'
-                }`}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">نام فروشگاه:</span>
-                    <span className="font-medium text-gray-900">{storeName}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">نام کاربری:</span>
-                    <span className="font-medium text-gray-900" dir="ltr">{username}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">شماره موبایل:</span>
-                    <span className="font-medium text-gray-900" dir="ltr">{mobile}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">آدرس فروشگاه:</span>
-                    <span className={`font-medium ${planInfo.isTrial ? 'text-amber-600' : 'text-emerald-600'}`} dir="ltr">
-                      {isLocalDev ? tenantDevUrl : tenantProdUrl}
-                    </span>
-                  </div>
-                  <div className="pt-2 border-t border-dashed border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">پلن انتخابی:</span>
-                      <span className={`font-bold ${planInfo.isTrial ? 'text-amber-700' : 'text-emerald-700'}`}>{planInfo.title}</span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-sm text-gray-500">دوره:</span>
-                      <span className="font-bold text-gray-900">{BILLING_CYCLE_FA[effectiveBillingCycle]}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* خطا */}
-                {error && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm animate-fade-in">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
-                {/* دکمه پرداخت / فعال‌سازی */}
-                <div className="space-y-2">
                   <Button
-                    onClick={handleRegisterAndCheckout}
-                    disabled={checkoutLoading}
-                    className={`w-full h-12 gap-2 text-base ${
-                      planInfo.isTrial 
-                        ? 'bg-amber-500 hover:bg-amber-600 text-white' 
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
+                    onClick={handleVerifyOtpAndRegister}
+                    disabled={otpCode.length !== 6 || otpVerifying || activating}
+                    className="flex-1 h-9 gap-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
                   >
-                    {checkoutLoading ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        در حال پردازش...
-                      </>
-                    ) : planInfo.isTrial ? (
-                      <>
-                        <Sparkles className="w-5 h-5" />
-                        فعال‌سازی تست ۳ روزه رایگان
-                      </>
+                    {(otpVerifying || activating) ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <>
-                        <Crown className="w-5 h-5" />
-                        پرداخت با زرین‌پال
-                      </>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
                     )}
+                    {activating ? 'در حال فعال‌سازی...' : otpVerifying ? 'در حال تأیید...' : 'تأیید و ثبت‌نام'}
                   </Button>
-
-                  {planInfo.isTrial ? (
-                    <p className="text-center text-xs text-amber-600 font-medium">
-                      🎉 بدون نیاز به پرداخت، بلافاصله وارد داشبورد می‌شوید.
-                    </p>
-                  ) : (
-                    <p className="text-center text-xs text-gray-400">
-                      🔒 پرداخت امن از طریق درگاه زرین‌پال
-                    </p>
-                  )}
                 </div>
-
-                {/* دکمه بازگشت */}
-                <Button variant="ghost" onClick={handleBack} className="w-full h-10 text-xs">
-                  بازگشت به مرحله قبل
-                </Button>
               </div>
             )}
           </CardContent>
         </Card>
 
-        <p className="text-center text-xs text-gray-400 mt-6">
-          ShopAccounting v5.1.5 — سیستم حسابداری فروشگاهی
+        <p className="text-center text-[10px] text-gray-400 mt-3">
+          رهگشا — سیستم حسابداری فروشگاهی
         </p>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════
+          ★ Loading Overlay — نمایش در حال ساخت حساب
+          ★ این overlay روی تمام صفحه قرار می‌گیرد و از نمایش
+          ★ هرگونه UI موقتی قبل از redirect جلوگیری می‌کند
+          ═══════════════════════════════════════════════════════════ */}
+      {(activating || otpVerifying) && (
+        <div className="fixed inset-0 z-50 bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center" dir="rtl">
+          <div className="text-center space-y-5 max-w-md px-6 w-full">
+            
+            {/* آیکون انیمیشن‌دار */}
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-emerald-400 rounded-full blur-2xl opacity-30 animate-pulse" />
+              <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-2xl">
+                <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            </div>
+
+            {/* عنوان و توضیح */}
+            <div>
+              <h2 className="text-xl font-black text-gray-900 mb-2">
+                {otpVerifying && !activating ? 'در حال تأیید کد...' : 'در حال ساخت فروشگاه شما...'}
+              </h2>
+              <p className="text-sm text-gray-500 leading-relaxed">
+                {otpVerifying && !activating 
+                  ? 'لطفاً چند لحظه صبر کنید.'
+                  : <>فروشگاه <b className="text-gray-700">{storeName}</b> با پلن <b className="text-gray-700">{planInfo.title}</b> در حال ایجاد است.</>
+                }
+              </p>
+            </div>
+
+            {/* Progress Steps */}
+            <div className="bg-white rounded-2xl shadow-lg p-4 space-y-2.5 text-right border border-emerald-100">
+              <div className="flex items-center gap-2 text-emerald-600">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="text-xs">اطلاعات فروشگاه ثبت شد</span>
+              </div>
+              <div className="flex items-center gap-2 text-emerald-600">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="text-xs">شماره موبایل تأیید شد</span>
+              </div>
+              <div className="flex items-center gap-2 text-violet-600">
+                <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="text-xs font-semibold">
+                  {otpVerifying && !activating ? 'در حال تأیید کد...' : `فعال‌سازی پلن ${planInfo.title}...`}
+                </span>
+              </div>
+            </div>
+
+            {/* پیام اطمینان‌بخش */}
+            <p className="text-[11px] text-gray-400">
+              لطفاً صفحه را نبندید. این فرآیند چند لحظه طول می‌کشد.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

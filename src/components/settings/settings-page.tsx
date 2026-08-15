@@ -8,6 +8,11 @@
 //   ✓ حذف کارت ویزارد راه‌اندازی از بالای صفحه (مدیریت در تب راه‌اندازی انجام می‌شود)
 //   ✓ حذف کامپوننت‌ها و ایمپورت‌های بدون استفاده (SetupStatusBadges, SetupWizard, Card, Button, etc.)
 //   ✓ سبک‌تر و تمیزتر شدن کد اصلی و تمرکز کامل روی تب‌ها
+//
+// ★★★ v10.3 تغییرات (v9.1 plan-features):
+//   ✓ تغییر شرط تب "اعلان SMS" از canAccessInstallments به canAccessSmsNotifications
+//   ✓ تب "درگاه پرداخت" فقط برای پلن‌هایی که canOnlinePayment = true دارند نمایش داده می‌شود
+//   ✓ تب "کارتخوان" فقط برای پلن‌هایی که canMultiCashRegister = true دارند نمایش داده می‌شود
 // ============================================================================
 
 import { useState, useEffect } from 'react'
@@ -22,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 // ★ Icons
 import {
   Store, CreditCard, Monitor, FileText, Database, Crown, Users, Wallet,
-  Lock, Sparkles, Bell, Building2, CalendarDays,
+  Lock, Sparkles, Bell, Building2, CalendarDays, Archive,
 } from 'lucide-react'
 
 // ★ تب‌های جداگانه (هر کدام در فایل مستقل)
@@ -38,7 +43,7 @@ import { InitialBalanceTab } from './initial-balance-tab'
 import { MoidianTab } from './moidian-tab'
 import { PosDevicesTab } from './pos-devices-tab'
 import { PaymentGatewayTab } from './payment-gateway-tab'
-
+import { BasicYearEndPage } from './basic-year-end-page'  // ★ v12.0: بستن حساب پلن پایه
 // ============================================================================
 // DemoDisabledSection — پیام غیرفعال در حالت دمو
 // ============================================================================
@@ -99,12 +104,26 @@ export default function SettingsPage() {
   // ★ اگر activeTab فعلی دیگر در دسترس نیست، به تب پیش‌فرض برگردان
   useEffect(() => {
     const visibleTabs = ['store', 'invoice', 'backup', 'subscription', 'employees', 'initial-balance']
-    if (features.canAccessInstallments) visibleTabs.push('sms')
+    // ★★★ v10.3: تغییر شرط تب SMS از canAccessInstallments به canAccessSmsNotifications
+    //   - پلن پایه: canAccessSmsNotifications = false → تب SMS مخفی
+    //   - پلن پیشرفته: canAccessSmsNotifications = false → تب SMS مخفی
+    //   - پلن حرفه‌ای: canAccessSmsNotifications = true → تب SMS نمایش داده می‌شود
+    if (features.canAccessSmsNotifications) visibleTabs.push('sms')
+    // ★★★ تب درگاه پرداخت فقط برای پلن‌های دارای canOnlinePayment
+    //   - پلن پایه: canOnlinePayment = false → مخفی
+    //   - پلن پیشرفته: canOnlinePayment = false → مخفی (تغییر v9.1)
+    //   - پلن حرفه‌ای: canOnlinePayment = true → نمایش
     if (features.canOnlinePayment) visibleTabs.push('gateway')
+    // ★★★ تب کارتخوان برای پلن‌های دارای canMultiCashRegister
+    //   - پلن پایه: canMultiCashRegister = false → مخفی
+    //   - پلن پیشرفته: canMultiCashRegister = true → نمایش (تغییر v9.1)
+    //   - پلن حرفه‌ای: canMultiCashRegister = true → نمایش
     if (features.canMultiCashRegister) visibleTabs.push('pos')
     if (features.canMoidianIntegration) visibleTabs.push('moidian')
     if (isEnterprise) visibleTabs.push('enterprise')
     if (features.canFiscalYearManagement) visibleTabs.push('fiscal-year')
+    // ★ v12.0: تب بستن حساب فقط برای پلن پایه (simple)
+    if (currentTier === 'simple') visibleTabs.push('basic-year-end')
 
     const disabledInDemoTabs = ['backup', 'subscription', 'initial-balance']
     if (isDemo && disabledInDemoTabs.includes(activeTab)) {
@@ -143,6 +162,7 @@ export default function SettingsPage() {
               <span className="hidden sm:inline">فروشگاه</span>
             </TabsTrigger>
 
+            {/* ★★★ v10.3: تب درگاه پرداخت — فقط برای پلن حرفه‌ای (canOnlinePayment) */}
             {features.canOnlinePayment && (
               <TabsTrigger value="gateway" className={tabClassEmerald}>
                 <CreditCard className="w-4 h-4" />
@@ -150,6 +170,7 @@ export default function SettingsPage() {
               </TabsTrigger>
             )}
 
+            {/* ★★★ v10.3: تب کارتخوان — برای پلن پیشرفته و حرفه‌ای (canMultiCashRegister) */}
             {features.canMultiCashRegister && (
               <TabsTrigger value="pos" className={tabClassEmerald}>
                 <Monitor className="w-4 h-4" />
@@ -190,7 +211,10 @@ export default function SettingsPage() {
               <span className="hidden sm:inline">کاربران</span>
             </TabsTrigger>
 
-            {features.canAccessInstallments && (
+            {/* ★★★ v10.3: تغییر شرط تب SMS از canAccessInstallments به canAccessSmsNotifications */}
+            {/* قبلاً: features.canAccessInstallments (پلن پیشرفته و حرفه‌ای دسترسی داشتند) */}
+            {/* حالا: features.canAccessSmsNotifications (فقط پلن حرفه‌ای) */}
+            {features.canAccessSmsNotifications && (
               <TabsTrigger value="sms" className={tabClassEmerald}>
                 <Bell className="w-4 h-4" />
                 <span className="hidden sm:inline">اعلان SMS</span>
@@ -211,10 +235,21 @@ export default function SettingsPage() {
               </TabsTrigger>
             )}
 
-            {features.canFiscalYearManagement && (
+                       {features.canFiscalYearManagement && (
               <TabsTrigger value="fiscal-year" className={tabClassEmerald}>
                 <CalendarDays className="w-4 h-4" />
                 <span className="hidden sm:inline">سال مالی</span>
+              </TabsTrigger>
+            )}
+
+            {/* ★ v12.0: تب بستن حساب — فقط برای پلن پایه */}
+            {currentTier === 'simple' && (
+              <TabsTrigger value="basic-year-end" className={tabClassPurple}>
+                <Archive className="w-4 h-4" />
+                <span className="hidden sm:inline">بستن حساب</span>
+                <span className="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-bold mr-1">
+                  پایه
+                </span>
               </TabsTrigger>
             )}
 
@@ -234,10 +269,12 @@ export default function SettingsPage() {
         {/* ═══ محتوای تب‌ها ═══ */}
         <TabsContent value="store"><StoreSettingsTab /></TabsContent>
 
+        {/* ★★★ v10.3: محتوای تب درگاه پرداخت — فقط برای پلن حرفه‌ای */}
         {features.canOnlinePayment && (
           <TabsContent value="gateway"><PaymentGatewayTab /></TabsContent>
         )}
 
+        {/* ★★★ v10.3: محتوای تب کارتخوان — برای پلن پیشرفته و حرفه‌ای */}
         {features.canMultiCashRegister && (
           <TabsContent value="pos"><PosDevicesTab /></TabsContent>
         )}
@@ -256,7 +293,10 @@ export default function SettingsPage() {
           <EmployeesTab />
         </TabsContent>
 
-        {features.canAccessInstallments && (
+        {/* ★★★ v10.3: تغییر شرط تب SMS از canAccessInstallments به canAccessSmsNotifications */}
+        {/* قبلاً: features.canAccessInstallments → پلن پیشرفته و حرفه‌ای دسترسی داشتند */}
+        {/* حالا: features.canAccessSmsNotifications → فقط پلن حرفه‌ای */}
+        {features.canAccessSmsNotifications && (
           <TabsContent value="sms"><SmsNotificationsTab /></TabsContent>
         )}
 
@@ -268,8 +308,15 @@ export default function SettingsPage() {
           <TabsContent value="enterprise"><EnterpriseTab /></TabsContent>
         )}
 
-        {features.canFiscalYearManagement && (
+            {features.canFiscalYearManagement && (
           <TabsContent value="fiscal-year"><FiscalYearTab /></TabsContent>
+        )}
+
+        {/* ★ v12.0: محتوای تب بستن حساب — فقط برای پلن پایه */}
+        {currentTier === 'simple' && (
+          <TabsContent value="basic-year-end">
+            <BasicYearEndPage />
+          </TabsContent>
         )}
 
         <TabsContent value="initial-balance" className="w-full mt-2 outline-none">

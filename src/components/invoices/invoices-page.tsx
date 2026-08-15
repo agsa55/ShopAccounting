@@ -12,6 +12,7 @@ import {
   ChevronLeft, ShoppingCart, CreditCard, Banknote, CalendarDays, Plus, X,
   AlertTriangle, CheckCircle2, Wallet, Calendar as CalendarIcon, Info,
   Wrench, RotateCcw, WifiOff, TrendingUp, Package, Filter,
+  ChevronRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -708,7 +709,7 @@ export default function InvoicesPage() {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const params = new URLSearchParams()
       params.set('page', String(page))
-      params.set('limit', '50')
+      params.set('limit', '10')
       params.set('tenantId', tenantId)
       if (statusFilter !== 'ALL') params.set('status', statusFilter)
 
@@ -1337,7 +1338,8 @@ export default function InvoicesPage() {
               <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
             )}
             <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
-            {(() => {
+                      {/* ★★★ v9.1: دکمه پرداخت الکترونیک فقط برای پلن‌های دارای درگاه پرداخت */}
+            {planFeatures.canOnlinePayment && (() => {
               const rem = (inv.totalAmount || 0) - (inv.paidAmount || 0)
               return rem > 0 ? <OnlinePaymentButton invoiceId={inv.id} amount={rem} /> : null
             })()}
@@ -2141,11 +2143,11 @@ export default function InvoicesPage() {
                         </p>
                         <div className="flex items-center gap-1 order-1 sm:order-2">
                           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-                            <ChevronLeft className="w-3 h-3" />قبلی
+                            <ChevronRight className="w-3 h-3" />قبلی
                           </Button>
                           <span className="text-xs text-gray-400 px-1">{page} / {totalPages}</span>
                           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
-                            بعدی<ChevronLeft className="w-3 h-3 rotate-180" />
+                            بعدی<ChevronRight className="w-3 h-3 rotate-180" />
                           </Button>
                         </div>
                       </div>

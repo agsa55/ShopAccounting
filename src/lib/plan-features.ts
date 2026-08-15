@@ -17,6 +17,11 @@
 //       پایه      سالانه: ۱,۵۹۰,۰۰۰   مادام‌العمر: ۱۶,۰۰۰,۰۰۰
 //       پیشرفته   سالانه: ۲,۷۶۰,۰۰۰   مادام‌العمر: ۲۸,۰۰۰,۰۰۰
 //       حرفه‌ای   سالانه: ۳,۵۵۰,۰۰۰   مادام‌العمر: ۳۶,۰۰۰,۰۰۰
+//
+// ★★★ v9.1: تغییرات جدید
+//   - پلن پایه: افزودن نسیه و اقساط (فقط پرداخت حضوری، بدون درگاه)
+//   - پلن پیشرفته: غیرفعال کردن درگاه پرداخت و اعلان SMS
+//   - پلن پیشرفته: فعال کردن کارتخوان (POS integration)
 // ============================================================================
 
 export type PlanTier = 'basic' | 'professional' | 'enterprise'
@@ -64,6 +69,9 @@ export interface PlanFeatureSet {
   canMoidianIntegration: boolean
   canMultiCashRegister: boolean
   canOnlinePayment: boolean
+  
+  // ★★★ v9.1: قابلیت جدید برای کنترل تب اعلان SMS (جدا از اقساط)
+  canAccessSmsNotifications: boolean
 
   // ★★★ v6.1: قابلیت‌های جدید انبارداری و خرید
   canPurchaseInvoice: boolean       // فاکتور خرید + تامین‌کنندگان
@@ -77,18 +85,24 @@ export interface PlanFeatureSet {
 
 const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
   basic: {
-    tier: 'basic', label: 'پایه', labelEn: 'Basic',
-    posPaymentTypes: ['cash'],
+     tier: 'basic', label: 'پایه', labelEn: 'Basic',
+  // ★★★ v9.2: پلن پایه می‌تواند با چک خرید و فروش کند
+  posPaymentTypes: ['cash', 'credit', 'installment', 'check'],
     canEditTax: false, canDeleteInvoice: false, canPrintInvoice: true,
     canViewSimpleReport: true, canViewJournals: true,
     canViewAccounts: false, canCreateJournal: false, canCreateAccount: false,
     canTrialBalance: false, canGeneralLedger: false, canJournalBook: false,
-    canAccessInstallments: false, canAccessCredit: false,
+    // ★★★ v9.1: پلن پایه نسیه و اقساط دارد (فقط پرداخت حضوری)
+    canAccessInstallments: true,
+    canAccessCredit: true,
     canMultiBranch: false, canConsolidatedReports: false,
     canCloseFiscalYear: false, canFiscalYearManagement: false,
     canMoidianIntegration: false,
     canMultiCashRegister: false,
+    // ★★★ v9.1: پلن پایه درگاه پرداخت الکترونیکی ندارد
     canOnlinePayment: false,
+    // ★★★ v9.1: پلن پایه اعلان SMS ندارد
+    canAccessSmsNotifications: false,
     // ★★★ v6.1: انبارداری پایه
     canPurchaseInvoice: true,       // ★ پایه هم فاکتور خرید دارد
     canMultiWarehouse: false,       // ★ فقط ۱ انبار
@@ -99,6 +113,7 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
   },
   professional: {
     tier: 'professional', label: 'پیشرفته', labelEn: 'Advanced',
+    // ★★★ v9.1: پلن پیشرفته همه روش‌های پرداخت را دارد (شامل کارتخوان)
     posPaymentTypes: ['cash', 'card', 'credit', 'installment', 'check'],
     canEditTax: true, canDeleteInvoice: true, canPrintInvoice: true,
     canViewSimpleReport: true, canViewJournals: true,
@@ -108,8 +123,12 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
     canMultiBranch: false, canConsolidatedReports: false,
     canCloseFiscalYear: true, canFiscalYearManagement: true, // ★★★ v6.7: فعال برای پیشرفته
     canMoidianIntegration: true,
-    canMultiCashRegister: false,
-    canOnlinePayment: true,
+    // ★★★ v9.1: پلن پیشرفته کارتخوان را فعال می‌کند
+    canMultiCashRegister: true,
+    // ★★★ v9.1: پلن پیشرفته درگاه پرداخت الکترونیکی ندارد
+    canOnlinePayment: false,
+    // ★★★ v9.1: پلن پیشرفته اعلان SMS ندارد
+    canAccessSmsNotifications: false,
     // ★★★ v6.1: انبارداری پیشرفته
     canPurchaseInvoice: true,
     canMultiWarehouse: true,        // ★ ۲ انبار
@@ -131,6 +150,8 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
     canMoidianIntegration: true,
     canMultiCashRegister: true,
     canOnlinePayment: true,
+    // ★★★ v9.1: پلن حرفه‌ای اعلان SMS دارد
+    canAccessSmsNotifications: true,
     // ★★★ v6.1: انبارداری حرفه‌ای
     canPurchaseInvoice: true,
     canMultiWarehouse: true,        // ★ نامحدود
@@ -169,7 +190,8 @@ export const PLANS: Record<PlanName, PlanInfo> = {
   simple: {
     planName: 'simple', tier: 'basic', label: 'پایه', labelEn: 'Basic',
     isPaid: true, isIsolated: false,
-    description: 'حسابداری پایه، فقط فروش نقدی، مناسب خرده‌فروش‌های کوچک و مغازه‌های محلی.',
+    // ★★★ v9.1: تغییر توضیحات پلن پایه
+    description: 'حسابداری پایه با فروش نقدی، نسیه و اقساط (فقط پرداخت حضوری). مناسب خرده‌فروش‌های کوچک و مغازه‌های محلی.',
     annualPrice: PLAN_PRICES.simple.annual,
     lifetimePrice: PLAN_PRICES.simple.lifetime,
     maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 2,  // ★ تغییر: محصولات و فاکتور نامحدود
@@ -178,7 +200,8 @@ export const PLANS: Record<PlanName, PlanInfo> = {
   professional: {
     planName: 'professional', tier: 'professional', label: 'پیشرفته', labelEn: 'Advanced',
     isPaid: true, isIsolated: false,
-    description: 'حسابداری دوطرفه کامل، ثبت خودکار بهای تمام شده، مدیریت طلب و بدهی، تراز آزمایشی، دفتر کل و روزنامه، اتصال به سامانه مودیان، انبارداری دوگانه. مناسب فروشگاه‌های متوسط.',
+    // ★★★ v9.1: تغییر توضیحات پلن پیشرفته
+    description: 'حسابداری دوطرفه کامل، ثبت خودکار بهای تمام شده، مدیریت طلب و بدهی، تراز آزمایشی، دفتر کل و روزنامه، اتصال به سامانه مودیان، انبارداری دوگانه، کارتخوان. مناسب فروشگاه‌های متوسط.',
     annualPrice: PLAN_PRICES.professional.annual,
     lifetimePrice: PLAN_PRICES.professional.lifetime,
     maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 5,  // ★ تغییر: محصولات و فاکتور نامحدود
@@ -187,7 +210,7 @@ export const PLANS: Record<PlanName, PlanInfo> = {
   enterprise: {
     planName: 'enterprise', tier: 'enterprise', label: 'حرفه‌ای', labelEn: 'Professional',
     isPaid: true, isIsolated: false,
-    description: 'تمام موارد پیشرفته + حسابداری شعب و انبارهای متعدد، گزارش‌های تلفیقی، بستن خودکار سال مالی. مناسب سازمان‌ها و فروشگاه‌های بزرگ.',
+    description: 'تمام موارد پیشرفته + حسابداری شعب و انبارهای متعدد، گزارش‌های تلفیقی، بستن خودکار سال مالی، درگاه پرداخت آنلاین، اعلان SMS. مناسب سازمان‌ها و فروشگاه‌های بزرگ.',
     annualPrice: PLAN_PRICES.enterprise.annual,
     lifetimePrice: PLAN_PRICES.enterprise.lifetime,
     maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 0,  // بدون تغییر (نامحدود)
@@ -281,9 +304,9 @@ export function isPaidPlan(_planName: string | null | undefined): boolean { retu
 export function isIsolatedPlan(_planName: string | null | undefined): boolean { return false }
 
 export const PLAN_TIERS: { tier: PlanTier; label: string; labelEn: string; description: string }[] = [
-  { tier: 'basic', label: 'پایه', labelEn: 'Basic', description: 'تک‌دفتری: فقط درآمد/هزینه، سود و زیان ساده، بدون بهای تمام شده خودکار، بدون مدیریت طلب و بدهی پیشرفته.' },
-  { tier: 'professional', label: 'پیشرفته', labelEn: 'Advanced', description: 'حسابداری دوطرفه کامل، ثبت خودکار بهای تمام شده، مدیریت طلب و بدهی، تراز آزمایشی، دفتر کل و روزنامه، اتصال به سامانه مودیان، انبارداری دوگانه.' },
-  { tier: 'enterprise', label: 'حرفه‌ای', labelEn: 'Professional', description: 'تمام موارد پیشرفته + حسابداری شعب و انبارهای متعدد، گزارش‌های تلفیقی، بستن خودکار سال مالی.' },
+  { tier: 'basic', label: 'پایه', labelEn: 'Basic', description: 'تک‌دفتری: درآمد/هزینه، سود و زیان ساده، فروش نسیه و اقساط (فقط حضوری)، بدون بهای تمام شده خودکار.' },
+  { tier: 'professional', label: 'پیشرفته', labelEn: 'Advanced', description: 'حسابداری دوطرفه کامل، ثبت خودکار بهای تمام شده، مدیریت طلب و بدهی، تراز آزمایشی، دفتر کل و روزنامه، اتصال به سامانه مودیان، انبارداری دوگانه، کارتخوان.' },
+  { tier: 'enterprise', label: 'حرفه‌ای', labelEn: 'Professional', description: 'تمام موارد پیشرفته + حسابداری شعب و انبارهای متعدد، گزارش‌های تلفیقی، بستن خودکار سال مالی، درگاه پرداخت آنلاین، اعلان SMS.' },
 ]
 
 export const PLAN_LIST: PlanInfo[] = Object.values(PLANS)
@@ -315,6 +338,7 @@ export function getFeatureLabel(feature: keyof PlanFeatureSet): string {
     canCloseFiscalYear: 'بستن سال مالی', canFiscalYearManagement: 'مدیریت سال مالی',
     canMoidianIntegration: 'اتصال سامانه مودیان',
     canMultiCashRegister: 'مدیریت چند صندوق', canOnlinePayment: 'درگاه پرداخت آنلاین',
+    canAccessSmsNotifications: 'اعلان پیامکی',
     canPurchaseInvoice: 'فاکتور خرید و تامین‌کنندگان',
     canMultiWarehouse: 'چند انباری',
     canStockTransfer: 'انتقال بین انبارها',

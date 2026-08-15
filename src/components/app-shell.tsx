@@ -1,16 +1,17 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v9.6.6 ★★★
-// ★ اصلاح قطعی نمایش پلن دمو/سالانه/مادام‌العمر در بالای سایدبار
-// ★ تشخیص دمو از چندین سیگنال API (isDemo, tenantType, planType, ...)
-// ★ نمایش ماه/روز/ساعت باقی‌مانده برای پلن‌های مختلف
-// ★ جلوگیری از نمایش "منقضی" وقتی زمان باقی مانده است
+// src/components/app-shell.tsx — v10.3 ★★★
+// ★ هشدار ۳ روزه + قفل خودکار + تشخیص SUBSCRIPTION_EXPIRED
+// ★ همه پلن‌ها مادام‌العمر — بدون نمایش زمان
+// ★ LockOverlay برای قفل کامل سیستم
+// ★ WarningBanner برای دوره هشدار ۳ روزه
+// ★ v10.3: تشخیص قفل از middleware (پاسخ 403 با SUBSCRIPTION_EXPIRED)
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
 import { useStore, type AppView } from '@/lib/store'
-import { resolvePlan, getFeaturesByPlanName } from '@/lib/plan-features'
+import { resolvePlan, getFeaturesByPlanName, type PlanFeatureSet } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
 
 // ★ PWA
@@ -21,7 +22,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, AlertTriangle, ChevronLeft, Calendar,
+  Download, AlertTriangle, ChevronLeft, Calendar, Landmark, Archive
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -44,7 +45,7 @@ import { Separator } from '@/components/ui/separator'
 import { OfflineBanner } from '@/components/ui/offline-indicator'
 import { OfflineModal } from '@/components/ui/offline-modal'
 
-import { DemoBanner } from '@/components/demo/demo-banner'
+
 import { useDemoStatus } from '@/lib/use-demo-status'
 
 import DashboardPage from '@/components/dashboard/dashboard-page'
@@ -68,6 +69,9 @@ import { ContactsPage } from '@/components/contacts/contacts-page'
 import { TicketsPage } from '@/components/tickets/tickets-page'
 import { TicketDetail } from '@/components/tickets/ticket-detail'
 import { useSidebar } from '@/components/ui/sidebar'
+import { ChecksTab } from '@/components/accounting/checks-tab'
+import { BasicYearEndPage } from '@/components/settings/basic-year-end-page'
+import UpgradePlanPage from '@/components/upgrade/upgrade-plan-page'
 
 /* ══════════════════════════════════════════════════════════════════
    ★ InvoicesHub
@@ -213,6 +217,7 @@ interface NavItem {
   permKey: string
   requiredFeature?: 'canAccessInstallments' | 'canViewAccounts' | 'canViewJournals' | 'canMultiBranch' | 'canAccessCredit' | 'canStockTransfer' | 'canStockCount'
   disabledInDemo?: boolean
+  showWhen?: (features: PlanFeatureSet) => boolean
 }
 
 interface NavGroup {
@@ -242,6 +247,14 @@ const navGroups: NavGroup[] = [
       { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
       { label: 'طرف حساب', icon: Users, view: 'contacts' as any, permKey: 'accounting' },
       { label: 'اقساط و نسیه', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
+      {
+        label: 'چک‌ها',
+        icon: Landmark,
+        view: 'checks',
+        permKey: 'checks',
+        requiredFeature: 'canAccessCredit',
+        showWhen: (features: PlanFeatureSet) => !features.canViewAccounts
+      },
     ],
   },
   {
@@ -279,6 +292,7 @@ const viewLabels: Record<string, string> = {
   'invoices-hub': 'فاکتورها',
   'purchase-invoices': 'فاکتورها',
   installments: 'نسیه و اقساط',
+  checks: 'چک‌ها',
   accounting: 'حسابداری',
   'journal-entry-detail': 'جزئیات سند',
   settings: 'تنظیمات',
@@ -300,6 +314,7 @@ const viewLabels: Record<string, string> = {
   contacts: 'طرفین حساب',
   tickets: 'تیکت پشتیبانی',
   'ticket-detail': 'جزئیات تیکت',
+  'basic-year-end': 'بستن حساب',
 }
 
 /* ─── Helpers ────────────────────────────────────────────────── */
@@ -352,17 +367,18 @@ function checkAccess(
 function renderCurrentView(view: AppView) {
   const viewStr = view as string
   switch (viewStr) {
-    case 'dashboard':             return <DashboardPage />
-    case 'pos':                   return <PosPage />
-    case 'products':              return <ProductsPage />
-    case 'categories':            return <CategoriesPage />
-    case 'customers':             return <CustomersPage />
-    case 'invoices-hub':          return <InvoicesHub />
-    case 'invoices':              return <InvoicesHub />
-    case 'purchase-invoices':     return <InvoicesHub />
-    case 'installments':          return <InstallmentsPage />
-    case 'accounting':            return <JournalEntriesPage />
-    case 'journal-entry-detail':  return <JournalEntryDetail />
+    case 'dashboard': return <DashboardPage />
+    case 'pos': return <PosPage />
+    case 'products': return <ProductsPage />
+    case 'categories': return <CategoriesPage />
+    case 'customers': return <CustomersPage />
+    case 'invoices-hub': return <InvoicesHub />
+    case 'invoices': return <InvoicesHub />
+    case 'purchase-invoices': return <InvoicesHub />
+    case 'installments': return <InstallmentsPage />
+    case 'checks': return <ChecksTab />
+    case 'accounting': return <JournalEntriesPage />
+    case 'journal-entry-detail': return <JournalEntryDetail />
     case 'settings':
     case 'settings-store':
     case 'settings-gateway':
@@ -370,141 +386,209 @@ function renderCurrentView(view: AppView) {
     case 'settings-invoice':
     case 'settings-backup':
     case 'subscription-tab':
-    case 'settings-employees':    return <SettingsPage />
-    case 'reports':               return <ReportsPage />
-    case 'upgrade-plan':          return <SettingsPage />
-    case 'suppliers':             return <SuppliersPage />
-    case 'warehouses-hub':        return <WarehousesHub />
-    case 'warehouses':            return <WarehousesHub />
-    case 'stock-transfer':        return <WarehousesHub />
-    case 'stock-count':           return <WarehousesHub />
-    case 'branches':              return <BranchesPage />
-    case 'contacts':              return <ContactsPage />
-    case 'tickets':               return <TicketsPage />
-    case 'ticket-detail':         return <TicketDetail />
-    default:                      return <DashboardPage />
+    case 'settings-employees': return <SettingsPage />
+    case 'reports': return <ReportsPage />
+    case 'upgrade-plan': return <UpgradePlanPage />
+    case 'suppliers': return <SuppliersPage />
+    case 'warehouses-hub': return <WarehousesHub />
+    case 'warehouses': return <WarehousesHub />
+    case 'stock-transfer': return <WarehousesHub />
+    case 'stock-count': return <WarehousesHub />
+    case 'branches': return <BranchesPage />
+    case 'contacts': return <ContactsPage />
+    case 'tickets': return <TicketsPage />
+    case 'ticket-detail': return <TicketDetail />
+    case 'basic-year-end': return <BasicYearEndPage />
+    default: return <DashboardPage />
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★★★ v9.6.0: SubscriptionBanner — بنر هشدار هوشمند اشتراک
+   ★ v10.3: تابع کمکی برای تشخیص SUBSCRIPTION_EXPIRED
    ═══════════════════════════════════════════════════════════════ */
 
-interface SubscriptionStatus {
-  status: 'active' | 'warning' | 'grace_period' | 'read_only' | 'expired'
+async function checkSubscriptionStatusAPI(token: string): Promise<{
+  isLocked: boolean
+  isLifetime: boolean
   daysRemaining: number
-  canCreate: boolean
-  canRead: boolean
-  message: string
-  isLifetime?: boolean
-}
+  fromMiddleware: boolean
+}> {
+  try {
+    const res = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
 
-function SubscriptionBanner() {
-  const [status, setStatus] = useState<SubscriptionStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const planName = useStore((s) => s.planName)
-  const billingCycle = useStore((s) => s.selectedBillingCycle)
-
-  useEffect(() => {
-    async function fetchStatus() {
+    // ★ v10.3: تشخیص قفل از middleware (پاسخ 403)
+    if (res.status === 403) {
       try {
-        const token = localStorage.getItem('token')
-        if (!token) {
-          setLoading(false)
-          return
+        const errData = await res.json()
+        if (errData.code === 'SUBSCRIPTION_EXPIRED') {
+          console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED from middleware (403)')
+          return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true }
         }
+      } catch { }
+    }
 
-        const res = await fetch('/api/subscription/status', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        const data = await res.json()
+    const data = await res.json()
 
-        if (data.success && data.data) {
-          setStatus(data.data)
-        }
-      } catch (err) {
-        console.warn('[SubscriptionBanner] Fetch error:', err)
-      } finally {
-        setLoading(false)
+    // ★ v10.3: تشخیص قفل از success: false با SUBSCRIPTION_EXPIRED
+    if (!data.success && data.code === 'SUBSCRIPTION_EXPIRED') {
+      console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED in response')
+      return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true }
+    }
+
+    if (data.success && data.data) {
+      const d = data.data
+      const lifetime = d.daysUntilUpdate === -1 || (d.status === 'active' && d.daysUntilUpdate === -1)
+
+      if (lifetime) {
+        return { isLocked: false, isLifetime: true, daysRemaining: -1, fromMiddleware: false }
+      } else {
+        const days = d.daysUntilUpdate ?? 0
+        const locked = d.isLocked || days <= 0
+        return { isLocked: locked, isLifetime: false, daysRemaining: days, fromMiddleware: false }
       }
     }
 
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // ✅ عدم نمایش بنر برای پلن‌های دمو/تستی
-  if (loading || !status || status.status === 'active' || planName === 'demo' || planName === 'trial' || billingCycle === 'trial') {
-    return null
+    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false }
+  } catch (err) {
+    console.warn('[checkSubscriptionStatusAPI] Error:', err)
+    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false }
   }
+}
 
-  const config = {
-    warning: {
-      bg: 'bg-yellow-50',
-      text: 'text-yellow-900',
-      border: 'border-yellow-200',
-      icon: '⚠️',
-      buttonBg: 'bg-yellow-600 hover:bg-yellow-700',
-    },
-    grace_period: {
-      bg: 'bg-orange-50',
-      text: 'text-orange-900',
-      border: 'border-orange-200',
-      icon: '⏰',
-      buttonBg: 'bg-orange-600 hover:bg-orange-700',
-    },
-    read_only: {
-      bg: 'bg-red-50',
-      text: 'text-red-900',
-      border: 'border-red-300',
-      icon: '🔒',
-      buttonBg: 'bg-red-600 hover:bg-red-700',
-    },
-    expired: {
-      bg: 'bg-red-100',
-      text: 'text-red-900',
-      border: 'border-red-400',
-      icon: '🚫',
-      buttonBg: 'bg-red-600 hover:bg-red-700',
-    },
-  }[status.status]
 
-  if (!config) return null
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ v10.4: LockOverlay — قفل‌کننده کامل سیستم هنگام انقضای اشتراک
+   ★ فقط یک دکمه "به‌روزرسانی" (بدون کلمه اشتراک)
+   ═══════════════════════════════════════════════════════════════ */
+
+function LockOverlay({ onUpgrade }: { onUpgrade: () => void }) {
   return (
-    <div className={`${config.bg} ${config.border} border-b px-3 sm:px-4 py-2.5 sm:py-3`}>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-        <div className={`flex items-start sm:items-center gap-2 ${config.text} text-xs sm:text-sm`}>
-          <span className="text-base sm:text-lg shrink-0">{config.icon}</span>
-          <div className="flex-1">
-            <p className="font-medium leading-relaxed">{status.message}</p>
-            {status.status === 'read_only' && (
-              <p className="text-[10px] sm:text-xs mt-1 opacity-80">
-                شما همچنان می‌توانید گزارشات را مشاهده کرده و خروجی بگیرید.
-              </p>
-            )}
-          </div>
+    <div
+      className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4"
+      dir="rtl"
+    >
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 text-center space-y-5 border-2 border-red-300">
+        {/* آیکون قفل */}
+        <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-10 h-10 text-red-600" />
         </div>
 
-        <a
-          href="/subscription/renew"
-          onClick={(e) => {
-            e.preventDefault()
-            useStore.getState().setCurrentView('subscription-tab' as AppView)
-          }}
-          className={`${config.buttonBg} text-white text-[10px] sm:text-xs font-semibold px-3 sm:px-4 py-1.5 sm:py-2 rounded-md transition-colors shrink-0 flex items-center gap-1 shadow-sm`}
-        >
-          <RefreshCw className="w-3 h-3" />
-          تمدید اشتراک
-        </a>
+        {/* عنوان */}
+        <div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">
+            🔒 سیستم قفل شده است
+          </h2>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            مهلت سه‌روزه به‌روزرسانی به پایان رسیده است.
+            <br />
+            برای ادامه استفاده از سیستم، لطفاً به‌روزرسانی کنید.
+          </p>
+        </div>
+
+        {/* اطلاعات */}
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
+          <p className="font-bold mb-2">⚠️ در حالت قفل:</p>
+          <ul className="list-disc list-inside text-right space-y-1 text-red-700">
+            <li>ثبت فاکتور جدید امکان‌پذیر نیست</li>
+            <li>دسترسی به گزارش‌ها مسدود است</li>
+            <li>امکان ویرایش اطلاعات وجود ندارد</li>
+            <li>فقط مشاهده اطلاعات قبلی ممکن است</li>
+          </ul>
+        </div>
+
+        {/* ★ v10.4: فقط یک دکمه "به‌روزرسانی" */}
+        <div className="pt-2">
+          <Button
+            onClick={onUpgrade}
+            className="w-full h-12 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold gap-2 shadow-lg text-base"
+          >
+            <CreditCard className="w-5 h-5" />
+            به‌روزرسانی
+          </Button>
+        </div>
+
+        {/* زیرنویس */}
+        <p className="text-[10px] text-slate-400 pt-2">
+          💡 با به‌روزرسانی، بلافاصله دسترسی شما باز می‌شود
+        </p>
       </div>
     </div>
   )
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AppSidebar
+   ★ v10.1: WarningBanner — بنر هشدار ۳ روزه بالای صفحه
+   ═══════════════════════════════════════════════════════════════ */
+
+function WarningBanner({
+  daysRemaining,
+  onUpgrade
+}: {
+  daysRemaining: number
+  onUpgrade: () => void
+}) {
+  const isUrgent = daysRemaining <= 1
+
+  return (
+    <div
+      onClick={onUpgrade}
+      className={`mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 sm:p-4 cursor-pointer transition-all hover:shadow-lg ${isUrgent
+          ? 'bg-gradient-to-r from-red-600 to-red-700 text-white animate-pulse'
+          : 'bg-gradient-to-r from-orange-500 to-amber-600 text-white'
+        }`}
+      dir="rtl"
+    >
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 ${isUrgent ? 'animate-bounce' : ''}`}>
+          <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className={`font-bold text-sm sm:text-base ${isUrgent ? 'animate-pulse' : ''}`}>
+              {isUrgent
+                ? '⚠️ فقط فردا فرصت دارید!'
+                : `⏰ ${daysRemaining} روز تا قفل سیستم`
+              }
+            </h3>
+            <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-bold ${isUrgent ? 'bg-red-800 text-white' : 'bg-orange-800 text-white'
+              }`}>
+              فوری
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-white/90 leading-relaxed">
+            {isUrgent
+              ? 'برای جلوگیری از قفل شدن سیستم، همین حالا سیستم را به روزرسانی کنید.'
+              : 'مهلت سه‌روزه به‌روزرسانی  رو به پایان است. پس از اتمام، سیستم قفل می‌شود.'
+            }
+          </p>
+        </div>
+
+        <div className="shrink-0 hidden sm:block">
+          <Button
+            variant="secondary"
+            className={`font-bold gap-1 ${isUrgent
+                ? 'bg-white text-red-700 hover:bg-red-50'
+                : 'bg-white text-orange-700 hover:bg-orange-50'
+              }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            به‌روزرسانی
+          </Button>
+        </div>
+
+        <ChevronLeft className="w-5 h-5 shrink-0 sm:hidden" />
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AppSidebar — v10.3 ★★★
    ═══════════════════════════════════════════════════════════════ */
 
 function AppSidebar() {
@@ -521,6 +605,7 @@ function AppSidebar() {
 
   const { isDemo, status: demoStatus } = useDemoStatus()
 
+  // ★ v10.1: وضعیت اشتراک
   const [daysRemaining, setDaysRemaining] = useState(0)
   const [hoursRemaining, setHoursRemaining] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
@@ -528,8 +613,6 @@ function AppSidebar() {
   const [isDemoTenant, setIsDemoTenant] = useState(false)
   const [realPlanName, setRealPlanName] = useState<string | null>(null)
 
-  // ✅ اصلاح حیاتی v9.6.6: تشخیص دمو از چندین سیگنال (hook + API + store)
-  // نکته: این خط باید بعد از تعریف isDemoTenant قرار گیرد (TDZ)
   const isDemoPlan = isDemo || isDemoTenant || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
 
   useEffect(() => {
@@ -538,124 +621,60 @@ function AppSidebar() {
         const token = localStorage.getItem('token')
         if (!token) return
 
-        const res = await fetch('/api/tenants/trial-check', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        const data = await res.json()
+        // ★ v10.3: استفاده از تابع کمکی مشترک
+        const result = await checkSubscriptionStatusAPI(token)
 
-        if (data.success) {
-          const d = data.data
+        if (result.fromMiddleware && result.isLocked) {
+          console.log('[AppSidebar] 🔒 Locked by middleware')
+          setIsLifetime(false)
+          setDaysRemaining(0)
+          setHoursRemaining(0)
+          setIsExpired(true)
+          return
+        }
 
-          // ═══ v9.6.6: تشخیص دمو از چندین سیگنال (پشتیبانی از ساختارهای مختلف API) ═══
-          const demoSignal =
-            d.isDemo === true ||
-            d.tenantType === 'demo' ||
-            d.tenantType === 'trial' ||
-            d.planType === 'demo' ||
-            d.planType === 'trial' ||
-            d.billingCycle === 'trial' ||
-            d.planName === 'demo' ||
-            d.planName === 'trial' ||
-            d.tierName === 'demo' ||
-            d.tierName === 'trial'
+        setIsLifetime(result.isLifetime)
 
-          setIsDemoTenant(demoSignal)
+        if (result.isLifetime) {
+          setDaysRemaining(-1)
+          setHoursRemaining(0)
+          setIsExpired(false)
+        } else {
+          setDaysRemaining(result.daysRemaining)
+          setHoursRemaining(0)
+          setIsExpired(result.isLocked || result.daysRemaining <= 0)
+        }
 
-          // ═══ v9.6.6: تعیین نام پلن برای نمایش — دمو روی 'demo' ثابت می‌ماند ═══
-          let displayPlanName = d.planName || d.tierName || planName
-          if (demoSignal) {
-            displayPlanName = 'demo'
+        // ★ تعیین نام پلن
+        let displayPlanName = 'simple'
+        try {
+          const res2 = await fetch('/api/tenants/trial-check', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const data2 = await res2.json()
+          if (data2.success && data2.data) {
+            displayPlanName = data2.data.planName || data2.data.planTierName || 'simple'
           }
+        } catch { }
 
-          // ═══ v9.6.6: زمان باقی‌مانده (روز + ساعت) ═══
-                  // ═══ v9.6.7: زمان باقی‌مانده (روز + ساعت) با سقف یک سال ═══
-          let dr = typeof d.daysRemaining === 'number' ? d.daysRemaining : 0
-          const hr = typeof d.hoursRemaining === 'number' ? d.hoursRemaining : 0
-          
-          // ★ پلن‌ها یک ساله هستند، پس حداکثر ۳۶۵ روز نمایش بده
-          // اگر بیشتر بود (چند دوره تمدید)، فقط یک دوره را نشان می‌دهیم
-          // نکته: برای مادام‌العمر (dr === -1) سقف اعمال نمی‌شود
-          if (dr > 0) {
-            dr = Math.min(dr, 365)
-          }
-          
-          setDaysRemaining(dr)
-          setHoursRemaining(hr)
+        setRealPlanName(displayPlanName)
+        useStore.getState().setPlanName(displayPlanName)
 
-          // ═══ v9.6.6: تشخیص پلن مادام‌العمر ═══
-          const lifetime = d.isLifetime === true || dr === -1
-          setIsLifetime(lifetime)
-
-          // ═══ v9.6.6: تشخیص منقضی بودن (دفاعی: اگر زمان باقی مانده، منقضی نشان نده) ═══
-          const expired = d.isExpired === true && !lifetime && dr <= 0 && hr <= 0
-          setIsExpired(expired)
-
-          if (displayPlanName) {
-            setRealPlanName(displayPlanName)
-            useStore.getState().setPlanName(displayPlanName)
-          }
-
+        // ★ ذخیره در cache
+        try {
           const { cachePlan } = await import('@/lib/offline-db')
           await cachePlan({
             planName: displayPlanName,
-            daysRemaining: dr,
-            hoursRemaining: hr,
-            isExpired: expired,
-            isDemo: demoSignal,
-            isLifetime: lifetime,
+            daysRemaining: result.isLifetime ? -1 : result.daysRemaining,
+            hoursRemaining: 0,
+            isExpired: result.isLocked || false,
+            isDemo: false,
+            isLifetime: result.isLifetime,
             cached_at: Date.now(),
           })
-        } else {
-          const { getCachedPlan } = await import('@/lib/offline-db')
-                const cachedPlan = await getCachedPlan()
-          if (cachedPlan?.planName) {
-            const cp = cachedPlan as any
-            const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
-            setIsDemoTenant(demoSignal)
-            setRealPlanName(cp.planName)
-            useStore.getState().setPlanName(cp.planName)
-            
-            // ★ v9.6.7: اعمال سقف ۳۶۵ روز
-            let cachedDays = cp.daysRemaining || 0
-            if (cachedDays > 0) {
-              cachedDays = Math.min(cachedDays, 365)
-            }
-            setDaysRemaining(cachedDays)
-            setHoursRemaining(cp.hoursRemaining || 0)
-            
-            const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
-            setIsLifetime(lifetime)
-            const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
-            setIsExpired(expired)
-          }
-        }
+        } catch { }
       } catch (err) {
-        try {
-          const { getCachedPlan } = await import('@/lib/offline-db')
-                  const cachedPlan = await getCachedPlan()
-          if (cachedPlan?.planName) {
-            const cp = cachedPlan as any
-            const demoSignal = cp.isDemo === true || cp.planName === 'demo' || cp.planName === 'trial'
-            setIsDemoTenant(demoSignal)
-            setRealPlanName(cp.planName)
-            useStore.getState().setPlanName(cp.planName)
-            
-            // ★ v9.6.7: اعمال سقف ۳۶۵ روز
-            let cachedDays = cp.daysRemaining || 0
-            if (cachedDays > 0) {
-              cachedDays = Math.min(cachedDays, 365)
-            }
-            setDaysRemaining(cachedDays)
-            setHoursRemaining(cp.hoursRemaining || 0)
-            
-            const lifetime = cp.isLifetime === true || cp.daysRemaining === -1
-            setIsLifetime(lifetime)
-            const expired = cp.isExpired === true && !lifetime && (cp.daysRemaining || 0) <= 0 && (cp.hoursRemaining || 0) <= 0
-            setIsExpired(expired)
-          }
-        } catch (cacheErr) {
-          console.error('[AppSidebar] Error reading cached plan:', cacheErr)
-        }
+        console.warn('[AppSidebar] checkSubscription error:', err)
       }
     }
 
@@ -664,7 +683,6 @@ function AppSidebar() {
     return () => clearInterval(interval)
   }, [])
 
-  // ✅ v9.6.6: اگر دمو تشخیص داده شد، نام پلن روی 'demo' ثابت می‌ماند
   const effectivePlanName = (isDemoPlan ? 'demo' : (realPlanName || planName || 'simple')) as string
   const effectiveFeatures = getFeaturesByPlanName(effectivePlanName)
   const unreadCount = notifications.filter(n => !n.isRead).length
@@ -672,6 +690,7 @@ function AppSidebar() {
   const visibleGroups = useMemo(() => {
     if (!user) return []
     const filterItem = (item: NavItem): boolean => {
+      if (item.showWhen && !item.showWhen(effectiveFeatures)) return false
       if (item.requiredFeature && !effectiveFeatures[item.requiredFeature]) return false
       if (!isFullAccessRole(user.role) && !(user.permissions && user.permissions.includes('all'))) {
         const perms = user.permissions || []
@@ -708,35 +727,6 @@ function AppSidebar() {
     return parts[0]?.[0] || 'م'
   }, [user])
 
-  // ✅ v9.6.6: نمایش ماه/روز/ساعت برای پلن‌های مختلف
-   // ✅ v9.6.7: فرمت زمان باقی‌مانده (اصلاح‌شده برای پلن‌های یک ساله)
-  const formatRemainingTime = (days: number, hours: number = 0, demoMode: boolean = false) => {
-    if (days === -1) return 'مادام‌العمر';
-    if (days <= 0 && hours <= 0) return 'منقضی شده';
-
-    // ★ پلن‌ها یک ساله هستند، پس اگر ۳۶۰ روز به بالا بود → "۱ سال کامل"
-    if (days >= 360) return '۱ سال کامل';
-
-    // برای پلن‌های دمو یا کوتاه‌مدت (زیر ۳۰ روز): روز + ساعت
-    if (demoMode || days < 30) {
-      const dStr = days > 0 ? `${days.toLocaleString('fa-IR')} روز` : '';
-      const hStr = hours > 0 ? `${hours.toLocaleString('fa-IR')} ساعت` : '';
-      if (dStr && hStr) return `${dStr} و ${hStr}`;
-      return dStr || hStr || 'کمتر از ۱ ساعت';
-    }
-
-    // برای پلن‌های سالانه: ماه + روز
-    const months = Math.floor(days / 30);
-    const remainingDays = days % 30;
-
-    const mStr = months > 0 ? `${months.toLocaleString('fa-IR')} ماه` : '';
-    const dStr = remainingDays > 0 ? `${remainingDays.toLocaleString('fa-IR')} روز` : '';
-
-    if (mStr && dStr) return `${mStr} و ${dStr}`;
-    return mStr || dStr;
-  };
-
-  // ✅ v9.6.6: پشتیبانی از نام‌های مختلف پلن (case-insensitive)
   const getPlanLabel = (name: string) => {
     const n = (name || '').toString().toLowerCase();
     if (n === 'trial' || n === 'demo') return 'تست ۳ روزه';
@@ -770,70 +760,138 @@ function AppSidebar() {
 
         <div className="mt-1.5 px-1 group-data-[collapsible=icon]:hidden">
           {isDemoPlan ? (
-            // ─── کارت دمو / تستی ───
+            // ─── کارت دمو واقعی ───
             <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs text-amber-700">
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="font-medium">تست ۳ روزه رایگان</span>
+                  <span className="font-medium">نسخه دمو</span>
                 </div>
                 <span className="text-[10px] text-amber-600 font-medium">
                   {(() => {
                     const d = demoStatus?.daysRemaining ?? daysRemaining ?? 3;
-                    const h = demoStatus?.hoursRemaining ?? hoursRemaining ?? 0;
-                    if (d <= 0 && h <= 0) return 'منقضی';
-                    const dStr = d > 0 ? `${Number(d).toLocaleString('fa-IR')} روز` : '';
-                    const hStr = h > 0 ? `${Number(h).toLocaleString('fa-IR')} ساعت` : '';
-                    if (dStr && hStr) return `${dStr} و ${hStr}`;
-                    return dStr || hStr || 'کمتر از ۱ ساعت';
+                    if (d <= 0) return 'منقضی';
+                    return `${Number(d).toLocaleString('fa-IR')} روز`;
                   })()}
                 </span>
               </div>
-              <a
-                href="/subscription/renew"
-                onClick={(e) => {
-                  e.preventDefault()
-                  setCurrentView('subscription-tab' as AppView)
-                }}
-                className="mt-1.5 w-full text-[10px] py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors flex items-center justify-center gap-1"
-              >
-                <RefreshCw className="w-2.5 h-2.5" />
-                ارتقا به پلن اصلی
-              </a>
             </div>
           ) : (
-            // ─── کارت پلن‌های عادی ───
-            <div 
-              onClick={() => setCurrentView('subscription-tab' as AppView)}
-              className="cursor-pointer group p-2.5 bg-white border border-slate-200 rounded-xl hover:shadow-md hover:border-indigo-200 transition-all duration-200"
+            // ─── کارت پلن‌های عادی (v10.1 — منطق ۳ روزه) ───
+            <div
+              onClick={() => {
+                if (isExpired) {
+                  setCurrentView('upgrade-plan' as AppView)
+                } else if (daysRemaining > 0 && daysRemaining <= 3) {
+                  setCurrentView('upgrade-plan' as AppView)
+                } else {
+                  setCurrentView('subscription-tab' as AppView)
+                }
+              }}
+              className={`cursor-pointer group p-2.5 rounded-xl transition-all duration-200 ${isExpired
+                  ? 'bg-red-50 border-2 border-red-300 hover:shadow-md animate-pulse'
+                  : daysRemaining > 0 && daysRemaining <= 3
+                    ? 'bg-orange-50 border-2 border-orange-400 hover:shadow-md'
+                    : isLifetime
+                      ? 'bg-purple-50 border border-purple-200 hover:shadow-md'
+                      : 'bg-white border border-slate-200 hover:shadow-md hover:border-indigo-200'
+                }`}
             >
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-6 h-6 rounded-md bg-indigo-50 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              {/* ★ حالت ۱: قفل کامل */}
+              {isExpired ? (
+                <>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-md bg-red-100 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                      </div>
+                      <span className="text-[11px] font-bold text-red-800">
+                        سیستم قفل شده
+                      </span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-red-100 text-red-700">
+                      منقضی
+                    </span>
                   </div>
-                  <span className="text-[11px] font-bold text-slate-800">
-                    {getPlanLabel(effectivePlanName)}
-                  </span>
-                </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${
-                  isExpired ? 'bg-red-100 text-red-700' : 
-                  isLifetime ? 'bg-purple-100 text-purple-700' :
-                  daysRemaining <= 7 && daysRemaining > 0 ? 'bg-amber-100 text-amber-700' : 
-                  'bg-emerald-100 text-emerald-700'
-                }`}>
-                  {isExpired ? 'منقضی' : isLifetime ? 'دائمی' : 'فعال'}
-                </span>
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-slate-600 font-medium">
-                  {isLifetime ? 'بدون محدودیت زمانی' : 
-                   isExpired ? 'لطفاً اشتراک خود را تمدید کنید' :
-                   `مانده تا پایان: ${formatRemainingTime(daysRemaining, hoursRemaining)}`}
-                </span>
-                <ChevronLeft className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:-translate-x-0.5 transition-all" />
-              </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-red-700 font-medium">
+                      برای ادامه کلیک کنید
+                    </span>
+                    <ChevronLeft className="w-3.5 h-3.5 text-red-500" />
+                  </div>
+                </>
+              ) : daysRemaining > 0 && daysRemaining <= 3 ? (
+                /* ★ حالت ۲: هشدار ۳ روزه */
+                <>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-md bg-orange-100 flex items-center justify-center shrink-0 animate-bounce">
+                        <AlertTriangle className="w-3.5 h-3.5 text-orange-600" />
+                      </div>
+                      <span className="text-[11px] font-bold text-orange-900">
+                        هشدار به‌روزرسانی
+                      </span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-bold bg-orange-600 text-white">
+                      {daysRemaining} روز
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-orange-800 font-medium leading-tight">
+                      {daysRemaining === 1
+                        ? '⚠️ فقط فردا فرصت دارید!'
+                        : `⚠️ ${daysRemaining} روز تا قفل سیستم`}
+                    </span>
+                    <ChevronLeft className="w-3.5 h-3.5 text-orange-500" />
+                  </div>
+                </>
+              ) : isLifetime ? (
+                /* ★ حالت ۳: مادام‌العمر — فقط نام پلن */
+                <>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-md bg-purple-100 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-800">
+                        {getPlanLabel(effectivePlanName)}
+                      </span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-purple-100 text-purple-700">
+                      مادام‌العمر
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-600 font-medium">
+                      بدون محدودیت زمانی
+                    </span>
+                    <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                </>
+              ) : (
+                /* ★ حالت ۴: فعال با بیش از ۳ روز — فقط نام پلن + فعال */
+                <>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-6 h-6 rounded-md bg-indigo-50 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-800">
+                        {getPlanLabel(effectivePlanName)}
+                      </span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-emerald-100 text-emerald-700">
+                      فعال
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-600 font-medium">
+                      اشتراک فعال
+                    </span>
+                    <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -851,12 +909,17 @@ function AppSidebar() {
               <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => {
                   const isActive = baseView === (item.view as string)
-                  const isItemDisabled = isDemoPlan && item.disabledInDemo
+                  const isItemDisabled = (isDemoPlan && item.disabledInDemo)
                   return (
                     <SidebarMenuItem key={item.view}>
                       <SidebarMenuButton
-                        isActive={isActive && !isItemDisabled}
+                        isActive={isActive && !isItemDisabled && !isExpired}
                         onClick={() => {
+                          // ★ v10.1: اگر سیستم قفل است → همه کلیک‌ها به upgrade
+                          if (isExpired) {
+                            setCurrentView('upgrade-plan' as AppView)
+                            return
+                          }
                           if (isItemDisabled) return
                           setCurrentView(item.view)
                           if (isMobile) {
@@ -864,18 +927,25 @@ function AppSidebar() {
                           }
                         }}
                         tooltip={item.label}
-                        className={`gap-2 sm:gap-2.5 h-8 sm:h-9 ${
-                          isItemDisabled
-                            ? 'opacity-50 cursor-not-allowed hover:bg-transparent'
-                            : isActive
-                              ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 font-semibold'
-                              : 'hover:bg-slate-100 text-slate-600'
-                        }`}
+                        className={`gap-2 sm:gap-2.5 h-8 sm:h-9 ${isExpired
+                            ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-400'
+                            : isItemDisabled
+                              ? 'opacity-50 cursor-not-allowed hover:bg-transparent'
+                              : isActive
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 font-semibold'
+                                : 'hover:bg-slate-100 text-slate-600'
+                          }`}
                       >
-                        <item.icon className={`size-4 ${isActive && !isItemDisabled ? 'text-emerald-600' : 'text-slate-400'}`} />
+                        <item.icon className={`size-4 ${isExpired ? 'text-slate-300' : isActive && !isItemDisabled ? 'text-emerald-600' : 'text-slate-400'
+                          }`} />
                         <span className="text-xs sm:text-sm">{item.label}</span>
 
-                        {isItemDisabled && (
+                        {isExpired && (
+                          <Badge className="ms-auto bg-red-100 text-red-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
+                            قفل
+                          </Badge>
+                        )}
+                        {isItemDisabled && !isExpired && (
                           <Badge className="ms-auto bg-amber-100 text-amber-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
                             دمو
                           </Badge>
@@ -911,7 +981,7 @@ function AppSidebar() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ PWAInstallButton — دکمه نصب اپ
+   ★ PWAInstallButton
    ═══════════════════════════════════════════════════════════════ */
 
 function PWAInstallButton() {
@@ -966,7 +1036,7 @@ function PWAInstallButton() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ SyncIndicator — نشانگر وضعیت همگام‌سازی
+   ★ SyncIndicator
    ═══════════════════════════════════════════════════════════════ */
 function SyncIndicator() {
   const pendingCount = useStore((s) => s.pendingSyncCount)
@@ -982,7 +1052,7 @@ function SyncIndicator() {
       onClick={async () => {
         const { syncEngine } = await import('@/lib/sync-engine')
         const result = await syncEngine.sync()
-        
+
         if (result.succeeded > 0) {
           useStore.getState().addNotification({
             title: '✅ همگام‌سازی موفق',
@@ -1050,10 +1120,10 @@ function AppHeader() {
         'planName', 'tenant-slug', 'auth-token', 'shop-accounting-store',
       ]
       keysToRemove.forEach((key) => {
-        try { localStorage.removeItem(key) } catch (e) {}
+        try { localStorage.removeItem(key) } catch (e) { }
       })
 
-      try { sessionStorage.clear() } catch (e) {}
+      try { sessionStorage.clear() } catch (e) { }
 
       const cookiesToClear = ['tenant-slug', 'tenant-view', 'auth-token', 'token', 'refreshToken']
       const hostname = window.location.hostname
@@ -1062,7 +1132,7 @@ function AppHeader() {
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname}; SameSite=Lax;`
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname}; SameSite=Lax;`
-        } catch (e) {}
+        } catch (e) { }
       })
 
       useStore.setState({
@@ -1091,7 +1161,7 @@ function AppHeader() {
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
         })
-      } catch (err) {}
+      } catch (err) { }
 
       setTimeout(() => {
         window.location.href = `/?logout=1&t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`
@@ -1126,27 +1196,26 @@ function AppHeader() {
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-       {/* ★ نمایش تاریخ شمسی با ترتیب صحیح و اعداد فارسی */}
-<div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
-  <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-  <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
-    {(() => {
-      const now = new Date();
-      const formatter = new Intl.DateTimeFormat('fa-IR', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-      const parts = formatter.formatToParts(now);
-      const weekday = parts.find(p => p.type === 'weekday')?.value || '';
-      const day = parts.find(p => p.type === 'day')?.value || '';
-      const month = parts.find(p => p.type === 'month')?.value || '';
-      const year = parts.find(p => p.type === 'year')?.value || '';
-      return `${weekday} ${day} ${month} ${year}`;
-    })()}
-  </span>
-</div>
+        <div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
+          <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+            {(() => {
+              const now = new Date();
+              const formatter = new Intl.DateTimeFormat('fa-IR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              });
+              const parts = formatter.formatToParts(now);
+              const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+              const day = parts.find(p => p.type === 'day')?.value || '';
+              const month = parts.find(p => p.type === 'month')?.value || '';
+              const year = parts.find(p => p.type === 'year')?.value || '';
+              return `${weekday} ${day} ${month} ${year}`;
+            })()}
+          </span>
+        </div>
 
         <PWAInstallButton />
         <SyncIndicator />
@@ -1227,7 +1296,7 @@ function AppHeader() {
               <div className="flex flex-col gap-1">
                 <span className="text-xs sm:text-sm font-semibold text-slate-800">{user?.username || 'کاربر'}</span>
                 <span className="text-[10px] sm:text-xs font-normal text-slate-500">
-                  {getRoleLabel(user?.role)} 
+                  {getRoleLabel(user?.role)}
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -1266,7 +1335,7 @@ function AppHeader() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AppShell
+   AppShell — v10.3 ★★★
    ═══════════════════════════════════════════════════════════════ */
 
 export default function AppShell() {
@@ -1275,6 +1344,11 @@ export default function AppShell() {
   const setCurrentView = useStore((s) => s.setCurrentView)
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
+
+  // ★ v10.1: وضعیت اشتراک
+  const [isSystemLocked, setIsSystemLocked] = useState(false)
+  const [daysRemaining, setDaysRemaining] = useState<number>(-1)
+  const [isLifetime, setIsLifetime] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -1285,11 +1359,48 @@ export default function AppShell() {
         : (user.permissions || []).includes('dashboard')
           ? 'dashboard'
           : (user.permissions || [])[0]
-              ? (navItems.find(n => n.permKey === (user.permissions || [])[0])?.view ?? 'dashboard')
-              : 'dashboard'
+            ? (navItems.find(n => n.permKey === (user.permissions || [])[0])?.view ?? 'dashboard')
+            : 'dashboard'
       setCurrentView(firstView as AppView)
     }
   }, [user, currentView, setCurrentView, planFeatures])
+
+  // ★ v10.3: بررسی وضعیت اشتراک هر ۳۰ ثانیه
+  useEffect(() => {
+    async function checkSubscriptionStatus() {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) return
+
+        // ★ v10.3: استفاده از تابع کمکی مشترک
+        const result = await checkSubscriptionStatusAPI(token)
+
+        if (result.fromMiddleware && result.isLocked) {
+          console.log('[AppShell] 🔒 Locked by middleware (SUBSCRIPTION_EXPIRED)')
+          setIsLifetime(false)
+          setDaysRemaining(0)
+          setIsSystemLocked(true)
+          return
+        }
+
+        setIsLifetime(result.isLifetime)
+
+        if (result.isLifetime) {
+          setDaysRemaining(-1)
+          setIsSystemLocked(false)
+        } else {
+          setDaysRemaining(result.daysRemaining)
+          setIsSystemLocked(result.isLocked || result.daysRemaining <= 0)
+        }
+      } catch (err) {
+        console.warn('[AppShell] checkSubscriptionStatus error:', err)
+      }
+    }
+
+    checkSubscriptionStatus()
+    const interval = setInterval(checkSubscriptionStatus, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1340,7 +1451,7 @@ export default function AppShell() {
       if (preloadTimer) clearTimeout(preloadTimer)
     }
   }, [])
-  
+
   const canViewCurrentPage = checkAccess(
     currentView,
     user?.role,
@@ -1349,22 +1460,49 @@ export default function AppShell() {
   )
   const isPosView = currentView === 'pos'
 
+  const handleUpgrade = () => {
+    console.log('[AppShell] 🔄 Navigating to upgrade-plan page')
+    setCurrentView('upgrade-plan' as AppView)
+  }
+
+  // ★ v10.1: آیا در دوره هشدار ۳ روزه هستیم؟
+  const isWarningPeriod = !isLifetime && daysRemaining > 0 && daysRemaining <= 3
+
+  // ★ v10.4: اگر در صفحه به‌روزرسانی هستیم، LockOverlay را نشان نده
+  // این باعث می‌شود کاربر بتواند صفحه به‌روزرسانی را ببیند
+  const isOnUpgradePage = currentView === 'upgrade-plan'
+  const shouldShowLockOverlay = isSystemLocked && !isOnUpgradePage
+
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
+       <SidebarInset>
         <OfflineBanner />
-        <DemoBanner />
         <AppHeader />
-        
-        <SubscriptionBanner />
+        {/* ★ v10.1: بنر هشدار ۳ روزه */}
+        {isWarningPeriod && !isSystemLocked && (
+          <WarningBanner daysRemaining={daysRemaining} onUpgrade={handleUpgrade} />
+        )}
+
+        {/* ★ v10.4: قفل‌کننده کامل سیستم (به جز صفحه به‌روزرسانی) */}
+        {shouldShowLockOverlay && <LockOverlay onUpgrade={handleUpgrade} />}
+
+        {/* ★ v10.4: بنر کوچک در صفحه به‌روزرسانی برای یادآوری قفل بودن */}
+        {isSystemLocked && isOnUpgradePage && (
+          <div className="mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 bg-red-50 border border-red-200 flex items-center gap-3" dir="rtl">
+            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+            <p className="text-xs sm:text-sm text-red-800 font-medium flex-1">
+              🔒 سیستم قفل است. برای باز شدن دسترسی، پلن خود را به‌روزرسانی کنید.
+            </p>
+          </div>
+        )}
 
         {isPosView ? (
-          <div className="flex-1 min-h-0 overflow-hidden bg-white">
+          <div className="flex-1 min-h-0 overflow-hidden bg-white relative">
             {canViewCurrentPage ? <PosPage /> : <DashboardPage />}
           </div>
         ) : (
-          <ScrollArea className="flex-1 bg-white">
+          <ScrollArea className="flex-1 bg-white relative">
             <main className="p-2 sm:p-3 md:p-4 lg:p-6 max-w-full overflow-x-hidden min-h-screen">
               {canViewCurrentPage
                 ? renderCurrentView(currentView)
@@ -1374,5 +1512,6 @@ export default function AppShell() {
         )}
       </SidebarInset>
     </SidebarProvider>
+  
   )
 }

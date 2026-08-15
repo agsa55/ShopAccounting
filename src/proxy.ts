@@ -55,7 +55,9 @@ const RESERVED_PATHS = new Set([
   'login', 'register', 'landing', 'dashboard', 'products', 'invoices',
   'employees', 'settings', 'reports', 'accounts', 'store-setting',
   'portal', 'portal-view', 'test-portal', 'subscription', 'demo', 'payment-result',
-  'renewal', // ★★★ v3.5: صفحه تمدید اشتراک
+  'renewal', 
+  'success', 
+   'payments',
 ]);
 
 // ★★★ v3.2: مسیرهای پورتال مشتری (بدون نیاز به احراز هویت storeUser)
@@ -163,7 +165,6 @@ function isCustomerPortalPath(pathname: string): boolean {
 
 // ★★★ v3.5: بررسی مسیرهای عمومی صفحه‌ای
 function isPublicPagePath(pathname: string): boolean {
-  // بررسی دقیق مسیر (بدون query string)
   const cleanPath = pathname.split('?')[0];
   
   // لندینگ پیج
@@ -172,8 +173,11 @@ function isPublicPagePath(pathname: string): boolean {
   // صفحات auth
   if (cleanPath.startsWith('/auth/')) return true;
   
-  // ★★★ v3.5: صفحه تمدید
+  // ★ v3.5: صفحه تمدید
   if (cleanPath === '/renewal') return true;
+  
+  // ★ v3.6: صفحه موفقیت ثبت‌نام
+  if (cleanPath === '/success') return true;
   
   return false;
 }
@@ -357,12 +361,12 @@ export default function proxy(request: NextRequest) {
   }
 
   // ── ۳. ★★★ v3.5: خروج زودهنگام برای صفحات عمومی (لندینگ، Auth و Renewal) ──
-  if (isPublicPagePath(pathname)) {
+   if (isPublicPagePath(pathname)) {
     const response = NextResponse.next();
     addSecurityHeaders(response);
 
-    // فقط برای لندینگ پیج و auth، کوکی tenant را پاک کن
-    // برای /renewal کوکی tenant را نگه دار (چون کاربر لاگین است و نیاز به tenant context دارد)
+    // ★ فقط برای لندینگ پیج و auth، کوکی tenant را پاک کن
+    // ★ /success و /renewal کوکی را نگه می‌دارند (کاربر لاگین است)
     if (pathname === '/' || pathname.startsWith('/auth/')) {
       const hasTenantCookie = request.cookies.get('tenant-slug')?.value;
       const hasTenantView = request.cookies.get('tenant-view')?.value;

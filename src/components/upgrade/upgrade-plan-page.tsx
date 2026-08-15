@@ -1,19 +1,24 @@
 'use client'
 
 // ============================================================================
-// src/components/upgrade/upgrade-plan-page.tsx (v9.7 ★★★)
-// ShopAccounting — صفحه ارتقای پلن (با دکمه تمدید)
+// src/components/upgrade/upgrade-plan-page.tsx (v10.4 ★★★)
+// ★ فقط پلن فعلی + به‌روزرسانی مادام‌العمر + تخفیف زودهنگام
+// ★ v10.4: تشخیص SUBSCRIPTION_EXPIRED از middleware
+// ★ v10.4: مخفی کردن "بعداً پرداخت" در حالت قفل
+// ★ v10.4: redirect خودکار بعد از پرداخت موفق
 // ============================================================================
 
 import { useState, useEffect } from 'react'
 import { useStore } from '@/lib/store'
-import { PLANS, resolvePlan, type PlanName, type PlanTier } from '@/lib/plan-features'
+import { PLANS, resolvePlan, type PlanName } from '@/lib/plan-features'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
-  CheckCircle2, Lock, Crown, ChevronLeft, Shield, Zap, Building2,
-  Database, Users, ShoppingCart, FileText, BarChart3, Star, RefreshCw,
+  CheckCircle2, Crown, ChevronLeft, Shield, Zap, Building2,
+  Database, Users, ShoppingCart, FileText, RefreshCw, Clock,
+  AlertTriangle, CreditCard, Sparkles, Infinity, X,
 } from 'lucide-react'
 
 // ═══════════════════════════════════════════════════════════════
@@ -27,15 +32,16 @@ const PLAN_STYLES: Record<PlanName, {
   icon: React.ElementType
   iconBg: string
   buttonClass: string
-  featured?: boolean
+  accentColor: string
 }> = {
   simple: {
     gradient: 'from-emerald-50 to-white',
-    border: 'border-emerald-200',
+    border: 'border-emerald-300',
     badge: 'bg-emerald-100 text-emerald-700',
     icon: Shield,
     iconBg: 'bg-emerald-100',
     buttonClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+    accentColor: 'emerald',
   },
   professional: {
     gradient: 'from-blue-50 to-white',
@@ -44,7 +50,7 @@ const PLAN_STYLES: Record<PlanName, {
     icon: Zap,
     iconBg: 'bg-blue-100',
     buttonClass: 'bg-gradient-to-l from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white',
-    featured: true,
+    accentColor: 'blue',
   },
   enterprise: {
     gradient: 'from-purple-50 to-white',
@@ -53,6 +59,7 @@ const PLAN_STYLES: Record<PlanName, {
     icon: Building2,
     iconBg: 'bg-purple-100',
     buttonClass: 'bg-gradient-to-l from-purple-600 to-purple-500 hover:from-purple-700 hover:to-purple-600 text-white',
+    accentColor: 'purple',
   },
 }
 
@@ -60,26 +67,47 @@ const PLAN_STYLES: Record<PlanName, {
 //  قابلیت‌های هر پلن
 // ═══════════════════════════════════════════════════════════════
 
-const FEATURE_MATRIX: { key: string; label: string; tiers: PlanTier[] }[] = [
-  { key: 'cash', label: 'فروش نقدی', tiers: ['basic', 'professional', 'enterprise'] as PlanTier[] },
-  { key: 'card', label: 'کارتخوان', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'credit', label: 'فروش نسیه', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'installment', label: 'فروش قسطی', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'edit_tax', label: 'ویرایش مالیات', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'delete_invoice', label: 'حذف فاکتور', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'print', label: 'چاپ فاکتور', tiers: ['basic', 'professional', 'enterprise'] as PlanTier[] },
-  { key: 'simple_report', label: 'گزارش ساده', tiers: ['basic', 'professional', 'enterprise'] as PlanTier[] },
-  { key: 'journals', label: 'مشاهده اسناد', tiers: ['basic', 'professional', 'enterprise'] as PlanTier[] },
-  { key: 'chart', label: 'چارت حساب‌ها', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'manual_journal', label: 'سند دستی', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'trial_balance', label: 'تراز آزمایشی', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'installments', label: 'مدیریت اقساط', tiers: ['professional', 'enterprise'] as PlanTier[] },
-  { key: 'multi_branch', label: 'حسابداری شعب', tiers: ['enterprise'] as PlanTier[] },
-  { key: 'consolidated', label: 'گزارش‌های تلفیقی', tiers: ['enterprise'] as PlanTier[] },
-  { key: 'close_fiscal', label: 'بستن سال مالی', tiers: ['enterprise'] as PlanTier[] },
-  { key: 'moidian', label: 'اتصال سامانه مودیان', tiers: ['enterprise'] as PlanTier[] },
-  { key: 'multi_register', label: 'مدیریت چند صندوق', tiers: ['enterprise'] as PlanTier[] },
-]
+const PLAN_FEATURES: Record<PlanName, string[]> = {
+  simple: [
+    'فروش نقدی و صدور فاکتور',
+    'مدیریت محصولات و مشتریان',
+    'گزارش‌های پایه فروش و سود',
+    'پشتیبانی ۲۴/۷',
+    'ذخیره‌سازی ابری امن',
+  ],
+  professional: [
+    'تمام قابلیت‌های پلن پایه',
+    'حسابداری دوطرفه کامل',
+    'فروش نسیه و قسطی',
+    'کارتخوان و پرداخت کارتی',
+    'گزارش‌های پیشرفته مالی',
+    'تراز آزمایشی و چارت حساب‌ها',
+    'سند حسابداری دستی',
+  ],
+  enterprise: [
+    'تمام قابلیت‌های پلن پیشرفته',
+    'اتصال به سامانه مودیان',
+    'حسابداری شعب و تلفیقی',
+    'مدیریت چند صندوق',
+    'بستن سال مالی هوشمند',
+    'گزارش‌های سازمانی',
+    'پشتیبانی اختصاصی',
+  ],
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  نوع داده وضعیت به‌روزرسانی
+// ═══════════════════════════════════════════════════════════════
+
+interface UpdateStatus {
+  status: 'active' | 'needs_update' | 'locked'
+  daysUntilUpdate: number
+  needsUpdate: boolean
+  isLocked: boolean
+  canCreate: boolean
+  discountPercent: number
+  message: string
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Page Component
@@ -90,29 +118,232 @@ export default function UpgradePlanPage() {
   const setCurrentView = useStore((s) => s.setCurrentView)
   const storeName = useStore((s) => s.storeName)
 
-  // ★ State برای وضعیت اشتراک
-  const [subscription, setSubscription] = useState<any>(null)
-
-  // ★ بارگذاری وضعیت اشتراک
-  useEffect(() => {
-    async function fetchSub() {
-      try {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-        if (!token) return
-        const res = await fetch('/api/subscription/status', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        const data = await res.json()
-        if (data.success) setSubscription(data.data)
-      } catch (err) {
-        console.error('Error fetching subscription:', err)
-      }
-    }
-    fetchSub()
-  }, [])
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [processing, setProcessing] = useState(false)
+  const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
 
   const currentPlan = resolvePlan(planName)
   const currentPlanName = currentPlan.planName
+  const style = PLAN_STYLES[currentPlanName]
+  const Icon = style.icon
+
+  // ★ بارگذاری وضعیت به‌روزرسانی
+  // ★ v10.4: تشخیص SUBSCRIPTION_EXPIRED از middleware (403)
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) {
+          setLoading(false)
+          return
+        }
+        
+        const res = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        
+        // ★ v10.4: تشخیص قفل از middleware (پاسخ 403)
+        if (res.status === 403) {
+          try {
+            const errData = await res.json()
+            if (errData.code === 'SUBSCRIPTION_EXPIRED') {
+              console.log('[UpgradePage] 🔒 SUBSCRIPTION_EXPIRED from middleware')
+              setUpdateStatus({
+                status: 'locked',
+                daysUntilUpdate: 0,
+                needsUpdate: true,
+                isLocked: true,
+                canCreate: false,
+                discountPercent: 0,
+                message: 'سیستم قفل شده است',
+              })
+              setLoading(false)
+              return
+            }
+          } catch {}
+        }
+        
+        const data = await res.json()
+        
+        // ★ v10.4: تشخیص قفل از success: false با SUBSCRIPTION_EXPIRED
+        if (!data.success && data.code === 'SUBSCRIPTION_EXPIRED') {
+          console.log('[UpgradePage] 🔒 SUBSCRIPTION_EXPIRED in response')
+          setUpdateStatus({
+            status: 'locked',
+            daysUntilUpdate: 0,
+            needsUpdate: true,
+            isLocked: true,
+            canCreate: false,
+            discountPercent: 0,
+            message: 'سیستم قفل شده است',
+          })
+          setLoading(false)
+          return
+        }
+        
+        if (data.success && data.data) {
+          setUpdateStatus(data.data)
+        }
+      } catch (err) {
+        console.error('[UpgradePage] Error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchStatus()
+  }, [])
+
+  // ★ شمارش معکوس (در صورت نیاز)
+  useEffect(() => {
+    if (!updateStatus || updateStatus.daysUntilUpdate <= 0) return
+
+    const updateCountdown = () => {
+      setCountdown({
+        days: updateStatus.daysUntilUpdate,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+      })
+    }
+
+    updateCountdown()
+  }, [updateStatus])
+
+  // ★ v10.4: تشخیص پارامترهای URL بعد از بازگشت از درگاه پرداخت
+  // وقتی کاربر از درگاه پرداخت برمی‌گردد، URL شامل ?success=1 یا ?error=... است
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    const url = new URL(window.location.href)
+    const success = url.searchParams.get('success')
+    const error = url.searchParams.get('error')
+    const duplicate = url.searchParams.get('duplicate')
+    
+    if (success === '1') {
+      console.log('[UpgradePage] 🎉 Payment successful — refreshing status...')
+      
+      // پاک کردن پارامترهای URL
+      window.history.replaceState({}, '', window.location.pathname)
+      
+      // نمایش پیام موفقیت
+      if (duplicate === '1') {
+        console.log('[UpgradePage] ⚠️ Duplicate payment detected')
+      }
+      
+      // رفرش کردن وضعیت بعد از ۱ ثانیه (صبر برای اعمال تغییرات دیتابیس)
+      setTimeout(async () => {
+        setLoading(true)
+        try {
+          const token = localStorage.getItem('token')
+          if (token) {
+            const res = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: 'no-store',
+            })
+            
+            let newData: any = null
+            
+            // تشخیص SUBSCRIPTION_EXPIRED
+            if (res.status === 403) {
+              try {
+                newData = await res.json()
+                if (newData.code === 'SUBSCRIPTION_EXPIRED') {
+                  setUpdateStatus({
+                    status: 'locked',
+                    daysUntilUpdate: 0,
+                    needsUpdate: true,
+                    isLocked: true,
+                    canCreate: false,
+                    discountPercent: 0,
+                    message: 'سیستم قفل شده است',
+                  })
+                  setLoading(false)
+                  return
+                }
+              } catch {}
+            } else {
+              newData = await res.json()
+            }
+            
+            if (newData?.success && newData.data) {
+              setUpdateStatus(newData.data)
+              
+              // اگر قفل باز شده، بعد از ۲ ثانیه به داشبورد برگرد
+              if (!newData.data.isLocked && newData.data.daysUntilUpdate === -1) {
+                console.log('[UpgradePage] 🔓 Lock released — redirecting to dashboard in 2s')
+                setTimeout(() => {
+                  setCurrentView('dashboard')
+                }, 2000)
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[UpgradePage] Refresh error:', err)
+        } finally {
+          setLoading(false)
+        }
+      }, 1000)
+    }
+    
+    if (error) {
+      console.warn('[UpgradePage] ⚠️ Payment error:', error)
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
+
+  // ★ محاسبه قیمت با تخفیف
+  const planData: any = PLANS[currentPlanName]
+  const basePrice = planData?.lifetimePrice || planData?.annualPrice || 0
+  const discountPercent = updateStatus?.discountPercent || 0
+  const discountedPrice = Math.round(basePrice * (1 - discountPercent / 100))
+  const savings = basePrice - discountedPrice
+
+  // ★ شروع پرداخت
+  const handlePayment = async () => {
+    setProcessing(true)
+    try {
+      const token = localStorage.getItem('token')
+      if (!token) {
+        alert('لطفاً ابتدا وارد شوید')
+        return
+      }
+
+      // ساخت تراکنش در سرور
+      const res = await fetch('/api/payments/create-update-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          planName: currentPlanName,
+          amount: discountedPrice,
+          discountPercent,
+          isLifetime: true,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (data.success && data.data?.paymentUrl) {
+        // هدایت به درگاه زرین‌پال
+        window.location.href = data.data.paymentUrl
+      } else {
+        alert(data.error || 'خطا در ایجاد تراکنش')
+      }
+    } catch (err: any) {
+      console.error('[Payment] Error:', err)
+      alert('خطا در ارتباط با درگاه پرداخت')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Render
+  // ═══════════════════════════════════════════════════════════
 
   return (
     <div className="min-h-full bg-gradient-to-b from-slate-50 to-white" dir="rtl">
@@ -120,214 +351,303 @@ export default function UpgradePlanPage() {
       <div className="flex items-center justify-between px-4 py-3 border-b bg-white sticky top-0 z-10">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => setCurrentView('dashboard')}>
-            <ChevronLeft className="h-5 w-5" />
+            <ChevronLeft className="h-5 w-5 rotate-180" />
           </Button>
-          <Crown className="h-5 w-5 text-amber-500" />
-          <h1 className="text-lg font-bold">ارتقای پلن</h1>
+          <RefreshCw className="h-5 w-5 text-amber-500" />
+          <h1 className="text-lg font-bold">به‌روزرسانی سیستم</h1>
         </div>
-        <Badge className={`text-xs ${PLAN_STYLES[currentPlanName].badge}`}>
-          پلن فعلی: {currentPlan.label}
+        <Badge className={`text-xs ${style.badge}`}>
+          {currentPlan.label}
         </Badge>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
-        {/* ─── عنوان ──────────────────────────────────────── */}
-        <div className="text-center space-y-2">
-          <h2 className="text-2xl font-bold text-gray-900">
-            پلن مناسب کسب‌وکار خود را انتخاب کنید
-          </h2>
-          <p className="text-sm text-gray-500">
-            {storeName || 'فروشگاه شما'} — هر پلن قابلیت‌های مخصوص به خود را دارد
-          </p>
-        </div>
-
-        {/* ─── کارت‌های پلن ───────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(Object.keys(PLANS) as PlanName[]).map((planKey) => {
-            const plan = PLANS[planKey]
-            const style = PLAN_STYLES[planKey]
-            const Icon = style.icon
-            const isCurrent = planKey === currentPlanName
-
-            const canUpgrade = !isCurrent && (
-              (currentPlanName === 'simple' && (planKey === 'professional' || planKey === 'enterprise')) ||
-              (currentPlanName === 'professional' && planKey === 'enterprise')
-            )
-
-            return (
-              <Card
-                key={planKey}
-                className={`relative overflow-hidden transition-all hover:shadow-md ${style.border} ${style.featured ? 'ring-2 ring-blue-400' : ''} ${isCurrent ? 'ring-2 ring-emerald-400' : ''}`}
-              >
-                {/* برچسب پلن فعلی */}
-                {isCurrent && (
-                  <div className="absolute top-0 left-0 right-0 bg-emerald-500 text-white text-center text-[10px] font-bold py-1 z-10">
-                    پلن فعلی شما
-                  </div>
-                )}
-
-                {/* برچسب پیشنهادی */}
-                {style.featured && !isCurrent && (
-                  <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-center text-[10px] font-bold py-1 z-10">
-                    پیشنهادی
-                  </div>
-                )}
-
-                <CardContent className={`p-5 ${isCurrent || style.featured ? 'pt-8' : ''}`}>
-                  {/* آیکون و نام */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${style.iconBg}`}>
-                      <Icon className={`w-6 h-6 ${style.iconBg.replace('bg-', 'text-').replace('100', '600')}`} />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-base">{plan.label}</h3>
-                      <p className="text-[10px] text-gray-500">{plan.labelEn}</p>
-                    </div>
-                  </div>
-
-                  {/* قیمت */}
-                  <div className="mb-4 space-y-1.5">
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-2xl font-bold">{plan.annualPrice.toLocaleString('fa-IR')}</span>
-                      <span className="text-xs text-gray-500">تومان/سالانه</span>
-                    </div>
-                    {plan.lifetimePrice && plan.lifetimePrice > 0 && (
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-sm font-medium text-gray-600">{plan.lifetimePrice.toLocaleString('fa-IR')}</span>
-                        <span className="text-[10px] text-gray-400">تومان/مادام‌العمر</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* توضیحات */}
-                  <p className="text-xs text-gray-600 leading-relaxed mb-4">
-                    {plan.description}
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+        {/* ─── پیام وضعیت ─────────────────────────────────── */}
+        {!loading && updateStatus && (
+          <>
+            {updateStatus.isLocked ? (
+              <Alert className="border-red-300 bg-red-50">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                <AlertDescription className="text-sm text-red-900">
+                  <div className="font-bold mb-1">🔒 سیستم قفل شده است</div>
+                  <p className="text-xs leading-relaxed">
+                    برای ادامه استفاده از سیستم و دسترسی به تمام قابلیت‌ها، لطفاً هزینه به‌روزرسانی را پرداخت کنید.
                   </p>
-
-                  {/* محدودیت‌ها */}
-                  <div className="space-y-1.5 mb-5">
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <Database className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-500">بانک اشتراکی</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <Users className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-500">
-                        {plan.maxUsers === 0 ? 'کاربر نامحدود' : `تا ${plan.maxUsers.toLocaleString('fa-IR')} کاربر`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <ShoppingCart className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-500">
-                        {plan.maxProducts === 0 ? 'محصول نامحدود' : `تا ${plan.maxProducts.toLocaleString('fa-IR')} محصول`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <FileText className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-500">
-                        {plan.maxInvoicesPerMonth === 0 ? 'فاکتور نامحدود' : `تا ${plan.maxInvoicesPerMonth.toLocaleString('fa-IR')} فاکتور/ماه`}
-                      </span>
-                    </div>
+                </AlertDescription>
+              </Alert>
+            ) : updateStatus.daysUntilUpdate <= 3 && updateStatus.daysUntilUpdate > 0 ? (
+              <Alert className="border-orange-300 bg-orange-50">
+                <Clock className="h-5 w-5 text-orange-600" />
+                <AlertDescription className="text-sm text-orange-900">
+                  <div className="font-bold mb-1">
+                    ⏰ {updateStatus.daysUntilUpdate === 1 ? 'فردا' : `${updateStatus.daysUntilUpdate} روز دیگر`} سیستم نیاز به به‌روزرسانی دارد
                   </div>
+                  <p className="text-xs leading-relaxed">
+                    برای جلوگیری از قطع دسترسی، الان به‌روزرسانی کنید و از تخفیف ویژه بهره‌مند شوید.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            ) : updateStatus.daysUntilUpdate <= 7 ? (
+              <Alert className="border-blue-200 bg-blue-50">
+                <RefreshCw className="h-5 w-5 text-blue-600" />
+                <AlertDescription className="text-sm text-blue-900">
+                  <div className="font-bold mb-1">به‌روزرسانی زودهنگام با تخفیف ویژه</div>
+                  <p className="text-xs leading-relaxed">
+                    {updateStatus.daysUntilUpdate} روز تا به‌روزرسانی بعدی. با پرداخت زودهنگام، تخفیف ویژه دریافت کنید.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </>
+        )}
 
-                  {/* ★ دکمه‌ها */}
-                  {isCurrent ? (
-                    <div className="space-y-2">
-                      <Button className="w-full gap-2 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 cursor-default" disabled>
-                        <CheckCircle2 className="w-4 h-4" />
-                        پلن فعلی
-                      </Button>
-                      {subscription?.isExpired && (
-                        <Button
-                          className="w-full gap-2 bg-gradient-to-l from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white"
-                          onClick={() => typeof window !== 'undefined' && (window.location.href = '/renewal')}
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                          تمدید اشتراک
-                        </Button>
-                      )}
-                    </div>
-                  ) : canUpgrade ? (
-                    <Button className={`w-full gap-2 ${style.buttonClass}`}>
-                      <Crown className="w-4 h-4" />
-                      ارتقا به {plan.label}
-                    </Button>
-                  ) : (
-                    <Button className="w-full gap-2" variant="outline" disabled>
-                      <Lock className="w-4 h-4" />
-                      ناموجود
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-
-        {/* ─── جدول مقایسه قابلیت‌ها ──────────────────────── */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-primary" />
-              مقایسه قابلیت‌ها
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-right px-4 py-2.5 font-medium text-gray-700 w-[200px] sticky right-0 bg-gray-50 z-10">قابلیت</th>
-                    <th className="text-center px-3 py-2.5 font-medium text-emerald-600 min-w-[100px]">پایه</th>
-                    <th className="text-center px-3 py-2.5 font-medium text-blue-600 bg-blue-50/50 min-w-[100px]">پیشرفته</th>
-                    <th className="text-center px-3 py-2.5 font-medium text-purple-600 min-w-[100px]">حرفه‌ای</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {FEATURE_MATRIX.map((feat, idx) => {
-                    const rowBg = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                    return (
-                      <tr key={feat.key} className={`border-b border-gray-100 ${rowBg}`}>
-                        <td className="px-4 py-2 text-gray-700 text-xs sticky right-0 bg-inherit z-10 font-medium">{feat.label}</td>
-                        <td className="text-center px-3 py-2">
-                          {feat.tiers.includes('basic' as PlanTier) ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 text-gray-300 mx-auto" />
-                          )}
-                        </td>
-                        <td className="text-center px-3 py-2 bg-blue-50/30">
-                          {feat.tiers.includes('professional' as PlanTier) ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 text-gray-300 mx-auto" />
-                          )}
-                        </td>
-                        <td className="text-center px-3 py-2">
-                          {feat.tiers.includes('enterprise' as PlanTier) ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500 mx-auto" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 text-gray-300 mx-auto" />
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+        {/* ─── کارت اصلی پلن ─────────────────────────────── */}
+        <Card className={`overflow-hidden border-2 ${style.border} shadow-lg`}>
+          <div className={`bg-gradient-to-l ${style.gradient} p-6 sm:p-8`}>
+            {/* آیکون و نام */}
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 shadow-md ${style.iconBg}`}>
+                  <Icon className={`w-8 h-8 text-${style.accentColor}-600`} />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-1">
+                    {currentPlan.label}
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    {storeName || 'فروشگاه شما'}
+                  </p>
+                </div>
+              </div>
+              <Badge className={`${style.badge} text-sm px-3 py-1`}>
+                پلن فعلی
+              </Badge>
             </div>
+
+            {/* توضیح چرا فقط این پلن */}
+            <div className="bg-white/60 backdrop-blur rounded-lg p-3 mb-6">
+              <p className="text-xs text-gray-700 leading-relaxed">
+                💡این به روز رسانی مخصوص پلن پایه <strong>{currentPlan.label}</strong> می باشد.
+              با پرداخت هزینه پشتیبانی عملکرد سیستم به روزتر و بهتر می شود.
+              </p>
+            </div>
+
+            {/* ═══ بخش قیمت ═══ */}
+            <div className="bg-white rounded-2xl p-6 shadow-md mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Infinity className="w-5 h-5 text-purple-600" />
+                <span className="text-sm font-bold text-gray-900">
+                 به روز رسانی کنید
+                </span>
+                <Badge className="bg-purple-100 text-purple-700 text-[10px]">
+                 سیستم به روزتر هوشمندتر و سریعتر می شود.
+                </Badge>
+              </div>
+
+              {/* قیمت اصلی و تخفیف‌دار */}
+              <div className="space-y-3">
+                {discountPercent > 0 ? (
+                  <>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm text-gray-500 line-through">
+                        {basePrice.toLocaleString('fa-IR')} تومان
+                      </span>
+                      <Badge className="bg-red-100 text-red-700 text-xs px-2 py-1">
+                        {discountPercent}٪ تخفیف
+                        {discountPercent === 30 ? ' زودهنگام' : ' ویژه'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <span className="text-3xl sm:text-4xl font-black text-gray-900">
+                          {discountedPrice.toLocaleString('fa-IR')}
+                        </span>
+                        <span className="text-sm text-gray-600 mr-2">تومان</span>
+                      </div>
+                      <div className="text-left">
+                        <div className="text-[10px] text-gray-500">صرفه‌جویی شما:</div>
+                        <div className="text-sm font-bold text-emerald-600">
+                          {savings.toLocaleString('fa-IR')} تومان
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <span className="text-3xl sm:text-4xl font-black text-gray-900">
+                        {basePrice.toLocaleString('fa-IR')}
+                      </span>
+                      <span className="text-sm text-gray-600 mr-2">تومان</span>
+                    </div>
+                    <span className="text-xs text-gray-500">پرداخت یک‌باره</span>
+                  </div>
+                )}
+              </div>
+
+              {/* دکمه پرداخت */}
+              <Button
+                onClick={handlePayment}
+                disabled={processing}
+                className={`w-full h-14 mt-6 text-base font-bold gap-2 shadow-lg ${style.buttonClass}`}
+              >
+                {processing ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    در حال انتقال به درگاه...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-5 h-5" />
+                    پرداخت و به‌روزرسانی سیستم
+                  </>
+                )}
+              </Button>
+
+              {/* اطلاعات امنیتی */}
+              <div className="flex items-center justify-center gap-4 mt-4 text-[10px] text-gray-500">
+                <div className="flex items-center gap-1">
+                  <Shield className="w-3 h-3" />
+                  <span>پرداخت امن</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>درگاه زرین‌پال</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  <span>فعال‌سازی فوری</span>
+                </div>
+              </div>
+            </div>
+
+            {/* ═══ قابلیت‌ها ═══ */}
+            <div className="mb-6">
+              <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <CheckCircle2 className={`w-4 h-4 text-${style.accentColor}-600`} />
+                قابلیت‌های {currentPlan.label}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {PLAN_FEATURES[currentPlanName].map((feat, idx) => (
+                  <div key={idx} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-2">
+                    <CheckCircle2 className={`w-4 h-4 text-${style.accentColor}-600 shrink-0`} />
+                    <span className="text-xs text-gray-700">{feat}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ═══ محدودیت‌ها ═══ */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="bg-white/60 rounded-lg p-3 text-center">
+                <Users className="w-4 h-4 text-gray-500 mx-auto mb-1" />
+                <div className="text-[10px] text-gray-500">کاربر</div>
+                <div className="text-xs font-bold text-gray-800">
+                  {planData?.maxUsers === 0 ? 'نامحدود' : `${(planData?.maxUsers || 2).toLocaleString('fa-IR')} نفر`}
+                </div>
+              </div>
+              <div className="bg-white/60 rounded-lg p-3 text-center">
+                <ShoppingCart className="w-4 h-4 text-gray-500 mx-auto mb-1" />
+                <div className="text-[10px] text-gray-500">محصول</div>
+                <div className="text-xs font-bold text-gray-800">
+                  {planData?.maxProducts === 0 ? 'نامحدود' : `${(planData?.maxProducts || 100).toLocaleString('fa-IR')}`}
+                </div>
+              </div>
+              <div className="bg-white/60 rounded-lg p-3 text-center">
+                <FileText className="w-4 h-4 text-gray-500 mx-auto mb-1" />
+                <div className="text-[10px] text-gray-500">فاکتور</div>
+                <div className="text-xs font-bold text-gray-800">
+                  {(currentPlan as any).maxInvoicesPerMonth === 0 ? 'نامحدود' : `${((currentPlan as any).maxInvoicesPerMonth || 0).toLocaleString('fa-IR')}`}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* ─── سوالات متداول ─────────────────────────────── */}
+        <Card>
+          <CardContent className="p-5 space-y-3">
+            <h3 className="font-bold text-gray-900 mb-3">سوالات متداول</h3>
+
+            <details className="group">
+              <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                <span>چرا فقط یک پلن نمایش داده می‌شود؟</span>
+                <ChevronLeft className="w-4 h-4 transition-transform group-open:rotate-90" />
+              </summary>
+              <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                برای راحتی شما، فقط به‌روزرسانی پلن فعلی نمایش داده می‌شود. اگر می‌خواهید به پلن بالاتر ارتقا دهید،
+                با پشتیبانی تماس بگیرید.
+              </p>
+            </details>
+
+            <details className="group">
+              <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                <span>آیا پس از پرداخت، سیستم بلافاصله فعال می‌شود؟</span>
+                <ChevronLeft className="w-4 h-4 transition-transform group-open:rotate-90" />
+              </summary>
+              <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                بله، پس از پرداخت موفق، سیستم بلافاصله و بدون نیاز به اقدام اضافی فعال می‌شود.
+              </p>
+            </details>
+
+            <details className="group">
+              <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                <span>مادام‌العمر یعنی چه؟</span>
+                <ChevronLeft className="w-4 h-4 transition-transform group-open:rotate-90" />
+              </summary>
+              <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                با خرید مادام‌العمر، فقط یک‌بار پرداخت می‌کنید و دیگر نیازی به تمدید سالانه نیست.
+                سیستم برای همیشه فعال خواهد بود.
+              </p>
+            </details>
+
+            <details className="group">
+              <summary className="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                <span>داده‌های من پس از به‌روزرسانی حفظ می‌شوند؟</span>
+                <ChevronLeft className="w-4 h-4 transition-transform group-open:rotate-90" />
+              </summary>
+              <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                بله، تمام داده‌های شما شامل فاکتورها، مشتریان، محصولات و اسناد حسابداری کاملاً حفظ می‌شوند.
+              </p>
+            </details>
           </CardContent>
         </Card>
 
-        {/* ─── توضیح ساختار ───────────────────────────────── */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Star className="w-4 h-4 text-blue-500" />
-            <span className="text-sm font-bold text-blue-700">نکته مهم</span>
-          </div>
-          <p className="text-xs text-blue-600 leading-relaxed max-w-lg mx-auto">
-            پلن پایه برای فروشگاه‌های کوچک و تازه‌کار عالی است. برای حسابداری دوطرفه کامل، مدیریت انبار پیشرفته و اتصال به سامانه مودیان، به پلن پیشرفته یا حرفه‌ای ارتقا دهید.
-          </p>
+        {/* ─── لینک‌های پشتیبانی ─────────────────────────── */}
+        {/* ★ v10.4: مخفی کردن "بعداً پرداخت" در حالت قفل */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
+          <button
+            onClick={() => setCurrentView('tickets')}
+            className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-2"
+          >
+            <span>💬</span>
+            <span>ارتباط با پشتیبانی</span>
+          </button>
+
+          {/* ★ فقط وقتی قفل نیست، دکمه "بعداً پرداخت می‌کنم" را نشان بده */}
+          {!updateStatus?.isLocked && (
+            <>
+              <span className="hidden sm:inline text-gray-300">|</span>
+              <button
+                onClick={() => setCurrentView('dashboard')}
+                className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-2"
+              >
+                <X className="w-4 h-4" />
+                <span>بعداً پرداخت می‌کنم</span>
+              </button>
+            </>
+          )}
+
+          {/* ★ وقتی قفل است، پیام بده که نمی‌تواند خارج شود */}
+          {updateStatus?.isLocked && (
+            <>
+              <span className="hidden sm:inline text-gray-300">|</span>
+              <span className="text-xs text-red-600 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                برای ادامه استفاده، باید به‌روزرسانی کنید
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

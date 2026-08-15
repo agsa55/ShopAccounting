@@ -163,8 +163,10 @@ export interface StandardAccountIds {
   equityAccountId: string | null
   retainedEarningsId: string | null
   serviceRevenueId: string | null
-  checkReceivableId: string | null
-  checkPayableId: string | null
+  checkReceivableAccountId: string | null  // ← جدید (برای سازگاری با invoices/route.ts)
+  checkReceivableId: string | null         // ← قدیمی (برای backward compatibility)
+  checkPayableAccountId: string | null     // ← جدید
+  checkPayableId: string | null            // ← قدیمی
   tradePurchasableId: string | null
   tradeReceivableId: string | null
 }
@@ -199,8 +201,10 @@ export async function getStandardAccountIds(tenantId: string): Promise<StandardA
     equityAccountId: codeMap.get('3000') ?? null,
     retainedEarningsId: codeMap.get('3100') ?? null,
     serviceRevenueId: codeMap.get('4200') ?? null,
-    checkReceivableId: codeMap.get('1350') ?? null,
-    checkPayableId: codeMap.get('2050') ?? null,
+   checkReceivableAccountId: codeMap.get('1350') ?? null,
+  checkReceivableId: codeMap.get('1350') ?? null,
+  checkPayableAccountId: codeMap.get('2050') ?? null,
+  checkPayableId: codeMap.get('2050') ?? null,
     tradePurchasableId: codeMap.get('2010') ?? null,
     tradeReceivableId: codeMap.get('1310') ?? null,
   }

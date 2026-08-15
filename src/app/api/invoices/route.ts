@@ -1,7 +1,9 @@
 // ============================================================================
-// src/app/api/invoices/route.ts — v7.7 (Railway Fixed)
+// src/app/api/invoices/route.ts — v7.9 (Check Support + JE Fix)
 // ★ استفاده از db.client مستقیم برای جلوگیری از مشکل tenant isolation در Railway
 // ★ لاگ‌های دقیق برای debug
+// ★ v7.8: پشتیبانی از paymentType 'check' در isCreditOrInstallment
+// ★ v7.9: استفاده از حساب ۱۳۵۰ (چک‌های دریافتنی) برای جلوگیری از سند تکراری
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -22,7 +24,7 @@ async function createAutoJournalEntry(
   paidAmount: number = 0
 ) {
   try {
-    console.log('[Invoices] 🚀 createAutoJournalEntry started for invoice:', invoice.number)
+    console.log('[Invoices] 🚀 createAutoJournalEntry started for invoice:', invoice.number, 'paymentType:', paymentType)
     
     const totalAmount = invoice.totalAmount || 0
     if (totalAmount <= 0) {
@@ -39,52 +41,89 @@ async function createAutoJournalEntry(
     let inventoryAccountId: string | null = null
     let receivablesAccountId: string | null = null
     let vatAccountId: string | null = null
+    let checkReceivableAccountId: string | null = null
 
-    try {
-      console.log('[Invoices] 📋 Fetching standard account IDs...')
-      const accountIds = await getStandardAccountIds(tenantId)
-      console.log('[Invoices] ✅ Account IDs fetched:', {
-        cash: accountIds.cashAccountId ? '✓' : '✗',
-        sales: accountIds.salesAccountId ? '✓' : '✗',
-        cogs: accountIds.cogsAccountId ? '✓' : '✗',
-        inventory: accountIds.inventoryAccountId ? '✓' : '✗',
-      })
-      
-      cashAccountId = accountIds.cashAccountId
-      salesAccountId = accountIds.salesAccountId
-      cogsAccountId = accountIds.cogsAccountId
-      inventoryAccountId = accountIds.inventoryAccountId
-      receivablesAccountId = accountIds.receivablesAccountId
-      vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
-    } catch (err: any) {
-      console.error('[Invoices] ❌ Failed to get account IDs:', err?.message)
-      console.error('[Invoices] ❌ Error stack:', err?.stack)
-      return
-    }
-
+  try {
+  console.log('[Invoices] 📋 Fetching standard account IDs...')
+  const accountIds = await getStandardAccountIds(tenantId)
+  console.log('[Invoices] ✅ Account IDs fetched:', {
+    cash: accountIds.cashAccountId ? '✓' : '✗',
+    sales: accountIds.salesAccountId ? '✓' : '✗',
+    cogs: accountIds.cogsAccountId ? '✓' : '✗',
+    inventory: accountIds.inventoryAccountId ? '✓' : '✗',
+    receivables: accountIds.receivablesAccountId ? '✓' : '✗',
+    checkReceivable: accountIds.checkReceivableAccountId ? '✓' : '✗',
+  })
+  
+  cashAccountId = accountIds.cashAccountId
+  salesAccountId = accountIds.salesAccountId
+  cogsAccountId = accountIds.cogsAccountId
+  inventoryAccountId = accountIds.inventoryAccountId
+  receivablesAccountId = accountIds.receivablesAccountId
+  vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
+  // ★ v7.9: حساب چک‌های دریافتنی (۱۳۵۰) — بدون as any
+  checkReceivableAccountId = accountIds.checkReceivableAccountId || null
+} catch (err: any) {
+  console.error('[Invoices] ❌ Failed to get account IDs:', err?.message)
+  console.error('[Invoices] ❌ Error stack:', err?.stack)
+  return
+}
     const lines: any[] = []
-    const isCreditOrInstallment = paymentType === 'credit' || paymentType === 'installment'
+    // ★ v7.8: اضافه کردن 'check' به شرط — چک هم مثل نسیه/قسطی است
+    const isCreditOrInstallment = paymentType === 'credit' || paymentType === 'installment' || paymentType === 'check'
     const netSales = invoice.subTotal - invoice.discountAmount
     const remainingAmount = totalAmount - paidAmount
 
+    // ★ ثبت پیش‌پرداخت (اگر نقدی/کارتخوان باشد)
     if (paidAmount > 0 && cashAccountId) {
-      lines.push({ accountId: cashAccountId, debit: paidAmount, credit: 0, description: 'بدهکار: دریافت نقد/پیش‌پرداخت فاکتور' })
+      lines.push({ 
+        accountId: cashAccountId, 
+        debit: paidAmount, 
+        credit: 0, 
+        description: 'بدهکار: دریافت نقد/پیش‌پرداخت فاکتور' 
+      })
     }
-    
+
+    // ★ ثبت مانده فاکتور بر اساس روش پرداخت
     if (remainingAmount > 0) {
-      const debitAccountId = isCreditOrInstallment ? (receivablesAccountId || cashAccountId) : cashAccountId
+      // ★ v7.9: تعیین حساب بدهکار بر اساس روش پرداخت
+      let debitAccountId: string | null = cashAccountId
+      let description = 'بدهکار: بابت فاکتور فروش'
+      
+      if (paymentType === 'check') {
+        // ★ v7.9: برای چک: از حساب "چک‌های دریافتنی" (۱۳۵۰) استفاده کن
+        // این کار باعث می‌شود سند فاکتور مستقیماً چک را ثبت کند
+        // و نیازی به سند تکراری در API چک نباشد
+        debitAccountId = checkReceivableAccountId || receivablesAccountId || cashAccountId
+        description = 'بدهکار: چک دریافتنی بابت فاکتور فروش'
+        console.log('[Invoices] 💳 Check payment - using account:', debitAccountId, '(1350 preferred)')
+      } else if (isCreditOrInstallment) {
+        // برای نسیه/قسطی: از حساب "بدهکاران تجاری" (۱۳۱۰) استفاده کن
+        debitAccountId = receivablesAccountId || cashAccountId
+        description = 'بدهکار: بدهکاران تجاری بابت فاکتور فروش'
+        console.log('[Invoices] 💰 Credit/Installment payment - using account:', debitAccountId)
+      } else {
+        console.log('[Invoices] 💵 Cash/Card payment - using account:', debitAccountId)
+      }
+      
       if (debitAccountId) {
-        lines.push({ accountId: debitAccountId, debit: remainingAmount, credit: 0, description: `بدهکار: بابت فاکتور فروش ${isCreditOrInstallment ? '(نسیه/قسطی)' : ''}` })
+        lines.push({ accountId: debitAccountId, debit: remainingAmount, credit: 0, description })
+      } else {
+        console.warn('[Invoices] ⚠️ No debit account found for remaining amount:', remainingAmount)
       }
     }
 
+    // ★ ثبت درآمد فروش
     if (salesAccountId) {
       lines.push({ accountId: salesAccountId, debit: 0, credit: netSales, description: 'بستانکار: درآمد فروش' })
     }
+
+    // ★ ثبت مالیات
     if (invoice.taxAmount > 0 && vatAccountId) {
       lines.push({ accountId: vatAccountId, debit: 0, credit: invoice.taxAmount, description: 'بستانکار: مالیات بر ارزش افزوده فروش' })
     }
 
+    // ★ ثبت بهای تمام شده کالای فروش رفته (COGS)
     if (totalCogs > 0 && cogsAccountId && inventoryAccountId) {
       lines.push({ accountId: cogsAccountId, debit: totalCogs, credit: 0, description: 'بدهکار: بهای تمام شده کالای فروش رفته' })
       lines.push({ accountId: inventoryAccountId, debit: 0, credit: totalCogs, description: 'بستانکار: خروج از موجودی کالا' })
@@ -101,13 +140,15 @@ async function createAutoJournalEntry(
         totalDebit,
         totalCredit,
         balanced: Math.abs(totalDebit - totalCredit) < 0.01,
+        paymentType,
+        lineCount: lines.length,
       })
 
       await tx.journalEntry.create({
         data: {
           number: jeNumber,
           date: invoice.invoiceDate || invoice.createdAt || new Date(),
-          description: `سند خودکار بابت فاکتور ${invoice.number}${isCreditOrInstallment ? ' (نسیه/قسطی)' : ''}`,
+          description: `سند خودکار بابت فاکتور ${invoice.number}${isCreditOrInstallment ? ` (${paymentType === 'check' ? 'چک' : paymentType === 'credit' ? 'نسیه' : 'قسطی'})` : ''}`,
           status: 'posted',
           sourceType: 'invoice',
           sourceId: invoice.id,
@@ -187,16 +228,14 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/invoices (v7.7 — استفاده از db.client مستقیم)
+//  GET /api/invoices (v7.9)
 // ═══════════════════════════════════════════════════════════════
 
 export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const { searchParams } = new URL(req.url)
     
-    // ★ استفاده از tenantId از query param (نه middleware)
     const tenantId = searchParams.get('tenantId') || tenant.tenantId
-
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const status = searchParams.get('status')
@@ -210,7 +249,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
         { status: statusUpper },
         { status: statusUpper.toLowerCase() },
         ...(statusUpper === 'PENDING' ? [{ paymentType: 'credit', status: { in: ['confirmed', 'Confirmed'] } }] : []),
-        ...(statusUpper === 'PAID' ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card'] }, paidAmount: { gt: 0 } }] : []),
+        ...(statusUpper === 'PAID' ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card', 'check', 'Check'] }, paidAmount: { gt: 0 } }] : []),
         ...(statusUpper === 'PARTIAL' ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }] : []),
       ]
     }
@@ -227,7 +266,6 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
       console.log('[Invoices GET] Filtering by paymentType:', where.paymentType)
     }
 
-    // ★ استفاده از db.client مستقیم
     let invoices: any[] = []
     try {
       invoices = await db.client.invoice.findMany({
@@ -294,7 +332,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/invoices (v7.7 — استفاده از db.client مستقیم)
+//  POST /api/invoices (v7.9)
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (
@@ -305,7 +343,6 @@ export const POST = withTenantAndPermission('pos')(async (
   try {
     const invoiceData = await req.json()
     
-    // ★ استفاده از tenantId از body (نه middleware)
     const tenantId = invoiceData.tenantId || tenant.tenantId
     const items = invoiceData.items || []
 
@@ -396,7 +433,6 @@ export const POST = withTenantAndPermission('pos')(async (
       }
     }
 
-    // ★ استفاده از db.client.$transaction
     let totalCogs = 0
 
     const result = await db.client.$transaction(async (tx: any) => {
@@ -425,6 +461,7 @@ export const POST = withTenantAndPermission('pos')(async (
         id: inv.id,
         number: inv.number,
         tenantId: inv.tenantId,
+        paymentType: pt,
       })
 
       // ایجاد آیتم‌ها و به‌روزرسانی موجودی
@@ -495,7 +532,7 @@ export const POST = withTenantAndPermission('pos')(async (
         }
       }
 
-      // ۳. ثبت پرداخت‌ها (شامل پیش‌پرداخت)
+      // ثبت پرداخت‌ها (شامل پیش‌پرداخت)
       const payments = invoiceData.payments || []
       
       if (paidAmount > 0 && payments.length === 0) {
@@ -544,7 +581,7 @@ export const POST = withTenantAndPermission('pos')(async (
         console.log('[Invoices POST] ⚠️ Skipped installment plan creation. paymentType:', pt, 'hasInstallmentData:', !!invoiceData.installmentData, 'hasNumberOfInstallments:', !!invoiceData.numberOfInstallments)
       }
 
-      // به‌روزرسانی مانده مشتری (برای نسیه/قسطی)
+      // ★ v7.8: به‌روزرسانی مانده مشتری (برای نسیه/قسطی/چک)
       if (isCreditOrInstallment && invoiceData.customerId && remainingAmount > 0) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
@@ -588,7 +625,7 @@ export const POST = withTenantAndPermission('pos')(async (
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT /api/invoices (v7.7 — استفاده از db.client مستقیم)
+//  PUT /api/invoices (v7.9)
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -659,7 +696,8 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           }
         }
 
-            if ((existing.paymentType === 'credit' || existing.paymentType === 'installment') && existing.customerId) {
+        // ★ v7.8: اضافه کردن 'check' — هنگام لغو فاکتور با چک هم مانده مشتری برگشت داده شود
+        if ((existing.paymentType === 'credit' || existing.paymentType === 'installment' || existing.paymentType === 'check') && existing.customerId) {
           const remainingAmount = Number(existing.totalAmount || 0) - Number(existing.paidAmount || 0)
           if (remainingAmount > 0) {
             await tx.customer.update({
@@ -687,7 +725,7 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/invoices (v7.7 — استفاده از db.client مستقیم)
+//  DELETE /api/invoices (v7.9)
 // ═══════════════════════════════════════════════════════════════
 
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -786,7 +824,8 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment') && invoice.customerId) {
+      // ★ v7.8: اضافه کردن 'check' — هنگام حذف فاکتور با چک هم مانده مشتری برگشت داده شود
+      if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
         const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
         if (remainingAmount > 0) {
           await tx.customer.update({

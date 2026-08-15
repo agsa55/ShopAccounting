@@ -1,5 +1,7 @@
 // ============================================================================
-// src/app/api/purchase-invoices/route.ts — v8.8.8 (مشابه Categories)
+// src/app/api/purchase-invoices/route.ts — v8.9.0 (Check Support)
+// ★ v8.9.0: پشتیبانی از خرید با چک + سند حسابداری خودکار
+// ★ استفاده از حساب ۲۰۵۰ (چک‌های پرداختنی) برای جلوگیری از سند تکراری
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -11,7 +13,7 @@ import {
 } from '@/lib/accounts-auto-seed'
 
 // ═══════════════════════════════════════════════════════════════
-//  GET — دقیقاً مشابه Categories GET
+//  GET
 // ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('accounting')(
   async (req: NextRequest, ctx: any, tenant: any) => {
@@ -38,15 +40,32 @@ export const GET = withTenantAndPermission('accounting')(
 
       let invoices: any[] = []
       try {
+        // ★ v8.9.3: Include supplier و warehouse برای نمایش نام‌ها
         invoices = await tenantDb.purchaseInvoice.findMany({
           where,
+          include: {
+            supplier: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              }
+            },
+            warehouse: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              }
+            },
+          },
           orderBy: { createdAt: 'desc' },
           skip: (page - 1) * limit,
           take: limit,
         })
       } catch (err: any) {
-        console.error('[PurchaseInvoices GET] findMany error:', err?.message)
-        // اگر خطا داد، با select ساده امتحان کن
+        console.error('[PurchaseInvoices GET] findMany with include error:', err?.message)
+        // Fallback: بدون include
         try {
           invoices = await tenantDb.purchaseInvoice.findMany({
             where,
@@ -75,6 +94,39 @@ export const GET = withTenantAndPermission('accounting')(
 
       const total = await tenantDb.purchaseInvoice.count({ where })
 
+      // ★ v8.9.3: اگر supplier یا warehouse در include نبود، دستی join کن
+      if (invoices.length > 0 && invoices[0].supplier === undefined) {
+        console.log('[PurchaseInvoices GET] Manual join for supplier and warehouse...')
+        
+        const supplierIds = [...new Set(invoices.map(inv => inv.supplierId).filter(Boolean))]
+        const warehouseIds = [...new Set(invoices.map(inv => inv.warehouseId).filter(Boolean))]
+        
+        let suppliers: any[] = []
+        if (supplierIds.length > 0) {
+          suppliers = await tenantDb.supplier.findMany({
+            where: { id: { in: supplierIds } },
+            select: { id: true, name: true, code: true }
+          })
+        }
+        
+        let warehouses: any[] = []
+        if (warehouseIds.length > 0) {
+          warehouses = await tenantDb.warehouse.findMany({
+            where: { id: { in: warehouseIds } },
+            select: { id: true, name: true, code: true }
+          })
+        }
+        
+        const supplierMap = new Map(suppliers.map(s => [s.id, s]))
+        const warehouseMap = new Map(warehouses.map(w => [w.id, w]))
+        
+        invoices = invoices.map(inv => ({
+          ...inv,
+          supplier: inv.supplierId ? supplierMap.get(inv.supplierId) || null : null,
+          warehouse: inv.warehouseId ? warehouseMap.get(inv.warehouseId) || null : null,
+        }))
+      }
+
       return NextResponse.json({
         success: true,
         data: invoices,
@@ -93,8 +145,130 @@ export const GET = withTenantAndPermission('accounting')(
   }
 )
 
+// ─── ایجاد سند حسابداری خودکار برای خرید ────────────────────
+async function createPurchaseAutoJournalEntry(
+  tx: any,
+  tenantId: string,
+  invoice: any,
+  paymentType: string,
+  inventoryAccountId: string | null,
+  payablesAccountId: string | null,
+  checkPayableAccountId: string | null,
+  cashAccountId: string | null,
+  vatAccountId: string | null,
+) {
+  try {
+    console.log('[PurchaseJE] 🚀 Creating auto journal entry for:', invoice.number, 'paymentType:', paymentType)
+
+    const totalAmount = invoice.totalAmount || 0
+    if (totalAmount <= 0) {
+      console.log('[PurchaseJE] ⏭️ Skipped: totalAmount <= 0')
+      return
+    }
+
+    const jeCount = await tx.journalEntry.count({ where: { tenantId } })
+    const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+
+    const lines: any[] = []
+    const pt = (paymentType || 'cash').toLowerCase()
+    const isCreditOrCheck = pt === 'credit' || pt === 'check'
+    const netAmount = invoice.subTotal - invoice.discountAmount
+
+    // ★ خط ۱: بدهکار — موجودی کالا (افزایش دارایی)
+    if (inventoryAccountId) {
+      lines.push({
+        accountId: inventoryAccountId,
+        debit: netAmount,
+        credit: 0,
+        description: 'بدهکار: افزایش موجودی کالا بابت خرید',
+      })
+    }
+
+    // ★ خط ۲: بدهکار — مالیات بر ارزش افزوده (در صورت وجود)
+    if (invoice.taxAmount > 0 && vatAccountId) {
+      lines.push({
+        accountId: vatAccountId,
+        debit: invoice.taxAmount,
+        credit: 0,
+        description: 'بدهکار: مالیات بر ارزش افزوده خرید',
+      })
+    }
+
+    // ★ خط ۳: بستانکار — بر اساس روش پرداخت
+    if (isCreditOrCheck) {
+      // ★ v8.9: برای چک، از حساب ۲۰۵۰ (چک‌های پرداختنی) استفاده کن
+      let creditAccountId: string | null = null
+      let description = ''
+
+      if (pt === 'check') {
+        creditAccountId = checkPayableAccountId || payablesAccountId || null
+        description = 'بستانکار: چک پرداختنی بابت فاکتور خرید'
+        console.log('[PurchaseJE] 💳 Check payment - using account:', creditAccountId, '(2050 preferred)')
+      } else {
+        creditAccountId = payablesAccountId || null
+        description = 'بستانکار: بستانکاران تجاری بابت فاکتور خرید'
+        console.log('[PurchaseJE] 💰 Credit payment - using account:', creditAccountId)
+      }
+
+      if (creditAccountId) {
+        lines.push({
+          accountId: creditAccountId,
+          debit: 0,
+          credit: totalAmount,
+          description,
+        })
+      }
+    } else {
+      // پرداخت نقدی: از صندوق/بانک
+      if (cashAccountId) {
+        lines.push({
+          accountId: cashAccountId,
+          debit: 0,
+          credit: totalAmount,
+          description: 'بستانکار: پرداخت نقدی بابت فاکتور خرید',
+        })
+      }
+    }
+
+    if (lines.length >= 2) {
+      const totalDebit = lines.reduce((sum: number, l: any) => sum + l.debit, 0)
+      const totalCredit = lines.reduce((sum: number, l: any) => sum + l.credit, 0)
+
+      console.log('[PurchaseJE] 💾 Creating journal entry:', {
+        number: jeNumber,
+        totalDebit,
+        totalCredit,
+        balanced: Math.abs(totalDebit - totalCredit) < 0.01,
+        paymentType: pt,
+      })
+
+      await tx.journalEntry.create({
+        data: {
+          number: jeNumber,
+          date: invoice.invoiceDate || invoice.createdAt || new Date(),
+          description: `سند خودکار بابت فاکتور خرید ${invoice.number}${isCreditOrCheck ? ` (${pt === 'check' ? 'چک' : 'نسیه'})` : ''}`,
+          status: 'posted',
+          sourceType: 'purchase_invoice',
+          sourceId: invoice.id,
+          totalDebit,
+          totalCredit,
+          tenantId,
+          lines: { create: lines },
+        },
+      })
+
+      console.log('[PurchaseJE] ✅ Journal entry created successfully:', jeNumber)
+    } else {
+      console.warn('[PurchaseJE] ⚠️ Not enough lines to create journal entry:', lines.length)
+    }
+  } catch (error: any) {
+    console.error('[PurchaseJE] ❌ Failed to create auto journal entry:', error?.message)
+    console.error('[PurchaseJE] ❌ Error stack:', error?.stack)
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
-//  POST — دقیقاً مشابه Categories POST (ساده‌تر)
+//  POST
 // ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('accounting')(
   async (req: NextRequest, ctx: any, tenant: any) => {
@@ -110,6 +284,7 @@ export const POST = withTenantAndPermission('accounting')(
         paymentType,
         description,
         invoiceDate,
+        checkData, // ★ v8.9: اطلاعات چک از frontend
       } = body
 
       if (!items || items.length === 0) {
@@ -152,11 +327,13 @@ export const POST = withTenantAndPermission('accounting')(
       })
 
       const totalAmount     = subTotal - discountAmount + taxAmount
-      const isCredit        = (paymentType || 'cash').toLowerCase() === 'credit'
-      const paidAmount      = isCredit ? 0           : totalAmount
-      const remainingAmount = isCredit ? totalAmount  : 0
+      const pt = (paymentType || 'cash').toLowerCase()
+      // ★ v8.9: چک هم مثل نسیه unpaid است
+      const isCreditOrCheck = pt === 'credit' || pt === 'check'
+      const paidAmount      = isCreditOrCheck ? 0           : totalAmount
+      const remainingAmount = isCreditOrCheck ? totalAmount  : 0
 
-      // ── ایجاد فاکتور (ساده، مشابه Categories) ──────────────────
+      // ── ایجاد فاکتور ──────────────────────────────────────────
       const invoice = await tenantDb.purchaseInvoice.create({
         data: {
           tenantId,
@@ -164,7 +341,7 @@ export const POST = withTenantAndPermission('accounting')(
           number:          invoiceNumber,
           invoiceDate:     invoiceDate ? new Date(invoiceDate) : new Date(),
           status:          'confirmed',
-          paymentType:     (paymentType || 'cash').toLowerCase(),
+          paymentType:     pt,
           subTotal,
           discountAmount,
           taxAmount,
@@ -179,7 +356,7 @@ export const POST = withTenantAndPermission('accounting')(
       console.log('[PurchaseInvoice POST] ✅ Invoice created:', {
         id: invoice.id,
         number: invoice.number,
-        tenantId: invoice.tenantId,
+        paymentType: pt,
       })
 
       // ── ایجاد آیتم‌ها ─────────────────────────────────────────
@@ -203,7 +380,6 @@ export const POST = withTenantAndPermission('accounting')(
               ? (item.unitPrice * item.quantity - item.discountAmount) / item.quantity
               : item.unitPrice
 
-          // به‌روزرسانی موجودی (بدون transaction)
           try {
             const stockLevel = await tenantDb.stockLevel.findUnique({
               where: {
@@ -271,10 +447,93 @@ export const POST = withTenantAndPermission('accounting')(
         }
       }
 
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v8.9: صدور سند حسابداری خودکار
+      // ═══════════════════════════════════════════════════════════════
+      try {
+        await ensureDefaultAccounts(tenantId)
+        const accountIds = await getStandardAccountIds(tenantId)
+        
+        await createPurchaseAutoJournalEntry(
+          tenantDb,
+          tenantId,
+          invoice,
+          pt,
+          accountIds.inventoryAccountId,
+          accountIds.payablesAccountId,
+          accountIds.checkPayableAccountId || (accountIds as any).checkPayableId,
+          accountIds.cashAccountId,
+          accountIds.vatAccountId,
+        )
+      } catch (jeErr: any) {
+        console.warn('[PurchaseInvoice POST] Auto journal failed (non-blocking):', jeErr?.message)
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v8.9: ثبت خودکار چک پرداختنی (اگر checkData ارسال شده)
+      // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+// ★ v8.9.1: ثبت خودکار چک پرداختنی
+// ★ عدم استفاده از supplierId (در مدل Check وجود ندارد)
+// ★ استفاده از payeeName برای نام تامین‌کننده
+// ═══════════════════════════════════════════════════════════════
+let createdCheck: any = null
+if (pt === 'check' && checkData) {
+  try {
+    // ★ گرفتن نام تامین‌کننده برای payeeName
+    let finalPayeeName = checkData.payeeName?.trim() || null
+    
+    // اگر payeeName خالی بود و supplierId داریم، نام تامین‌کننده را از DB بگیریم
+    if (!finalPayeeName && supplierId) {
+      try {
+        const supplier = await tenantDb.supplier.findUnique({
+          where: { id: supplierId },
+          select: { name: true }
+        })
+        if (supplier?.name) {
+          finalPayeeName = supplier.name
+        }
+   } catch (err: any) {
+      console.warn('[PurchaseInvoice POST] Failed to fetch supplier name:', err?.message || 'خطای نامشخص')
+      }
+    }
+
+    createdCheck = await tenantDb.check.create({
+      data: {
+        tenantId,
+        type: 'payable',
+        checkNumber: checkData.checkNumber?.trim() || `CHK-${Date.now().toString().slice(-6)}`,
+        bankName: checkData.bankName?.trim() || 'نامشخص',
+        branchName: checkData.branchName?.trim() || null,
+        amount: totalAmount,
+        issueDate: checkData.issueDate ? new Date(checkData.issueDate) : new Date(),
+        dueDate: checkData.dueDate ? new Date(checkData.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        // ★ عدم استفاده از supplierId (در مدل Check وجود ندارد)
+        // ★ استفاده از payeeName برای نمایش نام تامین‌کننده
+        payeeName: finalPayeeName || 'تامین‌کننده',
+        description: `چک پرداختنی بابت فاکتور خرید ${invoiceNumber}${supplierId ? ` (SupplierID: ${supplierId})` : ''}`,
+        status: 'pending',
+      },
+    })
+    
+    console.log('[PurchaseInvoice POST] ✅ Check created:', {
+      id: createdCheck.id,
+      checkNumber: createdCheck.checkNumber,
+      payeeName: createdCheck.payeeName,
+      amount: totalAmount,
+    })
+  } catch (checkErr: any) {
+    console.error('[PurchaseInvoice POST] ❌ Check creation failed:', checkErr?.message)
+  }
+}
+
       return NextResponse.json({
         success: true,
-        data: invoice,
-        message: `فاکتور خرید ${invoiceNumber} با موفقیت ثبت شد`,
+        data: {
+          ...invoice,
+          check: createdCheck,
+        },
+        message: `فاکتور خرید ${invoiceNumber} با موفقیت ثبت شد${createdCheck ? ' و چک پرداختنی ایجاد شد' : ''}`,
       }, { status: 201 })
 
     } catch (error: any) {

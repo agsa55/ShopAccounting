@@ -123,18 +123,27 @@ function toFaNum(n: number | string): string {
 function getStatusBadge(status: string) {
   switch (status) {
     case 'pending':
-      return <Badge className="bg-amber-100 text-amber-700">در جریان</Badge>
+      return <Badge className="bg-amber-100 text-amber-700 border border-amber-300 px-2.5 py-0.5 text-xs font-bold">
+        ⏳ در جریان
+      </Badge>
     case 'deposited':
-      return <Badge className="bg-blue-100 text-blue-700">نزد بانک</Badge>
+      return <Badge className="bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-0.5 text-xs font-bold">
+        🏦 نزد بانک
+      </Badge>
     case 'cleared':
-      return <Badge className="bg-emerald-100 text-emerald-700">وصول شده</Badge>
+      return <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-300 px-2.5 py-0.5 text-xs font-bold">
+        ✅ وصول شده
+      </Badge>
     case 'bounced':
-      return <Badge className="bg-red-100 text-red-700">برگشت خورده</Badge>
-       case 'returned':
-      return <Badge className="bg-orange-100 text-orange-700">پس داده/باطل</Badge>
-    
+      return <Badge className="bg-red-100 text-red-700 border border-red-300 px-2.5 py-0.5 text-xs font-bold">
+        ❌ برگشت خورده
+      </Badge>
+    case 'returned':
+      return <Badge className="bg-orange-100 text-orange-700 border border-orange-300 px-2.5 py-0.5 text-xs font-bold">
+        ↩️ پس داده/باطل
+      </Badge>
     default:
-      return <Badge>{status}</Badge>
+      return <Badge className="border px-2.5 py-0.5 text-xs">{status}</Badge>
   }
 }
 
@@ -674,12 +683,21 @@ const handleCheckStatus = useCallback(async (
 
     if (res.ok) {
       const data = await res.json()
-      const statusLabels: Record<string, string> = {
-        deposited: 'به بانک سپرده شد',
-        cleared: 'چک وصول/پاس شد',
-        bounced: 'چک برگشت خورد',
-        returned: check.type === 'receivable' ? 'چک به مشتری پس داده شد' : 'چک باطل/پس گرفته شد',
-      }
+     const statusLabels: Record<string, string> = {
+  pending: '⏳ در جریان',        // ✅ درست
+  cleared: '✅ وصول شد',
+  bounced: '❌ برگشتی',
+  deposited: '🏦 به بانک سپرده شد',
+  returned: '↩️ پس داده شد',
+}
+
+const statusColors: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-700 border-amber-300',
+  cleared: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+  bounced: 'bg-red-100 text-red-700 border-red-300',
+  deposited: 'bg-blue-100 text-blue-700 border-blue-300',
+  returned: 'bg-gray-100 text-gray-700 border-gray-300',
+}
       toast({ title: '✓ موفق', description: data.message || statusLabels[newStatus] })
       await loadChecks() // بارگذاری مجدد برای دریافت اطلاعات سند حسابداری
     } else {
@@ -1040,15 +1058,15 @@ const handleCheckStatus = useCallback(async (
     {/* ─── چک پرداختنی ─── */}
     {chk.type === 'payable' && (
       <>
-        {chk.status === 'pending' && (
-          <>
-            <Button
-              size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-              onClick={() => handleCheckStatus(chk.id, 'cleared')}
-              title="پاس شدن چک (پرداخت)"
-            >
-              <CheckCircle2 className="w-3 h-3 ml-1" /> پاس شد
-            </Button>
+       {chk.status === 'pending' && (
+  <>
+    <Button
+      size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+      onClick={() => handleCheckStatus(chk.id, 'cleared')}
+      title="ثبت پرداخت چک"
+    >
+      <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
+    </Button>
             {/* ★ v10.0: باطل کردن چک (پس گرفتن از تأمین‌کننده) */}
             <Button
               size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
@@ -1158,10 +1176,10 @@ const handleCheckStatus = useCallback(async (
                           </>
                         ) : (
                           <>
-                            <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                              onClick={() => handleCheckStatus(chk.id, 'cleared')}>
-                              <CheckCircle2 className="w-3 h-3 ml-1" /> پاس شد
-                            </Button>
+                           <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+  onClick={() => handleCheckStatus(chk.id, 'cleared')}>
+  <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
+</Button>
                             <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
                               onClick={() => handleCheckStatus(chk.id, 'returned')}>
                               <XCircle className="w-3 h-3 ml-1" /> باطل
@@ -1229,29 +1247,97 @@ const handleCheckStatus = useCallback(async (
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* نوع چک */}
-            <div>
-              <Label className="text-xs">نوع چک</Label>
-              <div className="flex gap-2 mt-1">
-                <Button
-                  size="sm" 
-                  variant={checkType === 'receivable' ? 'default' : 'outline'}
-                  className="text-xs flex-1"
-                  onClick={() => setCheckType('receivable')}
-                >
-                  دریافتنی
-                </Button>
-                <Button
-                  size="sm" 
-                  variant={checkType === 'payable' ? 'default' : 'outline'}
-                  className="text-xs flex-1"
-                  onClick={() => setCheckType('payable')}
-                >
-                  پرداختنی
-                </Button>
-              </div>
-            </div>
+         {/* ═══ نوع چک — نسخه فشرده ═══ */}
+<div>
+  <Label className="text-xs font-medium">نوع چک <span className="text-red-500">*</span></Label>
+  <div className="grid grid-cols-2 gap-1.5 mt-1">
+    
+    {/* ─── چک دریافتنی ─── */}
+    <button
+      type="button"
+      onClick={() => setCheckType('receivable')}
+      className={`
+        relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
+        transition-all duration-200 cursor-pointer
+        ${checkType === 'receivable' 
+          ? 'bg-blue-50 border-blue-500 shadow-sm' 
+          : 'bg-white border-gray-200 hover:border-blue-300'
+        }
+      `}
+    >
+      {/* نشانگر انتخاب */}
+      {checkType === 'receivable' && (
+        <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+      )}
+      
+      {/* آیکون */}
+      <div className={`
+        w-7 h-7 rounded-md flex items-center justify-center shrink-0
+        ${checkType === 'receivable' 
+          ? 'bg-blue-500 text-white' 
+          : 'bg-blue-50 text-blue-500'
+        }
+      `}>
+        <Landmark className="w-3.5 h-3.5" />
+      </div>
+      
+      {/* متن */}
+      <div className="text-right">
+        <span className={`text-[11px] font-bold block leading-tight ${
+          checkType === 'receivable' ? 'text-blue-700' : 'text-gray-700'
+        }`}>
+          دریافتنی
+        </span>
+        <span className="text-[9px] text-gray-400 leading-tight block">
+          از مشتری
+        </span>
+      </div>
+    </button>
 
+    {/* ─── چک پرداختنی ─── */}
+    <button
+      type="button"
+      onClick={() => setCheckType('payable')}
+      className={`
+        relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
+        transition-all duration-200 cursor-pointer
+        ${checkType === 'payable' 
+          ? 'bg-purple-50 border-purple-500 shadow-sm' 
+          : 'bg-white border-gray-200 hover:border-purple-300'
+        }
+      `}
+    >
+      {/* نشانگر انتخاب */}
+      {checkType === 'payable' && (
+        <CheckCircle2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+      )}
+      
+      {/* آیکون */}
+      <div className={`
+        w-7 h-7 rounded-md flex items-center justify-center shrink-0
+        ${checkType === 'payable' 
+          ? 'bg-purple-500 text-white' 
+          : 'bg-purple-50 text-purple-500'
+        }
+      `}>
+        <CreditCard className="w-3.5 h-3.5" />
+      </div>
+      
+      {/* متن */}
+      <div className="text-right">
+        <span className={`text-[11px] font-bold block leading-tight ${
+          checkType === 'payable' ? 'text-purple-700' : 'text-gray-700'
+        }`}>
+          پرداختنی
+        </span>
+        <span className="text-[9px] text-gray-400 leading-tight block">
+          به تامین‌کننده
+        </span>
+      </div>
+    </button>
+
+  </div>
+</div>
             {/* شماره چک و بانک */}
             <div className="grid grid-cols-2 gap-3">
               <div>

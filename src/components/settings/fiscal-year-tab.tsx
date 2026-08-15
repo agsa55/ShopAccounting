@@ -1,11 +1,11 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/fiscal-year-tab.tsx — v2.1 Wizard هوشمند
-// ============================================================================
-// ★ v2.1: اصلاح معماری بر اساس نوع پلن:
-//   - پلن مادام‌العمر: بستن + اختتامیه + افتتاحیه + سال جدید (در یک Wizard)
-//   - پلن سالانه: فقط بستن + اختتامیه (کاربر باید اول تمدید کند)
+// src/components/settings/fiscal-year-tab.tsx — v4.0 ★★★
+// ★ v4.0: حذف ساخت سال جدید و سند افتتاحیه
+//   - فقط بستن سال + سند اختتامیه
+//   - سال جدید توسط SetupWizard ساخته می‌شود
+//   - ۳ مرحله: prerequisites → closing-preview → confirm
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -52,38 +52,29 @@ import {
   TrendingUp,
   TrendingDown,
   Scale,
-  Crown,
   AlertCircle,
   XCircle,
   Check,
-  Wallet,
 } from 'lucide-react'
 
 // ─── Types ──────────────────────────────────────────────────────
 
 type WizardStep =
   | 'prerequisites'
-  | 'plan-status'
   | 'closing-preview'
-  | 'opening-preview'
   | 'confirm'
   | 'executing'
   | 'completed'
 
 interface PreCheckData {
   activeYear: any
-  subscription: any
-  requiresRenewal: boolean
   canProceed: boolean
   warnings: string[]
   blockers: string[]
   closingPreview: any
   openingPreview: any
-  suggestedNewYearName: string
-  renewOptions: any[]
   closeMode: 'normal' | 'early' | 'too_early'
   closeModeReason: string
-  closeModeLabels?: Record<string, string>
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -99,6 +90,7 @@ const toFaNum = (n: number | string | null | undefined): string => {
 
 export function FiscalYearTab() {
   const planName = useAppStore((s) => s.planName)
+  const tenantId = useAppStore((s) => s.tenantId)
   const features = useMemo(() => getFeaturesByPlanName(planName), [planName])
   const { toast } = useToast()
 
@@ -120,8 +112,6 @@ export function FiscalYearTab() {
   const [wizardStep, setWizardStep] = useState<WizardStep>('prerequisites')
   const [wizardLoading, setWizardLoading] = useState(false)
   const [preCheckData, setPreCheckData] = useState<PreCheckData | null>(null)
-  const [selectedRenewalCycle, setSelectedRenewalCycle] = useState<string>('')
-  const [newYearName, setNewYearName] = useState('')
   const [wizardResult, setWizardResult] = useState<any>(null)
   const [executing, setExecuting] = useState(false)
   const [earlyCloseReason, setEarlyCloseReason] = useState('')
@@ -317,7 +307,6 @@ export function FiscalYearTab() {
     setWizardLoading(true)
     setPreCheckData(null)
     setWizardResult(null)
-    setSelectedRenewalCycle('')
     setEarlyCloseReason('')
     setEarlyCloseConfirmed(false)
 
@@ -331,13 +320,6 @@ export function FiscalYearTab() {
 
       if (data.success) {
         setPreCheckData(data.data)
-        setNewYearName(data.data.suggestedNewYearName)
-
-        if (data.data.subscription.isLifetime) {
-          setSelectedRenewalCycle('')
-        } else if (data.data.renewOptions.length > 0) {
-          setSelectedRenewalCycle('annual')
-        }
       } else {
         toast({ title: data.error || 'خطا در بررسی', variant: 'destructive' })
         setWizardOpen(false)
@@ -352,7 +334,7 @@ export function FiscalYearTab() {
 
   // ─── Wizard: Execute Close ───────────────────────────────────
 
-   const executeClose = async () => {
+  const executeClose = async () => {
     if (!preCheckData) return
 
     setExecuting(true)
@@ -363,23 +345,12 @@ export function FiscalYearTab() {
         typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
       const body: any = {
-        newYearName: newYearName.trim(),
         forceClose: false,
       }
 
       if (preCheckData.closeMode === 'early') {
         body.earlyCloseReason = earlyCloseReason.trim()
         body.earlyCloseConfirmed = true
-      }
-
-      // ★ پلن سالانه → فقط بستن + اختتامیه
-      const isLifetime = preCheckData.subscription.isLifetime
-      if (!isLifetime) {
-        body.skipOpeningEntry = true
-      }
-
-      if (preCheckData.requiresRenewal && selectedRenewalCycle) {
-        body.renewalCycle = selectedRenewalCycle
       }
 
       const res = await fetch('/api/fiscal-years', {
@@ -397,20 +368,22 @@ export function FiscalYearTab() {
         setWizardResult(data.data)
         setWizardStep('completed')
         setRefreshKey((k) => k + 1)
-
-        // ★★★ برای پلن سالانه: بعد از ۳ ثانیه redirect به صفحه تمدید
-        if (!isLifetime) {
-          toast({
-            title: '🎉 سال مالی با موفقیت بسته شد!',
-            description: 'در حال انتقال به صفحه تمدید اشتراک...',
-          })
-
-          setTimeout(() => {
-            if (typeof window !== 'undefined') {
-              window.location.replace('/renewal?reason=after_close')
-            }
-          }, 3000)
-        }
+        toast({
+          title: '🎉 سال مالی با موفقیت بسته شد!',
+          description: 'در حال آماده‌سازی ویزارد راه‌اندازی سال جدید...',
+        })
+        
+        // ★ بعد از ۲ ثانیه، Wizard بستن را ببند
+      // ★ بعد از ۲ ثانیه، Wizard بستن را ببند و صفحه را reload کن
+setTimeout(() => {
+  setWizardOpen(false)
+  
+  // ★ بعد از ۵۰۰ms، صفحه را reload کن تا SetupWizard به صورت خودکار باز شود
+  setTimeout(() => {
+    console.log('[FiscalYearTab] 🔄 Reloading page to trigger setup wizard...')
+    window.location.reload()
+  }, 500)
+}, 2000)
       } else {
         toast({ title: data.error || 'خطا در بستن سال مالی', variant: 'destructive' })
         setWizardStep('confirm')
@@ -423,41 +396,30 @@ export function FiscalYearTab() {
     }
   }
 
-  // ─── Wizard: Dynamic Steps Based on Plan Type ───────────────
+  // ─── Wizard: Steps (۳ مرحله اصلی) ──────────────────────────
 
-  const getWizardSteps = useCallback((): WizardStep[] => {
-    if (!preCheckData) return []
-    const isLifetime = preCheckData.subscription.isLifetime
-
-    if (isLifetime) {
-      // پلن مادام‌العمر: همه مراحل
-      return ['prerequisites', 'plan-status', 'closing-preview', 'opening-preview', 'confirm']
-    } else {
-      // پلن سالانه: بدون مرحله افتتاحیه
-      return ['prerequisites', 'plan-status', 'closing-preview', 'confirm']
-    }
-  }, [preCheckData])
+  const wizardSteps: WizardStep[] = [
+    'prerequisites',
+    'closing-preview',
+    'confirm',
+  ]
 
   const goToNextStep = () => {
-    const steps = getWizardSteps()
-    const currentIndex = steps.indexOf(wizardStep)
-    if (currentIndex < steps.length - 1) {
-      setWizardStep(steps[currentIndex + 1])
+    const currentIndex = wizardSteps.indexOf(wizardStep)
+    if (currentIndex < wizardSteps.length - 1) {
+      setWizardStep(wizardSteps[currentIndex + 1])
     }
   }
 
   const goToPrevStep = () => {
-    const steps = getWizardSteps()
-    const currentIndex = steps.indexOf(wizardStep)
+    const currentIndex = wizardSteps.indexOf(wizardStep)
     if (currentIndex > 0) {
-      setWizardStep(steps[currentIndex - 1])
+      setWizardStep(wizardSteps[currentIndex - 1])
     }
   }
 
   const canGoNext = (): boolean => {
     if (!preCheckData) return false
-
-    const isLifetime = preCheckData.subscription.isLifetime
 
     switch (wizardStep) {
       case 'prerequisites':
@@ -470,20 +432,9 @@ export function FiscalYearTab() {
           )
         }
         return preCheckData.canProceed
-      case 'plan-status':
-        // برای پلن سالانه منقضی شده، باید گزینه تمدید انتخاب شود
-        if (!isLifetime && preCheckData.requiresRenewal) {
-          return !!selectedRenewalCycle
-        }
-        return true
       case 'closing-preview':
         return true
-      case 'opening-preview':
-        return true
       case 'confirm':
-        // برای پلن مادام‌العمر، نام سال جدید لازم است
-        if (isLifetime) return !!newYearName.trim()
-        // برای پلن سالانه، فقط کافیست ادامه دهیم
         return true
       default:
         return false
@@ -501,21 +452,10 @@ export function FiscalYearTab() {
           <p className="text-xs text-gray-500 mb-4">
             تعریف، فعال‌سازی و بستن سال‌های مالی فقط در پلن پیشرفته و حرفه‌ای در دسترس است.
           </p>
-          <Button
-            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-            onClick={() =>
-              useAppStore.getState().setCurrentView('settings-subscription' as any)
-            }
-          >
-            ارتقا به پلن پیشرفته
-          </Button>
         </CardContent>
       </Card>
     )
   }
-
-  const wizardSteps = getWizardSteps()
-  const isLifetime = preCheckData?.subscription.isLifetime ?? false
 
   return (
     <div className="space-y-3">
@@ -842,11 +782,7 @@ export function FiscalYearTab() {
               </p>
               <p>
                 <strong className="text-emerald-700">بستن سال:</strong> سند اختتامیه صادر می‌شود،
-                حساب‌های موقت صفر شده و سود/زیان به سود انباشته منتقل می‌شود.
-              </p>
-              <p>
-                <strong className="text-purple-700">شروع سال جدید:</strong> در پلن مادام‌العمر بلافاصله ایجاد می‌شود.
-                در پلن سالانه پس از تمدید اشتراک از طریق Wizard راه‌اندازی.
+                حساب‌های موقت صفر شده و سود/زیان به سود انباشته منتقل می‌شود. سپس ویزارد راه‌اندازی سال جدید باز می‌شود.
               </p>
             </div>
           </div>
@@ -945,18 +881,17 @@ export function FiscalYearTab() {
       </Dialog>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
-      {/*  ★★★ Wizard بستن سال مالی هوشمند                              */}
+      {/*  ★★★ Wizard بستن سال مالی (نسخه v4.0 — ۳ مرحله)             */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       <Dialog open={wizardOpen} onOpenChange={setWizardOpen}>
         <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto" dir="rtl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
               <Archive className="w-4 h-4 text-red-600" />
-              بستن سال مالی هوشمند
+              بستن سال مالی
             </DialogTitle>
             <DialogDescription className="text-[11px]">
-              فرآیند کامل: بررسی → سند اختتامیه
-              {isLifetime ? ' → سند افتتاحیه → سال جدید' : ''}
+              فرآیند: بررسی پیش‌نیازها → پیش‌نمایش سند اختتامیه → تأیید و اجرا
             </DialogDescription>
           </DialogHeader>
 
@@ -971,7 +906,6 @@ export function FiscalYearTab() {
           {/* ─── مرحله ۱: پیش‌نیازها ─── */}
           {!wizardLoading && preCheckData && wizardStep === 'prerequisites' && (
             <div className="space-y-3 py-2">
-              {/* Progress bar */}
               <div className="flex items-center gap-1 mb-2">
                 {wizardSteps.map((s, i) => (
                   <div
@@ -990,7 +924,6 @@ export function FiscalYearTab() {
                 بررسی پیش‌نیازها
               </h3>
 
-              {/* حالت بستن */}
               {preCheckData.closeMode === 'normal' && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded p-2.5 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -1067,7 +1000,6 @@ export function FiscalYearTab() {
                 </div>
               )}
 
-              {/* اطلاعات سال فعال */}
               <div className="bg-emerald-50 border border-emerald-200 rounded p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold text-emerald-800">{preCheckData.activeYear.name}</span>
@@ -1080,7 +1012,6 @@ export function FiscalYearTab() {
                 </div>
               </div>
 
-              {/* بررسی‌ها */}
               <div className="space-y-1.5">
                 <CheckItem
                   ok={preCheckData.activeYear.isYearEnded || preCheckData.activeYear.daysUntilEnd <= 7}
@@ -1137,148 +1068,7 @@ export function FiscalYearTab() {
             </div>
           )}
 
-          {/* ─── مرحله ۲: وضعیت پلن ─── */}
-          {!wizardLoading && preCheckData && wizardStep === 'plan-status' && (
-            <div className="space-y-3 py-2">
-              <div className="flex items-center gap-1 mb-2">
-                {wizardSteps.map((s, i) => (
-                  <div
-                    key={s}
-                    className={`flex-1 h-1 rounded-full ${
-                      wizardSteps.indexOf(wizardStep) >= i
-                        ? 'bg-emerald-500'
-                        : 'bg-gray-200'
-                    }`}
-                  />
-                ))}
-              </div>
-
-              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۲</span>
-                وضعیت پلن و اشتراک
-              </h3>
-
-              <div className={`p-3 rounded border ${
-                preCheckData.subscription.isLifetime
-                  ? 'bg-purple-50 border-purple-200'
-                  : preCheckData.subscription.isExpired
-                  ? 'bg-red-50 border-red-200'
-                  : 'bg-emerald-50 border-emerald-200'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Crown className={`w-4 h-4 ${
-                      preCheckData.subscription.isLifetime ? 'text-purple-600' : 'text-emerald-600'
-                    }`} />
-                    <span className="text-xs font-bold">
-                      پلن {preCheckData.subscription.tierNameFa}
-                      {preCheckData.subscription.isLifetime && ' (مادام‌العمر)'}
-                    </span>
-                  </div>
-                  <Badge className={`text-[9px] ${
-                    preCheckData.subscription.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
-                    preCheckData.subscription.status === 'warning' ? 'bg-amber-100 text-amber-700' :
-                    preCheckData.subscription.status === 'grace_period' ? 'bg-orange-100 text-orange-700' :
-                    'bg-red-100 text-red-700'
-                  }`}>
-                    {preCheckData.subscription.status === 'active' && 'فعال'}
-                    {preCheckData.subscription.status === 'warning' && 'در آستانه انقضا'}
-                    {preCheckData.subscription.status === 'grace_period' && 'دوره مهلت'}
-                    {preCheckData.subscription.status === 'read_only' && 'فقط خواندنی'}
-                  </Badge>
-                </div>
-                <p className="text-[10px] text-gray-600">{preCheckData.subscription.message}</p>
-              </div>
-
-              {/* پلن مادام‌العمر */}
-              {preCheckData.subscription.isLifetime && (
-                <div className="bg-purple-50 border border-purple-200 rounded p-3 flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-purple-800">
-                    <p className="font-bold mb-1">پلن مادام‌العمر — نیازی به تمدید نیست</p>
-                    <p className="text-[10px]">پس از بستن، سال جدید بلافاصله ایجاد می‌شود.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* پلن سالانه منقضی شده */}
-              {preCheckData.requiresRenewal && !preCheckData.subscription.isLifetime && (
-                <div className="bg-red-50 border border-red-200 rounded p-3">
-                  <div className="flex items-start gap-2 mb-3">
-                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                    <div className="text-xs text-red-800">
-                      <p className="font-bold mb-1">⚠️ پلن شما منقضی شده است</p>
-                      <p className="text-[10px]">برای ادامه فرآیند، گزینه تمدید را انتخاب کنید.</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-[11px] font-bold text-gray-700">گزینه تمدید:</Label>
-                    {preCheckData.renewOptions.map((opt: any) => (
-                      <label
-                        key={opt.billingCycle}
-                        className={`flex items-center justify-between p-2.5 rounded border cursor-pointer transition-all ${
-                          selectedRenewalCycle === opt.billingCycle
-                            ? 'border-emerald-500 bg-emerald-50'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            name="renewal"
-                            value={opt.billingCycle}
-                            checked={selectedRenewalCycle === opt.billingCycle}
-                            onChange={(e) => setSelectedRenewalCycle(e.target.value)}
-                            className="w-3.5 h-3.5 text-emerald-600"
-                          />
-                          <div>
-                            <div className="text-xs font-bold">
-                              تمدید {opt.billingCycle === 'lifetime' ? 'مادام‌العمر' : 'سالانه'}
-                            </div>
-                            <div className="text-[9px] text-gray-500">
-                              {opt.billingCycle === 'lifetime' ? 'یک بار برای همیشه' : '۳۶۵ روز'}
-                              {opt.discount > 0 && (
-                                <Badge className="text-[8px] bg-emerald-100 text-emerald-700 mr-1">
-                                  {toFaNum(opt.discount)}٪ تخفیف
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-left">
-                          <div className="text-xs font-bold text-emerald-700">
-                            {toFaNum(opt.price.toLocaleString('en-US'))}
-                          </div>
-                          <div className="text-[9px] text-gray-500">تومان</div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* پلن سالانه فعال */}
-              {!preCheckData.requiresRenewal && !preCheckData.subscription.isLifetime && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded p-3 flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-emerald-800">
-                    <p className="font-bold mb-1">اشتراک فعال است</p>
-                    <p className="text-[10px]">
-                      {preCheckData.subscription.daysRemaining > 0
-                        ? `${toFaNum(preCheckData.subscription.daysRemaining)} روز تا پایان اشتراک باقی مانده`
-                        : 'در دوره مهلت هستید'}
-                    </p>
-                    <p className="text-[10px] text-blue-700 mt-1">
-                      💡 پس از بستن سال مالی، برای شروع سال جدید باید اشتراک را تمدید کنید.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ─── مرحله ۳: پیش‌نمایش اختتامیه ─── */}
+          {/* ─── مرحله ۲: پیش‌نمایش اختتامیه ─── */}
           {!wizardLoading && preCheckData && wizardStep === 'closing-preview' && (
             <div className="space-y-3 py-2">
               <div className="flex items-center gap-1 mb-2">
@@ -1295,7 +1085,7 @@ export function FiscalYearTab() {
               </div>
 
               <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۳</span>
+                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۲</span>
                 پیش‌نمایش سند اختتامیه
               </h3>
 
@@ -1381,107 +1171,7 @@ export function FiscalYearTab() {
             </div>
           )}
 
-          {/* ─── مرحله ۴: پیش‌نمایش افتتاحیه (فقط مادام‌العمر) ─── */}
-          {!wizardLoading && preCheckData && wizardStep === 'opening-preview' && isLifetime && (
-            <div className="space-y-3 py-2">
-              <div className="flex items-center gap-1 mb-2">
-                {wizardSteps.map((s, i) => (
-                  <div
-                    key={s}
-                    className={`flex-1 h-1 rounded-full ${
-                      wizardSteps.indexOf(wizardStep) >= i
-                        ? 'bg-emerald-500'
-                        : 'bg-gray-200'
-                    }`}
-                  />
-                ))}
-              </div>
-
-              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۴</span>
-                پیش‌نمایش سند افتتاحیه
-              </h3>
-
-              <p className="text-[10px] text-gray-600">
-                مانده حساب‌های دائمی (دارایی، بدهی، سرمایه) به سال جدید منتقل می‌شود.
-              </p>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-blue-50 border border-blue-200 rounded p-2 text-center">
-                  <div className="text-[9px] text-gray-500">دارایی‌ها</div>
-                  <div className="text-xs font-bold text-blue-700">
-                    {toFaNum(Math.round(preCheckData.openingPreview.totalAssets).toLocaleString('en-US'))}
-                  </div>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded p-2 text-center">
-                  <div className="text-[9px] text-gray-500">بدهی‌ها</div>
-                  <div className="text-xs font-bold text-red-700">
-                    {toFaNum(Math.round(preCheckData.openingPreview.totalLiabilities).toLocaleString('en-US'))}
-                  </div>
-                </div>
-                <div className="bg-purple-50 border border-purple-200 rounded p-2 text-center">
-                  <div className="text-[9px] text-gray-500">سرمایه</div>
-                  <div className="text-xs font-bold text-purple-700">
-                    {toFaNum(Math.round(preCheckData.openingPreview.totalEquity).toLocaleString('en-US'))}
-                  </div>
-                </div>
-              </div>
-
-              <div className={`p-2.5 rounded border flex items-center gap-2 ${
-                preCheckData.openingPreview.isBalanced
-                  ? 'bg-emerald-50 border-emerald-200'
-                  : 'bg-amber-50 border-amber-200'
-              }`}>
-                {preCheckData.openingPreview.isBalanced ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div className="text-[10px] text-emerald-800">
-                      <strong>✓ تراز حسابداری برقرار است</strong>
-                      <p>دارایی = بدهی + سرمایه</p>
-                      {(preCheckData.openingPreview as any).differenceNote && (
-                        <p className="mt-1 text-[9px] text-emerald-600 italic">
-                          💡 {(preCheckData.openingPreview as any).differenceNote}
-                        </p>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <div className="text-[10px] text-amber-800">
-                      <strong>⚠️ اختلاف {toFaNum(Math.round(preCheckData.openingPreview.difference).toLocaleString('en-US'))} ریال</strong>
-                      <p>پس از صدور سند اختتامیه، تراز به‌صورت خودکار برقرار می‌شود.</p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {preCheckData.openingPreview.assets.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded">
-                  <div className="px-3 py-1.5 bg-blue-50 border-b border-blue-100">
-                    <span className="text-[10px] font-bold text-blue-800">
-                      دارایی‌ها ({toFaNum(preCheckData.openingPreview.assets.length)})
-                    </span>
-                  </div>
-                  <div className="max-h-20 overflow-y-auto">
-                    {preCheckData.openingPreview.assets.slice(0, 8).map((a: any) => (
-                      <div key={a.accountId} className="flex justify-between px-3 py-1 text-[10px] border-b border-gray-50">
-                        <span className="text-gray-700 truncate">
-                          <span className="font-mono text-gray-400 ml-1">{a.code}</span>
-                          {a.name}
-                        </span>
-                        <span className="font-mono text-blue-700" dir="ltr">
-                          {toFaNum(Math.round(a.balance).toLocaleString('en-US'))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ─── مرحله ۵: تأیید نهایی ─── */}
+          {/* ─── مرحله ۳: تأیید نهایی ─── */}
           {!wizardLoading && preCheckData && wizardStep === 'confirm' && (
             <div className="space-y-3 py-2">
               <div className="flex items-center gap-1 mb-2">
@@ -1499,22 +1189,10 @@ export function FiscalYearTab() {
 
               <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">
-                  {toFaNum(wizardSteps.length)}
+                  ۳
                 </span>
                 تأیید نهایی
               </h3>
-
-              {/* ★ پلن مادام‌العمر: نام سال جدید */}
-              {isLifetime && (
-                <div>
-                  <Label className="text-[11px] font-bold text-gray-700">نام سال مالی جدید</Label>
-                  <Input
-                    value={newYearName}
-                    onChange={(e) => setNewYearName(e.target.value)}
-                    className="h-9 text-xs mt-1 font-bold"
-                  />
-                </div>
-              )}
 
               {/* خلاصه عملیات */}
               <div className="bg-gray-50 border border-gray-200 rounded p-3 space-y-2">
@@ -1531,37 +1209,13 @@ export function FiscalYearTab() {
                       صدور سند اختتامیه (سود/زیان: {toFaNum(Math.round(Math.abs(preCheckData.closingPreview.netProfit)).toLocaleString('en-US'))} ریال)
                     </span>
                   </div>
+                </div>
+              </div>
 
-                  {/* ★ فقط برای پلن مادام‌العمر */}
-                  {isLifetime ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span>صدور سند افتتاحیه برای سال جدید</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                        <span>ایجاد و فعال‌سازی سال مالی «{newYearName}»</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-start gap-2 p-2 bg-blue-50 border border-blue-200 rounded">
-                      <Info className="w-3 h-3 text-blue-600 shrink-0 mt-0.5" />
-                      <span className="text-blue-800">
-                        پس از بستن سال مالی، برای شروع سال جدید باید اشتراک خود را تمدید کنید.
-                        پس از تمدید، Wizard راه‌اندازی به‌صورت خودکار سال جدید و سند افتتاحیه را ایجاد می‌کند.
-                      </span>
-                    </div>
-                  )}
-
-                  {preCheckData.requiresRenewal && selectedRenewalCycle && (
-                    <div className="flex items-center gap-2">
-                      <Check className="w-3 h-3 text-purple-600 shrink-0" />
-                      <span className="text-purple-700 font-bold">
-                        تمدید اشتراک ({selectedRenewalCycle === 'lifetime' ? 'مادام‌العمر' : 'سالانه'})
-                      </span>
-                    </div>
-                  )}
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 flex items-start gap-2">
+                <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                <div className="text-[10px] text-blue-800">
+                  <strong>📋 ادامه فرآیند:</strong> پس از بستن سال مالی، ویزارد راه‌اندازی سال جدید به‌صورت خودکار باز می‌شود تا سال جدید، انبارها و سند افتتاحیه را تنظیم کنید.
                 </div>
               </div>
 
@@ -1574,7 +1228,7 @@ export function FiscalYearTab() {
             </div>
           )}
 
-          {/* ─── مرحله ۶: در حال اجرا ─── */}
+          {/* ─── مرحله در حال اجرا ─── */}
           {wizardStep === 'executing' && (
             <div className="py-12 text-center">
               <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mx-auto mb-3" />
@@ -1582,52 +1236,35 @@ export function FiscalYearTab() {
               <p className="text-[10px] text-gray-500">لطفاً صبر کنید. این عملیات ممکن است چند ثانیه طول بکشد.</p>
               <div className="mt-4 space-y-1 text-[10px] text-gray-500">
                 <div className="flex items-center gap-2 justify-center">
-                  <Check className="w-3 h-3 text-emerald-500" />
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
                   <span>صدور سند اختتامیه</span>
                 </div>
                 <div className="flex items-center gap-2 justify-center">
-                  <Check className="w-3 h-3 text-emerald-500" />
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
                   <span>بستن سال مالی</span>
                 </div>
-                {isLifetime && (
-                  <>
-                    <div className="flex items-center gap-2 justify-center">
-                      <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
-                      <span>ایجاد سال جدید و سند افتتاحیه...</span>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
           )}
 
-          {/* ─── مرحله ۷: تکمیل ─── */}
-                {!wizardLoading && wizardStep === 'completed' && wizardResult && (
+          {/* ─── مرحله تکمیل ─── */}
+          {!wizardLoading && wizardStep === 'completed' && wizardResult && (
             <div className="space-y-3 py-2">
               <div className="text-center py-4">
                 <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
                   <CheckCircle2 className="w-8 h-8 text-emerald-600" />
                 </div>
                 <h3 className="text-base font-bold text-gray-800 mb-1">
-                  بستن سال مالی با موفقیت انجام شد
+                  🎉 بستن سال مالی با موفقیت انجام شد
                 </h3>
-
-                {isLifetime && wizardResult.newYear ? (
-                  <p className="text-xs text-gray-500">
-                    سال «{wizardResult.closedYear.name}» بسته شد و سال «{wizardResult.newYear.name}» فعال گردید
-                  </p>
-                ) : (
-                  <p className="text-xs text-gray-500">
-                    سال «{wizardResult.closedYear.name}» بسته شد.
-                    <br />
-                    <strong className="text-amber-700">
-                      🔒 سیستم قفل شد. برای ادامه استفاده، اشتراک را تمدید کنید.
-                    </strong>
-                  </p>
-                )}
+                <p className="text-xs text-gray-500">
+                  سال «{wizardResult.closedYear.name}» بسته شد و سند اختتامیه صادر گردید.
+                </p>
+                <p className="text-[11px] text-blue-700 mt-2 font-medium">
+                  در حال آماده‌سازی ویزارد راه‌اندازی سال جدید...
+                </p>
               </div>
 
-              {/* خلاصه نتایج */}
               <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2 text-[10px]">
                 <div className="font-bold text-emerald-800 pb-1 border-b border-emerald-100">نتایج عملیات:</div>
 
@@ -1655,71 +1292,7 @@ export function FiscalYearTab() {
                     {toFaNum(Math.round(Math.abs(wizardResult.closingEntry.netProfit)).toLocaleString('en-US'))} ریال
                   </span>
                 </div>
-
-                {/* فقط برای پلن مادام‌العمر */}
-                {wizardResult.newYear && wizardResult.openingEntry && (
-                  <>
-                    <div className="flex justify-between pt-1 border-t border-emerald-100">
-                      <span>سند افتتاحیه:</span>
-                      <span className="font-mono text-blue-700">{wizardResult.openingEntry.number}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>دارایی‌های منتقل شده:</span>
-                      <span className="font-mono text-blue-600">
-                        {toFaNum(Math.round(wizardResult.openingEntry.totalAssets).toLocaleString('en-US'))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between pt-1 border-t border-emerald-100 font-bold text-emerald-800">
-                      <span>سال مالی جدید:</span>
-                      <span>{wizardResult.newYear.name}</span>
-                    </div>
-                  </>
-                )}
-
-                {wizardResult.renewal && (
-                  <div className="flex items-center gap-1 pt-1 border-t border-emerald-100 text-purple-700">
-                    <Crown className="w-3 h-3" />
-                    <span>✓ اشتراک تمدید شد</span>
-                  </div>
-                )}
               </div>
-
-              {/* ★ پیام برای پلن سالانه */}
-              {!isLifetime && (
-                <div className="p-3 bg-amber-50 border-2 border-amber-300 rounded-lg">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                    <div className="text-[11px] text-amber-900 space-y-1">
-                      <p className="font-bold">⚠️ سیستم موقتاً قفل شده است</p>
-                      <p>
-                        سال مالی بسته شده و تا زمان تمدید اشتراک و ایجاد سال مالی جدید،
-                        امکان ثبت فاکتور و اسناد جدید وجود ندارد.
-                      </p>
-                      <p className="text-[10px] text-amber-700">
-                        شما به‌طور خودکار به صفحه تمدید هدایت می‌شوید...
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
-                    <span className="text-xs text-amber-800 font-bold">
-                      در حال انتقال به صفحه تمدید...
-                    </span>
-                  </div>
-
-                  <Button
-                    className="w-full mt-2 bg-amber-600 hover:bg-amber-700 text-white text-xs h-8"
-                    onClick={() => {
-                      if (typeof window !== 'undefined') {
-                        window.location.replace('/renewal?reason=after_close')
-                      }
-                    }}
-                  >
-                    انتقال فوری به صفحه تمدید
-                  </Button>
-                </div>
-              )}
             </div>
           )}
 
@@ -1751,11 +1324,11 @@ export function FiscalYearTab() {
               {wizardStep === 'confirm' && (
                 <Button
                   onClick={executeClose}
-                  disabled={executing || (isLifetime && !newYearName.trim())}
+                  disabled={executing}
                   className="bg-red-600 hover:bg-red-700 text-white text-xs h-8 gap-1.5"
                 >
                   <Archive className="w-3.5 h-3.5" />
-                  {isLifetime ? 'تأیید و اجرای عملیات' : 'بستن سال مالی'}
+                  تأیید و بستن سال مالی
                 </Button>
               )}
             </DialogFooter>
@@ -1763,13 +1336,10 @@ export function FiscalYearTab() {
 
           {wizardStep === 'completed' && (
             <DialogFooter className="gap-2 mt-3 pt-2 border-t border-gray-200">
-              <Button
-                onClick={() => setWizardOpen(false)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 ml-1" />
-                تکمیل شد
-              </Button>
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                <span>در حال انتقال به ویزارد راه‌اندازی...</span>
+              </div>
             </DialogFooter>
           )}
         </DialogContent>

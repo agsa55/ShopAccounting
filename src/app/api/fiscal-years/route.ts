@@ -1,16 +1,10 @@
 // ============================================================================
-// src/app/api/fiscal-years/route.ts — v8.7 ★★★
+// src/app/api/fiscal-years/route.ts — v9.1 ★★★
 // ShopAccounting — Fiscal Year Management API
 // ============================================================================
-// ★★★ v8.7: پشتیبانی از skipOpeningEntry برای جداسازی فرآیند پلن سالانه
-// ★★★ v8.6: رفع خطاهای TypeScript + اضافه شدن سند افتتاحیه
-// ★★★ v8.5: محاسبه تعداد اسناد بر اساس بازه تاریخ (نه relation)
-// ============================================================================
-//
-// منطق v8.7:
-//   - پلن مادام‌العمر: بستن + اختتامیه + افتتاحیه + سال جدید (همه در یک مرحله)
-//   - پلن سالانه: فقط بستن + اختتامیه (skipOpeningEntry=true از Frontend)
-//                 کاربر بعداً از طریق Wizard راه‌اندازی سال جدید را می‌سازد
+// ★★★ v9.1: حذف ساخت سال جدید و سند افتتاحیه از PUT
+//   - PUT فقط: بستن + سند اختتامیه
+//   - سال جدید توسط SetupWizard (renewal_setup) ساخته می‌شود
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -201,8 +195,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT — بستن سال فعال + سند اختتامیه (+ افتتاحیه + سال جدید)
-//  ★ v8.7: پشتیبانی از skipOpeningEntry
+//  PUT — بستن سال فعال + سند اختتامیه (بدون سال جدید)
+//  ★ v9.1: فقط بستن + اختتامیه — سال جدید توسط SetupWizard ساخته می‌شود
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('accounting')(
@@ -221,12 +215,9 @@ export const PUT = withTenantAndPermission('accounting')(
       const body = await req.json()
 
       const {
-        newYearName,
         forceClose,
-        renewalCycle,
         earlyCloseReason,
         earlyCloseConfirmed,
-        skipOpeningEntry, // ★ v8.7: اگر true باشد، فقط بستن + اختتامیه
       } = body
 
       // ── ۱. یافتن سال فعال ────────────────────────────────────
@@ -299,29 +290,7 @@ export const PUT = withTenantAndPermission('accounting')(
         )
       }
 
-      // ── ۴. بررسی وضعیت پلن ──────────────────────────────────
-      const { checkSubscriptionStatus, renewSubscription } = await import(
-        '@/lib/plan-limits'
-      )
-      const subStatus = await checkSubscriptionStatus(tenantId)
-
-      if (
-        subStatus.billingCycle === 'annual' &&
-        subStatus.isExpired &&
-        subStatus.status === 'read_only' &&
-        !renewalCycle
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'اشتراک شما منقضی شده است. ابتدا پلن را تمدید کنید.',
-            code: 'SUBSCRIPTION_EXPIRED',
-          },
-          { status: 403 }
-        )
-      }
-
-      // ── ۵. بررسی اسناد Draft ──────────────────────────────────
+      // ── ۴. بررسی اسناد Draft ──────────────────────────────────
       if (!forceClose) {
         const draftCount = await tenantDb.journalEntry.count({
           where: {
@@ -342,35 +311,17 @@ export const PUT = withTenantAndPermission('accounting')(
         }
       }
 
-      // ── ۶. تمدید پلن (اگر درخواست شده) ──────────────────────
-      let renewalResult: { success: boolean; error?: string } | null = null
-      if (renewalCycle) {
-        renewalResult = await renewSubscription(tenantId, renewalCycle)
-        if (!renewalResult.success) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `خطا در تمدید اشتراک: ${renewalResult.error || 'خطای ناشناخته'}`,
-              code: 'RENEWAL_FAILED',
-            },
-            { status: 500 }
-          )
-        }
-      }
-
-      // ── ۷. ساخت توضیحات سال (شامل دلیل بستن زودهنگام) ────────
+      // ── ۵. ساخت توضیحات سال ──────────────────────────────────
       let notesText = `بسته شد در ${new Date().toISOString().split('T')[0]}`
       if (closeMode === 'early') {
         notesText += ` — ⚠️ بستن زودهنگام (${daysUntilEnd} روز زودتر) — دلیل: ${earlyCloseReason.trim()}`
       }
 
-          // ── ۸. اجرای تراکنش ─────────────────────────────────────
+      // ── ۶. اجرای تراکنش (فقط بستن + اختتامیه) ───────────────
       const result = await tenantDb.$transaction(async (tx: any) => {
-        const {
-          createClosingEntry,
-        } = await import('@/lib/accounting/closing-entry')
+        const { createClosingEntry } = await import('@/lib/accounting/closing-entry')
 
-        // ۸.۱. صدور سند اختتامیه
+        // ۶.۱. صدور سند اختتامیه
         const closingResult = await createClosingEntry(
           tx,
           tenantId,
@@ -383,7 +334,7 @@ export const PUT = withTenantAndPermission('accounting')(
           throw new Error(`خطا در ایجاد سند اختتامیه: ${closingResult.error}`)
         }
 
-        // ۸.۲. بستن سال فعلی
+        // ۶.۲. بستن سال فعلی (بدون ایجاد سال جدید)
         await tx.fiscalYear.update({
           where: { id: activeYear.id },
           data: {
@@ -394,92 +345,26 @@ export const PUT = withTenantAndPermission('accounting')(
           },
         })
 
-        // ★★★ v8.7: منطق تصمیم‌گیری برای ایجاد سال جدید و سند افتتاحیه
-        const shouldCreateNewYear = !skipOpeningEntry && subStatus.isLifetime
-
-        let newYear: any = null
-        let openingResult: any = null
-
-        if (shouldCreateNewYear) {
-          // ── پلن مادام‌العمر: ایجاد سال جدید + سند افتتاحیه ──
-          const newStartDate = new Date(activeYear.endDate)
-          newStartDate.setDate(newStartDate.getDate() + 1)
-          const newEndDate = new Date(newStartDate)
-          newEndDate.setDate(newEndDate.getDate() + 364)
-
-          const finalNewYearName = newYearName?.trim() || generateNextYearName(activeYear.name)
-
-          newYear = await tx.fiscalYear.create({
-            data: {
-              tenantId,
-              name: finalNewYearName,
-              startDate: newStartDate,
-              endDate: newEndDate,
-              isActive: true,
-              isClosed: false,
-            },
-          })
-
-          const { createOpeningEntry } = await import('@/lib/accounting/closing-entry')
-          openingResult = await createOpeningEntry(
-            tx,
-            tenantId,
-            newYear.id,
-            newYear.name,
-            newStartDate
-          )
-
-          if (!openingResult.success) {
-            console.warn(`[FiscalYears PUT] Opening entry warning: ${openingResult.error}`)
-          }
-        }
-
         return {
           closedYear: {
             id: activeYear.id,
             name: activeYear.name,
+            startDate: activeYear.startDate,
+            endDate: activeYear.endDate,
+            closedAt: new Date(),
           },
-          newYear: newYear
-            ? {
-                id: newYear.id,
-                name: newYear.name,
-                startDate: newYear.startDate,
-                endDate: newYear.endDate,
-              }
-            : null,
           closingEntry: {
             number: closingResult.entryNumber,
             totalRevenue: closingResult.totalRevenue,
             totalExpense: closingResult.totalExpense,
             netProfit: closingResult.netProfit,
           },
-          openingEntry: openingResult?.entryNumber
-            ? {
-                number: openingResult.entryNumber,
-                totalAssets: openingResult.totalAssets,
-                totalLiabilities: openingResult.totalLiabilities,
-                totalEquity: openingResult.totalEquity,
-              }
-            : null,
-          renewal: renewalResult && renewalResult.success
-            ? { success: true, message: 'اشتراک تمدید شد' }
-            : null,
           closeMode,
           earlyCloseReason: closeMode === 'early' ? earlyCloseReason : null,
-          newYearCreated: !!newYear,
-          requiresRenewalSetup: !shouldCreateNewYear && !subStatus.isLifetime,
         }
       })
 
-      // ★ پیام بر اساس نوع پلن و skipOpeningEntry
-      let message: string
-      if (result.newYearCreated && result.newYear) {
-        message = `سال مالی «${activeYear.name}» بسته شد. سال جدید «${result.newYear.name}» ایجاد و فعال شد.`
-      } else if (skipOpeningEntry) {
-        message = `سال مالی «${activeYear.name}» بسته شد. برای شروع سال جدید و صدور سند افتتاحیه، ابتدا اشتراک را تمدید کنید و سپس از Wizard راه‌اندازی استفاده کنید.`
-      } else {
-        message = `سال مالی «${activeYear.name}» بسته شد. برای شروع سال جدید، ابتدا اشتراک را تمدید کنید.`
-      }
+      const message = `سال مالی «${activeYear.name}» با موفقیت بسته شد. سند اختتامیه صادر شد.`
 
       return NextResponse.json({
         success: true,
@@ -490,6 +375,195 @@ export const PUT = withTenantAndPermission('accounting')(
       console.error('[FiscalYears PUT] Error:', error?.message || error)
       return NextResponse.json(
         { success: false, error: error?.message || 'خطا در بستن سال مالی' },
+        { status: 500 }
+      )
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════
+//  PATCH — عملیات روی یک سال مالی (activate / update)
+// ═══════════════════════════════════════════════════════════════
+
+export const PATCH = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const features = getFeaturesByPlanName(tenant.planTierName)
+      if (!features.canFiscalYearManagement) {
+        return NextResponse.json(
+          { success: false, error: 'مدیریت سال مالی در پلن فعلی در دسترس نیست' },
+          { status: 403 }
+        )
+      }
+
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+      const body = await req.json()
+
+      // استخراج yearId از URL
+      const { pathname } = new URL(req.url)
+      const segments = pathname.split('/').filter(Boolean)
+      const yearId = segments[segments.length - 1]
+
+      if (!yearId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه سال مالی مشخص نشده است' },
+          { status: 400 }
+        )
+      }
+
+      const year = await tenantDb.fiscalYear.findFirst({
+        where: { id: yearId, tenantId },
+      })
+
+      if (!year) {
+        return NextResponse.json(
+          { success: false, error: 'سال مالی یافت نشد' },
+          { status: 404 }
+        )
+      }
+
+      const { action, name } = body
+
+      if (action === 'activate') {
+        if (year.isClosed) {
+          return NextResponse.json(
+            { success: false, error: 'سال بسته‌شده قابل فعال‌سازی نیست' },
+            { status: 400 }
+          )
+        }
+
+        await tenantDb.fiscalYear.updateMany({
+          where: { tenantId, isActive: true },
+          data: { isActive: false },
+        }).catch(() => {})
+
+        await tenantDb.fiscalYear.update({
+          where: { id: yearId },
+          data: { isActive: true },
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `سال مالی «${year.name}» فعال شد`,
+        })
+      }
+
+      if (action === 'update') {
+        if (!name || name.trim().length < 2) {
+          return NextResponse.json(
+            { success: false, error: 'نام سال مالی باید حداقل ۲ کاراکتر باشد' },
+            { status: 400 }
+          )
+        }
+
+        await tenantDb.fiscalYear.update({
+          where: { id: yearId },
+          data: { name: name.trim() },
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `نام سال مالی به «${name.trim()}» تغییر کرد`,
+        })
+      }
+
+      return NextResponse.json(
+        { success: false, error: 'عملیات نامعتبر' },
+        { status: 400 }
+      )
+    } catch (error: any) {
+      console.error('[FiscalYears PATCH] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطا در به‌روزرسانی سال مالی' },
+        { status: 500 }
+      )
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════
+//  DELETE — حذف سال مالی (فقط سال‌های خالی و غیرفعال)
+// ═══════════════════════════════════════════════════════════════
+
+export const DELETE = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const features = getFeaturesByPlanName(tenant.planTierName)
+      if (!features.canFiscalYearManagement) {
+        return NextResponse.json(
+          { success: false, error: 'مدیریت سال مالی در پلن فعلی در دسترس نیست' },
+          { status: 403 }
+        )
+      }
+
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+
+      // استخراج yearId از URL
+      const { pathname } = new URL(req.url)
+      const segments = pathname.split('/').filter(Boolean)
+      const yearId = segments[segments.length - 1]
+
+      if (!yearId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه سال مالی مشخص نشده است' },
+          { status: 400 }
+        )
+      }
+
+      const year = await tenantDb.fiscalYear.findFirst({
+        where: { id: yearId, tenantId },
+      })
+
+      if (!year) {
+        return NextResponse.json(
+          { success: false, error: 'سال مالی یافت نشد' },
+          { status: 404 }
+        )
+      }
+
+      if (year.isClosed) {
+        return NextResponse.json(
+          { success: false, error: 'سال بسته‌شده قابل حذف نیست' },
+          { status: 400 }
+        )
+      }
+
+      if (year.isActive) {
+        return NextResponse.json(
+          { success: false, error: 'سال فعال قابل حذف نیست. ابتدا سال دیگری را فعال کنید' },
+          { status: 400 }
+        )
+      }
+
+      // بررسی وجود اسناد در این سال
+      const entryCount = await tenantDb.journalEntry.count({
+        where: {
+          tenantId,
+          date: { gte: year.startDate, lte: year.endDate },
+        },
+      })
+
+      if (entryCount > 0) {
+        return NextResponse.json(
+          { success: false, error: `این سال مالی دارای ${entryCount} سند است و قابل حذف نیست` },
+          { status: 400 }
+        )
+      }
+
+      await tenantDb.fiscalYear.delete({
+        where: { id: yearId },
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: `سال مالی «${year.name}» حذف شد`,
+      })
+    } catch (error: any) {
+      console.error('[FiscalYears DELETE] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطا در حذف سال مالی' },
         { status: 500 }
       )
     }

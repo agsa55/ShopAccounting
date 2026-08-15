@@ -63,7 +63,7 @@ import {
   Crown,
   Camera,
   ScanLine,
-    Store, Building2 
+    Store, Building2, Landmark, CreditCard as CreditCardIcon
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { usePosProductSearch } from '@/lib/use-pos-product-search'
@@ -888,10 +888,22 @@ const isProcessingScan = useRef(false);
   const [installmentInterestRate, setInstallmentInterestRate] = useState(0)
   const [installmentPeriod, setInstallmentPeriod] = useState<'monthly' | 'biweekly' | 'weekly'>('monthly')
 
-  // Credit dialog state
-  const [creditDialogOpen, setCreditDialogOpen] = useState(false)
-  const [creditDueDate, setCreditDueDate] = useState('')
-  const [creditDescription, setCreditDescription] = useState('')
+ // Credit dialog state
+const [creditDialogOpen, setCreditDialogOpen] = useState(false)
+const [creditDueDate, setCreditDueDate] = useState('')
+const [creditDescription, setCreditDescription] = useState('')
+
+// ★ v11.2: Check dialog state
+const [checkDialogOpen, setCheckDialogOpen] = useState(false)
+const [checkNumber, setCheckNumber] = useState('')
+const [checkBank, setCheckBank] = useState('')
+const [checkDueDate, setCheckDueDate] = useState('')
+const [checkPayee, setCheckPayee] = useState('')
+const [checkCustomerSearch, setCheckCustomerSearch] = useState('')
+const [checkSelectedCustomerId, setCheckSelectedCustomerId] = useState<string | null>(null)
+const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
+
+
 
   // Card payment state
   const [cardPaymentDialogOpen, setCardPaymentDialogOpen] = useState(false)
@@ -1923,15 +1935,27 @@ const handleSearchKeyDown = useCallback(
       return
     }
 
-    if (pt === 'installment') {
-      setInstallmentDownPayment(0)
-      setInstallmentCount(3)
-      setInstallmentInterestRate(0)
-      setInstallmentPeriod('monthly')
-      setInstallmentDialogOpen(true)
-      console.log('[POS] Installment dialog opened')
-      return
-    }
+  if (pt === 'installment') {
+  setInstallmentDownPayment(0)
+  setInstallmentCount(3)
+  setInstallmentInterestRate(0)
+  setInstallmentPeriod('monthly')
+  setInstallmentDialogOpen(true)
+  console.log('[POS] Installment dialog opened')
+  return
+}
+
+// ★ v11.2: باز کردن مودال ثبت چک
+if (pt === 'check') {
+  setCheckNumber('')
+  setCheckBank('')
+  setCheckDueDate('')
+  setCheckPayee('')
+  setCheckDialogOpen(true)
+  console.log('[POS] Check dialog opened')
+  return
+}
+
 
     if (pt === 'card') {
       if (openCardPaymentDialogRef.current) {
@@ -2299,132 +2323,19 @@ const handleSearchKeyDown = useCallback(
     return config?.label ?? type
   }, [])
 
-  const handleConfirmInvoiceFinal = useCallback(async () => {
-    // ★ OFFLINE: ذخیره در صف
-    if (!navigator.onLine) {
-      console.log('[POS] 🔴 آفلاین — فاکتور به صف اضافه می‌شود')
+ const handleConfirmInvoiceFinal = useCallback(async () => {
+  // ═══════════════════════════════════════════════════════════════
+  // ★ OFFLINE: ذخیره در صف
+  // ═══════════════════════════════════════════════════════════════
+  if (!navigator.onLine) {
+    console.log('[POS] 🔴 آفلاین — فاکتور به صف اضافه می‌شود')
 
-      useStore.getState().setOnline(false)
-
-      try {
-        const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
-
-        const offlineNumber = `OFF-${Date.now()}`
-
-        const invoiceItems = cart.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountAmount: Math.round(item.quantity * item.unitPrice * (item.discount / 100)),
-          taxAmount: Math.round(
-            item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
-          ),
-        }))
-
-            const ptFinal = (paymentType || '').toLowerCase()
-        const isCreditOrInstallment =
-          ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-        
-        // ★★★ اصلاح آفلاین: محاسبه صحیح پیش‌پرداخت
-             // ★★★ اصلاح آفلاین: محاسبه صحیح پیش‌پرداخت
-        const currentInstPlanOffline = useStore.getState().installmentPlan
-        const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
-        const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
-        const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
-
-        // ساختار داده‌های اقساط برای صف آفلاین (با تایپ any برای جلوگیری از خطای TS)
-        const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
-          downPayment: downPaymentAmountOffline,
-          numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
-          interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
-          installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
-          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
-          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
-          remainingAmount: remainingAmountOffline,
-          schedules: installmentCalc?.schedule || [],
-        } : undefined
-
-        await addToSyncQueue('invoice', {
-          method: 'POST',
-          url: '/api/invoices',
-          body: {
-            tenantId: getTenantIdFromStore(),
-            branchId: branchId || undefined,
-            customerId: selectedCustomerId || undefined,
-            paymentType: ptFinal,
-            items: invoiceItems,
-            discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
-            taxAmount: cartTotals.taxAmount,
-            paidAmount: paidAmountOffline,
-            remainingAmount: remainingAmountOffline,
-            warehouseId: selectedWarehouseId || undefined,
-            ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
-          },
-        })
-
-        
-                // ★ OFFLINE-FIX: کاهش موجودی در state محلی + IndexedDB cache
-        try {
-          const { updateCachedProductStock } = await import('@/lib/offline-db')
-          for (const item of cart) {
-            // بروزرسانی state محلی
-            setProducts((prev) =>
-              prev.map((p) =>
-                p.id === item.productId
-                  ? { ...p, currentStock: Math.max(0, p.currentStock - item.quantity) }
-                  : p
-              )
-            )
-            // بروزرسانی IndexedDB cache
-            const product = products.find((p) => p.id === item.productId)
-            if (product) {
-              const newStock = Math.max(0, product.currentStock - item.quantity)
-              await updateCachedProductStock(item.productId, newStock)
-            }
-          }
-          console.log('[POS] ✅ موجودی cache آفلاین بروزرسانی شد')
-        } catch (stockErr) {
-          console.warn('[POS] ⚠️ خطا در بروزرسانی موجودی cache:', stockErr)
-        }
-
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
-
-        toast({
-          title: '📡 فاکتور در صف ذخیره شد',
-          description: `شماره آفلاین: ${offlineNumber} — پس از اتصال ثبت خواهد شد`,
-          duration: 5000,
-        })
-
-        clearCart()
-        posSearchSetQuery('')
-        setSelectedCategory('all')
-        setPaymentType(null as any)
-        setTaxOverrideAmount(null)
-        setInvoiceDiscountPercent('')
-        setConfirmDialogOpen(false)
-        setSubmitting(false)
-        return
-
-      } catch (err: any) {
-        console.error('[POS] خطا در ذخیره آفلاین:', err)
-        toast({
-          title: '❌ خطا در ذخیره آفلاین',
-          description: err?.message || 'خطای ناشناخته',
-          variant: 'destructive',
-        })
-        setSubmitting(false)
-        return
-      }
-    }
-
-    // ★ ONLINE: ارسال به سرور
-    setSubmitting(true)
-    setConfirmDialogOpen(false)
+    useStore.getState().setOnline(false)
 
     try {
-      const tenantId = getTenantIdFromStore()
+      const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
+
+      const offlineNumber = `OFF-${Date.now()}`
 
       const invoiceItems = cart.map((item) => ({
         productId: item.productId,
@@ -2436,362 +2347,608 @@ const handleSearchKeyDown = useCallback(
           item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
         ),
       }))
+
       const ptFinal = (paymentType || '').toLowerCase()
       const isCreditOrInstallment =
         ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-      
-      // ★★★ اصلاح: اگر قسطی است، مبلغ پرداختی برابر با پیش‌پرداخت است (نه صفر!)
-      const currentInstPlan = useStore.getState().installmentPlan
-      const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
-      const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
-      const remainingAmount = cartTotals.totalAmount - paidAmount
-      const payments =
-        cartTotals.totalAmount > 0
-          ? [
-              {
-                amount: paidAmount,
-                paymentType:
-                  ptFinal === 'card'
-                    ? 'card'
-                    : ptFinal === 'credit'
-                    ? 'credit'
-                    : ptFinal === 'installment'
-                    ? 'installment'
-                    : 'cash',
-              },
-            ]
-          : []
 
-      const requestBody: any = {
-        tenantId,
-         branchId: branchId || undefined,
-        customerId: selectedCustomerId || undefined,
-        paymentType: (paymentType || 'cash').toLowerCase(),
-        items: invoiceItems,
-        payments,
-        discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
-        taxAmount: cartTotals.taxAmount,
-        paidAmount,
-        remainingAmount,
-        warehouseId: selectedWarehouseId || undefined,
-      }
+      const currentInstPlanOffline = useStore.getState().installmentPlan
+      const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
+      const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
+      const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
 
-          // ★★★ اصلاح: ارسال داده‌های اقساط با نام صحیح (installmentData) و همچنین در ریشه برای اطمینان صددرصدی
-          // ★★★ اصلاح: ارسال داده‌های اقساط با نام صحیح و جلوگیری از خطای TypeScript
-      const currentInstPlanReq = useStore.getState().installmentPlan
-      if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
-        const planData: any = {
-          downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
-          numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
-          interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
-          installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
-          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
-          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
-          remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
-        }
-        
-        // ۱. ارسال به صورت nested (مطابق با انتظار بک‌اند)
-        ;(requestBody as any).installmentData = {
-          ...planData,
-          schedules: installmentCalc?.schedule || [],
-        }
-        
-        // ۲. ارسال به صورت flat در ریشه (برای اطمینان از خوانده شدن توسط بک‌اند)
-        ;(requestBody as any).downPayment = planData.downPayment
-        ;(requestBody as any).numberOfInstallments = planData.numberOfInstallments
-        ;(requestBody as any).interestRate = planData.interestRate
-        ;(requestBody as any).installmentPeriod = planData.installmentPeriod
-        ;(requestBody as any).totalWithInterest = planData.totalWithInterest
-        ;(requestBody as any).installmentAmount = planData.installmentAmount
-        ;(requestBody as any).remainingAmount = planData.remainingAmount
-      }
+      const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
+        downPayment: downPaymentAmountOffline,
+        numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
+        interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
+        installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
+        totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
+        installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
+        remainingAmount: remainingAmountOffline,
+        schedules: installmentCalc?.schedule || [],
+      } : undefined
 
-      if (ptFinal === 'credit') {
-        requestBody.creditData = {
-          dueDate: creditDueDate || undefined,
-          description: creditDescription || undefined,
-        }
-      }
+      // ★ v11.2: اولویت مشتری از مودال چک، سپس از POS
+      const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
 
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-
-      let res: Response
-      try {
-        res = await fetch('/api/invoices', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify(requestBody),
-        })
-      } catch (networkErr: any) {
-        console.error('[POS] Network error during invoice submit:', networkErr)
-        useStore.getState().setOnline(false)
-
-        try {
-          const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
-          await addToSyncQueue('invoice', {
-            method: 'POST',
-            url: '/api/invoices',
-            body: requestBody,
-          })
-          const count = await getSyncQueueCount()
-          useStore.getState().setPendingSyncCount(count)
-
-          toast({
-            title: '📡 اتصال قطع شد',
-            description: 'فاکتور در صف ذخیره شد و پس از اتصال ثبت خواهد شد',
-            duration: 5000,
-          })
-
-          clearCart()
-          posSearchSetQuery('')
-          setSelectedCategory('all')
-          setPaymentType(null as any)
-          setTaxOverrideAmount(null)
-          setInvoiceDiscountPercent('')
-        } catch (queueErr) {
-          toast({
-            title: '❌ خطای شبکه',
-            description: 'اتصال قطع شد و امکان ذخیره آفلاین وجود ندارد',
-            variant: 'destructive',
-          })
-        }
-
-        setSubmitting(false)
-        return
-      }
-
-      let result: any
-      try {
-        result = await res.json()
-      } catch (parseErr) {
-        console.error('[POS] Failed to parse invoice response:', parseErr)
-        toast({
-          title: 'خطای سرور',
-          description: `خطا در ثبت فاکتور (کد ${res.status})`,
-          variant: 'destructive',
-        })
-        setSubmitting(false)
-        return
-      }
-
-      console.log('[POS] Invoice API response:', {
-        status: res.status,
-        success: result.success,
-        error: result.error,
+      await addToSyncQueue('invoice', {
+        method: 'POST',
+        url: '/api/invoices',
+        body: {
+          tenantId: getTenantIdFromStore(),
+          branchId: branchId || undefined,
+          customerId: finalCustomerId,
+          paymentType: ptFinal,
+          items: invoiceItems,
+          discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
+          taxAmount: cartTotals.taxAmount,
+          paidAmount: paidAmountOffline,
+          remainingAmount: remainingAmountOffline,
+          warehouseId: selectedWarehouseId || undefined,
+          ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
+        },
       })
 
-      if (res.ok && result.success) {
-        const isInstallment = ptFinal === 'installment'
-        const isCredit = ptFinal === 'credit'
-
-        if (isInstallment && result.data?.installmentPlan) {
-          const plan = result.data.installmentPlan
-          toast({
-            title: 'فاکتور قسطی ثبت شد',
-            description: `فاکتور با ${(plan.numberOfInstallments || 0).toLocaleString('fa-IR')} قسط و پیش‌پرداخت ${formatPrice(plan.downPayment)} ریال ثبت شد.`,
+      // ★ v11.2: ثبت چک در صف آفلاین
+      if (ptFinal === 'check') {
+        try {
+          await addToSyncQueue('check', {
+            method: 'POST',
+            url: '/api/checks',
+            body: {
+              tenantId: getTenantIdFromStore(),
+              type: 'receivable',
+              checkNumber: checkNumber.trim(),
+              bankName: checkBank.trim(),
+              amount: cartTotals.totalAmount,
+              dueDate: checkDueDate,
+              customerId: finalCustomerId || null,
+              payeeName: checkPayee.trim() || null,
+              description: `چک دریافتی بابت فاکتور ${offlineNumber}`,
+              invoiceId: null,
+            },
           })
-        } else if (isInstallment) {
-          toast({
-            title: 'فاکتور قسطی ثبت شد',
-            description: `فاکتور قسطی با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
-          })
-        } else if (isCredit) {
-          toast({
-            title: 'فاکتور نسیه ثبت شد',
-            description: `فاکتور نسیه با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
-          })
-        } else {
-          toast({
-            title: 'فاکتور تأیید شد',
-            description: `فاکتور با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد`,
-          })
+          console.log('[POS] ✅ Check added to sync queue')
+        } catch (checkErr) {
+          console.warn('[POS] ⚠️ Failed to queue check:', checkErr)
         }
+      }
 
-        if (ptFinal === 'check' && selectedCustomerId) {
-          try {
-            await fetch('/api/checks', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body: JSON.stringify({
-                type: 'receivable',
-                checkNumber: `CHK-${Date.now().toString().slice(-6)}`,
-                bankName: 'نامشخص (ثبت از POS)',
-                amount: cartTotals.totalAmount,
-                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-                  .toISOString()
-                  .split('T')[0],
-                customerId: selectedCustomerId,
-                description: `چک فاکتور`,
-              }),
-            })
-            toast({ title: 'چک ثبت شد', description: 'چک دریافتنی برای این فاکتور ثبت شد' })
-          } catch {}
-        }
-
-        setInstallmentPlan(null)
-        setInstallmentDialogOpen(false)
-        setConfirmDialogOpen(false)
-        setPaymentType(null as any)
-        setTaxOverrideAmount(null)
-        setInvoiceDiscountPercent('')
-
-        const printSettings =
-          typeof window !== 'undefined'
-            ? localStorage.getItem('auto-print-settings')
-            : null
-        if (printSettings) {
-          try {
-            const ps = JSON.parse(printSettings)
-            if (ps.enabled && ps.paymentTypes && ps.paymentTypes.length > 0) {
-              const currentPaymentType = (paymentType || 'cash').toLowerCase()
-              if (ps.paymentTypes.includes(currentPaymentType)) {
-                const cartCopy = [...cart]
-                const totalsCopy = { ...cartTotals }
-                const customerCopy = customers.find((c) => c.id === selectedCustomerId)
-                const paymentTypeCopy = paymentType
-
-                const savedTemplate = ps.template || '8cm'
-                const mappedTemplate: PrintTemplate =
-                  savedTemplate === 'a4'
-                    ? 'a4'
-                    : savedTemplate === '58mm'
-                    ? 'thermal-58mm'
-                    : 'thermal-80mm'
-                setThermalPrintTemplate(mappedTemplate)
-
-                const customerNameForPrint = customerCopy
-                  ? `${customerCopy.firstName || ''} ${customerCopy.lastName || ''}`.trim()
-                  : 'فروش عمومی'
-
-                const paymentTypeLabelForPrint = (() => {
-                  const cfg = paymentTypeConfig.find((c) => c.value === paymentTypeCopy)
-                  return cfg?.label ?? (paymentTypeCopy || 'نقدی')
-                })()
-
-                const pt = (paymentTypeCopy || '').toLowerCase()
-                const paidAmountForPrint =
-                  pt === 'credit'
-                    ? 0
-                    : pt === 'installment'
-                    ? installmentDownPayment
-                    : totalsCopy.totalAmount
-
-                const settings: any = (() => {
-                  if (typeof window === 'undefined') return {}
-                  const saved = localStorage.getItem('invoice-template-settings')
-                  try {
-                    return saved ? JSON.parse(saved) : {}
-                  } catch {
-                    return {}
-                  }
-                })()
-
-                const autoPrintReceiptData: PrintReceiptData = {
-                  invoiceNumber:
-                    result.data?.number || `INV-${Date.now().toString().slice(-6)}`,
-                  invoiceDate: new Date().toLocaleDateString('fa-IR'),
-                  customerName: customerNameForPrint,
-                  cashierName: user?.username || undefined,
-                  items: cartCopy.map((item: any) => ({
-                    productName: item.productName,
-                    quantity: item.quantity,
-                    unitPrice: item.unitPrice,
-                    discount: item.discount || 0,
-                    lineTotal: item.lineTotal,
-                    unitLabel: item.unitLabel,
-                  })),
-                  subTotal: totalsCopy.subTotal,
-                  discountAmount: totalsCopy.discountAmount,
-                  invoiceDiscountAmount: totalsCopy.invoiceDiscountAmount || 0,
-                  taxAmount: totalsCopy.taxAmount,
-                  totalAmount: totalsCopy.totalAmount,
-                  paidAmount: paidAmountForPrint,
-                  remainingAmount: Math.max(0, totalsCopy.totalAmount - paidAmountForPrint),
-                  paymentType: paymentTypeCopy || 'cash',
-                  paymentTypeLabel: paymentTypeLabelForPrint,
-                  storeName: storeName || 'فروشگاه',
-                  storeAddress: settings.storeAddress,
-                  storePhone: settings.storePhone,
-                  headerText: settings.headerText || 'فاکتور فروش',
-                  footerText: settings.footerText || 'با تشکر از خرید شما',
-                  bankAccounts: settings.bankAccounts,
-                  logoData: settings.logoData,
-                  currency: 'ریال',
-                }
-
-                pendingAutoPrintDataRef.current = autoPrintReceiptData
-                setAutoPrintMode(true)
-
-                setTimeout(() => {
-                  setThermalPrintOpen(true)
-                  toast({
-                    title: 'فاکتور ثبت شد',
-                    description: 'لطفاً قالب چاپ را انتخاب کنید',
-                  })
-                }, 500)
-              }
-            }
-          } catch (e) {
-            console.warn('[POS] Auto-print failed (non-blocking):', e)
+      try {
+        const { updateCachedProductStock } = await import('@/lib/offline-db')
+        for (const item of cart) {
+          setProducts((prev) =>
+            prev.map((p) =>
+              p.id === item.productId
+                ? { ...p, currentStock: Math.max(0, p.currentStock - item.quantity) }
+                : p
+            )
+          )
+          const product = products.find((p) => p.id === item.productId)
+          if (product) {
+            const newStock = Math.max(0, product.currentStock - item.quantity)
+            await updateCachedProductStock(item.productId, newStock)
           }
         }
+        console.log('[POS] ✅ موجودی cache آفلاین بروزرسانی شد')
+      } catch (stockErr) {
+        console.warn('[POS] ⚠️ خطا در بروزرسانی موجودی cache:', stockErr)
+      }
+
+      const count = await getSyncQueueCount()
+      useStore.getState().setPendingSyncCount(count)
+
+      toast({
+        title: '📡 فاکتور در صف ذخیره شد',
+        description: `شماره آفلاین: ${offlineNumber} — پس از اتصال ثبت خواهد شد`,
+        duration: 5000,
+      })
+
+      // ریست state های مودال چک
+      setCheckNumber('')
+      setCheckBank('')
+      setCheckDueDate('')
+      setCheckPayee('')
+      setCheckCustomerSearch('')
+      setCheckSelectedCustomerId(null)
+      setCheckSelectedCustomerName('')
+
+      clearCart()
+      posSearchSetQuery('')
+      setSelectedCategory('all')
+      setPaymentType(null as any)
+      setTaxOverrideAmount(null)
+      setInvoiceDiscountPercent('')
+      setConfirmDialogOpen(false)
+      setSubmitting(false)
+      return
+
+    } catch (err: any) {
+      console.error('[POS] خطا در ذخیره آفلاین:', err)
+      toast({
+        title: '❌ خطا در ذخیره آفلاین',
+        description: err?.message || 'خطای ناشناخته',
+        variant: 'destructive',
+      })
+      setSubmitting(false)
+      return
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ ONLINE: ارسال به سرور
+  // ═══════════════════════════════════════════════════════════════
+  setSubmitting(true)
+  setConfirmDialogOpen(false)
+
+  try {
+    const tenantId = getTenantIdFromStore()
+
+    const invoiceItems = cart.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discountAmount: Math.round(item.quantity * item.unitPrice * (item.discount / 100)),
+      taxAmount: Math.round(
+        item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
+      ),
+    }))
+    const ptFinal = (paymentType || '').toLowerCase()
+    const isCreditOrInstallment =
+      ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
+
+    const currentInstPlan = useStore.getState().installmentPlan
+    const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
+    const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
+    const remainingAmount = cartTotals.totalAmount - paidAmount
+    const payments =
+      cartTotals.totalAmount > 0
+        ? [
+            {
+              amount: paidAmount,
+              paymentType:
+                ptFinal === 'card'
+                  ? 'card'
+                  : ptFinal === 'credit'
+                  ? 'credit'
+                  : ptFinal === 'installment'
+                  ? 'installment'
+                  : 'cash',
+            },
+          ]
+        : []
+
+    // ★ v11.2: اولویت مشتری از مودال چک
+    const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
+
+    const requestBody: any = {
+      tenantId,
+      branchId: branchId || undefined,
+      customerId: finalCustomerId,
+      paymentType: (paymentType || 'cash').toLowerCase(),
+      items: invoiceItems,
+      payments,
+      discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
+      taxAmount: cartTotals.taxAmount,
+      paidAmount,
+      remainingAmount,
+      warehouseId: selectedWarehouseId || undefined,
+    }
+
+    // ارسال داده‌های اقساط
+    const currentInstPlanReq = useStore.getState().installmentPlan
+    if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
+      const planData = {
+        downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
+        numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
+        interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
+        installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
+        totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
+        installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
+        remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
+      }
+
+      requestBody.installmentData = {
+        downPayment: planData.downPayment,
+        numberOfInstallments: planData.numberOfInstallments,
+        interestRate: planData.interestRate,
+        installmentPeriod: planData.installmentPeriod,
+        totalWithInterest: planData.totalWithInterest,
+        installmentAmount: planData.installmentAmount,
+        remainingAmount: planData.remainingAmount,
+        schedules: installmentCalc?.schedule || [],
+      }
+
+      requestBody.downPayment = planData.downPayment
+      requestBody.numberOfInstallments = planData.numberOfInstallments
+      requestBody.interestRate = planData.interestRate
+      requestBody.installmentPeriod = planData.installmentPeriod
+      requestBody.totalWithInterest = planData.totalWithInterest
+      requestBody.installmentAmount = planData.installmentAmount
+      requestBody.remainingAmount = planData.remainingAmount
+    }
+
+    if (ptFinal === 'credit') {
+      requestBody.creditData = {
+        dueDate: creditDueDate || undefined,
+        description: creditDescription || undefined,
+      }
+    }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
+    let res: Response
+    try {
+      res = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(requestBody),
+      })
+    } catch (networkErr: any) {
+      console.error('[POS] Network error during invoice submit:', networkErr)
+      useStore.getState().setOnline(false)
+
+      try {
+        const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
+        await addToSyncQueue('invoice', {
+          method: 'POST',
+          url: '/api/invoices',
+          body: requestBody,
+        })
+        const count = await getSyncQueueCount()
+        useStore.getState().setPendingSyncCount(count)
+
+        toast({
+          title: '📡 اتصال قطع شد',
+          description: 'فاکتور در صف ذخیره شد و پس از اتصال ثبت خواهد شد',
+          duration: 5000,
+        })
 
         clearCart()
         posSearchSetQuery('')
         setSelectedCategory('all')
-        await posLoadRecents()
-        loadData()
-
-      } else {
-        const errorMsg =
-          result.error || result.message || `خطای سرور (کد ${res.status})`
-        console.error('[POS] Invoice creation failed:', errorMsg)
+        setPaymentType(null as any)
+        setTaxOverrideAmount(null)
+        setInvoiceDiscountPercent('')
+      } catch (queueErr) {
         toast({
-          title: 'خطا در ثبت فاکتور',
-          description: errorMsg,
+          title: '❌ خطای شبکه',
+          description: 'اتصال قطع شد و امکان ذخیره آفلاین وجود ندارد',
           variant: 'destructive',
-          duration: 7000,
         })
       }
-    } catch (error: any) {
-      console.error('[POS] Invoice submission exception:', error)
-      toast({
-        title: 'خطا',
-        description: error?.message || 'خطا در ثبت فاکتور',
-        variant: 'destructive',
-      })
+
+      setSubmitting(false)
+      return
     }
 
-    setSubmitting(false)
-  }, [
-    cart,
-    cartTotals,
-    paymentType,
-    selectedCustomerId,
-    selectedWarehouseId,
-    clearCart,
-    loadData,
-    toast,
-    installmentCalc,
-    installmentDownPayment,
-    installmentCount,
-    installmentInterestRate,
-    installmentPeriod,
-    creditDueDate,
-    creditDescription,
-    setInstallmentPlan,
-    posSearchSetQuery,
-    posLoadRecents,
-    customers,
-    storeName,
-    user,
-  ])
+    let result: any
+    try {
+      result = await res.json()
+    } catch (parseErr) {
+      console.error('[POS] Failed to parse invoice response:', parseErr)
+      toast({
+        title: 'خطای سرور',
+        description: `خطا در ثبت فاکتور (کد ${res.status})`,
+        variant: 'destructive',
+      })
+      setSubmitting(false)
+      return
+    }
+
+    console.log('[POS] Invoice API response:', {
+      status: res.status,
+      success: result.success,
+      error: result.error,
+      invoiceId: result.data?.id,
+      invoiceNumber: result.data?.number,
+    })
+
+    if (res.ok && result.success) {
+      const isInstallment = ptFinal === 'installment'
+      const isCredit = ptFinal === 'credit'
+      const isCheck = ptFinal === 'check'
+
+      if (isInstallment && result.data?.installmentPlan) {
+        const plan = result.data.installmentPlan
+        toast({
+          title: 'فاکتور قسطی ثبت شد',
+          description: `فاکتور با ${(plan.numberOfInstallments || 0).toLocaleString('fa-IR')} قسط و پیش‌پرداخت ${formatPrice(plan.downPayment)} ریال ثبت شد.`,
+        })
+      } else if (isInstallment) {
+        toast({
+          title: 'فاکتور قسطی ثبت شد',
+          description: `فاکتور قسطی با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
+        })
+      } else if (isCredit) {
+        toast({
+          title: 'فاکتور نسیه ثبت شد',
+          description: `فاکتور نسیه با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
+        })
+      } else if (!isCheck) {
+        toast({
+          title: 'فاکتور تأیید شد',
+          description: `فاکتور با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد`,
+        })
+      }
+
+      // ★ v11.2: ثبت چک با ارسال invoiceId
+      if (isCheck) {
+        const invoiceId = result.data?.id || null
+        const invoiceNumber = result.data?.number || ''
+
+        try {
+          const checkPayload = {
+            type: 'receivable',
+            checkNumber: checkNumber.trim(),
+            bankName: checkBank.trim(),
+            amount: cartTotals.totalAmount,
+            dueDate: checkDueDate,
+            customerId: finalCustomerId || null,
+            payeeName: checkPayee.trim() || null,
+            description: `چک دریافتی بابت فاکتور ${invoiceNumber}`,
+            invoiceId: invoiceId,
+          }
+
+          console.log('[POS] 📤 Sending check to API:', {
+            checkNumber: checkPayload.checkNumber,
+            bankName: checkPayload.bankName,
+            invoiceId: invoiceId ? '✓' : '✗',
+          })
+
+          const checkRes = await fetch('/api/checks', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(checkPayload),
+          })
+
+          const checkData = await checkRes.json()
+          console.log('[POS] 📥 Check API response:', {
+            status: checkRes.status,
+            success: checkData.success,
+            error: checkData.error,
+            checkId: checkData.data?.id,
+          })
+
+          if (checkData.success) {
+            toast({
+              title: '✓ فاکتور و چک ثبت شد',
+              description: `فاکتور ${invoiceNumber} + چک شماره ${checkNumber} (${checkBank})`,
+              duration: 5000,
+            })
+            window.dispatchEvent(new Event('checks-updated'))
+          } else {
+            console.error('[POS] ❌ Check API error:', checkData.error)
+            toast({
+              title: '⚠️ فاکتور ثبت شد اما چک ثبت نشد',
+              description: checkData.error || 'لطفاً از بخش چک‌ها، چک را دستی ثبت کنید',
+              variant: 'destructive',
+              duration: 7000,
+            })
+          }
+        } catch (err: any) {
+          console.error('[POS] ❌ Check registration exception:', err)
+          toast({
+            title: '⚠️ فاکتور ثبت شد اما چک ثبت نشد',
+            description: err?.message || 'لطفاً از بخش چک‌ها، چک را دستی ثبت کنید',
+            variant: 'destructive',
+            duration: 7000,
+          })
+        }
+      }
+
+      setInstallmentPlan(null)
+      setInstallmentDialogOpen(false)
+      setConfirmDialogOpen(false)
+      setPaymentType(null as any)
+      setTaxOverrideAmount(null)
+      setInvoiceDiscountPercent('')
+
+      // ریست state های مودال چک
+      setCheckNumber('')
+      setCheckBank('')
+      setCheckDueDate('')
+      setCheckPayee('')
+      setCheckCustomerSearch('')
+      setCheckSelectedCustomerId(null)
+      setCheckSelectedCustomerName('')
+
+      const printSettings =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('auto-print-settings')
+          : null
+      if (printSettings) {
+        try {
+          const ps = JSON.parse(printSettings)
+          if (ps.enabled && ps.paymentTypes && ps.paymentTypes.length > 0) {
+            const currentPaymentType = (paymentType || 'cash').toLowerCase()
+            if (ps.paymentTypes.includes(currentPaymentType)) {
+              const cartCopy = [...cart]
+              const totalsCopy = { ...cartTotals }
+              const customerCopy = customers.find((c) => c.id === finalCustomerId)
+              const paymentTypeCopy = paymentType
+
+              const savedTemplate = ps.template || '8cm'
+              const mappedTemplate: PrintTemplate =
+                savedTemplate === 'a4'
+                  ? 'a4'
+                  : savedTemplate === '58mm'
+                  ? 'thermal-58mm'
+                  : 'thermal-80mm'
+              setThermalPrintTemplate(mappedTemplate)
+
+              const customerNameForPrint = customerCopy
+                ? `${customerCopy.firstName || ''} ${customerCopy.lastName || ''}`.trim()
+                : 'فروش عمومی'
+
+              const paymentTypeLabelForPrint = (() => {
+                const cfg = paymentTypeConfig.find((c) => c.value === paymentTypeCopy)
+                return cfg?.label ?? (paymentTypeCopy || 'نقدی')
+              })()
+
+              const pt = (paymentTypeCopy || '').toLowerCase()
+              const paidAmountForPrint =
+                pt === 'credit'
+                  ? 0
+                  : pt === 'installment'
+                  ? installmentDownPayment
+                  : totalsCopy.totalAmount
+
+              const settings: any = (() => {
+                if (typeof window === 'undefined') return {}
+                const saved = localStorage.getItem('invoice-template-settings')
+                try {
+                  return saved ? JSON.parse(saved) : {}
+                } catch {
+                  return {}
+                }
+              })()
+
+              const autoPrintReceiptData: PrintReceiptData = {
+                invoiceNumber:
+                  result.data?.number || `INV-${Date.now().toString().slice(-6)}`,
+                invoiceDate: new Date().toLocaleDateString('fa-IR'),
+                customerName: customerNameForPrint,
+                cashierName: user?.username || undefined,
+                items: cartCopy.map((item: any) => ({
+                  productName: item.productName,
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  discount: item.discount || 0,
+                  lineTotal: item.lineTotal,
+                  unitLabel: item.unitLabel,
+                })),
+                subTotal: totalsCopy.subTotal,
+                discountAmount: totalsCopy.discountAmount,
+                invoiceDiscountAmount: totalsCopy.invoiceDiscountAmount || 0,
+                taxAmount: totalsCopy.taxAmount,
+                totalAmount: totalsCopy.totalAmount,
+                paidAmount: paidAmountForPrint,
+                remainingAmount: Math.max(0, totalsCopy.totalAmount - paidAmountForPrint),
+                paymentType: paymentTypeCopy || 'cash',
+                paymentTypeLabel: paymentTypeLabelForPrint,
+                storeName: storeName || 'فروشگاه',
+                storeAddress: settings.storeAddress,
+                storePhone: settings.storePhone,
+                headerText: settings.headerText || 'فاکتور فروش',
+                footerText: settings.footerText || 'با تشکر از خرید شما',
+                bankAccounts: settings.bankAccounts,
+                logoData: settings.logoData,
+                currency: 'ریال',
+              }
+
+              pendingAutoPrintDataRef.current = autoPrintReceiptData
+              setAutoPrintMode(true)
+
+              setTimeout(() => {
+                setThermalPrintOpen(true)
+                toast({
+                  title: 'فاکتور ثبت شد',
+                  description: 'لطفاً قالب چاپ را انتخاب کنید',
+                })
+              }, 500)
+            }
+          }
+        } catch (e) {
+          console.warn('[POS] Auto-print failed (non-blocking):', e)
+        }
+      }
+
+      clearCart()
+      posSearchSetQuery('')
+      setSelectedCategory('all')
+      await posLoadRecents()
+      loadData()
+
+    } else {
+      const errorMsg =
+        result.error || result.message || `خطای سرور (کد ${res.status})`
+      console.error('[POS] Invoice creation failed:', errorMsg)
+      toast({
+        title: 'خطا در ثبت فاکتور',
+        description: errorMsg,
+        variant: 'destructive',
+        duration: 7000,
+      })
+    }
+  } catch (error: any) {
+    console.error('[POS] Invoice submission exception:', error)
+    toast({
+      title: 'خطا',
+      description: error?.message || 'خطا در ثبت فاکتور',
+      variant: 'destructive',
+    })
+  }
+
+  setSubmitting(false)
+}, [
+  cart,
+  cartTotals,
+  paymentType,
+  selectedCustomerId,
+  selectedCustomerName,
+  selectedWarehouseId,
+  clearCart,
+  loadData,
+  toast,
+  installmentCalc,
+  installmentDownPayment,
+  installmentCount,
+  installmentInterestRate,
+  installmentPeriod,
+  creditDueDate,
+  creditDescription,
+  setInstallmentPlan,
+  posSearchSetQuery,
+  posLoadRecents,
+  customers,
+  storeName,
+  user,
+  branchId,
+  products,
+  checkNumber,
+  checkBank,
+  checkDueDate,
+  checkPayee,
+  checkSelectedCustomerId,
+  checkSelectedCustomerName,
+  checkCustomerSearch,
+  setCheckNumber,
+  setCheckBank,
+  setCheckDueDate,
+  setCheckPayee,
+  setCheckCustomerSearch,
+  setCheckSelectedCustomerId,
+  setCheckSelectedCustomerName,
+])
+
+  // ★ v11.2: تأیید مودال چک و باز کردن مودال تأیید نهایی
+const handleConfirmCheck = useCallback(() => {
+  // Validation
+  if (!checkNumber.trim()) {
+    toast({ title: 'خطا', description: 'شماره چک الزامی است', variant: 'destructive' })
+    return
+  }
+  if (!checkBank.trim()) {
+    toast({ title: 'خطا', description: 'نام بانک الزامی است', variant: 'destructive' })
+    return
+  }
+  if (!checkDueDate) {
+    toast({ title: 'خطا', description: 'تاریخ سررسید الزامی است', variant: 'destructive' })
+    return
+  }
+
+  // بستن مودال چک و باز کردن مودال تأیید نهایی
+  setCheckDialogOpen(false)
+  setConfirmDialogOpen(true)
+}, [checkNumber, checkBank, checkDueDate, toast])
 
   const handlePrintInvoice = useCallback(() => {
     if (cart.length === 0) {
@@ -3963,6 +4120,148 @@ const handleSearchKeyDown = useCallback(
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ★ v11.2: مودال ثبت چک */}
+<Dialog open={checkDialogOpen} onOpenChange={setCheckDialogOpen}>
+  <DialogContent className="sm:max-w-[500px] w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto" dir="rtl">
+    <DialogHeader>
+      <DialogTitle className="flex items-center gap-2 text-cyan-700 text-sm sm:text-base">
+        <Landmark className="w-4 h-4" />
+        ثبت چک دریافتنی
+      </DialogTitle>
+      <DialogDescription className="text-xs">
+        اطلاعات چک مشتری را وارد کنید
+      </DialogDescription>
+    </DialogHeader>
+
+    <div className="space-y-3 py-3 text-[11px] sm:text-xs">
+      {/* مبلغ کل */}
+      <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-cyan-50 border border-cyan-200">
+        <span className="text-cyan-700 font-medium">مبلغ چک:</span>
+        <span className="font-black text-sm text-cyan-900">
+          {formatPrice(cartTotals.totalAmount)} ریال
+        </span>
+      </div>
+
+      {/* نوع چک */}
+      <div className="grid grid-cols-2 gap-1.5 mt-2">
+        <button
+          type="button"
+          className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-cyan-50 border-cyan-500 shadow-sm"
+        >
+          <Landmark className="w-5 h-5 text-cyan-600 shrink-0" />
+          <div className="text-right">
+            <span className="text-[11px] font-bold block leading-tight text-cyan-700">
+              دریافتنی
+            </span>
+            <span className="text-[9px] text-cyan-500 leading-tight block">
+              از مشتری
+            </span>
+          </div>
+        </button>
+        <button
+          type="button"
+          disabled
+          className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed"
+        >
+          <CreditCardIcon className="w-5 h-5 text-gray-400 shrink-0" />
+          <div className="text-right">
+            <span className="text-[11px] font-bold block leading-tight text-gray-400">
+              پرداختنی
+            </span>
+            <span className="text-[9px] text-gray-400 leading-tight block">
+              به تامین‌کننده
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {/* شماره چک */}
+      <div className="space-y-1">
+        <Label className="text-slate-600 font-medium">
+          شماره چک <span className="text-red-500">*</span>
+        </Label>
+        <Input
+          type="text"
+          value={checkNumber}
+          onChange={(e) => setCheckNumber(e.target.value)}
+          placeholder="مثلاً: 123456"
+          className="h-8 sm:h-9 text-xs"
+          dir="ltr"
+          autoFocus
+        />
+      </div>
+
+      {/* بانک */}
+      <div className="space-y-1">
+        <Label className="text-slate-600 font-medium">
+          نام بانک <span className="text-red-500">*</span>
+        </Label>
+        <Input
+          type="text"
+          value={checkBank}
+          onChange={(e) => setCheckBank(e.target.value)}
+          placeholder="مثلاً: بانک ملت"
+          className="h-8 sm:h-9 text-xs"
+        />
+      </div>
+
+      {/* تاریخ سررسید */}
+      <div className="space-y-1">
+        <Label className="text-slate-600 font-medium">
+          تاریخ سررسید <span className="text-red-500">*</span>
+        </Label>
+        <ShamsiDatePicker 
+          value={checkDueDate} 
+          onChange={setCheckDueDate} 
+          placeholder="انتخاب تاریخ سررسید"
+        />
+      </div>
+
+      {/* در وجه (اختیاری) */}
+      <div className="space-y-1">
+        <Label className="text-slate-600 font-medium">
+          در وجه (اختیاری)
+        </Label>
+        <Input
+          type="text"
+          value={checkPayee}
+          onChange={(e) => setCheckPayee(e.target.value)}
+          placeholder="نام شخص یا شرکت"
+          className="h-8 sm:h-9 text-xs"
+        />
+      </div>
+
+      {/* اطلاعات مشتری */}
+      {selectedCustomer && (
+        <div className="rounded-lg bg-blue-50 border border-blue-200 p-2 text-[10px] text-blue-700">
+          <div className="flex items-center gap-1.5">
+            <User className="w-3 h-3" />
+            <span className="font-medium">مشتری: </span>
+            <span className="font-bold">{selectedCustomerName}</span>
+          </div>
+        </div>
+      )}
+    </div>
+
+    <DialogFooter className="gap-2 sm:gap-0">
+      <Button 
+        variant="outline" 
+        onClick={() => setCheckDialogOpen(false)} 
+        className="border-slate-300 text-xs sm:text-sm h-8 sm:h-9"
+      >
+        انصراف
+      </Button>
+      <Button 
+        onClick={handleConfirmCheck} 
+        className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs sm:text-sm h-8 sm:h-9"
+      >
+        <Landmark className="w-3.5 h-3.5 ml-1" />
+        تأیید و ادامه
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 
       {/* اسکن دوربین */}
       <BarcodeScannerModal

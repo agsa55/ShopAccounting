@@ -12,7 +12,7 @@
 //   ✓ Optimistic UI برای آفلاین
 // ============================================================================
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName, resolvePlan, type PlanFeatureSet } from '@/lib/plan-features'
 import { Card, CardContent } from '@/components/ui/card'
@@ -69,7 +69,7 @@ function UpgradeCard({
 // Main Component — JournalEntriesPage
 // ═══════════════════════════════════════════════════════════════
 
-export default function JournalEntriesPage() {
+export default function JournalEntriesPage({ defaultTab = 'journals' }: { defaultTab?: string }) {
   const { toast } = useToast()
   const isOnline = useAppStore((s) => s.isOnline)
   const planName = useAppStore((s) => s.planName)
@@ -81,7 +81,16 @@ export default function JournalEntriesPage() {
   const isBasicTier = plan.tier === 'basic'
   const isManager = ['Admin', 'Manager', 'Owner', 'admin', 'manager', 'owner'].includes(user?.role || '')
 
-  const [activeTab, setActiveTab] = useState('journals')
+
+
+  // ★ تنظیم تب پیش‌فرض بر اساس prop
+const [activeTab, setActiveTab] = useState(defaultTab)
+
+useEffect(() => {
+  if (defaultTab && defaultTab !== activeTab) {
+    setActiveTab(defaultTab)
+  }
+}, [defaultTab])
 
   // ═══════════════════════════════════════════════════════════
   // RENDER

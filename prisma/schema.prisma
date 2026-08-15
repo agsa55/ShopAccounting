@@ -39,15 +39,22 @@ model Tenant {
   registrationNumber String?
   logoUrl            String?
 
-  planTierId   Int?
-  // ★★★ v9.0: دوره اشتراک — فقط 'annual' (سالانه، ۳۶۵ روز) یا 'lifetime' (مادام‌العمر)
-  //   - مقدار 'monthly' قدیمی است و در seed-plans.ts به 'annual' مهاجرت می‌شود.
-  //   - 'lifetime' یعنی بدون تاریخ انقضا (expiresAt = null).
+   planTierId   Int?
+
+  // ★ فیلدهای قدیمی (حفظ موقت — بعداً حذف می‌شوند)
   billingCycle String    @default("annual")
-  // ★★★ v9.0: اگر billingCycle = 'lifetime' باشد، expiresAt باید null باشد.
   expiresAt    DateTime?
 
+  // ★ فیلدهای جدید Trial
+  trialStartAt    DateTime  @default(now())
+  trialEndAt      DateTime?
+  isPaid          Boolean   @default(false)
+  paidAt          DateTime?
+  discountApplied Decimal?  @db.Decimal(5, 2)
+
   createdAt     DateTime  @default(now())
+
+
   updatedAt     DateTime  @updatedAt
   soldAt        DateTime?
   soldTo        String?
@@ -114,6 +121,8 @@ model Tenant {
   @@index([status])
   @@index([planTierId])
   @@map("Tenants")
+    @@index([trialEndAt])
+  @@index([isPaid])
 }
 
 model OtpCode {
@@ -284,14 +293,13 @@ model PlanTier {
 model PlanPrice {
   id              Int      @id @default(autoincrement())
   planTierId      Int
-  // ★★★ v9.0: مقادیر مجاز:
-  //   - 'annual'    : سالانه (۳۶۵ روز)
-  //   - 'lifetime'  : مادام‌العمر (durationDays = 0، یعنی بدون انقضا)
-  //   - 'monthly'   : قدیمی — در seed-plans.ts غیرفعال می‌شود
+
+  // ★ فیلدهای قدیمی (حفظ موقت)
   billingCycle    String
-  // ★★★ v9.0: durationDays = 0 یعنی «نامحدود / مادام‌العمر»
   durationDays    Int
+
   price           Int
+  earlyBirdPrice  Int?     // ★ جدید: قیمت با تخفیف زودهنگام
   discountPercent Int      @default(0)
   isActive        Boolean  @default(true)
   isPopular       Boolean  @default(false)
@@ -300,10 +308,9 @@ model PlanPrice {
 
   planTier PlanTier @relation(fields: [planTierId], references: [id], onDelete: Cascade)
 
-  @@unique([planTierId, billingCycle])
+  @@index([planTierId])
   @@map("PlanPrices")
 }
-
 model StoreUser {
   id             String    @id @default(uuid()) @db.VarChar(450)
   username       String
@@ -432,6 +439,7 @@ model Customer {
 
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   invoices Invoice[]
+  Checks   Check[]   @relation("CustomerChecks")
 
   @@unique([code, tenantId])
   @@index([tenantId])
@@ -884,30 +892,37 @@ model Backup {
 }
 
 model Check {
-  id             String   @id @default(uuid()) @db.VarChar(450)
-  tenantId       String   @db.VarChar(1000)
-  type           String   @default("receivable")
-  checkNumber    String
-  bankName       String
-  branchName     String?
-  // ★★★ v10.0: تغییر به Decimal (حل مشکل ۴۹,۹۹۹,۹۹۹)
-  amount         Decimal  @db.Decimal(18, 2)
-  issueDate      DateTime
-  dueDate        DateTime
-  status         String   @default("pending")
-  customerId     String?  @db.VarChar(450)
+  id          String   @id @default(uuid()) @db.VarChar(450)
+  tenantId    String   @db.VarChar(1000)
+  type        String   @default("receivable")
+  checkNumber String
+  bankName    String
+  branchName  String?
+  amount      Decimal  @db.Decimal(18, 2)
+  issueDate   DateTime
+  dueDate     DateTime
+  status      String   @default("pending")
+
+  customerId String? @db.VarChar(450)
+  supplierId String? @db.VarChar(450)
+
   payeeName      String?
   description    String?
   journalEntryId String?  @db.VarChar(450)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  Tenant Tenant @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  // ★★★ استفاده از Named Relations برای جلوگیری از conflict
+  Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  customer Customer? @relation("CustomerChecks", fields: [customerId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  supplier Supplier? @relation("SupplierChecks", fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: SetNull)
 
   @@index([tenantId])
   @@index([tenantId, type])
   @@index([tenantId, status])
   @@index([tenantId, dueDate])
+  @@index([customerId])
+  @@index([supplierId])
   @@map("Checks")
 }
 
@@ -944,15 +959,13 @@ model FiscalYear {
 model OnlinePayment {
   id          String    @id @default(uuid()) @db.VarChar(450)
   tenantId    String    @db.VarChar(1000)
-  invoiceId   String    @db.VarChar(450)
+  invoiceId   String?   @db.VarChar(450)  // ← باید علامت ? داشته باشد
   customerId  String?
-  // ★★★ v10.0: تغییر به Decimal
   amount      Decimal   @db.Decimal(18, 2)
   authority   String?
   refId       String?
   status      String    @default("pending")
   gatewayType String    @default("zarinpal") @db.VarChar(30)
-  // ★★★ v8.7: آی‌دی درگاه اختصاصی فروشگاه (PaymentGateway.id)
   gatewayId   String?   @db.VarChar(450)
   gatewayUrl  String?
   description String?
@@ -962,8 +975,8 @@ model OnlinePayment {
 
   installmentId String?
 
-  Tenant  Tenant  @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
-  Invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  Tenant  Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)  // ← باید Invoice? باشد
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -1179,20 +1192,20 @@ model Supplier {
   mobile         String?  @db.VarChar(20)
   nationalCode   String?  @db.VarChar(20)
   address        String?  @db.VarChar(500)
-  // ★★★ v10.0: تغییر به Decimal
   creditLimit    Decimal  @default(0) @db.Decimal(18, 2)
   currentBalance Decimal  @default(0) @db.Decimal(18, 2)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  // ★★★ v7.4: طرف حساب — شخص حقوقی
-  personType     String   @default("person") @db.VarChar(10) // person | legal
+  personType     String   @default("person") @db.VarChar(10)
   economicCode   String?  @db.VarChar(20)
   companyName    String?  @db.VarChar(200)
   legalForm      String?  @db.VarChar(100)
 
   Tenant           Tenant            @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
   PurchaseInvoices PurchaseInvoice[]
+  // ★★★ v8.9.2: با named relation
+  Checks           Check[]           @relation("SupplierChecks")
 
   @@unique([code, tenantId])
   @@index([tenantId])

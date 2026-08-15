@@ -1,4 +1,4 @@
-// src/app/api/initial-balance/route.ts — v8.8.7 (FIXED)
+// src/app/api/initial-balance/route.ts — v8.9 (FIXED: لغو سند قبلی قبل از صدور جدید)
 // ============================================================================
 // ویزارد راه‌اندازی اولیه فروشگاه
 // ============================================================================
@@ -89,6 +89,7 @@ async function ensureOpeningBalanceAccounts(tx: any, tenantId: string) {
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/initial-balance — ثبت موجودی‌های اولیه + سند افتتاحیه
+//  ★ v8.9: لغو سند قبلی قبل از صدور سند جدید (جلوگیری از دو برابر شدن)
 // ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('settings')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -134,6 +135,37 @@ export const POST = withTenantAndPermission('settings')(async (req: NextRequest,
 
     // ★ تراکنش
     const result = await db.client.$transaction(async (tx: any) => {
+      // ★★★ v8.9: لغو سند قبلی قبل از حذف رکوردها
+      // این مهم‌ترین اصلاح است! بدون این، مانده حساب‌ها دو برابر می‌شود.
+      const existingBalances = await tx.initialBalance.findMany({ 
+        where: { tenantId },
+        select: { journalEntryId: true },
+      })
+      
+      const existingJournalIds = [...new Set(
+        existingBalances
+          .map((b: any) => b.journalEntryId)
+          .filter((id: string | null) => id !== null)
+      )] as string[]
+      
+      let cancelledCount = 0
+      if (existingJournalIds.length > 0) {
+        const cancelled = await tx.journalEntry.updateMany({
+          where: { 
+            id: { in: existingJournalIds },
+            tenantId,
+            status: 'posted',
+          },
+          data: {
+            status: 'cancelled',
+            // اگر فیلد isCancelled وجود دارد:
+            // isCancelled: true,
+          },
+        })
+        cancelledCount = cancelled.count
+        console.log(`[InitialBalance POST] ✅ Cancelled ${cancelledCount} existing journal entries`)
+      }
+
       // ۱. حذف موجودی‌های قدیمی
       await tx.initialBalance.deleteMany({ where: { tenantId } }).catch(() => {})
 
@@ -275,8 +307,12 @@ export const POST = withTenantAndPermission('settings')(async (req: NextRequest,
         }
       }
 
-      return { createdBalances, journalEntryId }
+      return { createdBalances, journalEntryId, cancelledCount }
     })
+
+    const cancelledMsg = result.cancelledCount > 0 
+      ? ` (سند قبلی لغو و جایگزین شد)` 
+      : ''
 
     return NextResponse.json({
       success: true,
@@ -286,8 +322,8 @@ export const POST = withTenantAndPermission('settings')(async (req: NextRequest,
         isPosted: !!result.journalEntryId,
       },
       message: result.journalEntryId
-        ? '✅ موجودی‌های اولیه ثبت شد و سند افتتاحیه صادر گردید'
-        : '✅ موجودی‌های اولیه ذخیره شد',
+        ? `✅ موجودی‌های اولیه ثبت شد و سند افتتاحیه صادر گردید${cancelledMsg}`
+        : `✅ موجودی‌های اولیه ذخیره شد${cancelledMsg}`,
     })
   } catch (error: any) {
     console.error('[InitialBalance POST] Error:', error)

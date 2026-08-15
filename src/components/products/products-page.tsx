@@ -11,7 +11,7 @@
 //   - در حالت Edit: مودال بسته می‌شود
 // ============================================================================
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppStore } from '@/lib/store'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -92,6 +92,12 @@ function calculateTotalValue(currentStock: number, salePrice: number): number {
   return (currentStock || 0) * (salePrice || 0)
 }
 
+// ★ محاسبه سود فروش یک کالا (سود واحد × موجودی)
+function calculateProfit(currentStock: number, purchasePrice: number, salePrice: number): number {
+  const profitPerUnit = (salePrice || 0) - (purchasePrice || 0)
+  return (currentStock || 0) * profitPerUnit
+}
+
 // ★ CustomSwitch: آبی برای فعال، خاکستری برای غیرفعال (RTL-safe)
 function CustomSwitch({
   checked,
@@ -134,6 +140,210 @@ function StockValueBadge({ currentStock, salePrice }: { currentStock: number; sa
     <span className="text-xs font-bold text-emerald-700" dir="rtl">
       {formatPrice(totalValue)}
     </span>
+  )
+}
+
+// ★ کامپوننت نمایش موجودی زیبا برای Desktop
+function StockDisplay({ currentStock, minStock }: { currentStock: number; minStock: number }) {
+  const stock = currentStock || 0
+  const min = minStock || 0
+  
+  // تعیین وضعیت
+  const isOutOfStock = stock === 0
+  const isCritical = stock > 0 && stock <= min
+  const isLow = stock > min && stock <= min * 2
+  const isGood = stock > min * 2
+  
+  // تعیین رنگ‌ها و آیکون
+  let bgColor = 'bg-emerald-50'
+  let borderColor = 'border-emerald-200'
+  let textColor = 'text-emerald-700'
+  let iconColor = 'text-emerald-600'
+  let statusText = 'موجود'
+  
+  if (isOutOfStock) {
+    bgColor = 'bg-red-50'
+    borderColor = 'border-red-200'
+    textColor = 'text-red-700'
+    iconColor = 'text-red-600'
+    statusText = 'ناموجود'
+  } else if (isCritical) {
+    bgColor = 'bg-red-50'
+    borderColor = 'border-red-200'
+    textColor = 'text-red-700'
+    iconColor = 'text-red-600'
+    statusText = 'بحرانی'
+  } else if (isLow) {
+    bgColor = 'bg-amber-50'
+    borderColor = 'border-amber-200'
+    textColor = 'text-amber-700'
+    iconColor = 'text-amber-600'
+    statusText = 'کم'
+  }
+  
+  // محاسبه درصد پر بودن (حداکثر 5 برابر minStock)
+  const maxDisplay = Math.max(min * 5, 10)
+  const fillPercent = Math.min(100, (stock / maxDisplay) * 100)
+  
+  return (
+    <div className={`inline-flex flex-col items-center gap-1 px-3 py-2 rounded-lg border ${bgColor} ${borderColor} min-w-[80px]`}>
+      <div className="flex items-center gap-1.5">
+        <div className={`w-2 h-2 rounded-full ${isOutOfStock ? 'bg-red-500' : isCritical ? 'bg-red-500 animate-pulse' : isLow ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+        <span className={`text-lg font-bold font-mono ${textColor}`}>
+          {toFaNum(stock)}
+        </span>
+      </div>
+      <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden">
+        <div 
+          className={`h-full rounded-full transition-all ${isOutOfStock ? 'bg-red-500' : isCritical ? 'bg-red-500' : isLow ? 'bg-amber-500' : 'bg-emerald-500'}`}
+          style={{ width: `${fillPercent}%` }}
+        />
+      </div>
+      <span className={`text-[9px] font-medium ${textColor}`}>
+        {statusText}
+      </span>
+    </div>
+  )
+}
+
+// ★ کامپوننت نمایش موجودی زیبا برای Mobile
+// ★ Badge ساده برای نمایش موجودی
+function StockBadge({ currentStock, minStock }: { currentStock: number; minStock: number }) {
+  const stock = currentStock || 0
+  const min = minStock || 0
+  
+  if (stock === 0) {
+    return (
+      <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-red-100 text-red-700 text-xs font-bold min-w-[48px]">
+        ۰
+      </span>
+    )
+  }
+  
+  if (stock <= min) {
+    return (
+      <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold min-w-[48px] border border-red-200">
+        {toFaNum(stock)}
+      </span>
+    )
+  }
+  
+  return (
+    <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs font-bold min-w-[48px] border border-emerald-200">
+      {toFaNum(stock)}
+    </span>
+  )
+}
+
+// ★ سلول قیمت فروش قابل ویرایش
+function EditablePriceCell({
+  product,
+  isEditing,
+  editingValue,
+  onDoubleClick,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  product: Product
+  isEditing: boolean
+  editingValue: string
+  onDoubleClick: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+  saving: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  
+  // فوکوس خودکار هنگام شروع ویرایش
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isEditing])
+  
+  // محاسبه درصد سود
+  const profitPercent = product.purchasePrice > 0 
+    ? ((product.salePrice - product.purchasePrice) / product.purchasePrice) * 100
+    : 0
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onSave()
+    } else if (e.key === 'Escape') {
+      onCancel()
+    }
+  }
+  
+  if (isEditing) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <div className="relative">
+          <Input
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            value={editingValue}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={onCancel}
+            className="w-28 h-8 text-center text-xs font-mono border-emerald-300 focus-visible:ring-emerald-500"
+            dir="ltr"
+            disabled={saving}
+          />
+          {saving && (
+            <Loader2 className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 animate-spin text-emerald-500" />
+          )}
+        </div>
+        <span className="text-[9px] text-gray-400">Enter برای ذخیره</span>
+      </div>
+    )
+  }
+  
+  return (
+    <div 
+      className="flex flex-col items-center gap-0.5 cursor-pointer group"
+      onDoubleClick={onDoubleClick}
+      title="دوبار کلیک برای ویرایش"
+    >
+      <span className="text-xs font-medium text-gray-700 group-hover:text-emerald-600 transition-colors" dir="rtl">
+        {formatPrice(product.salePrice)}
+      </span>
+      {/* درصد سود */}
+      <span className={`text-[9px] font-medium ${
+        profitPercent >= 0 ? 'text-blue-600' : 'text-red-500'
+      }`}>
+        {profitPercent >= 0 ? '↑' : '↓'} {toFaNum(Math.abs(profitPercent).toFixed(1))}٪
+      </span>
+      {/* آیکون ویرایش هنگام hover */}
+      <Edit2 className="w-3 h-3 text-gray-300 group-hover:text-emerald-500 transition-colors" />
+    </div>
+  )
+}
+
+// ★ کامپوننت نمایش سود فروش در جدول Desktop
+function ProfitBadge({ currentStock, purchasePrice, salePrice }: { currentStock: number; purchasePrice: number; salePrice: number }) {
+  const profit = calculateProfit(currentStock, purchasePrice, salePrice)
+  const profitPerUnit = (salePrice || 0) - (purchasePrice || 0)
+  
+  if (profit === 0 && profitPerUnit === 0) {
+    return <span className="text-gray-300 text-[11px]">—</span>
+  }
+  
+  const profitColor = profit >= 0 ? 'text-blue-700' : 'text-red-600'
+  
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span className={`text-xs font-bold ${profitColor}`} dir="rtl">
+        {formatPrice(Math.abs(profit))}
+      </span>
+      <span className={`text-[9px] ${profit >= 0 ? 'text-blue-500' : 'text-red-500'}`}>
+        {profit >= 0 ? '↑' : '↓'} {formatPrice(Math.abs(profitPerUnit))}/واحد
+      </span>
+    </div>
   )
 }
 
@@ -342,6 +552,11 @@ export default function ProductsPage() {
   })
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // ★ state برای ویرایش inline قیمت فروش
+const [editingProductId, setEditingProductId] = useState<string | null>(null)
+const [editingPrice, setEditingPrice] = useState<string>('')
+const [savingPrice, setSavingPrice] = useState(false)
   const { toast } = useToast()
 
   // ══════════════════════════════════════════
@@ -1129,6 +1344,45 @@ export default function ProductsPage() {
     setDeleting(false)
   }
 
+  // ★ ذخیره قیمت فروش جدید
+const handleSavePrice = async (productId: string, newPrice: number) => {
+  if (savingPrice) return
+  
+  const trulyOnline = isOnline && navigator.onLine
+  
+  if (!trulyOnline) {
+    toast({ title: 'خطا', description: 'ویرایش قیمت نیاز به اتصال اینترنت دارد', variant: 'destructive' })
+    return
+  }
+  
+  setSavingPrice(true)
+  try {
+    const res = await fetch('/api/products', {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        id: productId,
+        tenantId,
+        salePrice: newPrice,
+      }),
+    })
+    const json = await res.json()
+    if (json.success) {
+      toast({ title: '✓ موفق', description: 'قیمت فروش به‌روزرسانی شد' })
+      // بروزرسانی لیست
+      await loadProducts(page, search)
+      await loadAllProducts()
+    } else {
+      toast({ title: 'خطا', description: json.error, variant: 'destructive' })
+    }
+  } catch (error: any) {
+    toast({ title: 'خطا', description: error?.message, variant: 'destructive' })
+  }
+  setSavingPrice(false)
+  setEditingProductId(null)
+  setEditingPrice('')
+}
+
   const openEditDialog = (product: Product) => {
     const unitLabel = product.unit ? getUnitLabel(product.unit) : product.unitLabel || ''
 
@@ -1170,6 +1424,13 @@ export default function ProductsPage() {
     )
   }, [allProducts])
 
+  // ★ محاسبه مجموع سود کل همه کالاها (سود واحد × موجودی)
+const totalInventoryProfit = useMemo(() => {
+  return allProducts.reduce((sum, p) =>
+    sum + calculateProfit(p.currentStock, p.purchasePrice, p.salePrice), 0
+  )
+}, [allProducts])
+
   // ★ تعداد کل اقلام موجود در انبار
   const totalInventoryItems = useMemo(() => {
     return allProducts.reduce((sum, p) => sum + (p.currentStock || 0), 0)
@@ -1193,20 +1454,39 @@ export default function ProductsPage() {
           </div>
           <div>
             <h1 className="text-base sm:text-lg font-bold text-gray-900">کالاها</h1>
-            <div className="flex items-center gap-2 flex-wrap mt-0.5">
-              <p className="text-xs text-gray-500">{toFaNum(total)} کالا</p>
-              {totalInventoryValue > 0 && (
-                <>
-                  <span className="text-gray-300">•</span>
-                  <div className="flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-emerald-600" />
-                    <p className="text-xs text-emerald-700 font-medium">
-                      ارزش کل: {formatPrice(totalInventoryValue)}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
+          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+  <p className="text-xs text-gray-500">{toFaNum(total)} کالا</p>
+  {totalInventoryValue > 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className="flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+        <TrendingUp className="w-3 h-3 text-emerald-600" />
+        <p className="text-xs text-emerald-700 font-medium">
+          ارزش کل: {formatPrice(totalInventoryValue)}
+        </p>
+      </div>
+    </>
+  )}
+  {totalInventoryProfit !== 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md border ${
+        totalInventoryProfit > 0 
+          ? 'bg-green-50 border-green-200' 
+          : 'bg-red-50 border-red-200'
+      }`}>
+        <TrendingUp className={`w-3 h-3 ${
+          totalInventoryProfit > 0 ? 'text-green-600' : 'text-red-600 rotate-180'
+        }`} />
+        <p className={`text-xs font-medium ${
+          totalInventoryProfit > 0 ? 'text-green-700' : 'text-red-700'
+        }`}>
+          سود کل: {formatPrice(Math.abs(totalInventoryProfit))}
+        </p>
+      </div>
+    </>
+  )}
+</div>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1363,18 +1643,20 @@ export default function ProductsPage() {
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-gray-50">
-                    <TableHead className="text-right text-xs">کد</TableHead>
-                    <TableHead className="text-right text-xs">نام کالا</TableHead>
-                    <TableHead className="text-right text-xs">بارکد</TableHead>
-                    <TableHead className="text-right text-xs">دسته</TableHead>
-                    <TableHead className="text-center text-xs">موجودی</TableHead>
-                    <TableHead className="text-center text-xs">قیمت فروش</TableHead>
-                    <TableHead className="text-center text-xs bg-emerald-50/50">ارزش موجودی</TableHead>
-                    <TableHead className="text-center text-xs">واحد</TableHead>
-                    <TableHead className="text-center text-xs">وضعیت</TableHead>
-                    <TableHead className="text-center text-xs">عملیات</TableHead>
-                  </TableRow>
+                 <TableRow className="bg-gray-50">
+  <TableHead className="text-right text-xs">کد</TableHead>
+  <TableHead className="text-right text-xs">نام کالا</TableHead>
+  <TableHead className="text-right text-xs">بارکد</TableHead>
+  <TableHead className="text-right text-xs">دسته</TableHead>
+  <TableHead className="text-center text-xs">موجودی</TableHead>
+  <TableHead className="text-center text-xs">قیمت خرید</TableHead>
+  <TableHead className="text-center text-xs">قیمت فروش</TableHead>
+
+  <TableHead className="text-center text-xs bg-blue-50/50">سود فروش</TableHead>
+  <TableHead className="text-center text-xs">واحد</TableHead>
+  <TableHead className="text-center text-xs">وضعیت</TableHead>
+  <TableHead className="text-center text-xs">عملیات</TableHead>
+</TableRow>
                 </TableHeader>
                 <TableBody>
                   {products.map((product) => (
@@ -1423,27 +1705,44 @@ export default function ProductsPage() {
                       <TableCell className="text-xs">
                         {product.category?.name || '—'}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <span
-                          className={`text-xs font-bold ${
-                            product.currentStock <= product.minStock
-                              ? 'text-red-500'
-                              : 'text-emerald-600'
-                          }`}
-                        >
-                          {toFaNum(product.currentStock)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center text-xs font-medium text-gray-700" dir="rtl">
-                        {formatPrice(product.salePrice)}
-                      </TableCell>
-                      {/* ★ ستون جدید: ارزش موجودی */}
-                      <TableCell className="text-center bg-emerald-50/30">
-                        <StockValueBadge
-                          currentStock={product.currentStock}
-                          salePrice={product.salePrice}
-                        />
-                      </TableCell>
+                    <TableCell className="text-center">
+  <StockBadge currentStock={product.currentStock} minStock={product.minStock} />
+</TableCell>
+
+<TableCell className="text-center text-xs font-medium text-gray-600" dir="rtl">
+  {formatPrice(product.purchasePrice)}
+</TableCell>
+
+                   <TableCell className="text-center">
+  <EditablePriceCell
+    product={product}
+    isEditing={editingProductId === product.id}
+    editingValue={editingPrice}
+    onDoubleClick={() => {
+      setEditingProductId(product.id)
+      setEditingPrice(formatToPersianWithCommas(String(product.salePrice)))
+    }}
+    onChange={(value) => setEditingPrice(formatToPersianWithCommas(value))}
+    onSave={() => {
+      const num = parsePersianNumber(editingPrice)
+      handleSavePrice(product.id, num)
+    }}
+    onCancel={() => {
+      setEditingProductId(null)
+      setEditingPrice('')
+    }}
+    saving={savingPrice}
+  />
+</TableCell>
+                     
+                      {/* ★ ستون جدید: سود فروش */}
+<TableCell className="text-center bg-blue-50/30">
+  <ProfitBadge
+    currentStock={product.currentStock}
+    purchasePrice={product.purchasePrice}
+    salePrice={product.salePrice}
+  />
+</TableCell>
                       <TableCell className="text-center text-xs">
                         {product.unit
                           ? getUnitLabel(product.unit)
@@ -1555,40 +1854,68 @@ export default function ProductsPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-gray-500 border-t border-gray-100 pt-2">
-                    <div className="flex items-center justify-between">
-                      <span>دسته:</span>
-                      <span className="text-gray-700 truncate">
-                        {product.category?.name || '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>واحد:</span>
-                      <span className="text-gray-700">
-                        {product.unit
-                          ? getUnitLabel(product.unit)
-                          : product.unitLabel || '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>موجودی:</span>
-                      <span
-                        className={`font-bold ${
-                          product.currentStock <= product.minStock
-                            ? 'text-red-500'
-                            : 'text-emerald-600'
-                        }`}
-                      >
-                        {toFaNum(product.currentStock)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>قیمت فروش:</span>
-                      <span className="text-gray-700 font-medium" dir="ltr">
-                        {formatPrice(product.salePrice)}
-                      </span>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-gray-500 border-t border-gray-100 pt-2">
+  <div className="flex items-center justify-between">
+    <span>دسته:</span>
+    <span className="text-gray-700 truncate">
+      {product.category?.name || '—'}
+    </span>
+  </div>
+  <div className="flex items-center justify-between">
+    <span>واحد:</span>
+    <span className="text-gray-700">
+      {product.unit
+        ? getUnitLabel(product.unit)
+        : product.unitLabel || '—'}
+    </span>
+  </div>
+<div className="flex items-center justify-between">
+  <span>موجودی:</span>
+  <StockBadge currentStock={product.currentStock} minStock={product.minStock} />
+</div>
+
+  <div className="flex items-center justify-between">
+    <span>قیمت خرید:</span>
+    <span className="text-gray-700 font-medium" dir="ltr">
+      {formatPrice(product.purchasePrice)}
+    </span>
+  </div>
+ <div className="flex items-center justify-between">
+  <span>قیمت فروش:</span>
+  <div className="flex flex-col items-end">
+    <span 
+      className="text-gray-700 font-medium cursor-pointer hover:text-emerald-600" 
+      dir="ltr"
+      onDoubleClick={() => openEditDialog(product)}
+      title="دوبار کلیک برای ویرایش"
+    >
+      {formatPrice(product.salePrice)}
+    </span>
+    <span className={`text-[9px] ${
+      product.purchasePrice > 0 && ((product.salePrice - product.purchasePrice) / product.purchasePrice) * 100 >= 0 
+        ? 'text-blue-600' 
+        : 'text-red-500'
+    }`}>
+      {product.purchasePrice > 0 
+        ? `${(((product.salePrice - product.purchasePrice) / product.purchasePrice) * 100).toFixed(1)}٪ سود`
+        : '—'}
+    </span>
+  </div>
+</div>
+  <div className="flex items-center justify-between col-span-2 mt-1 pt-1 border-t border-gray-100">
+    <span className="font-medium">سود فروش:</span>
+    <span 
+      className={`font-bold ${
+        (product.salePrice - product.purchasePrice) >= 0 
+          ? 'text-blue-600' 
+          : 'text-red-600'
+      }`}
+      dir="ltr"
+    >
+      {formatPrice(calculateProfit(product.currentStock, product.purchasePrice, product.salePrice))}
+    </span>
+  </div>
+</div>
 
                   {/* ★ بخش جدید: ارزش موجودی */}
                   <StockValueCard

@@ -14,7 +14,7 @@ export type AppView =
   | 'landing' | 'login' | 'register'
   | 'dashboard' | 'pos' | 'products' | 'categories'
   | 'customers' | 'invoices' | 'invoice-detail'
-  | 'installments' | 'accounting' | 'journal-entry-detail'
+  | 'installments' | 'checks' | 'accounting' | 'journal-entry-detail'
   | 'settings' | 'settings-store' | 'settings-gateway'
   | 'settings-pos' | 'settings-invoice' | 'settings-backup'
   | 'settings-subscription' | 'settings-employees'
@@ -28,6 +28,7 @@ export type AppView =
   | 'branches'
   | 'tickets'
   | 'ticket-detail'
+   | 'basic-year-end'
 
 export type ViewType = AppView;
 
