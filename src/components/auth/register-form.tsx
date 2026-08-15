@@ -18,6 +18,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import {
   ShoppingCart, ArrowLeft, Loader2, CheckCircle2, Store, Globe,
   Phone, User, Lock, Check, AlertCircle, RefreshCw,
+  Zap, Crown, Building2, Sparkles,
 } from 'lucide-react'
 
 const steps = [
@@ -32,6 +33,41 @@ const PLAN_INFO: Record<string, { title: string; tierName: string }> = {
   demo:          { title: 'پلن پایه',    tierName: 'simple' },
   free:          { title: 'پلن پایه',    tierName: 'simple' },
   trial:         { title: 'پلن پایه',    tierName: 'simple' },
+}
+
+// ★ v10.3: تنظیمات UI برای نمایش پلن در بالای فرم
+const PLAN_UI: Record<string, { 
+  icon: React.ComponentType<{ className?: string }>
+  gradient: string
+  bgColor: string
+  textColor: string
+  borderColor: string
+  iconBg: string
+}> = {
+  simple: {
+    icon: Zap,
+    gradient: 'from-blue-500 to-indigo-600',
+    bgColor: 'bg-blue-50',
+    textColor: 'text-blue-700',
+    borderColor: 'border-blue-200',
+    iconBg: 'bg-blue-100',
+  },
+  professional: {
+    icon: Crown,
+    gradient: 'from-emerald-500 to-teal-600',
+    bgColor: 'bg-emerald-50',
+    textColor: 'text-emerald-700',
+    borderColor: 'border-emerald-200',
+    iconBg: 'bg-emerald-100',
+  },
+  enterprise: {
+    icon: Building2,
+    gradient: 'from-purple-500 to-fuchsia-600',
+    bgColor: 'bg-purple-50',
+    textColor: 'text-purple-700',
+    borderColor: 'border-purple-200',
+    iconBg: 'bg-purple-100',
+  },
 }
 
 export default function RegisterForm() {
@@ -74,30 +110,106 @@ export default function RegisterForm() {
 
   const [activating, setActivating] = useState(false)
 
+    // ★ v10.4: State های بررسی تکراری بودن
+  const [storeNameAvailable, setStoreNameAvailable] = useState<boolean | null>(null)
+  const [storeNameChecking, setStoreNameChecking] = useState(false)
+  const [storeNameReason, setStoreNameReason] = useState('')
+
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
+  const [usernameChecking, setUsernameChecking] = useState(false)
+  const [usernameReason, setUsernameReason] = useState('')
+
+  const [subdomainReason, setSubdomainReason] = useState('')
+
+  const storeNameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const usernameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const subdomainCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+    // ★ v10.4: بررسی زیردامنه (بهبودیافته)
   const checkSubdomain = useCallback(async (value: string) => {
     if (!value || value.length < 3) {
       setSubdomainAvailable(null)
       setSubdomainChecking(false)
+      setSubdomainReason('')
       return
     }
     setSubdomainChecking(true)
     setSubdomainAvailable(null)
     try {
-      const res = await fetch(`/api/tenants/check-subdomain?subdomain=${encodeURIComponent(value)}`)
+      const res = await fetch(`/api/tenants/check-availability?subdomain=${encodeURIComponent(value)}`)
       if (res.ok) {
         const data = await res.json()
-        setSubdomainAvailable(data.available === true)
+        const info = data.data?.subdomain
+        setSubdomainAvailable(info?.available ?? false)
+        setSubdomainReason(info?.reason || '')
       } else {
-        const reserved = ['admin', 'test', 'shop', 'api', 'auth', 'www', 'mail', 'ftp', 'cdn']
-        setSubdomainAvailable(!reserved.includes(value.toLowerCase()))
+        setSubdomainAvailable(false)
+        setSubdomainReason('خطا در بررسی')
       }
     } catch {
-      const reserved = ['admin', 'test', 'shop', 'api', 'auth', 'www', 'mail', 'ftp', 'cdn']
-      setSubdomainAvailable(!reserved.includes(value.toLowerCase()))
+      setSubdomainAvailable(false)
+      setSubdomainReason('خطا در ارتباط با سرور')
     } finally {
       setSubdomainChecking(false)
+    }
+  }, [])
+
+  // ★ v10.4: بررسی نام فروشگاه
+  const checkStoreName = useCallback(async (value: string) => {
+    if (!value || value.length < 2) {
+      setStoreNameAvailable(null)
+      setStoreNameChecking(false)
+      setStoreNameReason('')
+      return
+    }
+    setStoreNameChecking(true)
+    setStoreNameAvailable(null)
+    try {
+      const res = await fetch(`/api/tenants/check-availability?storeName=${encodeURIComponent(value)}`)
+      if (res.ok) {
+        const data = await res.json()
+        const info = data.data?.storeName
+        setStoreNameAvailable(info?.available ?? false)
+        setStoreNameReason(info?.reason || '')
+      } else {
+        setStoreNameAvailable(false)
+        setStoreNameReason('خطا در بررسی')
+      }
+    } catch {
+      setStoreNameAvailable(false)
+      setStoreNameReason('خطا در ارتباط با سرور')
+    } finally {
+      setStoreNameChecking(false)
+    }
+  }, [])
+
+  // ★ v10.4: بررسی نام کاربری
+  const checkUsername = useCallback(async (value: string) => {
+    if (!value || value.length < 3) {
+      setUsernameAvailable(null)
+      setUsernameChecking(false)
+      setUsernameReason('')
+      return
+    }
+    setUsernameChecking(true)
+    setUsernameAvailable(null)
+    try {
+      const res = await fetch(`/api/tenants/check-availability?username=${encodeURIComponent(value)}`)
+      if (res.ok) {
+        const data = await res.json()
+        const info = data.data?.username
+        setUsernameAvailable(info?.available ?? false)
+        setUsernameReason(info?.reason || '')
+      } else {
+        setUsernameAvailable(false)
+        setUsernameReason('خطا در بررسی')
+      }
+    } catch {
+      setUsernameAvailable(false)
+      setUsernameReason('خطا در ارتباط با سرور')
+    } finally {
+      setUsernameChecking(false)
     }
   }, [])
 
@@ -106,6 +218,20 @@ export default function RegisterForm() {
     if (subdomainCheckRef.current) clearTimeout(subdomainCheckRef.current)
     subdomainCheckRef.current = setTimeout(() => checkSubdomain(value), 500)
   }, [checkSubdomain])
+
+    // ★ v10.4: handler های جدید با debounce
+  const handleStoreNameChange = useCallback((value: string) => {
+    setStoreName(value)
+    if (storeNameCheckRef.current) clearTimeout(storeNameCheckRef.current)
+    storeNameCheckRef.current = setTimeout(() => checkStoreName(value), 500)
+  }, [checkStoreName])
+
+  const handleUsernameChange = useCallback((value: string) => {
+    const cleaned = value.toLowerCase().replace(/\s/g, '')
+    setUsername(cleaned)
+    if (usernameCheckRef.current) clearTimeout(usernameCheckRef.current)
+    usernameCheckRef.current = setTimeout(() => checkUsername(cleaned), 500)
+  }, [checkUsername])
 
   const handleSendOtp = async () => {
     setError('')
@@ -232,21 +358,42 @@ export default function RegisterForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
   
-  const handleCancel = () => router.replace('/')
+  // ★ v10.5: انصراف → هدایت به لاندینگ با reload کامل
+  // window.location.replace به جای router.replace استفاده می‌شود چون:
+  // 1. صفحه را کامل reload می‌کند (جلوگیری از صفحه سفید)
+  // 2. همه state های React پاک می‌شوند
+  // 3. تاریخچه مرورگر آلوده نمی‌شود (Back به فرم برنمی‌گردد)
+  const handleCancel = () => {
+    // پاک کردن پلن انتخابی از store
+    setSelectedPlanId(null)
+    // هدایت به لاندینگ پیج با reload کامل
+    window.location.replace('/')
+  }
 
-  const canGoNext = useCallback(() => {
+   const canGoNext = useCallback(() => {
     if (currentStep === 1) {
       return !!(
-        storeName.trim() &&
-        subdomain.trim() && subdomain.trim().length >= 3 &&
-        subdomainAvailable !== false && !subdomainChecking &&
-        username.trim() && username.trim().length >= 3 &&
-        mobile.trim() && mobile.trim().length >= 10 &&
+        storeName.trim().length >= 2 &&
+        storeNameAvailable === true &&
+        !storeNameChecking &&
+        subdomain.trim().length >= 3 &&
+        subdomainAvailable === true && 
+        !subdomainChecking &&
+        username.trim().length >= 3 &&
+        usernameAvailable === true &&
+        !usernameChecking &&
+        mobile.trim().length === 11 &&
         password.length >= 4
       )
     }
     return false
-  }, [currentStep, storeName, subdomain, subdomainAvailable, subdomainChecking, username, mobile, password])
+  }, [
+    currentStep, 
+    storeName, storeNameAvailable, storeNameChecking,
+    subdomain, subdomainAvailable, subdomainChecking, 
+    username, usernameAvailable, usernameChecking,
+    mobile, password
+  ])
 
   const handleNext = async () => {
     setError('')
@@ -256,9 +403,60 @@ export default function RegisterForm() {
     }
   }
 
-  return (
+    return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-emerald-50 via-white to-teal-50 px-4 py-4" dir="rtl">
       <div className="w-full max-w-md">
+        
+        {/* ═══════════════════════════════════════════════════════════
+            ★ v10.3: Plan Selection Badge — نمایش پلن انتخابی
+            ═══════════════════════════════════════════════════════════ */}
+        {(() => {
+          const ui = PLAN_UI[planName] || PLAN_UI.simple
+          const PlanIcon = ui.icon
+          return (
+            <div className={`mb-4 rounded-2xl border-2 ${ui.borderColor} ${ui.bgColor} p-4 shadow-sm`}>
+              <div className="flex items-center gap-3">
+                {/* آیکون پلن با gradient */}
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${ui.gradient} flex items-center justify-center shadow-md shrink-0`}>
+                  <PlanIcon className="w-6 h-6 text-white" />
+                </div>
+                
+                {/* اطلاعات پلن */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <Sparkles className={`w-3.5 h-3.5 ${ui.textColor}`} />
+                    <span className={`text-[10px] font-bold ${ui.textColor} uppercase tracking-wide`}>
+                      پلن انتخابی شما
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-gray-900">
+                    {planInfo.title}
+                  </h3>
+                  <p className="text-[11px] text-gray-600 mt-0.5">
+                    ۳ ماه استفاده رایگان — سپس فعال‌سازی مادام‌العمر
+                  </p>
+                </div>
+              </div>
+              
+              {/* مزایای کلیدی */}
+              <div className="mt-3 pt-3 border-t border-gray-200/60 grid grid-cols-3 gap-2">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className={`w-3.5 h-3.5 ${ui.textColor} shrink-0`} />
+                  <span className="text-[10px] text-gray-600 leading-tight">بدون کارت بانکی</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className={`w-3.5 h-3.5 ${ui.textColor} shrink-0`} />
+                  <span className="text-[10px] text-gray-600 leading-tight">راه‌اندازی فوری</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className={`w-3.5 h-3.5 ${ui.textColor} shrink-0`} />
+                  <span className="text-[10px] text-gray-600 leading-tight">پشتیبانی کامل</span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* ─── Header فشرده ─── */}
         <div className="text-center mb-4">
           <div className="inline-flex items-center gap-2 mb-2">
@@ -290,72 +488,131 @@ export default function RegisterForm() {
         <Card className="border-gray-200 shadow-lg">
           <CardContent className="pt-4 pb-4">
             {/* ═══ Step 1 ═══ */}
+                    {/* ═══ Step 1 ═══ */}
             {currentStep === 1 && (
               <div className="space-y-3">
+                {/* ── نام فروشگاه ── */}
                 <div className="space-y-1">
                   <Label htmlFor="storeName" className="text-xs font-medium flex items-center gap-1">
                     <Store className="w-3 h-3" />
                     نام فروشگاه
                   </Label>
-                  <Input
-                    id="storeName"
-                    placeholder="مثال: فروشگاه اروندان"
-                    value={storeName}
-                    onChange={(e) => setStoreName(e.target.value)}
-                    className="h-9 text-sm"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="storeName"
+                      placeholder="مثال: فروشگاه اروندان"
+                      value={storeName}
+                      onChange={(e) => handleStoreNameChange(e.target.value)}
+                      className={`h-9 text-sm pr-9 ${
+                        storeNameAvailable === true ? 'border-emerald-400' :
+                        storeNameAvailable === false ? 'border-red-400' : ''
+                      }`}
+                    />
+                    {storeNameChecking && (
+                      <Loader2 className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                    )}
+                    {storeNameAvailable === true && !storeNameChecking && (
+                      <Check className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    {storeNameAvailable === false && !storeNameChecking && (
+                      <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
+                    )}
+                  </div>
+                  {storeNameReason && (
+                    <p className={`text-[10px] flex items-center gap-1 ${
+                      storeNameAvailable ? 'text-emerald-600' : 'text-red-500'
+                    }`}>
+                      {storeNameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                      {storeNameReason}
+                    </p>
+                  )}
                 </div>
 
+                {/* ── زیردامنه ── */}
                 <div className="space-y-1">
                   <Label htmlFor="subdomain" className="text-xs font-medium flex items-center gap-1">
                     <Globe className="w-3 h-3" />
                     زیردامنه
                   </Label>
                   <div className="flex items-center gap-0">
-                    <Input
-                      id="subdomain"
-                      placeholder="myshop"
-                      value={subdomain}
-                      onChange={(e) => handleSubdomainChange(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
-                      className="text-left rounded-l-none h-9 text-sm"
-                      dir="ltr"
-                    />
+                    <div className="relative flex-1">
+                      <Input
+                        id="subdomain"
+                        placeholder="myshop"
+                        value={subdomain}
+                        onChange={(e) => handleSubdomainChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                        className={`text-left rounded-l-none h-9 text-sm pl-9 ${
+                          subdomainAvailable === true ? 'border-emerald-400' :
+                          subdomainAvailable === false ? 'border-red-400' : ''
+                        }`}
+                        dir="ltr"
+                      />
+                      {subdomainChecking && (
+                        <Loader2 className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                      )}
+                      {subdomainAvailable === true && !subdomainChecking && (
+                        <Check className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                      )}
+                      {subdomainAvailable === false && !subdomainChecking && (
+                        <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
+                      )}
+                    </div>
                     <div className="h-9 px-2 bg-gray-100 border border-r-0 border-input rounded-l-md flex items-center text-xs text-gray-500 whitespace-nowrap">
                       .shopaccounting.ir
                     </div>
                   </div>
-                  {subdomainChecking && (
-                    <p className="text-[10px] text-gray-400 flex items-center gap-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> بررسی...
-                    </p>
-                  )}
-                  {subdomainAvailable === true && !subdomainChecking && (
-                    <p className="text-[10px] text-emerald-600 flex items-center gap-1">
-                      <Check className="w-3 h-3" /> آزاد است
-                    </p>
-                  )}
-                  {subdomainAvailable === false && !subdomainChecking && (
-                    <p className="text-[10px] text-red-500 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> قبلاً ثبت شده
+                  {subdomainReason && (
+                    <p className={`text-[10px] flex items-center gap-1 ${
+                      subdomainAvailable ? 'text-emerald-600' : 'text-red-500'
+                    }`}>
+                      {subdomainAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                      {subdomainReason}
                     </p>
                   )}
                 </div>
 
-                <div className="space-y-1">
-                  <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
-                    <User className="w-3 h-3" />
-                    نام کاربری
-                  </Label>
-                  <Input
-                    id="username"
-                    placeholder="مثال: admin"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                    className="h-9 text-sm"
-                    dir="ltr"
-                  />
-                </div>
+              {/* ── نام کاربری ── */}
+<div className="space-y-1">
+  <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
+    <User className="w-3 h-3" />
+    نام کاربری
+  </Label>
+  <div className="relative">
+    <Input
+      id="username"
+      placeholder="مثال: admin_shop"
+      value={username}
+      onChange={(e) => handleUsernameChange(e.target.value)}
+      className={`h-9 text-sm pr-9 ${
+        usernameAvailable === true ? 'border-emerald-400' :
+        usernameAvailable === false ? 'border-red-400' : ''
+      }`}
+      dir="ltr"
+    />
+    {usernameChecking && (
+      <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+    )}
+    {usernameAvailable === true && !usernameChecking && (
+      <Check className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+    )}
+    {usernameAvailable === false && !usernameChecking && (
+      <AlertCircle className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
+    )}
+  </div>
+  {usernameReason && (
+    <p className={`text-[10px] flex items-center gap-1 ${
+      usernameAvailable ? 'text-emerald-600' : 'text-red-500'
+    }`}>
+      {usernameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+      {usernameReason}
+    </p>
+  )}
+  <p className="text-[9px] text-gray-400">
+    فقط حروف انگلیسی کوچک، اعداد و _ (حداقل ۳ کاراکتر)
+  </p>
+</div>
 
+                {/* ── شماره موبایل ── */}
                 <div className="space-y-1">
                   <Label htmlFor="mobile" className="text-xs font-medium flex items-center gap-1">
                     <Phone className="w-3 h-3" />
@@ -371,8 +628,12 @@ export default function RegisterForm() {
                     dir="ltr"
                     maxLength={11}
                   />
+                  <p className="text-[9px] text-gray-400">
+                    شماره ۱۱ رقمی شروع شده با ۰۹
+                  </p>
                 </div>
 
+                {/* ── رمز عبور ── */}
                 <div className="space-y-1">
                   <Label htmlFor="password" className="text-xs font-medium flex items-center gap-1">
                     <Lock className="w-3 h-3" />
@@ -381,12 +642,47 @@ export default function RegisterForm() {
                   <Input
                     id="password"
                     type="password"
-                    placeholder="حداقل ۴ کاراکتر"
+                    placeholder="رمز عبور قوی انتخاب کنید"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-9 text-sm"
+                    className={`h-9 text-sm ${
+                      password.length >= 8 ? 'border-emerald-400' :
+                      password.length >= 4 ? 'border-amber-400' :
+                      password.length > 0 ? 'border-red-400' : ''
+                    }`}
                     dir="ltr"
                   />
+                  <div className="space-y-1">
+                    <p className="text-[9px] text-gray-500 leading-relaxed">
+                      <span className="font-bold">حداقل ۴ کاراکتر</span> — برای امنیت بیشتر، حداقل ۸ کاراکتر شامل حروف و اعداد پیشنهاد می‌شود.
+                    </p>
+                    {/* نشانگر قدرت رمز */}
+                    {password.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-300 ${
+                              password.length < 4 ? 'bg-red-500 w-1/4' :
+                              password.length < 6 ? 'bg-orange-500 w-1/2' :
+                              password.length < 8 ? 'bg-amber-500 w-3/4' :
+                              'bg-emerald-500 w-full'
+                            }`}
+                          />
+                        </div>
+                        <span className={`text-[9px] font-bold whitespace-nowrap ${
+                          password.length < 4 ? 'text-red-600' :
+                          password.length < 6 ? 'text-orange-600' :
+                          password.length < 8 ? 'text-amber-600' :
+                          'text-emerald-600'
+                        }`}>
+                          {password.length < 4 ? 'ضعیف' :
+                           password.length < 6 ? 'متوسط' :
+                           password.length < 8 ? 'خوب' :
+                           'قوی'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {error && (
@@ -528,8 +824,6 @@ export default function RegisterForm() {
 
       {/* ═══════════════════════════════════════════════════════════
           ★ Loading Overlay — نمایش در حال ساخت حساب
-          ★ این overlay روی تمام صفحه قرار می‌گیرد و از نمایش
-          ★ هرگونه UI موقتی قبل از redirect جلوگیری می‌کند
           ═══════════════════════════════════════════════════════════ */}
       {(activating || otpVerifying) && (
         <div className="fixed inset-0 z-50 bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center" dir="rtl">

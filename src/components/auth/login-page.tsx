@@ -162,7 +162,17 @@ export default function LoginPage() {
     }
   }
 
-  function handleGoToLanding() { window.location.href = '/' }
+  // ★ v3.40: انصراف → هدایت سریع به لاندینگ با reload کامل
+  // window.location.replace به جای href استفاده می‌شود چون:
+  // 1. صفحه را کامل reload می‌کند (جلوگیری از صفحه سفید)
+  // 2. state های React پاک می‌شوند
+  // 3. تاریخچه مرورگر آلوده نمی‌شود (Back به لاگین برنمی‌گردد)
+  function handleGoToLanding() {
+    // پاک کردن پلن انتخابی از store
+    setSelectedPlanId(null)
+    // هدایت به لاندینگ پیج با reload کامل
+    window.location.replace('/')
+  }
 
      async function handleLoginSuccess(data: LoginResponse['data']) {
     if (!data) return
@@ -399,15 +409,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4">
       <div className="w-full max-w-md">
+              {/* ★ v3.40: دکمه انصراف بالای صفحه (بهبودیافته) */}
         <button
           type="button"
           onClick={handleGoToLanding}
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-6 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-emerald-600 mb-6 transition-colors group"
         >
-          <ArrowRight className="w-4 h-4" />
-          بازگشت به صفحه اصلی
+          <ArrowRight className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+          <span>بازگشت به صفحه اصلی</span>
         </button>
-
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg shadow-emerald-200 mb-4">
             <Store className="w-8 h-8 text-white" />
@@ -609,8 +619,9 @@ export default function LoginPage() {
             </form>
           )}
 
-          <div className="mt-6 pt-5 border-t border-gray-100 text-center">
-            <p className="text-sm text-gray-500">
+                  <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
+            {/* ── لینک ثبت‌نام ── */}
+            <p className="text-sm text-gray-500 text-center">
               ثبت‌نام نکرده‌اید؟{' '}
               <button
                 type="button"
@@ -623,6 +634,16 @@ export default function LoginPage() {
                 ثبت‌نام کنید
               </button>
             </p>
+
+            {/* ── ★ v3.40: دکمه انصراف واضح ── */}
+            <button
+              type="button"
+              onClick={handleGoToLanding}
+              className="w-full py-2.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-xl transition-all duration-200 flex items-center justify-center gap-2"
+            >
+              <ArrowRight className="w-4 h-4" />
+              انصراف و بازگشت به صفحه اصلی
+            </button>
           </div>
 
           {tenantBranding && (
