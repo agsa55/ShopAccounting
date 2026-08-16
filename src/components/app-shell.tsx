@@ -606,14 +606,49 @@ function AppSidebar() {
   const { isDemo, status: demoStatus } = useDemoStatus()
 
   // ★ v10.1: وضعیت اشتراک
+   // ★ v10.6: وضعیت اشتراک — تشخیص دقیق دمو از API (نه hook)
   const [daysRemaining, setDaysRemaining] = useState(0)
   const [hoursRemaining, setHoursRemaining] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
   const [isLifetime, setIsLifetime] = useState(false)
   const [isDemoTenant, setIsDemoTenant] = useState(false)
   const [realPlanName, setRealPlanName] = useState<string | null>(null)
+  // ★ v10.6: فقط وقتی واقعاً از API تایید شود که دمو است
+  const [verifiedIsDemo, setVerifiedIsDemo] = useState<boolean | null>(null)
 
-  const isDemoPlan = isDemo || isDemoTenant || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
+  // ★ v10.6: بررسی واقعی وضعیت دمو از API (به جای hook)
+  useEffect(() => {
+    async function verifyDemoStatus() {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) return
+        
+        const res = await fetch('/api/tenants/trial-check?_t=' + Date.now(), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        const data = await res.json()
+        
+        if (data.success && data.data) {
+          // ★ فقط وقتی billingCycle === 'trial' و isPaid === false → دمو واقعی
+          const isRealDemo = data.data.billingCycle === 'trial' && !data.data.isPaid
+          setVerifiedIsDemo(isRealDemo)
+          setIsDemoTenant(isRealDemo)
+        } else {
+          setVerifiedIsDemo(false)
+        }
+      } catch (err) {
+        console.warn('[AppSidebar] verifyDemoStatus error:', err)
+        setVerifiedIsDemo(false)
+      }
+    }
+    
+    verifyDemoStatus()
+  }, [])
+
+  // ★ v10.6: isDemoPlan فقط وقتی verifiedIsDemo === true
+  // اگر verifiedIsDemo === null (هنوز چک نشده) → false در نظر می‌گیریم تا کارت دمو اشتباه نشان داده نشود
+  const isDemoPlan = verifiedIsDemo === true
 
   useEffect(() => {
     async function checkSubscription() {

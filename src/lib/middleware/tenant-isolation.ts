@@ -188,7 +188,7 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
     )
   }
 
-  const userId = payload.userId || payload.sub || payload.id
+   const userId = payload.userId || payload.sub || payload.id
   const tenantId = payload.tenantId || payload.tid
   // ★★★ v3.36.4: استخراج نوع توکن و customerId (برای پورتال)
   const tokenType = payload.type
@@ -197,6 +197,12 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
   if (!tenantId) {
     return NextResponse.json({ success: false, error: 'شناسه فروشگاه در توکن یافت نشد' }, { status: 400 })
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v4.3: Safety Net — بررسی تطابق tenant-slug cookie با token
+  // این یک لایه حفاظتی برای تشخیص نشت داده است
+  // ═══════════════════════════════════════════════════════════════
+  const cookieSlug = req.cookies.get('tenant-slug')?.value
 
   let tenant: any
   try {
@@ -215,6 +221,20 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
   if (!tenant) {
     return NextResponse.json({ success: false, error: 'فروشگاه یافت نشد' }, { status: 404 })
   }
+
+  // ★ v4.3: بررسی نهایی — tenant باید با subDomain در cookie مطابقت داشته باشد
+  // اگر cookie وجود دارد و با tenant متفاوت است، مشکوک است
+  if (cookieSlug && tenant.subDomain && cookieSlug !== tenant.subDomain) {
+    console.warn(`[TenantIsolation] ⚠️ Tenant mismatch detected!`)
+    console.warn(`[TenantIsolation]    Cookie tenant-slug: ${cookieSlug}`)
+    console.warn(`[TenantIsolation]    Token tenant.subDomain: ${tenant.subDomain}`)
+    console.warn(`[TenantIsolation]    Token tenantId: ${tenantId}`)
+    // ⚠️ بلاک نمی‌کنیم چون ممکن است cookie قدیمی باشد
+    // فقط لاگ می‌زنیم تا در production رصد کنیم
+    // اگر این لاگ زیاد دیده شد، باید بلاک کنیم
+  }
+
+ 
 
   let subscription: any
   try {

@@ -1,125 +1,198 @@
+// ============================================================================
+// src/app/success/page.tsx — Success Page (v10.7)
+// ★ نمایش پیام موفقیت ثبت‌نام + پاک‌سازی نهایی + redirect به dashboard
+// ★ v10.7: تأیید تطابق token با tenantId برای جلوگیری از نشت داده
+// ============================================================================
+
 'use client'
 
-import { Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { CheckCircle2, Sparkles, ArrowLeft, Crown, Store, Infinity } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { CheckCircle2, Loader2, ArrowLeft } from 'lucide-react'
 
-function SuccessContent() {
+export default function SuccessPage() {
+  const router = useRouter()
   const searchParams = useSearchParams()
-  const subdomain = searchParams.get('subdomain') || ''
-  const planName = searchParams.get('plan') || 'simple'
+  const [countdown, setCountdown] = useState(3)
+  const [verified, setVerified] = useState(false)
 
-  const planLabels: Record<string, string> = {
-    simple: 'پلن پایه',
-    professional: 'پلن پیشرفته',
-    enterprise: 'پلن حرفه‌ای',
-  }
+  useEffect(() => {
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v10.7: پاک‌سازی نهایی و تأیید tenantId
+    // قبل از redirect به dashboard، یک بار دیگر تطابق را چک کن
+    // ═══════════════════════════════════════════════════════════════
+    const tenantIdFromUrl = searchParams.get('tenantId')
+    const subdomain = searchParams.get('subdomain')
+    const plan = searchParams.get('plan')
 
-  // ★ استفاده از window.location.href به جای router.push
-  // این کار باعث page reload می‌شود و app-shell.tsx می‌تواند
-  // توکن را از localStorage بخواند و user را populate کند
-  const goToDashboard = () => {
-    console.log('[Success] Navigating to dashboard via full reload...')
-    window.location.href = '/dashboard'
+    console.log('[Success] 🎉 Registration success page loaded')
+    console.log('[Success] Params:', { tenantIdFromUrl, subdomain, plan })
+
+    if (typeof window !== 'undefined') {
+      try {
+        // بررسی token فعلی
+        const token = localStorage.getItem('token')
+        if (token && tenantIdFromUrl) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+
+            if (payload.tenantId !== tenantIdFromUrl) {
+              console.error('[Success] ❌ Token mismatch! Clearing corrupted data...')
+              console.error('[Success] Token has:', payload.tenantId)
+              console.error('[Success] URL expects:', tenantIdFromUrl)
+
+              // token اشتباه است → پاک کن
+              const keysToRemove = [
+                'token', 'refreshToken', 'user', 'tenant',
+                'storeName', 'planName', 'shop-accounting-store',
+                'portal_token',
+              ]
+              keysToRemove.forEach(key => {
+                try { localStorage.removeItem(key) } catch {}
+              })
+
+              // پاک کردن wizard flags
+              Object.keys(localStorage).forEach(key => {
+                if (key.includes('wizard') || key.includes('force_') || key.includes('renewal_')) {
+                  try { localStorage.removeItem(key) } catch {}
+                }
+              })
+
+              // پاک کردن sessionStorage
+              try { sessionStorage.clear() } catch {}
+
+              // پاک کردن cookie
+              document.cookie.split(';').forEach(c => {
+                const name = c.split('=')[0].trim()
+                if (['tenant-slug', 'tenant-view', 'auth-token'].includes(name)) {
+                  try {
+                    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`
+                  } catch {}
+                }
+              })
+
+              // redirect به login
+              setTimeout(() => {
+                window.location.href = '/auth/login?error=token_mismatch'
+              }, 1000)
+              return
+            } else {
+              console.log('[Success] ✅ Token matches tenantId:', tenantIdFromUrl)
+              setVerified(true)
+            }
+          } catch (err) {
+            console.warn('[Success] Token parse error:', err)
+          }
+        } else {
+          console.warn('[Success] No token or tenantId found')
+        }
+      } catch (err) {
+        console.warn('[Success] Verification error:', err)
+      }
+    }
+
+    // countdown و redirect
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          console.log('[Success] 🚀 Redirecting to dashboard...')
+          router.replace('/dashboard')
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [router, searchParams])
+
+  const handleGoToDashboard = () => {
+    console.log('[Success] 🚀 Manual redirect to dashboard')
+    router.replace('/dashboard')
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
-      <div className="w-full max-w-lg">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 text-center border border-emerald-100">
-          
-          {/* آیکون موفقیت */}
-          <div className="relative inline-block mb-6">
-            <div className="absolute inset-0 bg-emerald-400 rounded-full blur-xl opacity-30 animate-pulse" />
-            <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-xl">
-              <CheckCircle2 className="w-12 h-12 text-white" />
-            </div>
+      <div className="text-center space-y-6 max-w-md w-full">
+        {/* آیکون موفقیت */}
+        <div className="relative inline-block">
+          <div className="absolute inset-0 bg-emerald-400 rounded-full blur-2xl opacity-30 animate-pulse" />
+          <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-2xl">
+            <CheckCircle2 className="w-12 h-12 text-white" />
           </div>
+        </div>
 
-          <h1 className="text-2xl font-black text-gray-900 mb-2">
-            🎉 ثبت‌نام با موفقیت انجام شد!
+        {/* عنوان و توضیح */}
+        <div>
+          <h1 className="text-3xl font-black text-gray-900 mb-2">
+            ثبت‌نام موفق! 🎉
           </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            حساب شما ایجاد شد. از تمام امکانات پلن انتخابی استفاده کنید.
-          </p>
-
-          {/* اطلاعات حساب */}
-          <div className="bg-gradient-to-bl from-violet-50 to-purple-50 border border-violet-200 rounded-2xl p-5 mb-6 space-y-3 text-right">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Store className="w-4 h-4 text-violet-600" />
-                <span className="text-sm text-gray-600">زیردامنه:</span>
-              </div>
-              <span className="font-bold text-gray-900" dir="ltr">{subdomain || '—'}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Crown className="w-4 h-4 text-violet-600" />
-                <span className="text-sm text-gray-600">پلن:</span>
-              </div>
-              <span className="font-bold text-violet-700">
-                {planLabels[planName] || 'پلن پایه'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between pt-2 border-t border-dashed border-violet-200">
-              <div className="flex items-center gap-2">
-                <Infinity className="w-4 h-4 text-purple-600" />
-                <span className="text-sm text-gray-600">مدت اعتبار:</span>
-              </div>
-              <span className="font-black text-purple-700">مادام‌العمر</span>
-            </div>
-          </div>
-
-          {/* مزایا */}
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-right">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-amber-600" />
-              <span className="text-sm font-bold text-amber-900">مزایای حساب شما:</span>
-            </div>
-            <ul className="space-y-1 text-xs text-amber-800">
-              <li>✓ دسترسی کامل به تمام امکانات {planLabels[planName] || 'پلن'}</li>
-              <li>✓ پشتیبانی کامل و رایگان</li>
-              <li>✓ بدون نیاز به کارت بانکی</li>
-              <li>✓ ذخیره‌سازی ابری امن</li>
-            </ul>
-          </div>
-
-          {/* دکمه ورود */}
-          <Button
-            onClick={goToDashboard}
-            className="w-full h-12 bg-gradient-to-l from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold gap-2 text-base"
-          >
-            ورود به داشبورد
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-
-          <p className="text-center text-xs text-gray-400 mt-4">
-            با کلیک روی دکمه بالا وارد داشبورد می‌شوید
+          <p className="text-gray-600 leading-relaxed">
+            فروشگاه شما با موفقیت ایجاد شد.
+            <br />
+            در حال انتقال به داشبورد...
           </p>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-4">
-          در صورت مشکل، با پشتیبانی تماس بگیرید
+        {/* اطلاعات فروشگاه */}
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-emerald-100 text-right space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500">نام فروشگاه:</span>
+            <span className="text-sm font-bold text-gray-900">
+              {searchParams.get('subdomain') || '-'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500">پلن:</span>
+            <span className="text-sm font-bold text-emerald-600">
+              {searchParams.get('plan') === 'simple' ? 'پایه' :
+               searchParams.get('plan') === 'professional' ? 'پیشرفته' :
+               searchParams.get('plan') === 'enterprise' ? 'حرفه‌ای' : '-'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500">وضعیت:</span>
+            <span className="text-sm font-bold text-emerald-600 flex items-center gap-1">
+              {verified ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  تأیید شده
+                </>
+              ) : (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  در حال بررسی
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {/* شمارش معکوس */}
+        <div className="bg-white rounded-2xl shadow-lg p-6 border border-emerald-100">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
+            <span className="text-sm font-bold text-gray-700">
+              {countdown.toLocaleString('fa-IR')} ثانیه تا ورود به داشبورد
+            </span>
+          </div>
+
+          <button
+            onClick={handleGoToDashboard}
+            disabled={!verified}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            ورود فوری به داشبورد
+          </button>
+        </div>
+
+        {/* پیام زیرین */}
+        <p className="text-xs text-gray-400">
+          فروشگاه شما به مدت ۳ ماه به صورت رایگان فعال است
         </p>
       </div>
     </div>
-  )
-}
-
-export default function SuccessPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50">
-        <div className="text-center">
-          <div className="w-8 h-8 mx-auto mb-4 rounded-full bg-emerald-100 flex items-center justify-center">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 animate-pulse" />
-          </div>
-          <p className="text-sm text-gray-500">در حال بارگذاری...</p>
-        </div>
-      </div>
-    }>
-      <SuccessContent />
-    </Suspense>
   )
 }

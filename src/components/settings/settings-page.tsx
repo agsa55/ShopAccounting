@@ -194,17 +194,7 @@ export default function SettingsPage() {
               {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
             </TabsTrigger>
 
-            <TabsTrigger
-              value="subscription"
-              disabled={isDemo}
-              title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
-              className={`${tabClassEmerald} ${isDemo ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <Crown className="w-4 h-4" />
-              <span className="hidden sm:inline">اشتراک</span>
-              {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
-            </TabsTrigger>
-
+           
             {/* ═══ ردیف ۲: تنظیمات پیشرفته ═══ */}
             <TabsTrigger value="employees" className={tabClassEmerald}>
               <Users className="w-4 h-4" />

@@ -43,6 +43,7 @@ const PUBLIC_API_PATHS = [
   '/api/subscription/status',
   '/api/subscription/renew',
   '/api/setup-wizard/status',
+   '/api/tenants/check-availability',
 ];
 
 const STATIC_BYPASS_PATHS = ['/sw.js', '/manifest.json', '/robots.txt', '/sitemap.xml', '/favicon.ico'];

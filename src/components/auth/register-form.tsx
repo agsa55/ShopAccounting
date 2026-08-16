@@ -137,7 +137,11 @@ export default function RegisterForm() {
     setSubdomainChecking(true)
     setSubdomainAvailable(null)
     try {
-      const res = await fetch(`/api/tenants/check-availability?subdomain=${encodeURIComponent(value)}`)
+  const res = await fetch(`/api/tenants/check-availability?subdomain=${encodeURIComponent(value)}`, {
+  method: 'GET',
+  headers: { 'Content-Type': 'application/json' },
+  cache: 'no-store',
+})
       if (res.ok) {
         const data = await res.json()
         const info = data.data?.subdomain
@@ -272,7 +276,7 @@ export default function RegisterForm() {
     return () => clearInterval(timer)
   }, [otpCooldown])
 
-  const handleVerifyOtpAndRegister = async () => {
+   const handleVerifyOtpAndRegister = async () => {
     setError('')
     if (otpCode.length !== 6) {
       setError('کد باید ۶ رقم باشد')
@@ -337,14 +341,106 @@ export default function RegisterForm() {
 
       const { accessToken, refreshToken, user, tenant } = regData.data
 
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v10.7: پاک‌سازی کامل قبل از تنظیم token جدید
+      // جلوگیری از نشت داده‌های tenant قبلی (مشکل بحرانی)
+      // ═══════════════════════════════════════════════════════════════
       if (typeof window !== 'undefined') {
+        console.log('[Register] 🧹 Starting complete cache cleanup...')
+        
+        // ۱. پاک کردن کلیدهای مشخص
+        const keysToRemove = [
+          'token', 'refreshToken', 'user', 'tenant',
+          'storeName', 'planName', 'shop-accounting-store',
+          'portal_token', 'auth-token',
+        ]
+
+        keysToRemove.forEach(key => {
+          try { localStorage.removeItem(key) } catch (e) {}
+        })
+
+        // ۲. پاک کردن همه key های wizard و subscription و force
+        Object.keys(localStorage).forEach(key => {
+          if (key.includes('wizard') || key.includes('force_') || 
+              key.includes('renewal_') || key.includes('basic_renewal')) {
+            try { localStorage.removeItem(key) } catch (e) {}
+          }
+        })
+
+        // ۳. پاک کردن sessionStorage
+        try { sessionStorage.clear() } catch (e) {}
+
+        // ۴. پاک کردن cookie های tenant
+        document.cookie.split(';').forEach(c => {
+          const name = c.split('=')[0].trim()
+          if (['tenant-slug', 'tenant-view', 'auth-token'].includes(name)) {
+            try {
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`
+            } catch (e) {}
+          }
+        })
+
+        console.log('[Register] ✅ Cache cleaned successfully')
+
+        // ۵. تنظیم tenant-slug جدید در cookie
+        if (tenant?.subDomain) {
+          const isLocalhost = window.location.hostname === 'localhost' ||
+                             window.location.hostname === '127.0.0.1'
+          const cookieStr = isLocalhost
+            ? `tenant-slug=${tenant.subDomain}; path=/; max-age=2592000; SameSite=Lax`
+            : `tenant-slug=${tenant.subDomain}; path=/; max-age=2592000; SameSite=Lax; domain=.${window.location.hostname.split('.').slice(-2).join('.')}`
+          try {
+            document.cookie = cookieStr
+            console.log('[Register] ✅ tenant-slug cookie set:', tenant.subDomain)
+          } catch (e) {
+            console.warn('[Register] Cookie set failed:', e)
+          }
+        }
+
+        // ۶. حالا token های جدید را تنظیم کن
         setAccessToken(accessToken || regData.data.token)
         if (refreshToken) setRefreshToken(refreshToken)
         if (user) setStoredUser(user)
+
+        // ۷. ذخیره tenant جدید در localStorage
+        if (tenant) {
+          localStorage.setItem('tenant', JSON.stringify(tenant))
+          localStorage.setItem('storeName', tenant.companyName || '')
+          localStorage.setItem('planName', tenant.planName || '')
+        }
+
+        // ۸. علامت‌گذاری wizard برای اولین ورود
+        if (tenant?.id) {
+          const forceWizardKey = `force_wizard_${tenant.id}`
+          localStorage.setItem(forceWizardKey, 'true')
+          console.log('[Register] 🎯 Wizard force flag set for tenant:', tenant.id)
+        }
+
+        // ۹. بررسی نهایی — تأیید تطابق
+        const finalToken = localStorage.getItem('token')
+        if (finalToken && tenant?.id) {
+          try {
+            const payload = JSON.parse(atob(finalToken.split('.')[1]))
+            if (payload.tenantId !== tenant.id) {
+              console.error('[Register] ❌ CRITICAL: Token mismatch after registration!')
+              console.error('[Register] Expected:', tenant.id)
+              console.error('[Register] Got:', payload.tenantId)
+              // پاک‌سازی فوری و redirect به login
+              localStorage.clear()
+              sessionStorage.clear()
+              window.location.href = '/auth/login?error=registration_mismatch'
+              return
+            } else {
+              console.log('[Register] ✅ Token verified:', tenant.id)
+            }
+          } catch (e) {
+            console.warn('[Register] Token verification error:', e)
+          }
+        }
       }
 
       // ★ Redirect به صفحه موفقیت
-    router.push(`/success?subdomain=${subdomain}&plan=${planName}&tenantId=${tenant?.id || ''}`)
+      router.push(`/success?subdomain=${subdomain}&plan=${planName}&tenantId=${tenant?.id || ''}`)
     } catch (err) {
       console.error('[Register] Error:', err)
       setError('خطا در ارتباط با سرور')
@@ -352,7 +448,7 @@ export default function RegisterForm() {
       setActivating(false)
     }
   }
-
+  
   const handleBack = () => {
     setError('')
     setCurrentStep((prev) => Math.max(prev - 1, 1))

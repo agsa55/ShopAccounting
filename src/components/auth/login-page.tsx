@@ -1,6 +1,7 @@
 // ============================================================================
-// src/components/auth/login-page.tsx — Login Page (v3.0 - Fixed Redirect)
+// src/components/auth/login-page.tsx — Login Page (v10.7 - Secure Cleanup)
 // ShopAccounting — Unified Single Database Architecture
+// ★ v10.7: پاک‌سازی کامل cache در mount برای جلوگیری از نشت داده
 // ============================================================================
 
 'use client'
@@ -82,15 +83,36 @@ export default function LoginPage() {
   const setCurrentTenant = useAppStore((s) => s.setCurrentTenant)
   const setPlanName = useAppStore((s) => s.setPlanName)
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v10.7: پاک‌سازی کامل در mount
+  // جلوگیری از نشت داده‌های tenant قبلی
+  // ═══════════════════════════════════════════════════════════════
   useEffect(() => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('refreshToken')
-    localStorage.removeItem('user')
-    localStorage.removeItem('tenant')
-    localStorage.removeItem('storeName')
-    localStorage.removeItem('planName')
-    localStorage.removeItem('shop-accounting-store')
-    
+    console.log('[Login] 🧹 Cleaning up all old auth data...')
+
+    // ۱. پاک کردن کلیدهای مشخص
+    const keysToRemove = [
+      'token', 'refreshToken', 'user', 'tenant',
+      'storeName', 'planName', 'shop-accounting-store',
+      'portal_token', 'auth-token',
+    ]
+
+    keysToRemove.forEach(key => {
+      try { localStorage.removeItem(key) } catch (e) {}
+    })
+
+    // ۲. پاک کردن wizard flags و force flags
+    Object.keys(localStorage).forEach(key => {
+      if (key.includes('wizard') || key.includes('force_') ||
+          key.includes('renewal_') || key.includes('basic_renewal')) {
+        try { localStorage.removeItem(key) } catch (e) {}
+      }
+    })
+
+    // ۳. پاک کردن sessionStorage
+    try { sessionStorage.clear() } catch (e) {}
+
+    // ۴. ریست store
     useAppStore.setState({
       isAuthenticated: false,
       user: null,
@@ -99,6 +121,9 @@ export default function LoginPage() {
       currentView: 'login',
     })
 
+    console.log('[Login] ✅ Cleanup complete')
+
+    // ۵. بارگذاری tenant branding از cookie
     const slug = getTenantSlugClient()
     if (slug) {
       fetch(`/api/tenants/resolve?slug=${slug}`)
@@ -120,14 +145,14 @@ export default function LoginPage() {
     return () => clearInterval(timer)
   }, [resendCountdown])
 
-   // ★★★ v3.39: تابع اصلاح‌شده برای هدایت پس از لاگین
+  // ★★★ v3.39: تابع اصلاح‌شده برای هدایت پس از لاگین
   function redirectAfterLogin(subDomain: string, userType?: string, portalToken?: string) {
     console.log('[DEBUG] redirectAfterLogin اجرا شد با', subDomain, 'userType:', userType)
-    
+
     // تنظیم کوکی tenant-slug (سازگار با local و production)
     const cookieDomain = typeof window !== 'undefined' ? window.location.hostname : ''
     const isLocalhost = cookieDomain === 'localhost' || cookieDomain === '127.0.0.1'
-    
+
     if (isLocalhost) {
       document.cookie = `tenant-slug=${subDomain}; path=/; max-age=2592000; SameSite=Lax`
     } else {
@@ -140,9 +165,7 @@ export default function LoginPage() {
       if (portalToken) {
         const portalPath = `/portal/${portalToken}`
         console.log('[DEBUG] Redirecting customer to', portalPath)
-        
-        // استفاده از window.location.replace برای redirect کامل
-        // این روش هم در local و هم در production کار می‌کند
+
         if (typeof window !== 'undefined') {
           window.location.replace(portalPath)
         }
@@ -162,11 +185,7 @@ export default function LoginPage() {
     }
   }
 
-  // ★ v3.40: انصراف → هدایت سریع به لاندینگ با reload کامل
-  // window.location.replace به جای href استفاده می‌شود چون:
-  // 1. صفحه را کامل reload می‌کند (جلوگیری از صفحه سفید)
-  // 2. state های React پاک می‌شوند
-  // 3. تاریخچه مرورگر آلوده نمی‌شود (Back به لاگین برنمی‌گردد)
+  // ★ v10.7: انصراف → هدایت سریع به لاندینگ با reload کامل
   function handleGoToLanding() {
     // پاک کردن پلن انتخابی از store
     setSelectedPlanId(null)
@@ -174,9 +193,24 @@ export default function LoginPage() {
     window.location.replace('/')
   }
 
-     async function handleLoginSuccess(data: LoginResponse['data']) {
+  async function handleLoginSuccess(data: LoginResponse['data']) {
     if (!data) return
     console.log('[DEBUG] handleLoginSuccess شروع شد', data)
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v10.7: پاک‌سازی قبل از تنظیم token جدید (جلوگیری از نشت)
+    // ═══════════════════════════════════════════════════════════════
+    if (typeof window !== 'undefined') {
+      console.log('[Login] 🧹 Clearing old tokens before setting new ones...')
+      const keysToRemove = [
+        'token', 'refreshToken', 'user', 'tenant',
+        'storeName', 'planName', 'shop-accounting-store',
+        'portal_token',
+      ]
+      keysToRemove.forEach(key => {
+        try { localStorage.removeItem(key) } catch (e) {}
+      })
+    }
 
     const isPortalUser = data.user.userType === 'portalUser'
     const portalToken = isPortalUser ? (data.user as any).portalToken : null
@@ -228,6 +262,31 @@ export default function LoginPage() {
       setPlanName(data.tenant.planName || '')
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v10.7: بررسی نهایی تطابق token با tenant (Safety Net)
+    // ═══════════════════════════════════════════════════════════════
+    if (typeof window !== 'undefined' && data.tenant?.id) {
+      try {
+        const finalToken = localStorage.getItem('token')
+        if (finalToken) {
+          const payload = JSON.parse(atob(finalToken.split('.')[1]))
+          if (payload.tenantId !== data.tenant.id) {
+            console.error('[Login] ❌ CRITICAL: Token mismatch after login!')
+            console.error('[Login] Expected:', data.tenant.id)
+            console.error('[Login] Got:', payload.tenantId)
+            setError('خطای امنیتی: عدم تطابق نشست. لطفاً دوباره تلاش کنید.')
+            localStorage.clear()
+            sessionStorage.clear()
+            setLoading(false)
+            return
+          }
+          console.log('[Login] ✅ Token verified for tenant:', data.tenant.id)
+        }
+      } catch (e) {
+        console.warn('[Login] Token verification error:', e)
+      }
+    }
+
     // برای portalUser، مستقیم redirect کن
     if (isPortalUser && portalToken) {
       const portalPath = `/portal-view?token=${portalToken}`
@@ -267,15 +326,11 @@ export default function LoginPage() {
                 window.location.replace('/renewal?reason=after_login_expired')
                 return
               }
-              // اگر پلن فعال است (مادام‌العمر یا تازه تمدید شده) → /dashboard (Wizard تمدید باز می‌شود)
             }
-
-            // برای first_setup یا ready → /dashboard
           }
         }
       } catch (err) {
         console.error('[DEBUG] Error checking status after login:', err)
-        // در صورت خطا، به داشبورد برو
       }
     }
 
@@ -288,6 +343,7 @@ export default function LoginPage() {
       }
     }
   }
+
   async function handlePasswordLogin(e: React.FormEvent) {
     e.preventDefault()
     setError('')
@@ -306,10 +362,10 @@ export default function LoginPage() {
         handleLoginSuccess(data.data)
       } else {
         setError(data.error || 'خطا در ورود')
+        setLoading(false)
       }
     } catch {
       setError('خطا در اتصال به سرور')
-    } finally {
       setLoading(false)
     }
   }
@@ -407,9 +463,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
       <div className="w-full max-w-md">
-              {/* ★ v3.40: دکمه انصراف بالای صفحه (بهبودیافته) */}
+        {/* ★ v10.7: دکمه انصراف بالای صفحه (بهبودیافته) */}
         <button
           type="button"
           onClick={handleGoToLanding}
@@ -418,6 +474,7 @@ export default function LoginPage() {
           <ArrowRight className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           <span>بازگشت به صفحه اصلی</span>
         </button>
+
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl shadow-lg shadow-emerald-200 mb-4">
             <Store className="w-8 h-8 text-white" />
@@ -619,7 +676,7 @@ export default function LoginPage() {
             </form>
           )}
 
-                  <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
+          <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
             {/* ── لینک ثبت‌نام ── */}
             <p className="text-sm text-gray-500 text-center">
               ثبت‌نام نکرده‌اید؟{' '}
@@ -635,7 +692,7 @@ export default function LoginPage() {
               </button>
             </p>
 
-            {/* ── ★ v3.40: دکمه انصراف واضح ── */}
+            {/* ── ★ v10.7: دکمه انصراف واضح ── */}
             <button
               type="button"
               onClick={handleGoToLanding}
@@ -656,7 +713,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          ShopAccounting v3.0 — سیستم حسابداری فروشگاهی
+          ShopAccounting v10.7 — سیستم حسابداری فروشگاهی
         </p>
       </div>
     </div>

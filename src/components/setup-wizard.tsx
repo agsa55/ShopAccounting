@@ -207,15 +207,25 @@ export function useSetupWizard() {
   useEffect(() => {
     if (!tenantId || checked) return
 
-    const isActuallyDemo = isDemo || planName === 'demo' || planName === 'trial' || billingCycle === 'trial'
-
-    if (isActuallyDemo) {
-      console.log('[useSetupWizard] 🚫 Blocked: Demo/Trial account')
-      setChecked(true)
-      return
-    }
+    // ★ v10.6: حذف شرط isActuallyDemo
+    // همه پلن‌ها (حتی professional و enterprise) نیاز به wizard دارند
+    // چون همه ۹۰ روز رایگان دارند ولی دمو نیستند
 
     const checkWizardStatus = async () => {
+      console.log('[useSetupWizard] 🔄 Checking wizard status for tenant:', tenantId)
+      
+      // ★ v10.6: پاک کردن flag force_wizard اگر وجود دارد (از ثبت‌نام تازه)
+      const forceWizardKey = `force_wizard_${tenantId}`
+      const forceWizard = typeof window !== 'undefined' && localStorage.getItem(forceWizardKey) === 'true'
+      if (forceWizard) {
+        console.log('[useSetupWizard] 🆕 Force wizard after registration — clearing flag')
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(forceWizardKey)
+          // پاک کردن wizard_done flag که ممکن است از تست‌های قبلی مانده باشد
+          const wizardDoneKey = `wizard_done_${tenantId}`
+          localStorage.removeItem(wizardDoneKey)
+        }
+      }
       try {
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
         if (!token) {
@@ -286,9 +296,19 @@ export function useSetupWizard() {
           }
         }
 
-        const res = await fetch('/api/setup-wizard/status', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
+          // ★ v10.6: اگر force_wizard flag فعال است، مستقیم wizard را باز کن
+      if (forceWizard) {
+        console.log('[useSetupWizard] 🆕 Force wizard — opening first_setup')
+        setWizardMode('first_setup')
+        setTimeout(() => setOpen(true), 600)
+        setChecked(true)
+        return
+      }
+
+      const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      })
 
         if (!res.ok) {
           console.warn('[useSetupWizard] Status API failed:', res.status)
