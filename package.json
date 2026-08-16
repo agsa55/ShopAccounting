@@ -2,7 +2,11 @@
   "name": "nextjs_tailwind_shadcn_ts",
   "version": "0.2.0",
   "private": true,
-   "scripts": {
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
     "dev": "next dev -p 3000",
     "build": "prisma generate && next build",
     "start": "next start -p 3000",
@@ -18,7 +22,6 @@
     "clean": "rm -rf .next node_modules/.cache",
     "deploy:build": "npm run clean && npm run build",
     "deploy:start": "NODE_ENV=production node .next/standalone/server.js"
-   
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
