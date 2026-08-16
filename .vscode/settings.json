@@ -1,3 +1,9 @@
 {
-    "git.ignoreLimitWarning": true
+  "files.associations": {
+    ".dockerignore": "ignore",
+    ".gitignore": "ignore",
+    "*.dockerignore": "ignore"
+  },
+  "js/ts.validate.enabled": true,
+  "js/ts.preferences.importModuleSpecifier": "relative"
 }

@@ -216,6 +216,8 @@ export default function DashboardPage() {
 
   // ✅ ✅ ✅ اصلاح قطعی: بستن اجباری ویزارد اگر پلن دمو یا تستی است (جلوگیری از Race Condition)
   useEffect(() => {
+
+    
     if (planName === 'demo' || planName === 'trial') {
       setOpen(false)
     }

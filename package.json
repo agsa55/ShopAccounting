@@ -3,17 +3,21 @@
   "version": "0.2.0",
   "private": true,
    "scripts": {
-    "dev": "next dev -p 3000 ",
-    "build": "next build",
+    "dev": "next dev -p 3000",
+    "build": "prisma generate && next build",
     "start": "next start -p 3000",
+    "start:prod": "NODE_ENV=production node .next/standalone/server.js",
     "lint": "eslint .",
     "db:push": "prisma db push && prisma generate && prisma db seed",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force && prisma db seed",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "clean": "rm -rf .next node_modules/.cache",
+    "deploy:build": "npm run clean && npm run build",
+    "deploy:start": "NODE_ENV=production node .next/standalone/server.js"
    
   },
   "prisma": {

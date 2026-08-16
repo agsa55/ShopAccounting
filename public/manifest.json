@@ -1,7 +1,7 @@
 {
-  "name": "ShopAccounting — حسابداری فروشگاهی",
-  "short_name": "حسابداری",
-  "description": "پلتفرم حسابداری و مدیریت فروشگاه",
+  "name": "رهگشا - سیستم حسابداری فروشگاهی",
+  "short_name": "رهگشا",
+  "description": "سیستم حسابداری فروشگاهی هوشمند و ابری",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAFAFC",
@@ -12,8 +12,6 @@
   "scope": "/",
   "id": "/",
   "icons": [
-   
-   
     {
       "src": "/icons/icon-192x192.png",
       "sizes": "192x192",
@@ -28,13 +26,12 @@
     }
   ],
   "categories": ["finance", "business", "productivity"],
-  "screenshots": [],
   "shortcuts": [
     {
       "name": "داشبورد",
       "short_name": "داشبورد",
       "description": "رفتن به داشبورد",
-      "url": "/?section=dashboard",
+      "url": "/dashboard",
       "icons": [
         {
           "src": "/icons/icon-192x192.png",

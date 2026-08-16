@@ -2,24 +2,50 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  
   typescript: {
     ignoreBuildErrors: true,
   },
+  
   reactStrictMode: false,
-
+  
+  // ★ بهینه‌سازی تصاویر برای کاهش مصرف حافظه
+  images: {
+    unoptimized: true,
+    remotePatterns: [],
+  },
+  
   // ★ بسته‌هایی که نباید توسط Next.js bundle شوند
   serverExternalPackages: ["mssql", "tedious", "bcryptjs", "bcrypt"],
-
+  
   // ★ v3.1: رفع هشدار NFT (file tracing) برای Prisma Client
-  //   مسیر client مطابق لاگ شما: ./src/generated/client/index.js
-  //   این باعث می‌شود Turbopack فقط فایل‌های لازم را trace کند، نه کل پروژه را
   outputFileTracingIncludes: {
     "/api/**": ["./src/generated/client/**/*"],
   },
-
-  // ⭐ PWA & Service Worker headers
+  
+  // ★ فشرده‌سازی
+  compress: true,
+  
+  // ★ Headers برای امنیت و SEO
   async headers() {
     return [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          {
+            key: "X-Frame-Options",
+            value: "DENY",
+          },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+        ],
+      },
       {
         source: "/sw.js",
         headers: [
@@ -52,6 +78,15 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/icons/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/_next/static/:path*",
         headers: [
           {
             key: "Cache-Control",
