@@ -1,14 +1,12 @@
 'use client'
 
 // ============================================================================
-// src/components/setup-wizard.tsx — v3.1 ★★★
+// src/components/setup-wizard.tsx — v10.9 ★★★
+// ★ v10.9: جلوگیری از Double Submit + پاک‌سازی cache
 // ★ v3.1: پشتیبانی از حالت basic_renewal_setup برای پلن پایه
-//   - first_setup: راه‌اندازی اولیه
-//   - renewal_setup: تمدید هوشمند (پلن پیشرفته/حرفه‌ای)
-//   - basic_renewal_setup: تمدید دوره پلن پایه (بدون سال مالی)
 // ============================================================================
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName, type PlanName } from '@/lib/plan-features'
 import { useDemoStatus } from '@/lib/use-demo-status'
@@ -186,20 +184,14 @@ export function useSetupWizard() {
   const [wizardMode, setWizardMode] = useState<'first_setup' | 'renewal_setup' | 'basic_renewal_setup' | null>(null)
   const [renewalData, setRenewalData] = useState<any>(null)
 
-  // ═══════════════════════════════════════════════════════════════
-  //  ★ Listener برای trigger از fiscal-year-tab (بعد از بستن سال)
-  // ═══════════════════════════════════════════════════════════════
   useEffect(() => {
     const handler = () => {
       console.log('[useSetupWizard] 🔄 Renewal wizard triggered from fiscal-year-tab')
-
       if (typeof window !== 'undefined' && tenantId) {
         localStorage.setItem(`force_renewal_setup_${tenantId}`, 'true')
       }
-
       setChecked(false)
     }
-
     window.addEventListener('trigger-renewal-setup', handler)
     return () => window.removeEventListener('trigger-renewal-setup', handler)
   }, [tenantId])
@@ -207,21 +199,15 @@ export function useSetupWizard() {
   useEffect(() => {
     if (!tenantId || checked) return
 
-    // ★ v10.6: حذف شرط isActuallyDemo
-    // همه پلن‌ها (حتی professional و enterprise) نیاز به wizard دارند
-    // چون همه ۹۰ روز رایگان دارند ولی دمو نیستند
-
     const checkWizardStatus = async () => {
       console.log('[useSetupWizard] 🔄 Checking wizard status for tenant:', tenantId)
-      
-      // ★ v10.6: پاک کردن flag force_wizard اگر وجود دارد (از ثبت‌نام تازه)
+
       const forceWizardKey = `force_wizard_${tenantId}`
       const forceWizard = typeof window !== 'undefined' && localStorage.getItem(forceWizardKey) === 'true'
       if (forceWizard) {
         console.log('[useSetupWizard] 🆕 Force wizard after registration — clearing flag')
         if (typeof window !== 'undefined') {
           localStorage.removeItem(forceWizardKey)
-          // پاک کردن wizard_done flag که ممکن است از تست‌های قبلی مانده باشد
           const wizardDoneKey = `wizard_done_${tenantId}`
           localStorage.removeItem(wizardDoneKey)
         }
@@ -233,15 +219,12 @@ export function useSetupWizard() {
           return
         }
 
-        // ★ v10.3: قبل از چک کردن wizard، وضعیت اشتراک را چک کن
-        // شامل تشخیص SUBSCRIPTION_EXPIRED از middleware
         try {
           const subRes = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
             headers: { Authorization: `Bearer ${token}` },
             cache: 'no-store',
           })
 
-          // ★ v10.3: تشخیص قفل از middleware (پاسخ 403)
           if (subRes.status === 403) {
             try {
               const errData = await subRes.json()
@@ -255,7 +238,6 @@ export function useSetupWizard() {
 
           const subData = await subRes.json()
 
-          // ★ v10.3: تشخیص قفل از success: false با SUBSCRIPTION_EXPIRED
           if (!subData.success && subData.code === 'SUBSCRIPTION_EXPIRED') {
             console.log('[useSetupWizard] 🔒 SUBSCRIPTION_EXPIRED in response — skipping wizard')
             setChecked(true)
@@ -268,14 +250,12 @@ export function useSetupWizard() {
             const daysRemaining = d.daysUntilUpdate ?? 0
             const isLocked = d.isLocked || daysRemaining <= 0
 
-            // ★ اگر قفل شده → wizard را باز نکن
             if (isLocked) {
               console.log('[useSetupWizard] 🔒 System locked — skipping wizard')
               setChecked(true)
               return
             }
 
-            // ★ اگر در دوره هشدار ۳ روزه → wizard را باز نکن
             if (!isLifetime && daysRemaining > 0 && daysRemaining <= 3) {
               console.log(`[useSetupWizard] ⚠️ Warning period (${daysRemaining} days) — skipping wizard`)
               setChecked(true)
@@ -296,19 +276,18 @@ export function useSetupWizard() {
           }
         }
 
-          // ★ v10.6: اگر force_wizard flag فعال است، مستقیم wizard را باز کن
-      if (forceWizard) {
-        console.log('[useSetupWizard] 🆕 Force wizard — opening first_setup')
-        setWizardMode('first_setup')
-        setTimeout(() => setOpen(true), 600)
-        setChecked(true)
-        return
-      }
+        if (forceWizard) {
+          console.log('[useSetupWizard] 🆕 Force wizard — opening first_setup')
+          setWizardMode('first_setup')
+          setTimeout(() => setOpen(true), 600)
+          setChecked(true)
+          return
+        }
 
-      const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      })
+        const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
 
         if (!res.ok) {
           console.warn('[useSetupWizard] Status API failed:', res.status)
@@ -327,7 +306,6 @@ export function useSetupWizard() {
 
         if (forceRenewal) {
           console.log('[useSetupWizard] 🔄 Opening forced wizard:', status)
-
           if (status === 'basic_renewal_setup') {
             setWizardMode('basic_renewal_setup')
           } else if (status === 'renewal_setup') {
@@ -335,7 +313,6 @@ export function useSetupWizard() {
           } else {
             setWizardMode('renewal_setup')
           }
-
           setRenewalData(data.data.wizardData)
           setTimeout(() => setOpen(true), 600)
           setChecked(true)
@@ -375,7 +352,6 @@ export function useSetupWizard() {
             setChecked(true)
             return
           }
-
           console.log('[useSetupWizard] 📦 Opening basic_renewal_setup wizard')
           setWizardMode('basic_renewal_setup')
           setRenewalData(data.data.wizardData)
@@ -390,7 +366,6 @@ export function useSetupWizard() {
             setChecked(true)
             return
           }
-
           const isExpired = subscription?.isExpired || subscription?.status === 'read_only'
           if (isExpired && !subscription?.isLifetime) {
             console.log('[useSetupWizard] 💳 Plan expired — redirect to /renewal')
@@ -400,7 +375,6 @@ export function useSetupWizard() {
             setChecked(true)
             return
           }
-
           console.log('[useSetupWizard] 🔄 Opening renewal_setup wizard')
           setWizardMode('renewal_setup')
           setRenewalData(data.data.wizardData)
@@ -440,10 +414,42 @@ export function useSetupWizard() {
       } else {
         markWizardDone(tenantId)
       }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v10.9: پاک‌سازی کامل cache برای جلوگیری از نمایش داده‌های قدیمی
+      // ═══════════════════════════════════════════════════════════════
+      if (typeof window !== 'undefined') {
+        console.log('[SetupWizard] 🧹 Clearing cache after wizard completion...')
+
+        const cacheKeys = [
+          'dashboard_stats',
+          'journal_entries',
+          'accounts_list',
+          'initial_balance',
+          'products_list',
+          'customers_list',
+        ]
+
+        cacheKeys.forEach(key => {
+          try { localStorage.removeItem(key) } catch {}
+        })
+
+        try { sessionStorage.clear() } catch {}
+
+        console.log('[SetupWizard] ✅ Cache cleared')
+      }
     }
     setOpen(false)
     setWizardMode(null)
     setRenewalData(null)
+
+    // ★ v10.9: Force reload dashboard بعد از ۵۰۰ میلی‌ثانیه
+    setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        console.log('[SetupWizard] 🔄 Reloading page to fetch fresh data...')
+        window.location.reload()
+      }
+    }, 500)
   }, [tenantId, wizardMode, renewalData])
 
   return { open, setOpen, handleComplete, wizardMode, renewalData }
@@ -475,11 +481,9 @@ export function SetupWizard(props: SetupWizardProps) {
     return 1
   }, [features])
 
-  // ★ حالت تمدید (پلن پیشرفته/حرفه‌ای)
   const isRenewalMode = props.wizardMode === 'renewal_setup' && !!props.renewalData
   const renewalData = props.renewalData || null
-  
-  // ★★★ حالت تمدید پلن پایه
+
   const isBasicRenewalMode = props.wizardMode === 'basic_renewal_setup' && !!props.renewalData
   const basicRenewalData = props.renewalData || null
 
@@ -497,6 +501,8 @@ export function SetupWizard(props: SetupWizardProps) {
   // ═══ State های حالت بار اول ═══
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
+  // ★ v10.9: flag جداگانه برای جلوگیری از Double Submit در saveBalance
+  const [savingBalance, setSavingBalance] = useState(false)
 
   const [fyName, setFyName] = useState('')
   const [fyStart, setFyStart] = useState(todayISO())
@@ -534,7 +540,6 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }, [isRenewalMode, renewalData])
 
-  // ★★★ مقداردهی اولیه برای حالت تمدید پلن پایه
   useEffect(() => {
     if (isBasicRenewalMode && basicRenewalData) {
       setRenewalWarehouses(basicRenewalData.existingWarehouses || [])
@@ -545,11 +550,11 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }, [isBasicRenewalMode, basicRenewalData])
 
-  // ═══ لود اولیه برای حالت بار اول ═══
   useEffect(() => {
     if (!open || isRenewalMode || isBasicRenewalMode) return
     setStep(0)
     setSaving(false)
+    setSavingBalance(false)
     setFyError('')
     setWhError('')
     setBalError('')
@@ -591,7 +596,6 @@ export function SetupWizard(props: SetupWizardProps) {
     } catch {}
   }
 
-  // ═══ اسم پیش‌فرض سال مالی ═══
   useEffect(() => {
     if (!isRenewalMode && !isBasicRenewalMode) {
       setFyName(getJalaliYearName(fyStart))
@@ -599,7 +603,6 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }, [fyStart, isRenewalMode, isBasicRenewalMode])
 
-  // ═══ توابع ذخیره برای حالت بار اول ═══
   const saveFY = async (): Promise<boolean> => {
     setFyError('')
     if (!fyName.trim()) { setFyError('نام سال مالی الزامی است'); return false }
@@ -707,8 +710,36 @@ export function SetupWizard(props: SetupWizardProps) {
     setBalError('')
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v10.9: saveBalance با flag جلوگیری از Double Submit
+  // ═══════════════════════════════════════════════════════════════
   const saveBalance = async (): Promise<boolean> => {
+    // ★ جلوگیری از Double Submit
+    if (savingBalance) {
+      console.log('[SetupWizard] ⚠️ saveBalance already in progress, ignoring duplicate call')
+      return false
+    }
+
     if (balItems.length === 0) return true
+
+    // ★ v10.9: Pre-check — آیا قبلاً موجودی ثبت شده؟
+    try {
+      const checkRes = await fetch('/api/initial-balance', {
+        headers: getToken(),
+        cache: 'no-store',
+      })
+      if (checkRes.ok) {
+        const checkData = await checkRes.json()
+        if (checkData.success && checkData.data && checkData.data.length > 0) {
+          console.warn('[SetupWizard] ⚠️ Initial balance already exists, skipping POST')
+          setBalIsPosted(checkData.summary?.isPosted || false)
+          return true
+        }
+      }
+    } catch (err) {
+      console.warn('[SetupWizard] Pre-check failed, continuing:', err)
+    }
+
     setBalError('')
     for (const item of balItems) {
       if (!item.title?.trim()) {
@@ -720,6 +751,9 @@ export function SetupWizard(props: SetupWizardProps) {
         return false
       }
     }
+
+    setSavingBalance(true)
+
     const requestBody = {
       items: balItems.map((b) => ({
         type: b.type,
@@ -729,12 +763,14 @@ export function SetupWizard(props: SetupWizardProps) {
       })),
       postToJournal: false,
     }
+
     try {
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(requestBody),
       })
+
       if (!res.ok && res.status !== 200) {
         const text = await res.text()
         const errMsg = `خطای سرور (${res.status})`
@@ -742,8 +778,11 @@ export function SetupWizard(props: SetupWizardProps) {
         toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
         return false
       }
+
       const data = await res.json()
-      if (data.success) {
+
+      // ★ v10.9: اگر skipped بود (idempotency)، موفق در نظر بگیر
+      if (data.success || data.data?.skipped) {
         setBalIsPosted(false)
         toast({
           title: '✅ پیش‌نویس سند افتتاحیه ذخیره شد',
@@ -751,6 +790,7 @@ export function SetupWizard(props: SetupWizardProps) {
         })
         return true
       }
+
       const errMsg = data.error || 'خطا در ثبت سند افتتاحیه'
       setBalError(errMsg)
       toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
@@ -760,6 +800,8 @@ export function SetupWizard(props: SetupWizardProps) {
       setBalError(errMsg)
       toast({ title: 'خطا', description: errMsg, variant: 'destructive' })
       return false
+    } finally {
+      setSavingBalance(false)
     }
   }
 
@@ -767,8 +809,13 @@ export function SetupWizard(props: SetupWizardProps) {
   const totalLiab = balItems.filter(b => b.type === 'liability').reduce((s, b) => s + b.amount, 0)
   const totalEquity = totalAssets - totalLiab
 
-  // ═══ Navigation برای حالت بار اول ═══
   const handleNext = async () => {
+    // ★ v10.9: جلوگیری از Double Submit در navigation
+    if (saving || savingBalance) {
+      console.log('[SetupWizard] ⚠️ Already saving, ignoring duplicate click')
+      return
+    }
+
     setSaving(true)
     setFyError('')
     setWhError('')
@@ -814,6 +861,7 @@ export function SetupWizard(props: SetupWizardProps) {
   }
 
   const handleSkip = async () => {
+    if (saving) return
     setSaving(true)
     try {
       if (step === 0 && !fyDone) {
@@ -836,6 +884,7 @@ export function SetupWizard(props: SetupWizardProps) {
   }
 
   const handleFinish = async () => {
+    if (saving) return
     setSaving(true)
     try {
       if (!fyDone) await autoCreateFY()
@@ -848,7 +897,6 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }
 
-  // ═══ افزودن انبار جدید در حالت تمدید ═══
   const handleAddRenewalWarehouse = async () => {
     if (!renewalNewWhName.trim()) {
       setRenewalError('نام انبار الزامی است')
@@ -902,8 +950,8 @@ export function SetupWizard(props: SetupWizardProps) {
     } catch {}
   }
 
-  // ═══ اجرای نهایی حالت تمدید (پلن پیشرفته/حرفه‌ای) ═══
   const handleRenewalFinish = async () => {
+    if (renewalSaving) return
     setRenewalSaving(true)
     setRenewalError('')
     try {
@@ -940,8 +988,8 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }
 
-  // ★★★ اجرای نهایی حالت تمدید پلن پایه (بدون سال مالی)
   const handleBasicRenewalFinish = async () => {
+    if (renewalSaving) return
     setRenewalSaving(true)
     setRenewalError('')
     try {
@@ -949,7 +997,6 @@ export function SetupWizard(props: SetupWizardProps) {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          // ★★★ بدون newYearName، startDate، endDate (پلن پایه سال مالی ندارد)
           isBasicPlan: true,
           warehouseUpdates: renewalWarehouses,
         }),
@@ -977,7 +1024,6 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }
 
-  // ═══ Progress برای حالت بار اول ═══
   const STEPS = [
     { label: 'سال مالی', icon: <Calendar className="w-4 h-4" />, done: fyDone },
     { label: 'انبار', icon: <Building2 className="w-4 h-4" />, done: whDone || warehouses.length > 0 },
@@ -985,9 +1031,6 @@ export function SetupWizard(props: SetupWizardProps) {
   ]
   const pct = step >= 3 ? 100 : Math.round((step / 3) * 100)
 
-  // ═══════════════════════════════════════════════════════════════
-  //  RENDER
-  // ═══════════════════════════════════════════════════════════════
   return (
     <Dialog open={open} onOpenChange={v => {
       if (!v) {
@@ -1004,9 +1047,6 @@ export function SetupWizard(props: SetupWizardProps) {
         onInteractOutside={e => (isRenewalMode || isBasicRenewalMode) && e.preventDefault()}
         onEscapeKeyDown={e => (isRenewalMode || isBasicRenewalMode) && e.preventDefault()}
       >
-        {/* ═══════════════════════════════════════════════════════════════ */}
-        {/*  ★★★ حالت تمدید پلن پایه (basic_renewal_setup)              */}
-        {/* ═══════════════════════════════════════════════════════════════ */}
         {isBasicRenewalMode ? (
           <>
             <DialogHeader className="pb-0">
@@ -1036,7 +1076,6 @@ export function SetupWizard(props: SetupWizardProps) {
               </div>
             ) : (
               <div className="space-y-4 py-2">
-                {/* ─── خلاصه سند اختتامیه قبلی ─── */}
                 <Card className="border-blue-200 bg-blue-50/30">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center gap-2 mb-2">
@@ -1054,7 +1093,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </CardContent>
                 </Card>
 
-                {/* ─── انبارها ─── */}
                 <Card className="border-purple-200 bg-purple-50/30">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center justify-between mb-2">
@@ -1150,7 +1188,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </CardContent>
                 </Card>
 
-                {/* ─── خطا ─── */}
                 {renewalError && (
                   <Alert className="border-red-200 bg-red-50 py-1.5">
                     <AlertCircle className="h-3.5 w-3.5 text-red-600" />
@@ -1178,9 +1215,6 @@ export function SetupWizard(props: SetupWizardProps) {
             </DialogFooter>
           </>
         ) : isRenewalMode ? (
-          /* ═══════════════════════════════════════════════════════════════ */
-          /*  حالت تمدید هوشمند (renewal_setup)                              */
-          /* ═══════════════════════════════════════════════════════════════ */
           <>
             <DialogHeader className="pb-0">
               <DialogTitle className="flex items-center gap-2 text-base">
@@ -1209,7 +1243,6 @@ export function SetupWizard(props: SetupWizardProps) {
               </div>
             ) : (
               <div className="space-y-4 py-2">
-                {/* ─── خلاصه سال قبل ─── */}
                 <Card className="border-blue-200 bg-blue-50/30">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center gap-2 mb-2">
@@ -1248,7 +1281,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </CardContent>
                 </Card>
 
-                {/* ─── سال جدید ─── */}
                 <Card className="border-emerald-200 bg-emerald-50/30">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center gap-2 mb-2">
@@ -1280,7 +1312,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </CardContent>
                 </Card>
 
-                {/* ─── انبارها ─── */}
                 <Card className="border-purple-200 bg-purple-50/30">
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center justify-between mb-2">
@@ -1380,7 +1411,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </CardContent>
                 </Card>
 
-                {/* ─── سند افتتاحیه خودکار ─── */}
                 {renewalData.closingDetails && (
                   <Card className="border-amber-200 bg-amber-50/30">
                     <CardContent className="p-3 space-y-2">
@@ -1439,7 +1469,6 @@ export function SetupWizard(props: SetupWizardProps) {
                   </Card>
                 )}
 
-                {/* ─── خطا ─── */}
                 {renewalError && (
                   <Alert className="border-red-200 bg-red-50 py-1.5">
                     <AlertCircle className="h-3.5 w-3.5 text-red-600" />
@@ -1467,9 +1496,6 @@ export function SetupWizard(props: SetupWizardProps) {
             </DialogFooter>
           </>
         ) : (
-          /* ═══════════════════════════════════════════════════════════════ */
-          /*  حالت بار اول (first_setup) — بدون تغییر                        */
-          /* ═══════════════════════════════════════════════════════════════ */
           <>
             <DialogHeader className="pb-0">
               <DialogTitle className="flex items-center gap-2 text-base">
@@ -1486,7 +1512,6 @@ export function SetupWizard(props: SetupWizardProps) {
               </DialogDescription>
             </DialogHeader>
 
-            {/* Stepper */}
             {step < 3 && (
               <div className="space-y-2 pt-1">
                 <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
@@ -1517,7 +1542,6 @@ export function SetupWizard(props: SetupWizardProps) {
             )}
 
             <div className="min-h-[260px] py-1">
-              {/* ─── مرحله ۰: سال مالی ─── */}
               {step === 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -1591,7 +1615,6 @@ export function SetupWizard(props: SetupWizardProps) {
                 </div>
               )}
 
-              {/* ─── مرحله ۱: انبار ─── */}
               {step === 1 && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -1718,7 +1741,6 @@ export function SetupWizard(props: SetupWizardProps) {
                 </div>
               )}
 
-              {/* ─── مرحله ۲: سند افتتاحیه ─── */}
               {step === 2 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -1858,7 +1880,6 @@ export function SetupWizard(props: SetupWizardProps) {
                 </div>
               )}
 
-              {/* ─── مرحله ۳: پایان ─── */}
               {step === 3 && (
                 <div className="space-y-4 py-4 text-center">
                   <div className="w-20 h-20 rounded-full bg-violet-100 flex items-center justify-center mx-auto">
@@ -1895,11 +1916,10 @@ export function SetupWizard(props: SetupWizardProps) {
               )}
             </div>
 
-            {/* دکمه‌ها برای حالت بار اول */}
             <DialogFooter className="flex items-center gap-2 pt-3 border-t border-gray-100">
               {step > 0 && step < 3 && (
                 <Button variant="ghost" size="sm" onClick={() => setStep(s => s - 1)}
-                  disabled={saving} className="text-xs gap-1 text-gray-500"
+                  disabled={saving || savingBalance} className="text-xs gap-1 text-gray-500"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                   قبلی
@@ -1908,7 +1928,7 @@ export function SetupWizard(props: SetupWizardProps) {
 
               {step < 3 && (
                 <Button variant="ghost" size="sm" onClick={handleSkip}
-                  disabled={saving}
+                  disabled={saving || savingBalance}
                   className="text-xs gap-1 text-gray-400 hover:text-gray-600 mr-auto"
                 >
                   {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SkipForward className="w-3.5 h-3.5" />}
@@ -1921,9 +1941,9 @@ export function SetupWizard(props: SetupWizardProps) {
                   <Button
                     className="bg-violet-600 hover:bg-violet-700 text-white text-xs gap-1 min-w-[100px]"
                     onClick={handleNext}
-                    disabled={saving}
+                    disabled={saving || savingBalance}
                   >
-                    {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    {(saving || savingBalance) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                     {step === 0 && fyDone ? 'ادامه →' : step === 1 && (warehouses.length > 0) ? 'ادامه →' : 'ثبت و ادامه →'}
                   </Button>
                 ) : (
