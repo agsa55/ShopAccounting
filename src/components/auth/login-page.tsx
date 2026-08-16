@@ -676,16 +676,17 @@ export default function LoginPage() {
             </form>
           )}
 
-          <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
-            {/* ── لینک ثبت‌نام ── */}
+               <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
+            {/* ── لینک ثبت‌نام — هدایت به لاندینگ برای انتخاب پلن ── */}
             <p className="text-sm text-gray-500 text-center">
               ثبت‌نام نکرده‌اید؟{' '}
               <button
                 type="button"
                 className="text-emerald-600 hover:text-emerald-700 font-medium transition-colors"
                 onClick={() => {
-                  setSelectedPlanId('simple')
-                  setCurrentView('register')
+                  // ★ v10.8: پاک کردن پلن قبلی و هدایت به لاندینگ
+                  setSelectedPlanId(null)
+                  window.location.replace('/')
                 }}
               >
                 ثبت‌نام کنید
