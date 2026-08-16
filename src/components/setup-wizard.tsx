@@ -754,7 +754,7 @@ export function SetupWizard(props: SetupWizardProps) {
 
     setSavingBalance(true)
 
-    const requestBody = {
+     const requestBody = {
       items: balItems.map((b) => ({
         type: b.type,
         title: b.title.trim(),
@@ -762,6 +762,8 @@ export function SetupWizard(props: SetupWizardProps) {
         description: b.description?.trim() || '',
       })),
       postToJournal: false,
+      // ★ v10.9.10: همیشه تاریخ امروز را ارسال کن
+      date: new Date().toISOString().split('T')[0],
     }
 
     try {

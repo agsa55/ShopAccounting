@@ -53,6 +53,7 @@ interface JournalEntry {
   number?: string
   date: string
   entryDate?: string
+    createdAt?: string | Date  // ★ v10.9.9: اضافه شد
   description: string
   totalDebit: number
   totalCredit: number
@@ -97,6 +98,21 @@ const getLocalDateTs = (dateStr: string | null | undefined): number => {
 function formatDate(d: string): string {
   if (!d) return '—'
   try {
+    // ★ v10.9.13: پشتیبانی از ISO string کامل
+    if (d.includes('T')) {
+      const dateObj = new Date(d)
+      if (!isNaN(dateObj.getTime())) {
+        const gy = dateObj.getFullYear()
+        const gm = dateObj.getMonth() + 1
+        const gd = dateObj.getDate()
+        
+        if (gy >= 1900 && gy <= 2200) {
+          const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+          return `${toPersianDigits(jy)}/${toPersianDigits(String(jm).padStart(2, '0'))}/${toPersianDigits(String(jd).padStart(2, '0'))}`
+        }
+      }
+    }
+    
     const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
     if (isoMatch) {
       const gy = parseInt(isoMatch[1], 10)
@@ -107,6 +123,7 @@ function formatDate(d: string): string {
         return `${toPersianDigits(jy)}/${toPersianDigits(String(jm).padStart(2, '0'))}/${toPersianDigits(String(jd).padStart(2, '0'))}`
       }
     }
+    
     const fallback = new Date(d)
     if (!isNaN(fallback.getTime())) {
       return fallback.toLocaleDateString('fa-IR', { year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -120,6 +137,23 @@ function formatDate(d: string): string {
 function formatDateLong(d: string): string {
   if (!d) return '—'
   try {
+    // ★ v10.9.13: اگر ISO string کامل است (با T)، از Date object استفاده کن
+    if (d.includes('T')) {
+      const dateObj = new Date(d)
+      if (!isNaN(dateObj.getTime())) {
+        const gy = dateObj.getFullYear()
+        const gm = dateObj.getMonth() + 1
+        const gd = dateObj.getDate()
+        
+        if (gy >= 1900 && gy <= 2200) {
+          const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+          return `${toPersianDigits(jd)} ${JALALI_MONTHS[jm - 1]} ${toPersianDigits(jy)}`
+          //                      ↑↑ روز شمسی
+        }
+      }
+    }
+    
+    // ★ v10.9.13: اگر فقط تاریخ است (YYYY-MM-DD)
     const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
     if (isoMatch) {
       const gy = parseInt(isoMatch[1], 10)
@@ -127,7 +161,8 @@ function formatDateLong(d: string): string {
       const gd = parseInt(isoMatch[3], 10)
       if (gy >= 1900 && gy <= 2200 && gm >= 1 && gm <= 12 && gd >= 1 && gd <= 31) {
         const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
-        return `${toPersianDigits(gd)} ${JALALI_MONTHS[jm - 1]} ${toPersianDigits(jy)}`
+        return `${toPersianDigits(jd)} ${JALALI_MONTHS[jm - 1]} ${toPersianDigits(jy)}`
+        //                      ↑↑ روز شمسی (نه gd!)
       }
     }
     return d
@@ -1329,11 +1364,16 @@ await cacheJournalEntries(finalList as any)
                 <DialogDescription className="text-xs sm:text-sm">{persianizeText(detailEntry.description)}</DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 py-2">
+                        <div className="space-y-4 py-2">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <div className="bg-gray-50 rounded p-2">
                     <div className="text-gray-500 text-[10px] mb-0.5">تاریخ</div>
-                    <div className="font-medium">{formatDateLong(detailEntry.date)}</div>
+                    {/* ★ v10.9.9: استفاده از entryDate یا createdAt اگر date قدیمی است */}
+               <div className="font-medium">
+  {formatDateLong(
+    detailEntry.entryDate || detailEntry.date || (detailEntry.createdAt ? String(detailEntry.createdAt) : '')
+  )}
+</div>
                   </div>
                   <div className="bg-gray-50 rounded p-2">
                     <div className="text-gray-500 text-[10px] mb-0.5">منبع</div>

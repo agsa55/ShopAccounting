@@ -1,6 +1,7 @@
 // ============================================================================
-// src/lib/moidian/scheduler.ts — موتور زمان‌بندی داخلی سامانه مودیان
+// src/lib/moidian/scheduler.ts — موتور زمان‌بندی داخلی سامانه مودیان (v2.1)
 // ============================================================================
+// ★ v2.1: اصلاح خطای Prisma — Tenant با حرف بزرگ + indentation صحیح
 // ★ این فایل جایگزین cron-job خارجی می‌شود.
 // ★ در src/instrumentation.ts در هنگام startup سرور راه‌اندازی می‌شود.
 // ★ وظایف:
@@ -177,12 +178,15 @@ class MoidianScheduler {
     try {
       console.log('[MoidianScheduler] 🔄 Starting cycle...')
 
-      // ★ یافتن همه tenants فعال با مودیان پیکربندی‌شده
+      // ═══════════════════════════════════════════════════════
+      // ★ v2.1: اصلاح — Tenant با حرف بزرگ و indentation صحیح
+      // Prisma schema: relation name = "Tenant" (capital T)
+      // ═══════════════════════════════════════════════════════
       const tenants = await db.client.moidianSettings.findMany({
         where: {
           isInitialized: true,
           autoSubmit: true,
-          tenant: {
+          Tenant: {
             status: 'active',
           },
         },

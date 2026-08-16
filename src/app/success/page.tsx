@@ -1,28 +1,25 @@
 // ============================================================================
-// src/app/success/page.tsx — Success Page (v10.8 - Suspense Fixed)
-// ★ نمایش پیام موفقیت ثبت‌نام + پاک‌سازی نهایی + redirect به dashboard
-// ★ v10.8: اصلاح Suspense boundary برای Next.js 14+ build
+// src/app/success/page.tsx — Success Page (v10.9.5 - Fixed Redirect)
+// ★ v10.9.5: اصلاح redirect با window.location.replace (حل مشکل React)
+// ★ v10.8: Suspense boundary برای Next.js 14+
 // ============================================================================
 
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { CheckCircle2, Loader2, ArrowLeft } from 'lucide-react'
 
 // ═══════════════════════════════════════════════════════════════
 // کامپوننت داخلی — استفاده از useSearchParams داخل Suspense
 // ═══════════════════════════════════════════════════════════════
 function SuccessContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [countdown, setCountdown] = useState(3)
   const [verified, setVerified] = useState(false)
+  const redirectTriggered = useRef(false)
 
   useEffect(() => {
-    // ═══════════════════════════════════════════════════════════════
-    // ★ v10.7: پاک‌سازی نهایی و تأیید tenantId
-    // ═══════════════════════════════════════════════════════════════
     const tenantIdFromUrl = searchParams.get('tenantId')
     const subdomain = searchParams.get('subdomain')
     const plan = searchParams.get('plan')
@@ -38,10 +35,7 @@ function SuccessContent() {
             const payload = JSON.parse(atob(token.split('.')[1]))
 
             if (payload.tenantId !== tenantIdFromUrl) {
-              console.error('[Success] ❌ Token mismatch! Clearing corrupted data...')
-              console.error('[Success] Token has:', payload.tenantId)
-              console.error('[Success] URL expects:', tenantIdFromUrl)
-
+              console.error('[Success] ❌ Token mismatch! Clearing...')
               const keysToRemove = [
                 'token', 'refreshToken', 'user', 'tenant',
                 'storeName', 'planName', 'shop-accounting-store',
@@ -50,24 +44,12 @@ function SuccessContent() {
               keysToRemove.forEach(key => {
                 try { localStorage.removeItem(key) } catch {}
               })
-
               Object.keys(localStorage).forEach(key => {
-                if (key.includes('wizard') || key.includes('force_') || key.includes('renewal_')) {
+                if (key.includes('wizard') || key.includes('force_')) {
                   try { localStorage.removeItem(key) } catch {}
                 }
               })
-
               try { sessionStorage.clear() } catch {}
-
-              document.cookie.split(';').forEach(c => {
-                const name = c.split('=')[0].trim()
-                if (['tenant-slug', 'tenant-view', 'auth-token'].includes(name)) {
-                  try {
-                    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`
-                  } catch {}
-                }
-              })
-
               setTimeout(() => {
                 window.location.href = '/auth/login?error=token_mismatch'
               }, 1000)
@@ -78,36 +60,42 @@ function SuccessContent() {
             }
           } catch (err) {
             console.warn('[Success] Token parse error:', err)
+            setVerified(true)
           }
         } else {
-          console.warn('[Success] No token or tenantId found')
-          setVerified(true) // در صورت نبود token، اجازه redirect بده
+          setVerified(true)
         }
       } catch (err) {
         console.warn('[Success] Verification error:', err)
         setVerified(true)
       }
     }
+  }, [searchParams])
 
-    // countdown و redirect
-    const timer = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(timer)
-          console.log('[Success] 🚀 Redirecting to dashboard...')
-          router.replace('/dashboard')
-          return 0
-        }
-        return prev - 1
-      })
+  // ★ v10.9.5: Countdown جداگانه — بدون مشکل React
+  useEffect(() => {
+    if (countdown <= 0) {
+      // وقتی countdown به 0 رسید، redirect کن
+      if (!redirectTriggered.current) {
+        redirectTriggered.current = true
+        console.log('[Success] 🚀 Redirecting to dashboard...')
+        // ★ استفاده از window.location.replace به جای router.replace
+        // این روش هیچ مشکل React state update ندارد
+        window.location.replace('/dashboard')
+      }
+      return
+    }
+
+    const timer = setTimeout(() => {
+      setCountdown(prev => prev - 1)
     }, 1000)
 
-    return () => clearInterval(timer)
-  }, [router, searchParams])
+    return () => clearTimeout(timer)
+  }, [countdown])
 
   const handleGoToDashboard = () => {
     console.log('[Success] 🚀 Manual redirect to dashboard')
-    router.replace('/dashboard')
+    window.location.replace('/dashboard')
   }
 
   const planLabel = (() => {
@@ -121,7 +109,6 @@ function SuccessContent() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
       <div className="text-center space-y-6 max-w-md w-full">
-        {/* آیکون موفقیت */}
         <div className="relative inline-block">
           <div className="absolute inset-0 bg-emerald-400 rounded-full blur-2xl opacity-30 animate-pulse" />
           <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-2xl">
@@ -129,7 +116,6 @@ function SuccessContent() {
           </div>
         </div>
 
-        {/* عنوان و توضیح */}
         <div>
           <h1 className="text-3xl font-black text-gray-900 mb-2">
             ثبت‌نام موفق! 🎉
@@ -141,7 +127,6 @@ function SuccessContent() {
           </p>
         </div>
 
-        {/* اطلاعات فروشگاه */}
         <div className="bg-white rounded-2xl shadow-lg p-6 border border-emerald-100 text-right space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500">زیردامنه:</span>
@@ -173,7 +158,6 @@ function SuccessContent() {
           </div>
         </div>
 
-        {/* شمارش معکوس */}
         <div className="bg-white rounded-2xl shadow-lg p-6 border border-emerald-100">
           <div className="flex items-center justify-center gap-2 mb-3">
             <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" />
@@ -184,15 +168,13 @@ function SuccessContent() {
 
           <button
             onClick={handleGoToDashboard}
-            disabled={!verified}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg"
           >
             <ArrowLeft className="w-4 h-4" />
             ورود فوری به داشبورد
           </button>
         </div>
 
-        {/* پیام زیرین */}
         <p className="text-xs text-gray-400">
           فروشگاه شما به مدت ۳ ماه به صورت رایگان فعال است
         </p>
@@ -201,9 +183,6 @@ function SuccessContent() {
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-// کامپوننت Loading — نمایش در زمان بارگذاری Suspense
-// ═══════════════════════════════════════════════════════════════
 function SuccessLoading() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
@@ -220,9 +199,6 @@ function SuccessLoading() {
   )
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Page Component — با Suspense Boundary
-// ═══════════════════════════════════════════════════════════════
 export default function SuccessPage() {
   return (
     <Suspense fallback={<SuccessLoading />}>

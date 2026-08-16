@@ -43,7 +43,7 @@ export function InitialBalanceTab() {
     description: '',
   })
 
-  const loadData = useCallback(async () => {
+   const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const tid = getTenantIdFromStore()
@@ -56,20 +56,56 @@ export function InitialBalanceTab() {
         ? { Authorization: `Bearer ${token}` }
         : undefined
 
-    // ★★★ اصلاح: حذف tenantId از URL محصولات
-      const [balRes, prodRes] = await Promise.all([
+      // ★★★ اصلاح: حذف tenantId از URL محصولات
+      const [balRes, prodRes, journalRes] = await Promise.all([
         fetch('/api/initial-balance', { ...(headers && { headers }) }),
         fetch('/api/products?limit=100', { ...(headers && { headers }) }),
+        // ★ v10.9.2: Fallback — fetch JournalEntries برای بازیابی InitialBalance
+        fetch('/api/journal-entries?sourceType=initial_balance&limit=10', { ...(headers && { headers }) }),
       ])
       
       const balData = await balRes.json()
       const prodData = await prodRes.json()
+      const journalData = await journalRes.json()
 
       if (balData.success) {
-        const apiItems = Array.isArray(balData.data) ? balData.data : []
+        let apiItems = Array.isArray(balData.data) ? balData.data : []
+        
+        // ═══════════════════════════════════════════════════════════════
+        // ★ v10.9.2: Fallback — اگر InitialBalances خالی است ولی JournalEntry هست
+        // از JournalEntry، InitialBalance را بازیابی کن
+        // ═══════════════════════════════════════════════════════════════
+        if (apiItems.length === 0 && journalData.success && journalData.data?.entries?.length > 0) {
+          console.log('[InitialBalanceTab] ⚠️ InitialBalances empty but JournalEntries found — recovering...')
+          
+          const openingJE = journalData.data.entries.find((e: any) => 
+            e.sourceType === 'initial_balance'
+          )
+          
+          if (openingJE && openingJE.lines && openingJE.lines.length > 0) {
+            // از lines سند، InitialBalance بساز
+            apiItems = openingJE.lines.map((line: any, idx: number) => ({
+              id: `recovered-${idx}`,
+              type: line.debit > 0 ? 'cash' : 'liability', // حدس نوع
+              title: line.description || line.accountName || `آیتم ${idx + 1}`,
+              amount: Math.abs(line.debit || line.credit || 0),
+              debitAmount: line.debit || 0,
+              creditAmount: line.credit || 0,
+              description: line.description,
+              journalEntryId: openingJE.id,
+              isPosted: true,
+              accountCode: line.accountCode,
+              accountName: line.accountName,
+              _recovered: true,
+            }))
+            
+            console.log('[InitialBalanceTab] ✅ Recovered', apiItems.length, 'items from JournalEntry')
+          }
+        }
+        
         setSavedItems(apiItems)
 
-        if (balData.summary) {
+        if (balData.summary && apiItems.length > 0 && !balData.summary?.isPosted) {
           setSummary(balData.summary)
         } else if (apiItems.length > 0) {
           const assets = apiItems
@@ -183,26 +219,29 @@ export function InitialBalanceTab() {
         ? localStorage.getItem('token')
         : null
 
-      const allItems = [
-        ...savedItems
-          .filter((b) => !summary?.isPosted)
-          .map((b) => ({
-            type: b.type,
-            title: b.title,
-            amount: b.amount,
-            productId: b.productId || undefined,
-            quantity: b.quantity || undefined,
-            description: b.description || undefined,
-          })),
-        ...pendingItems.map((b) => ({
+        // ★ v10.9.6: ارسال accountId برای حفظ ارتباط با حساب
+    const allItems = [
+      ...savedItems
+        .filter((b) => !summary?.isPosted)
+        .map((b) => ({
           type: b.type,
           title: b.title,
           amount: b.amount,
+          accountId: b.accountId || undefined,
           productId: b.productId || undefined,
           quantity: b.quantity || undefined,
           description: b.description || undefined,
         })),
-      ]
+      ...pendingItems.map((b) => ({
+        type: b.type,
+        title: b.title,
+        amount: b.amount,
+        accountId: b.accountId || undefined,
+        productId: b.productId || undefined,
+        quantity: b.quantity || undefined,
+        description: b.description || undefined,
+      })),
+    ]
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
@@ -247,7 +286,11 @@ export function InitialBalanceTab() {
       const token = typeof window !== 'undefined'
         ? localStorage.getItem('token')
         : null
-      const res = await fetch('/api/initial-balance', {
+
+      // ★ v10.9.7: اگر سند صادر شده، force=true ارسال کن
+      const forceParam = summary?.isPosted ? '?force=true' : ''
+
+      const res = await fetch(`/api/initial-balance${forceParam}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -256,12 +299,42 @@ export function InitialBalanceTab() {
       })
       const data = await res.json()
       if (data.success) {
-        toast({ title: 'حذف شد ✓', description: data.message })
+        toast({
+          title: 'حذف شد ✓',
+          description: data.message,
+        })
         setSavedItems([])
         setSummary(null)
         setPendingItems([])
         setDeleteDialogOpen(false)
+        // ★ v10.9.7: reload برای تازه‌سازی داده‌ها
+        await loadData()
       } else {
+        // ★ v10.9.7: اگر needsForce بود، دوباره با force=true تلاش کن
+        if (data.needsForce) {
+          console.log('[InitialBalanceTab] Retrying with force=true')
+          const retryRes = await fetch('/api/initial-balance?force=true', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          })
+          const retryData = await retryRes.json()
+          if (retryData.success) {
+            toast({
+              title: 'حذف شد ✓',
+              description: retryData.message,
+            })
+            setSavedItems([])
+            setSummary(null)
+            setPendingItems([])
+            setDeleteDialogOpen(false)
+            await loadData()
+            return
+          }
+        }
+        
         toast({
           title: 'خطا',
           description: data.error || 'حذف ناموفق بود',
@@ -295,14 +368,16 @@ export function InitialBalanceTab() {
         ? localStorage.getItem('token')
         : null
 
-      const draftItems = savedItems.map((b: any) => ({
-        type: b.type,
-        title: b.title,
-        amount: b.amount,
-        productId: b.productId || undefined,
-        quantity: b.quantity || undefined,
-        description: b.description || undefined,
-      }))
+    // ★ v10.9.6: ارسال accountId برای حفظ ارتباط با حساب
+    const draftItems = savedItems.map((b: any) => ({
+      type: b.type,
+      title: b.title,
+      amount: b.amount,
+      accountId: b.accountId || undefined,
+      productId: b.productId || undefined,
+      quantity: b.quantity || undefined,
+      description: b.description || undefined,
+    }))
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
@@ -804,7 +879,7 @@ export function InitialBalanceTab() {
         </Card>
       )}
 
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-red-700 text-sm">
@@ -818,7 +893,23 @@ export function InitialBalanceTab() {
                   <li>
                     تمام {savedItems.length} آیتم موجودی اولیه را حذف می‌کند
                   </li>
+                  {/* ★ v10.9.7: اگر سند صادر شده، هشدار اضافی */}
+                  {summary?.isPosted && (
+                    <li className="text-red-600 font-bold">
+                      ⚠️ سند حسابداری صادر شده نیز حذف می‌شود
+                    </li>
+                  )}
                 </ul>
+                {summary?.isPosted && (
+                  <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-red-700 text-[11px] font-bold">
+                      ⚠️ هشدار: این عملیات غیرقابل بازگشت است!
+                    </p>
+                    <p className="text-red-600 text-[10px] mt-1">
+                      سند افتتاحیه به‌طور کامل از سیستم حذف می‌شود.
+                    </p>
+                  </div>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -836,7 +927,7 @@ export function InitialBalanceTab() {
               ) : (
                 <Trash2 className="w-4 h-4 ml-1" />
               )}
-              بله، حذف شود
+              {summary?.isPosted ? 'حذف کامل سند' : 'بله، حذف شود'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
