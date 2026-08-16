@@ -1,16 +1,19 @@
 // ============================================================================
-// src/app/success/page.tsx — Success Page (v10.7)
+// src/app/success/page.tsx — Success Page (v10.8 - Suspense Fixed)
 // ★ نمایش پیام موفقیت ثبت‌نام + پاک‌سازی نهایی + redirect به dashboard
-// ★ v10.7: تأیید تطابق token با tenantId برای جلوگیری از نشت داده
+// ★ v10.8: اصلاح Suspense boundary برای Next.js 14+ build
 // ============================================================================
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { CheckCircle2, Loader2, ArrowLeft } from 'lucide-react'
 
-export default function SuccessPage() {
+// ═══════════════════════════════════════════════════════════════
+// کامپوننت داخلی — استفاده از useSearchParams داخل Suspense
+// ═══════════════════════════════════════════════════════════════
+function SuccessContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [countdown, setCountdown] = useState(3)
@@ -19,7 +22,6 @@ export default function SuccessPage() {
   useEffect(() => {
     // ═══════════════════════════════════════════════════════════════
     // ★ v10.7: پاک‌سازی نهایی و تأیید tenantId
-    // قبل از redirect به dashboard، یک بار دیگر تطابق را چک کن
     // ═══════════════════════════════════════════════════════════════
     const tenantIdFromUrl = searchParams.get('tenantId')
     const subdomain = searchParams.get('subdomain')
@@ -30,7 +32,6 @@ export default function SuccessPage() {
 
     if (typeof window !== 'undefined') {
       try {
-        // بررسی token فعلی
         const token = localStorage.getItem('token')
         if (token && tenantIdFromUrl) {
           try {
@@ -41,7 +42,6 @@ export default function SuccessPage() {
               console.error('[Success] Token has:', payload.tenantId)
               console.error('[Success] URL expects:', tenantIdFromUrl)
 
-              // token اشتباه است → پاک کن
               const keysToRemove = [
                 'token', 'refreshToken', 'user', 'tenant',
                 'storeName', 'planName', 'shop-accounting-store',
@@ -51,17 +51,14 @@ export default function SuccessPage() {
                 try { localStorage.removeItem(key) } catch {}
               })
 
-              // پاک کردن wizard flags
               Object.keys(localStorage).forEach(key => {
                 if (key.includes('wizard') || key.includes('force_') || key.includes('renewal_')) {
                   try { localStorage.removeItem(key) } catch {}
                 }
               })
 
-              // پاک کردن sessionStorage
               try { sessionStorage.clear() } catch {}
 
-              // پاک کردن cookie
               document.cookie.split(';').forEach(c => {
                 const name = c.split('=')[0].trim()
                 if (['tenant-slug', 'tenant-view', 'auth-token'].includes(name)) {
@@ -71,7 +68,6 @@ export default function SuccessPage() {
                 }
               })
 
-              // redirect به login
               setTimeout(() => {
                 window.location.href = '/auth/login?error=token_mismatch'
               }, 1000)
@@ -85,9 +81,11 @@ export default function SuccessPage() {
           }
         } else {
           console.warn('[Success] No token or tenantId found')
+          setVerified(true) // در صورت نبود token، اجازه redirect بده
         }
       } catch (err) {
         console.warn('[Success] Verification error:', err)
+        setVerified(true)
       }
     }
 
@@ -111,6 +109,14 @@ export default function SuccessPage() {
     console.log('[Success] 🚀 Manual redirect to dashboard')
     router.replace('/dashboard')
   }
+
+  const planLabel = (() => {
+    const p = searchParams.get('plan')
+    if (p === 'simple') return 'پایه'
+    if (p === 'professional') return 'پیشرفته'
+    if (p === 'enterprise') return 'حرفه‌ای'
+    return '-'
+  })()
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
@@ -138,17 +144,15 @@ export default function SuccessPage() {
         {/* اطلاعات فروشگاه */}
         <div className="bg-white rounded-2xl shadow-lg p-6 border border-emerald-100 text-right space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500">نام فروشگاه:</span>
-            <span className="text-sm font-bold text-gray-900">
+            <span className="text-xs text-gray-500">زیردامنه:</span>
+            <span className="text-sm font-bold text-gray-900" dir="ltr">
               {searchParams.get('subdomain') || '-'}
             </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500">پلن:</span>
             <span className="text-sm font-bold text-emerald-600">
-              {searchParams.get('plan') === 'simple' ? 'پایه' :
-               searchParams.get('plan') === 'professional' ? 'پیشرفته' :
-               searchParams.get('plan') === 'enterprise' ? 'حرفه‌ای' : '-'}
+              {planLabel}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -194,5 +198,35 @@ export default function SuccessPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// کامپوننت Loading — نمایش در زمان بارگذاری Suspense
+// ═══════════════════════════════════════════════════════════════
+function SuccessLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-4" dir="rtl">
+      <div className="text-center space-y-4">
+        <div className="relative inline-block">
+          <div className="absolute inset-0 bg-emerald-400 rounded-full blur-2xl opacity-30 animate-pulse" />
+          <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-2xl">
+            <Loader2 className="w-12 h-12 text-white animate-spin" />
+          </div>
+        </div>
+        <p className="text-gray-600 text-sm">در حال بارگذاری...</p>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Page Component — با Suspense Boundary
+// ═══════════════════════════════════════════════════════════════
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={<SuccessLoading />}>
+      <SuccessContent />
+    </Suspense>
   )
 }
