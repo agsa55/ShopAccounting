@@ -1,6 +1,5 @@
 # ═══════════════════════════════════════════════════════════
-# Dockerfile برای Railway - Node.js 20
-# ★ v2.0: اصلاح Node.js 20 + npm install به جای npm ci
+# Dockerfile برای Railway - Node.js 20 (v2.1 - Fixed)
 # ═══════════════════════════════════════════════════════════
 
 # ─── مرحله ۱: Dependencies ─────────────────────────────────
@@ -17,8 +16,9 @@ WORKDIR /app
 # کپی package files
 COPY package.json package-lock.json* ./
 
-# ★ نصب با npm install (نه npm ci) برای حل مشکل sync
-RUN npm install --legacy-peer-deps --no-audit --no-fund
+# ★ نصب با --ignore-scripts برای جلوگیری از prisma generate
+# (prisma generate در مرحله builder اجرا می‌شود)
+RUN npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
 # ─── مرحله ۲: Build ────────────────────────────────────────
 FROM node:20-slim AS builder
@@ -31,7 +31,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate Prisma Client
+# ★ Generate Prisma Client (اینجا schema.prisma موجود است)
 RUN npx prisma generate
 
 # Build Next.js
