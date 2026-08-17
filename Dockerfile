@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y openssl \
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
+# ★ PORT را Railway خودش می‌دهد، فقط HOSTNAME تنظیم شود
 ENV HOSTNAME="0.0.0.0"
 
 RUN addgroup --system --gid 1001 nodejs
@@ -41,5 +41,5 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modul
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 
 USER nextjs
-EXPOSE 3000
+
 CMD ["node", "server.js"]
