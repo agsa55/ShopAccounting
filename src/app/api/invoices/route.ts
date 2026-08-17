@@ -595,22 +595,33 @@ export const POST = withTenantAndPermission('pos')(async (
          // ═══════════════════════════════════════════════════════════════
       // ★ v8.2: ایجاد Check record (سازگار با Railway — بدون invoiceId)
       // ═══════════════════════════════════════════════════════════════
+         // ═══════════════════════════════════════════════════════════════
+      // ★ v8.3: ایجاد رکورد Check با invoiceId برای فاکتورهای چکی
+      // ═══════════════════════════════════════════════════════════════
       if (pt === 'check' && remainingAmount > 0) {
         try {
-          const checkNumber = invoiceData.checkNumber || invoiceData.checkRef || `CHK-${Date.now()}`
-          const bankName = invoiceData.checkBankName || invoiceData.bankName || 'نامشخص'
-          const branchName = invoiceData.checkBranchName || invoiceData.branchName || null
-          const checkDueDate = invoiceData.checkDueDate || invoiceData.dueDate || inv.invoiceDate
-          
-          console.log('[Invoices POST] 💳 Creating Check record:', {
+          // اطلاعات چک از invoiceData
+          const checkNumber = invoiceData.checkNumber 
+            || invoiceData.checkRef 
+            || `CHK-${Date.now()}`
+          const bankName = invoiceData.checkBankName 
+            || invoiceData.bankName 
+            || 'نامشخص'
+          const branchName = invoiceData.checkBranchName 
+            || invoiceData.branchName 
+            || null
+          const checkDueDate = invoiceData.checkDueDate 
+            || invoiceData.dueDate 
+            || inv.invoiceDate
+
+          console.log('[Invoices POST] 💳 Creating Check with invoiceId:', {
+            invoiceId: inv.id,
             invoiceNumber: inv.number,
             checkNumber,
             bankName,
             amount: remainingAmount,
           })
 
-          // ★ v8.2: ایجاد Check بدون invoiceId (سازگار با Railway)
-          // invoiceId در فیلد description ذخیره می‌شود برای ردیابی
           const newCheck = await tx.check.create({
             data: {
               tenantId,
@@ -623,24 +634,23 @@ export const POST = withTenantAndPermission('pos')(async (
               dueDate: new Date(checkDueDate),
               customerId: inv.customerId || null,
               payeeName: null,
-              // ★ v8.2: ذخیره شماره فاکتور در description برای ردیابی
-              description: `چک دریافتی بابت فاکتور ${inv.number} (ID: ${inv.id})`,
+              description: `چک دریافتی بابت فاکتور ${inv.number}`,
               status: 'pending',
+              // ★ v8.3: لینک مستقیم به فاکتور
+              invoiceId: inv.id,
             },
           })
 
-          console.log('[Invoices POST] ✅ Check created successfully:', {
-            id: newCheck.id,
-            number: newCheck.checkNumber,
-            amount: newCheck.amount,
-            linkedInvoice: inv.number,
+          console.log('[Invoices POST] ✅ Check created with invoiceId:', {
+            checkId: newCheck.id,
+            checkNumber: newCheck.checkNumber,
+            invoiceId: newCheck.invoiceId,
           })
         } catch (err: any) {
           console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
-          console.error('[Invoices POST] ❌ Full error:', err)
+          console.error('[Invoices POST] ❌ Stack:', err?.stack)
         }
       }
-
       return inv
     })
 
