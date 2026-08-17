@@ -407,17 +407,30 @@ function renderCurrentView(view: AppView) {
    ★ v10.3: تابع کمکی برای تشخیص SUBSCRIPTION_EXPIRED
    ═══════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ v10.7: تابع کمکی برای تشخیص SUBSCRIPTION_EXPIRED
+   ★ با Fail-Open در صورت خطای شبکه
+   ═══════════════════════════════════════════════════════════════ */
+
 async function checkSubscriptionStatusAPI(token: string): Promise<{
   isLocked: boolean
   isLifetime: boolean
   daysRemaining: number
   fromMiddleware: boolean
+  isError: boolean  // ★ v10.7: flag جدید
 }> {
   try {
+    // ★ v10.7: timeout برای جلوگیری از hang در قطعی شبکه
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // ۸ ثانیه timeout
+    
     const res = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
+      signal: controller.signal,
     })
+    
+    clearTimeout(timeoutId)
 
     // ★ v10.3: تشخیص قفل از middleware (پاسخ 403)
     if (res.status === 403) {
@@ -425,7 +438,7 @@ async function checkSubscriptionStatusAPI(token: string): Promise<{
         const errData = await res.json()
         if (errData.code === 'SUBSCRIPTION_EXPIRED') {
           console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED from middleware (403)')
-          return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true }
+          return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true, isError: false }
         }
       } catch { }
     }
@@ -435,7 +448,7 @@ async function checkSubscriptionStatusAPI(token: string): Promise<{
     // ★ v10.3: تشخیص قفل از success: false با SUBSCRIPTION_EXPIRED
     if (!data.success && data.code === 'SUBSCRIPTION_EXPIRED') {
       console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED in response')
-      return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true }
+      return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true, isError: false }
     }
 
     if (data.success && data.data) {
@@ -443,21 +456,27 @@ async function checkSubscriptionStatusAPI(token: string): Promise<{
       const lifetime = d.daysUntilUpdate === -1 || (d.status === 'active' && d.daysUntilUpdate === -1)
 
       if (lifetime) {
-        return { isLocked: false, isLifetime: true, daysRemaining: -1, fromMiddleware: false }
+        return { isLocked: false, isLifetime: true, daysRemaining: -1, fromMiddleware: false, isError: false }
       } else {
         const days = d.daysUntilUpdate ?? 0
         const locked = d.isLocked || days <= 0
-        return { isLocked: locked, isLifetime: false, daysRemaining: days, fromMiddleware: false }
+        return { isLocked: locked, isLifetime: false, daysRemaining: days, fromMiddleware: false, isError: false }
       }
     }
 
-    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false }
+    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false, isError: false }
   } catch (err) {
-    console.warn('[checkSubscriptionStatusAPI] Error:', err)
-    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false }
+    // ★ v10.7: در صورت هر خطایی (شبکه، timeout، ...) → Fail-Open
+    console.warn('[checkSubscriptionStatusAPI] ⚠️ Error (fail-open):', err)
+    return { 
+      isLocked: false,      // ★ قفل نکن
+      isLifetime: false, 
+      daysRemaining: 999,   // ★ عدد بالا تا <= 0 نشود
+      fromMiddleware: false, 
+      isError: true          // ★ علامت‌گذاری به عنوان خطا
+    }
   }
 }
-
 
 
 /* ═══════════════════════════════════════════════════════════════
@@ -650,14 +669,21 @@ function AppSidebar() {
   // اگر verifiedIsDemo === null (هنوز چک نشده) → false در نظر می‌گیریم تا کارت دمو اشتباه نشان داده نشود
   const isDemoPlan = verifiedIsDemo === true
 
+  // ★ v10.7: بررسی وضعیت اشتراک (با Fail-Open)
   useEffect(() => {
     async function checkSubscription() {
       try {
         const token = localStorage.getItem('token')
         if (!token) return
 
-        // ★ v10.3: استفاده از تابع کمکی مشترک
+        // ★ v10.7: استفاده از تابع کمکی مشترک
         const result = await checkSubscriptionStatusAPI(token)
+
+        // ★★★ v10.7: اگر خطا رخ داده، وضعیت را تغییر نده (Fail-Open)
+        if (result.isError) {
+          console.warn('[AppSidebar] ⚠️ Network/API error - keeping current state (fail-open)')
+          return  // وضعیت قبلی را حفظ کن
+        }
 
         if (result.fromMiddleware && result.isLocked) {
           console.log('[AppSidebar] 🔒 Locked by middleware')
@@ -709,7 +735,8 @@ function AppSidebar() {
           })
         } catch { }
       } catch (err) {
-        console.warn('[AppSidebar] checkSubscription error:', err)
+        // ★ v10.7: در صورت هر خطای غیرمنتظره، وضعیت را تغییر نده
+        console.warn('[AppSidebar] ⚠️ Unexpected error - keeping current state:', err)
       }
     }
 
@@ -717,7 +744,7 @@ function AppSidebar() {
     const interval = setInterval(checkSubscription, 60000)
     return () => clearInterval(interval)
   }, [])
-
+  
   const effectivePlanName = (isDemoPlan ? 'demo' : (realPlanName || planName || 'simple')) as string
   const effectiveFeatures = getFeaturesByPlanName(effectivePlanName)
   const unreadCount = notifications.filter(n => !n.isRead).length
@@ -1400,15 +1427,23 @@ export default function AppShell() {
     }
   }, [user, currentView, setCurrentView, planFeatures])
 
-  // ★ v10.3: بررسی وضعیت اشتراک هر ۳۰ ثانیه
+   // ★ v10.7: بررسی وضعیت اشتراک هر ۳۰ ثانیه (با Fail-Open)
   useEffect(() => {
     async function checkSubscriptionStatus() {
       try {
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
         if (!token) return
 
-        // ★ v10.3: استفاده از تابع کمکی مشترک
+        // ★ v10.7: استفاده از تابع کمکی مشترک
         const result = await checkSubscriptionStatusAPI(token)
+
+        // ★★★ v10.7: اگر خطا رخ داده، هرگز قفل نکن (Fail-Open)
+        if (result.isError) {
+          console.warn('[AppShell] ⚠️ Network/API error - keeping system OPEN (fail-open)')
+          setIsSystemLocked(false)
+          // وضعیت قبلی را حفظ کن (تغییر نده)
+          return
+        }
 
         if (result.fromMiddleware && result.isLocked) {
           console.log('[AppShell] 🔒 Locked by middleware (SUBSCRIPTION_EXPIRED)')
@@ -1428,7 +1463,9 @@ export default function AppShell() {
           setIsSystemLocked(result.isLocked || result.daysRemaining <= 0)
         }
       } catch (err) {
-        console.warn('[AppShell] checkSubscriptionStatus error:', err)
+        // ★ v10.7: در صورت هر خطای غیرمنتظره هم سیستم را قفل نکن
+        console.warn('[AppShell] ⚠️ Unexpected error - keeping system OPEN:', err)
+        setIsSystemLocked(false)
       }
     }
 
