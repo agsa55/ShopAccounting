@@ -41,10 +41,50 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
     if (type !== 'all') where.type = type
     if (status !== 'all') where.status = status
 
+      // ★ v8.2: Include customer برای نمایش اطلاعات مشتری
+    // invoice include نمی‌شود چون invoiceId در Railway وجود ندارد
     const checks = await tenantDb.check.findMany({
       where,
+      include: {
+        customer: { 
+          select: { 
+            id: true, 
+            firstName: true, 
+            lastName: true, 
+            mobile: true 
+          } 
+        },
+        // ★ invoice حذف شد (چون invoiceId در Railway وجود ندارد)
+      },
       orderBy: { dueDate: 'asc' },
-    }).catch(() => [])
+    }).catch((err) => {
+      console.error('[Checks GET] findMany error:', err?.message)
+      return []
+    })
+
+    // ★ v8.2: استخراج invoiceNumber از description برای نمایش
+    const checksWithInvoice = checks.map((check: any) => {
+      let invoiceNumber: string | null = null
+      if (check.description) {
+        const match = check.description.match(/فاکتور\s+([A-Z0-9-]+)/)
+        if (match) {
+          invoiceNumber = match[1]
+        }
+      }
+      
+      return {
+        ...check,
+        invoiceNumber,
+        customerName: check.customer 
+          ? `${check.customer.firstName || ''} ${check.customer.lastName || ''}`.trim() 
+          : null,
+      }
+    })
+
+    return NextResponse.json({
+      success: true,
+      data: { checks: checksWithInvoice },
+    })
 
     return NextResponse.json({
       success: true,

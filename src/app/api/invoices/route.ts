@@ -581,12 +581,64 @@ export const POST = withTenantAndPermission('pos')(async (
         console.log('[Invoices POST] ⚠️ Skipped installment plan creation. paymentType:', pt, 'hasInstallmentData:', !!invoiceData.installmentData, 'hasNumberOfInstallments:', !!invoiceData.numberOfInstallments)
       }
 
-      // ★ v7.8: به‌روزرسانی مانده مشتری (برای نسیه/قسطی/چک)
+          // ★ v7.8: به‌روزرسانی مانده مشتری (برای نسیه/قسطی/چک)
       if (isCreditOrInstallment && invoiceData.customerId && remainingAmount > 0) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
           data: { currentBalance: { increment: remainingAmount } },
         }).catch((err: any) => console.warn(`[Invoices POST] Failed to update customer balance:`, err?.message))
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v8.0: ایجاد رکورد Check برای فاکتورهای با paymentType = 'check'
+      // ═══════════════════════════════════════════════════════════════
+         // ═══════════════════════════════════════════════════════════════
+      // ★ v8.2: ایجاد Check record (سازگار با Railway — بدون invoiceId)
+      // ═══════════════════════════════════════════════════════════════
+      if (pt === 'check' && remainingAmount > 0) {
+        try {
+          const checkNumber = invoiceData.checkNumber || invoiceData.checkRef || `CHK-${Date.now()}`
+          const bankName = invoiceData.checkBankName || invoiceData.bankName || 'نامشخص'
+          const branchName = invoiceData.checkBranchName || invoiceData.branchName || null
+          const checkDueDate = invoiceData.checkDueDate || invoiceData.dueDate || inv.invoiceDate
+          
+          console.log('[Invoices POST] 💳 Creating Check record:', {
+            invoiceNumber: inv.number,
+            checkNumber,
+            bankName,
+            amount: remainingAmount,
+          })
+
+          // ★ v8.2: ایجاد Check بدون invoiceId (سازگار با Railway)
+          // invoiceId در فیلد description ذخیره می‌شود برای ردیابی
+          const newCheck = await tx.check.create({
+            data: {
+              tenantId,
+              type: 'receivable',
+              checkNumber: checkNumber.trim(),
+              bankName: bankName.trim(),
+              branchName: branchName?.trim() || null,
+              amount: remainingAmount,
+              issueDate: inv.invoiceDate || new Date(),
+              dueDate: new Date(checkDueDate),
+              customerId: inv.customerId || null,
+              payeeName: null,
+              // ★ v8.2: ذخیره شماره فاکتور در description برای ردیابی
+              description: `چک دریافتی بابت فاکتور ${inv.number} (ID: ${inv.id})`,
+              status: 'pending',
+            },
+          })
+
+          console.log('[Invoices POST] ✅ Check created successfully:', {
+            id: newCheck.id,
+            number: newCheck.checkNumber,
+            amount: newCheck.amount,
+            linkedInvoice: inv.number,
+          })
+        } catch (err: any) {
+          console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
+          console.error('[Invoices POST] ❌ Full error:', err)
+        }
       }
 
       return inv
