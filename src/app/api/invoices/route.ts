@@ -1,8 +1,8 @@
 // ============================================================================
-// src/app/api/invoices/route.ts — v7.9 (Check Support + JE Fix)
+// src/app/api/invoices/route.ts — v8.5 (Check Outside Transaction Fix)
 // ★ استفاده از db.client مستقیم برای جلوگیری از مشکل tenant isolation در Railway
-// ★ لاگ‌های دقیق برای debug
-// ★ v7.8: پشتیبانی از paymentType 'check' در isCreditOrInstallment
+// ★ v8.5: ایجاد Check خارج از transaction (حل مشکل Railway Foreign Key)
+// ★ v8.4: اضافه کردن createdCheck به response
 // ★ v7.9: استفاده از حساب ۱۳۵۰ (چک‌های دریافتنی) برای جلوگیری از سند تکراری
 // ============================================================================
 
@@ -43,38 +43,37 @@ async function createAutoJournalEntry(
     let vatAccountId: string | null = null
     let checkReceivableAccountId: string | null = null
 
-  try {
-  console.log('[Invoices] 📋 Fetching standard account IDs...')
-  const accountIds = await getStandardAccountIds(tenantId)
-  console.log('[Invoices] ✅ Account IDs fetched:', {
-    cash: accountIds.cashAccountId ? '✓' : '✗',
-    sales: accountIds.salesAccountId ? '✓' : '✗',
-    cogs: accountIds.cogsAccountId ? '✓' : '✗',
-    inventory: accountIds.inventoryAccountId ? '✓' : '✗',
-    receivables: accountIds.receivablesAccountId ? '✓' : '✗',
-    checkReceivable: accountIds.checkReceivableAccountId ? '✓' : '✗',
-  })
-  
-  cashAccountId = accountIds.cashAccountId
-  salesAccountId = accountIds.salesAccountId
-  cogsAccountId = accountIds.cogsAccountId
-  inventoryAccountId = accountIds.inventoryAccountId
-  receivablesAccountId = accountIds.receivablesAccountId
-  vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
-  // ★ v7.9: حساب چک‌های دریافتنی (۱۳۵۰) — بدون as any
-  checkReceivableAccountId = accountIds.checkReceivableAccountId || null
-} catch (err: any) {
-  console.error('[Invoices] ❌ Failed to get account IDs:', err?.message)
-  console.error('[Invoices] ❌ Error stack:', err?.stack)
-  return
-}
+    try {
+      console.log('[Invoices] 📋 Fetching standard account IDs...')
+      const accountIds = await getStandardAccountIds(tenantId)
+      console.log('[Invoices] ✅ Account IDs fetched:', {
+        cash: accountIds.cashAccountId ? '✓' : '✗',
+        sales: accountIds.salesAccountId ? '✓' : '✗',
+        cogs: accountIds.cogsAccountId ? '✓' : '✗',
+        inventory: accountIds.inventoryAccountId ? '✓' : '✗',
+        receivables: accountIds.receivablesAccountId ? '✓' : '✗',
+        checkReceivable: accountIds.checkReceivableAccountId ? '✓' : '✗',
+      })
+      
+      cashAccountId = accountIds.cashAccountId
+      salesAccountId = accountIds.salesAccountId
+      cogsAccountId = accountIds.cogsAccountId
+      inventoryAccountId = accountIds.inventoryAccountId
+      receivablesAccountId = accountIds.receivablesAccountId
+      vatAccountId = accountIds.vatAccountId || accountIds.taxAccountId
+      checkReceivableAccountId = accountIds.checkReceivableAccountId || null
+    } catch (err: any) {
+      console.error('[Invoices] ❌ Failed to get account IDs:', err?.message)
+      console.error('[Invoices] ❌ Error stack:', err?.stack)
+      return
+    }
+
     const lines: any[] = []
-    // ★ v7.8: اضافه کردن 'check' به شرط — چک هم مثل نسیه/قسطی است
     const isCreditOrInstallment = paymentType === 'credit' || paymentType === 'installment' || paymentType === 'check'
     const netSales = invoice.subTotal - invoice.discountAmount
     const remainingAmount = totalAmount - paidAmount
 
-    // ★ ثبت پیش‌پرداخت (اگر نقدی/کارتخوان باشد)
+    // ثبت پیش‌پرداخت
     if (paidAmount > 0 && cashAccountId) {
       lines.push({ 
         accountId: cashAccountId, 
@@ -84,21 +83,16 @@ async function createAutoJournalEntry(
       })
     }
 
-    // ★ ثبت مانده فاکتور بر اساس روش پرداخت
+    // ثبت مانده فاکتور بر اساس روش پرداخت
     if (remainingAmount > 0) {
-      // ★ v7.9: تعیین حساب بدهکار بر اساس روش پرداخت
       let debitAccountId: string | null = cashAccountId
       let description = 'بدهکار: بابت فاکتور فروش'
       
       if (paymentType === 'check') {
-        // ★ v7.9: برای چک: از حساب "چک‌های دریافتنی" (۱۳۵۰) استفاده کن
-        // این کار باعث می‌شود سند فاکتور مستقیماً چک را ثبت کند
-        // و نیازی به سند تکراری در API چک نباشد
         debitAccountId = checkReceivableAccountId || receivablesAccountId || cashAccountId
         description = 'بدهکار: چک دریافتنی بابت فاکتور فروش'
         console.log('[Invoices] 💳 Check payment - using account:', debitAccountId, '(1350 preferred)')
       } else if (isCreditOrInstallment) {
-        // برای نسیه/قسطی: از حساب "بدهکاران تجاری" (۱۳۱۰) استفاده کن
         debitAccountId = receivablesAccountId || cashAccountId
         description = 'بدهکار: بدهکاران تجاری بابت فاکتور فروش'
         console.log('[Invoices] 💰 Credit/Installment payment - using account:', debitAccountId)
@@ -113,17 +107,17 @@ async function createAutoJournalEntry(
       }
     }
 
-    // ★ ثبت درآمد فروش
+    // ثبت درآمد فروش
     if (salesAccountId) {
       lines.push({ accountId: salesAccountId, debit: 0, credit: netSales, description: 'بستانکار: درآمد فروش' })
     }
 
-    // ★ ثبت مالیات
+    // ثبت مالیات
     if (invoice.taxAmount > 0 && vatAccountId) {
       lines.push({ accountId: vatAccountId, debit: 0, credit: invoice.taxAmount, description: 'بستانکار: مالیات بر ارزش افزوده فروش' })
     }
 
-    // ★ ثبت بهای تمام شده کالای فروش رفته (COGS)
+    // ثبت بهای تمام شده کالای فروش رفته (COGS)
     if (totalCogs > 0 && cogsAccountId && inventoryAccountId) {
       lines.push({ accountId: cogsAccountId, debit: totalCogs, credit: 0, description: 'بدهکار: بهای تمام شده کالای فروش رفته' })
       lines.push({ accountId: inventoryAccountId, debit: 0, credit: totalCogs, description: 'بستانکار: خروج از موجودی کالا' })
@@ -228,7 +222,7 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/invoices (v7.9)
+//  GET /api/invoices (v8.5)
 // ═══════════════════════════════════════════════════════════════
 
 export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -332,7 +326,8 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/invoices (v7.9)
+//  POST /api/invoices (v8.5)
+//  ★ v8.5: Check creation OUTSIDE transaction (Railway fix)
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (
@@ -346,13 +341,13 @@ export const POST = withTenantAndPermission('pos')(async (
     const tenantId = invoiceData.tenantId || tenant.tenantId
     const items = invoiceData.items || []
 
-    console.log('\n=== 🚨 [Invoices POST] DEBUG RECEIVED DATA 🚨 ===')
+    console.log('\n=== 🚨 [Invoices POST v8.5] DEBUG RECEIVED DATA 🚨 ===')
     console.log('tenantId:', tenantId)
     console.log('paymentType:', invoiceData.paymentType)
     console.log('paidAmount:', invoiceData.paidAmount)
-    console.log('downPayment (root):', invoiceData.downPayment)
-    console.log('numberOfInstallments (root):', invoiceData.numberOfInstallments)
-    console.log('installmentData (nested):', invoiceData.installmentData)
+    console.log('checkNumber:', invoiceData.checkNumber)
+    console.log('checkBankName:', invoiceData.checkBankName)
+    console.log('checkDueDate:', invoiceData.checkDueDate)
     console.log('items count:', items.length)
     console.log('==================================================\n')
 
@@ -435,6 +430,9 @@ export const POST = withTenantAndPermission('pos')(async (
 
     let totalCogs = 0
 
+    // ═══════════════════════════════════════════════════════════════
+    // TRANSACTION: فقط Invoice, Items, Payments, InstallmentPlan
+    // ═══════════════════════════════════════════════════════════════
     const result = await db.client.$transaction(async (tx: any) => {
       const inv = await tx.invoice.create({
         data: {
@@ -532,7 +530,7 @@ export const POST = withTenantAndPermission('pos')(async (
         }
       }
 
-      // ثبت پرداخت‌ها (شامل پیش‌پرداخت)
+      // ثبت پرداخت‌ها
       const payments = invoiceData.payments || []
       
       if (paidAmount > 0 && payments.length === 0) {
@@ -581,7 +579,7 @@ export const POST = withTenantAndPermission('pos')(async (
         console.log('[Invoices POST] ⚠️ Skipped installment plan creation. paymentType:', pt, 'hasInstallmentData:', !!invoiceData.installmentData, 'hasNumberOfInstallments:', !!invoiceData.numberOfInstallments)
       }
 
-          // ★ v7.8: به‌روزرسانی مانده مشتری (برای نسیه/قسطی/چک)
+      // به‌روزرسانی مانده مشتری
       if (isCreditOrInstallment && invoiceData.customerId && remainingAmount > 0) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
@@ -589,81 +587,73 @@ export const POST = withTenantAndPermission('pos')(async (
         }).catch((err: any) => console.warn(`[Invoices POST] Failed to update customer balance:`, err?.message))
       }
 
-      // ═══════════════════════════════════════════════════════════════
-      // ★ v8.0: ایجاد رکورد Check برای فاکتورهای با paymentType = 'check'
-      // ═══════════════════════════════════════════════════════════════
-         // ═══════════════════════════════════════════════════════════════
-      // ★ v8.2: ایجاد Check record (سازگار با Railway — بدون invoiceId)
-      // ═══════════════════════════════════════════════════════════════
-         // ═══════════════════════════════════════════════════════════════
-      // ★ v8.3: ایجاد رکورد Check با invoiceId برای فاکتورهای چکی
-      // ═══════════════════════════════════════════════════════════════
-      if (pt === 'check' && remainingAmount > 0) {
-        try {
-          // اطلاعات چک از invoiceData
-          const checkNumber = invoiceData.checkNumber 
-            || invoiceData.checkRef 
-            || `CHK-${Date.now()}`
-          const bankName = invoiceData.checkBankName 
-            || invoiceData.bankName 
-            || 'نامشخص'
-          const branchName = invoiceData.checkBranchName 
-            || invoiceData.branchName 
-            || null
-          const checkDueDate = invoiceData.checkDueDate 
-            || invoiceData.dueDate 
-            || inv.invoiceDate
-
-          console.log('[Invoices POST] 💳 Creating Check with invoiceId:', {
-            invoiceId: inv.id,
-            invoiceNumber: inv.number,
-            checkNumber,
-            bankName,
-            amount: remainingAmount,
-          })
-
-          const newCheck = await tx.check.create({
-            data: {
-              tenantId,
-              type: 'receivable',
-              checkNumber: checkNumber.trim(),
-              bankName: bankName.trim(),
-              branchName: branchName?.trim() || null,
-              amount: remainingAmount,
-              issueDate: inv.invoiceDate || new Date(),
-              dueDate: new Date(checkDueDate),
-              customerId: inv.customerId || null,
-              payeeName: null,
-              description: `چک دریافتی بابت فاکتور ${inv.number}`,
-              status: 'pending',
-              // ★ v8.3: لینک مستقیم به فاکتور
-              invoiceId: inv.id,
-            },
-          })
-
-            console.log('[Invoices POST] ✅ Check created with invoiceId:', {
-            checkId: newCheck.id,
-            checkNumber: newCheck.checkNumber,
-            invoiceId: newCheck.invoiceId,
-          })
-
-          // ★ v8.4: اضافه کردن اطلاعات چک به response
-          ;(inv as any).createdCheck = {
-            id: newCheck.id,
-            checkNumber: newCheck.checkNumber,
-            bankName: newCheck.bankName,
-            amount: newCheck.amount,
-            dueDate: newCheck.dueDate,
-          }
-        } catch (err: any) {
-          console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
-          console.error('[Invoices POST] ❌ Stack:', err?.stack)
-        }
-      }
       return inv
     })
 
-    // ایجاد سند حسابداری (بعد از transaction، برای جلوگیری از lock)
+    console.log('[Invoices POST] ✅ Transaction committed successfully')
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v8.5: ایجاد Check خارج از transaction (بعد از commit)
+    // ★ این کار مشکل Railway Foreign Key constraint را حل می‌کند
+    // ═══════════════════════════════════════════════════════════════
+    let createdCheck: any = null
+    if (pt === 'check' && remainingAmount > 0) {
+      try {
+        const checkNumber = invoiceData.checkNumber?.trim() 
+          || invoiceData.checkRef?.trim() 
+          || `CHK-${Date.now().toString().slice(-6)}`
+        const bankName = invoiceData.checkBankName?.trim() 
+          || invoiceData.bankName?.trim() 
+          || 'نامشخص'
+        const branchName = invoiceData.checkBranchName?.trim() 
+          || invoiceData.branchName?.trim() 
+          || null
+        const checkDueDate = invoiceData.checkDueDate 
+          || invoiceData.dueDate 
+          || result.invoiceDate
+        const checkPayee = invoiceData.checkPayee?.trim() || null
+
+        console.log('[Invoices POST] 💳 Creating Check OUTSIDE transaction:', {
+          invoiceId: result.id,
+          invoiceNumber: result.number,
+          checkNumber,
+          bankName,
+          amount: remainingAmount,
+          dueDate: checkDueDate,
+        })
+
+        // ★ v8.5: استفاده از db.client (نه tx) چون خارج از transaction هستیم
+        createdCheck = await db.client.check.create({
+          data: {
+            tenantId,
+            type: 'receivable',
+            checkNumber,
+            bankName,
+            branchName,
+            amount: remainingAmount,
+            issueDate: result.invoiceDate || new Date(),
+            dueDate: new Date(checkDueDate),
+            customerId: result.customerId || null,
+            payeeName: checkPayee,
+            description: `چک دریافتی بابت فاکتور ${result.number}`,
+            status: 'pending',
+            invoiceId: result.id,
+          },
+        })
+
+        console.log('[Invoices POST] ✅ Check created successfully:', {
+          id: createdCheck.id,
+          checkNumber: createdCheck.checkNumber,
+          invoiceId: createdCheck.invoiceId,
+          amount: createdCheck.amount,
+        })
+      } catch (err: any) {
+        console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
+        console.error('[Invoices POST] ❌ Stack:', err?.stack)
+      }
+    }
+
+    // ایجاد سند حسابداری (بعد از transaction)
     const planTier = tenant.planTier || 'basic'
     await createAutoJournalEntry(db.client, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
 
@@ -679,10 +669,20 @@ export const POST = withTenantAndPermission('pos')(async (
       console.warn('[Invoices] Moidian auto-submit hook failed:', err?.message)
     }
 
+    // ★ v8.5: بازگشت response با createdCheck
     return NextResponse.json({
       success: true,
-      data: result,
-      message: 'فاکتور با موفقیت ثبت شد'
+      data: {
+        ...result,
+        createdCheck: createdCheck ? {
+          id: createdCheck.id,
+          checkNumber: createdCheck.checkNumber,
+          bankName: createdCheck.bankName,
+          amount: createdCheck.amount,
+          dueDate: createdCheck.dueDate,
+        } : null,
+      },
+      message: `فاکتور ${result.number} با موفقیت ثبت شد${createdCheck ? ' و چک دریافتی ایجاد شد' : ''}`,
     }, { status: 201 })
 
   } catch (error: any) {
@@ -696,7 +696,7 @@ export const POST = withTenantAndPermission('pos')(async (
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT /api/invoices (v7.9)
+//  PUT /api/invoices (v8.5)
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -767,7 +767,6 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           }
         }
 
-        // ★ v7.8: اضافه کردن 'check' — هنگام لغو فاکتور با چک هم مانده مشتری برگشت داده شود
         if ((existing.paymentType === 'credit' || existing.paymentType === 'installment' || existing.paymentType === 'check') && existing.customerId) {
           const remainingAmount = Number(existing.totalAmount || 0) - Number(existing.paidAmount || 0)
           if (remainingAmount > 0) {
@@ -796,7 +795,7 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/invoices (v7.9)
+//  DELETE /api/invoices (v8.5)
 // ═══════════════════════════════════════════════════════════════
 
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -895,7 +894,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      // ★ v7.8: اضافه کردن 'check' — هنگام حذف فاکتور با چک هم مانده مشتری برگشت داده شود
       if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
         const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
         if (remainingAmount > 0) {
