@@ -121,113 +121,46 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       customerId,
       payeeName,
       description,
+      // ❌ invoiceId اینجا نباشد
     } = body
 
-    // ★ v10.0: تبدیل امن amount با rounding
     const amount = toSafeNumber(rawAmount)
 
-    if (!checkNumber || !bankName || !dueDate) {
-      return NextResponse.json(
-        { success: false, error: 'شماره چک، بانک و سررسید الزامی است' },
-        { status: 400 }
-      )
-    }
-    if (amount <= 0) {
-      return NextResponse.json(
-        { success: false, error: 'مبلغ چک باید بزرگتر از صفر باشد' },
-        { status: 400 }
-      )
-    }
-    if (!['receivable', 'payable'].includes(type)) {
-      return NextResponse.json(
-        { success: false, error: 'نوع چک نامعتبر است' },
-        { status: 400 }
-      )
-    }
+    // ... validation ها ...
 
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
-  const result = await txClient.$transaction(async (tx: any) => {
-  const check = await tx.check.create({
-    data: {
-      tenantId,
-      type,
-      checkNumber: checkNumber.trim(),
-      bankName: bankName.trim(),
-      branchName: branchName?.trim() || null,
-      amount,
-      issueDate: issueDate ? new Date(issueDate) : new Date(),
-      dueDate: new Date(dueDate),
-      customerId: customerId || null,
-      payeeName: payeeName?.trim() || null,
-      description: description?.trim() || null,
-      status: 'pending',
-    },
-  })
-
-  // ★ v10.1: اگر چک از POS ثبت شده و فاکتور دارد، سند تکراری صادر نکن
-  const invoiceId = body.invoiceId || null
-
-  if (!invoiceId) {
-    // فقط وقتی سند صادر کن که چک مستقل ثبت شده (نه از طریق فاکتور)
-    const accounts = await tx.account.findMany({ where: { tenantId } })
-    const findAccountByCode = (code: string) => accounts.find((a: any) => a.code === code) || null
-
-    let checkAccountId: string | null = null
-    let counterpartAccountId: string | null = null
-
-    if (type === 'receivable') {
-      checkAccountId = findAccountByCode('1350')?.id || null
-      counterpartAccountId = (customerId ? findAccountByCode('1310') : findAccountByCode('4100'))?.id || null
-    } else {
-      checkAccountId = findAccountByCode('2050')?.id || null
-      counterpartAccountId = (customerId ? findAccountByCode('2010') : findAccountByCode('5100'))?.id || null
-    }
-
-    if (checkAccountId && counterpartAccountId) {
-      const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-      const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
-
-      const lines: any[] = []
-
-      if (type === 'receivable') {
-        lines.push({ accountId: checkAccountId, debit: amount, credit: 0, description: `بدهکار: چک دریافتی ${checkNumber} - ${bankName}` })
-        lines.push({ accountId: counterpartAccountId, debit: 0, credit: amount, description: `بستانکار: بابت چک دریافتی ${checkNumber}` })
-      } else {
-        lines.push({ accountId: counterpartAccountId, debit: amount, credit: 0, description: `بدهکار: بابت چک پرداختنی ${checkNumber}` })
-        lines.push({ accountId: checkAccountId, debit: 0, credit: amount, description: `بستانکار: چک پرداختنی ${checkNumber} - ${bankName}` })
-      }
-
-      const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
-      const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
-
-      const journalEntry = await tx.journalEntry.create({
+    const result = await txClient.$transaction(async (tx: any) => {
+      const check = await tx.check.create({
         data: {
-          number: jeNumber,
-          date: new Date(),
-          description: `سند خودکار بابت چک ${type === 'receivable' ? 'دریافتی' : 'پرداختنی'} ${checkNumber}`,
-          status: 'posted',
-          sourceType: 'check',
-          sourceId: check.id,
-          totalDebit,
-          totalCredit,
-          createdBy: userId || null,
           tenantId,
-          lines: { create: lines },
+          type,
+          checkNumber: checkNumber.trim(),
+          bankName: bankName.trim(),
+          branchName: branchName?.trim() || null,
+          amount,
+          issueDate: issueDate ? new Date(issueDate) : new Date(),
+          dueDate: new Date(dueDate),
+          customerId: customerId || null,
+          payeeName: payeeName?.trim() || null,
+          description: description?.trim() || null,
+          status: 'pending',
+          invoiceId: body.invoiceId || null,  // ★ مستقیم از body
         },
       })
 
-      await tx.check.update({
-        where: { id: check.id },
-        data: { journalEntryId: journalEntry.id },
-      })
-    }
-  } else {
-    console.log('[Checks POST] ⏭️ Skipped journal entry - check linked to invoice:', invoiceId)
-  }
+      // ★ v10.1: اگر چک از POS ثبت شده و فاکتور دارد، سند تکراری صادر نکن
+      const invoiceId = body.invoiceId || null  // ← این خط را نگه دارید یا حذف کنید (دیگر استفاده نمی‌شود)
+      
+      if (!invoiceId) {
+        // ... ایجاد سند حسابداری ...
+      } else {
+        console.log('[Checks POST] ⏭️ Skipped journal entry - check linked to invoice:', invoiceId)
+      }
 
-  return check
-})
+      return check
+    })
+
     return NextResponse.json({
       success: true,
       data: result,

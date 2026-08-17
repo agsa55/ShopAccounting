@@ -535,7 +535,7 @@ model Invoice {
   warehouse       Warehouse?       @relation(fields: [warehouseId], references: [id])
   // ★★★ v8.0: relation به پرداخت‌های کارتی
   cardPayments    CardPayment[]    @relation("CardPaymentInvoice")
-
+ checks          Check[]  @relation("InvoiceChecks")
   @@unique([number, tenantId])
   @@index([tenantId])
   @@index([tenantId, status])
@@ -905,6 +905,9 @@ model Check {
 
   customerId String? @db.VarChar(450)
   supplierId String? @db.VarChar(450)
+  
+  // ★ v8.3: لینک به فاکتور (برای ردیابی چک‌های صادر شده از فاکتور)
+  invoiceId  String? @db.VarChar(450)
 
   payeeName      String?
   description    String?
@@ -916,6 +919,9 @@ model Check {
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   customer Customer? @relation("CustomerChecks", fields: [customerId], references: [id], onUpdate: NoAction, onDelete: SetNull)
   supplier Supplier? @relation("SupplierChecks", fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  
+  // ★ v8.3: رابطه با فاکتور (Named Relation)
+  invoice  Invoice?  @relation("InvoiceChecks", fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
 
   @@index([tenantId])
   @@index([tenantId, type])
@@ -923,6 +929,7 @@ model Check {
   @@index([tenantId, dueDate])
   @@index([customerId])
   @@index([supplierId])
+  @@index([invoiceId])  // ★ v8.3: index برای جستجوی سریع چک‌های یک فاکتور
   @@map("Checks")
 }
 
