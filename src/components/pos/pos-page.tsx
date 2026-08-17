@@ -2371,7 +2371,7 @@ if (pt === 'check') {
       // ★ v11.2: اولویت مشتری از مودال چک، سپس از POS
       const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
 
-      await addToSyncQueue('invoice', {
+       await addToSyncQueue('invoice', {
         method: 'POST',
         url: '/api/invoices',
         body: {
@@ -2386,34 +2386,16 @@ if (pt === 'check') {
           remainingAmount: remainingAmountOffline,
           warehouseId: selectedWarehouseId || undefined,
           ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
+          // ★ v11.4: اطلاعات چک داخل body فاکتور
+          ...(ptFinal === 'check' && {
+            checkNumber: checkNumber.trim(),
+            checkBankName: checkBank.trim(),
+            checkDueDate: checkDueDate,
+            checkPayee: checkPayee.trim() || null,
+          }),
         },
       })
-
-      // ★ v11.2: ثبت چک در صف آفلاین
-      if (ptFinal === 'check') {
-        try {
-          await addToSyncQueue('check', {
-            method: 'POST',
-            url: '/api/checks',
-            body: {
-              tenantId: getTenantIdFromStore(),
-              type: 'receivable',
-              checkNumber: checkNumber.trim(),
-              bankName: checkBank.trim(),
-              amount: cartTotals.totalAmount,
-              dueDate: checkDueDate,
-              customerId: finalCustomerId || null,
-              payeeName: checkPayee.trim() || null,
-              description: `چک دریافتی بابت فاکتور ${offlineNumber}`,
-              invoiceId: null,
-            },
-          })
-          console.log('[POS] ✅ Check added to sync queue')
-        } catch (checkErr) {
-          console.warn('[POS] ⚠️ Failed to queue check:', checkErr)
-        }
-      }
-
+   
       try {
         const { updateCachedProductStock } = await import('@/lib/offline-db')
         for (const item of cart) {
@@ -2676,74 +2658,34 @@ if (pt === 'check') {
         })
       }
 
-      // ★ v11.2: ثبت چک با ارسال invoiceId
+         // ★ v11.4: چک در همان API فاکتور ایجاد شده - فقط پیام موفقیت
       if (isCheck) {
-        const invoiceId = result.data?.id || null
         const invoiceNumber = result.data?.number || ''
+        const createdCheck = (result.data as any)?.createdCheck || null
+        
+        console.log('[POS] 📥 Invoice response:', {
+          invoiceId: result.data?.id,
+          invoiceNumber: result.data?.number,
+          createdCheck: createdCheck ? '✓' : '✗',
+        })
 
-        try {
-          const checkPayload = {
-            type: 'receivable',
-            checkNumber: checkNumber.trim(),
-            bankName: checkBank.trim(),
-            amount: cartTotals.totalAmount,
-            dueDate: checkDueDate,
-            customerId: finalCustomerId || null,
-            payeeName: checkPayee.trim() || null,
-            description: `چک دریافتی بابت فاکتور ${invoiceNumber}`,
-            invoiceId: invoiceId,
-          }
-
-          console.log('[POS] 📤 Sending check to API:', {
-            checkNumber: checkPayload.checkNumber,
-            bankName: checkPayload.bankName,
-            invoiceId: invoiceId ? '✓' : '✗',
-          })
-
-          const checkRes = await fetch('/api/checks', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify(checkPayload),
-          })
-
-          const checkData = await checkRes.json()
-          console.log('[POS] 📥 Check API response:', {
-            status: checkRes.status,
-            success: checkData.success,
-            error: checkData.error,
-            checkId: checkData.data?.id,
-          })
-
-          if (checkData.success) {
-            toast({
-              title: '✓ فاکتور و چک ثبت شد',
-              description: `فاکتور ${invoiceNumber} + چک شماره ${checkNumber} (${checkBank})`,
-              duration: 5000,
-            })
-            window.dispatchEvent(new Event('checks-updated'))
-          } else {
-            console.error('[POS] ❌ Check API error:', checkData.error)
-            toast({
-              title: '⚠️ فاکتور ثبت شد اما چک ثبت نشد',
-              description: checkData.error || 'لطفاً از بخش چک‌ها، چک را دستی ثبت کنید',
-              variant: 'destructive',
-              duration: 7000,
-            })
-          }
-        } catch (err: any) {
-          console.error('[POS] ❌ Check registration exception:', err)
+        if (createdCheck) {
           toast({
-            title: '⚠️ فاکتور ثبت شد اما چک ثبت نشد',
-            description: err?.message || 'لطفاً از بخش چک‌ها، چک را دستی ثبت کنید',
-            variant: 'destructive',
-            duration: 7000,
+            title: '✓ فاکتور و چک ثبت شد',
+            description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
+            duration: 5000,
+          })
+        } else {
+          toast({
+            title: '✓ فاکتور ثبت شد',
+            description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
+            duration: 5000,
           })
         }
+        
+        // رویداد به‌روزرسانی چک‌ها
+        window.dispatchEvent(new Event('checks-updated'))
       }
-
       setInstallmentPlan(null)
       setInstallmentDialogOpen(false)
       setConfirmDialogOpen(false)

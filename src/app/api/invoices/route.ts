@@ -641,11 +641,20 @@ export const POST = withTenantAndPermission('pos')(async (
             },
           })
 
-          console.log('[Invoices POST] ✅ Check created with invoiceId:', {
+            console.log('[Invoices POST] ✅ Check created with invoiceId:', {
             checkId: newCheck.id,
             checkNumber: newCheck.checkNumber,
             invoiceId: newCheck.invoiceId,
           })
+
+          // ★ v8.4: اضافه کردن اطلاعات چک به response
+          ;(inv as any).createdCheck = {
+            id: newCheck.id,
+            checkNumber: newCheck.checkNumber,
+            bankName: newCheck.bankName,
+            amount: newCheck.amount,
+            dueDate: newCheck.dueDate,
+          }
         } catch (err: any) {
           console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
           console.error('[Invoices POST] ❌ Stack:', err?.stack)
