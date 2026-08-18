@@ -132,6 +132,8 @@ interface Invoice {
   payments: InvoicePayment[]
   installmentPlan?: any | null
   customerPortalToken?: string | null
+    checkStatus?: string | null
+  checkInfo?: { id: string; status: string; checkNumber: string; bankName: string; dueDate: string } | null
   _isOffline?: boolean
   _offlineAction?: 'create' | 'update' | 'delete'
 }
@@ -254,6 +256,19 @@ function getPaymentTypeBadge(paymentType: string) {
   if (pt === 'installment')
     return <Badge className="bg-orange-50 text-orange-600 hover:bg-orange-50 text-[10px] gap-1"><CreditCard className="w-3 h-3" />قسطی</Badge>
   return <Badge className="bg-gray-50 text-gray-600 hover:bg-gray-50 text-[10px]">{paymentType}</Badge>
+}
+
+function getCheckStatusBadge(checkStatus: string | null | undefined) {
+  if (!checkStatus) return null
+  const map: Record<string, { label: string; className: string }> = {
+    pending: { label: 'در جریان', className: 'bg-amber-50 text-amber-600 border border-amber-200' },
+    deposited: { label: 'نزد بانک', className: 'bg-blue-50 text-blue-600 border border-blue-200' },
+    cleared: { label: 'وصول شد', className: 'bg-emerald-50 text-emerald-600 border border-emerald-200' },
+    bounced: { label: 'برگشت خورد', className: 'bg-red-50 text-red-600 border border-red-200' },
+    returned: { label: 'پس داده شد', className: 'bg-gray-100 text-gray-600 border border-gray-200' },
+  }
+  const info = map[checkStatus] || { label: checkStatus, className: 'bg-gray-50 text-gray-500' }
+  return <Badge className={`${info.className} text-[10px] gap-1 hover:${info.className}`}>{info.label}</Badge>
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -549,7 +564,10 @@ function MobileInvoiceCard({
           <span className="text-xs text-gray-600 truncate flex-1">
             {inv.customerName || <span className="text-gray-400">فروش عمومی</span>}
           </span>
-          {getPaymentTypeBadge(inv.paymentType)}
+      <div className="flex items-center gap-1">
+  {getPaymentTypeBadge(inv.paymentType)}
+  {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}
+</div>
         </div>
 
         <div className="grid grid-cols-3 gap-1.5 mb-2.5">
@@ -1208,7 +1226,7 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'مشتری', value: <span className="text-xs font-medium truncate block">{inv.customerName || 'فروش عمومی'}</span> },
-                { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}{getPaymentTypeBadge(inv.paymentType)}</div> },
+             { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}</div> },
               ].map((item, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
                   <p className="text-[9px] text-gray-400 mb-0.5">{item.label}</p>
@@ -2068,7 +2086,12 @@ export default function InvoicesPage() {
                                     {formatNumber(inv.paidAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
                                   </span>
                                 </TableCell>
-                                <TableCell className="hidden xl:table-cell">{getPaymentTypeBadge(inv.paymentType)}</TableCell>
+                          <TableCell className="hidden xl:table-cell">
+  <div className="flex items-center gap-1 flex-wrap">
+    {getPaymentTypeBadge(inv.paymentType)}
+    {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}
+  </div>
+</TableCell>
                                 <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}</TableCell>
                                 <TableCell className="text-xs hidden lg:table-cell">{formatDateShort(inv.createdAt)}</TableCell>
                                 <TableCell>

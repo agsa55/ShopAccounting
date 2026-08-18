@@ -63,6 +63,8 @@ interface PurchaseInvoice {
   _syncStatus?: 'pending' | 'syncing' | 'failed'
   _offlineAction?: 'create' | 'update' | 'delete'
   _retryCount?: number
+    checkStatus?: string | null
+  checkInfo?: { id: string; status: string; checkNumber: string; bankName: string; dueDate: string } | null
 }
 
 interface CartItem {
@@ -531,7 +533,7 @@ function MobileInvoiceCard({
             <p className="text-[9px] text-gray-400 leading-tight">انبار</p>
             <p className="text-[10px] font-bold text-blue-600 leading-tight mt-0.5 truncate">{inv.warehouse?.name || '—'}</p>
           </div>
-      <div className={`rounded p-1.5 text-center ${
+    <div className={`rounded p-1.5 text-center ${
   inv.paymentType === 'credit' ? 'bg-purple-50' :
   inv.paymentType === 'check' ? 'bg-cyan-50' :
   'bg-emerald-50'
@@ -546,6 +548,14 @@ function MobileInvoiceCard({
      inv.paymentType === 'check' ? '🏛️ چک' :
      'نقدی'}
   </p>
+  {inv.paymentType === 'check' && inv.checkStatus && (
+    <p className="text-[8px] mt-0.5 font-medium text-cyan-700">
+      {inv.checkStatus === 'cleared' ? '✅ پاس شد' :
+       inv.checkStatus === 'bounced' ? '❌ برگشتی' :
+       inv.checkStatus === 'returned' ? '↩️ باطل شد' :
+       '⏳ در جریان'}
+    </p>
+  )}
 </div>
         </div>
 
@@ -2051,6 +2061,19 @@ const filteredInvoices = useMemo(() => {
        inv.paymentType === 'check' ? '🏛️ چک' :
        '💵 نقدی'}
     </Badge>
+        {inv.paymentType === 'check' && inv.checkStatus && (
+      <Badge className={`text-[8px] ${
+        inv.checkStatus === 'cleared' ? 'bg-emerald-100 text-emerald-700' :
+        inv.checkStatus === 'bounced' ? 'bg-red-100 text-red-700' :
+        inv.checkStatus === 'returned' ? 'bg-gray-100 text-gray-700' :
+        'bg-amber-100 text-amber-700'
+      }`}>
+        {inv.checkStatus === 'cleared' ? '✅ پاس شد' :
+         inv.checkStatus === 'bounced' ? '❌ برگشتی' :
+         inv.checkStatus === 'returned' ? '↩️ باطل شد' :
+         '⏳ در جریان'}
+      </Badge>
+    )}
                                 {inv.invoiceType === 'service' && (
                                   <Badge className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200">خدمات</Badge>
                                 )}

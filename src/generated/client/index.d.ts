@@ -6278,10 +6278,12 @@ export namespace Prisma {
    */
 
   export type PurchaseInvoiceCountOutputType = {
+    Checks: number
     items: number
   }
 
   export type PurchaseInvoiceCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    Checks?: boolean | PurchaseInvoiceCountOutputTypeCountChecksArgs
     items?: boolean | PurchaseInvoiceCountOutputTypeCountItemsArgs
   }
 
@@ -6294,6 +6296,13 @@ export namespace Prisma {
      * Select specific fields to fetch from the PurchaseInvoiceCountOutputType
      */
     select?: PurchaseInvoiceCountOutputTypeSelect<ExtArgs> | null
+  }
+
+  /**
+   * PurchaseInvoiceCountOutputType without action
+   */
+  export type PurchaseInvoiceCountOutputTypeCountChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: CheckWhereInput
   }
 
   /**
@@ -42249,6 +42258,7 @@ export namespace Prisma {
     customerId: string | null
     supplierId: string | null
     invoiceId: string | null
+    purchaseInvoiceId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42270,6 +42280,7 @@ export namespace Prisma {
     customerId: string | null
     supplierId: string | null
     invoiceId: string | null
+    purchaseInvoiceId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42291,6 +42302,7 @@ export namespace Prisma {
     customerId: number
     supplierId: number
     invoiceId: number
+    purchaseInvoiceId: number
     payeeName: number
     description: number
     journalEntryId: number
@@ -42322,6 +42334,7 @@ export namespace Prisma {
     customerId?: true
     supplierId?: true
     invoiceId?: true
+    purchaseInvoiceId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42343,6 +42356,7 @@ export namespace Prisma {
     customerId?: true
     supplierId?: true
     invoiceId?: true
+    purchaseInvoiceId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42364,6 +42378,7 @@ export namespace Prisma {
     customerId?: true
     supplierId?: true
     invoiceId?: true
+    purchaseInvoiceId?: true
     payeeName?: true
     description?: true
     journalEntryId?: true
@@ -42472,6 +42487,7 @@ export namespace Prisma {
     customerId: string | null
     supplierId: string | null
     invoiceId: string | null
+    purchaseInvoiceId: string | null
     payeeName: string | null
     description: string | null
     journalEntryId: string | null
@@ -42512,6 +42528,7 @@ export namespace Prisma {
     customerId?: boolean
     supplierId?: boolean
     invoiceId?: boolean
+    purchaseInvoiceId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
@@ -42521,6 +42538,7 @@ export namespace Prisma {
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -42537,6 +42555,7 @@ export namespace Prisma {
     customerId?: boolean
     supplierId?: boolean
     invoiceId?: boolean
+    purchaseInvoiceId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
@@ -42546,6 +42565,7 @@ export namespace Prisma {
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
@@ -42562,6 +42582,7 @@ export namespace Prisma {
     customerId?: boolean
     supplierId?: boolean
     invoiceId?: boolean
+    purchaseInvoiceId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
@@ -42571,6 +42592,7 @@ export namespace Prisma {
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }, ExtArgs["result"]["check"]>
 
   export type CheckSelectScalar = {
@@ -42587,6 +42609,7 @@ export namespace Prisma {
     customerId?: boolean
     supplierId?: boolean
     invoiceId?: boolean
+    purchaseInvoiceId?: boolean
     payeeName?: boolean
     description?: boolean
     journalEntryId?: boolean
@@ -42594,24 +42617,27 @@ export namespace Prisma {
     updatedAt?: boolean
   }
 
-  export type CheckOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "tenantId" | "type" | "checkNumber" | "bankName" | "branchName" | "amount" | "issueDate" | "dueDate" | "status" | "customerId" | "supplierId" | "invoiceId" | "payeeName" | "description" | "journalEntryId" | "createdAt" | "updatedAt", ExtArgs["result"]["check"]>
+  export type CheckOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "tenantId" | "type" | "checkNumber" | "bankName" | "branchName" | "amount" | "issueDate" | "dueDate" | "status" | "customerId" | "supplierId" | "invoiceId" | "purchaseInvoiceId" | "payeeName" | "description" | "journalEntryId" | "createdAt" | "updatedAt", ExtArgs["result"]["check"]>
   export type CheckInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }
   export type CheckIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }
   export type CheckIncludeUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     Tenant?: boolean | TenantDefaultArgs<ExtArgs>
     customer?: boolean | Check$customerArgs<ExtArgs>
     supplier?: boolean | Check$supplierArgs<ExtArgs>
     invoice?: boolean | Check$invoiceArgs<ExtArgs>
+    purchaseInvoice?: boolean | Check$purchaseInvoiceArgs<ExtArgs>
   }
 
   export type $CheckPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
@@ -42621,6 +42647,7 @@ export namespace Prisma {
       customer: Prisma.$CustomerPayload<ExtArgs> | null
       supplier: Prisma.$SupplierPayload<ExtArgs> | null
       invoice: Prisma.$InvoicePayload<ExtArgs> | null
+      purchaseInvoice: Prisma.$PurchaseInvoicePayload<ExtArgs> | null
     }
     scalars: $Extensions.GetPayloadResult<{
       id: string
@@ -42636,6 +42663,7 @@ export namespace Prisma {
       customerId: string | null
       supplierId: string | null
       invoiceId: string | null
+      purchaseInvoiceId: string | null
       payeeName: string | null
       description: string | null
       journalEntryId: string | null
@@ -43039,6 +43067,7 @@ export namespace Prisma {
     customer<T extends Check$customerArgs<ExtArgs> = {}>(args?: Subset<T, Check$customerArgs<ExtArgs>>): Prisma__CustomerClient<$Result.GetResult<Prisma.$CustomerPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     supplier<T extends Check$supplierArgs<ExtArgs> = {}>(args?: Subset<T, Check$supplierArgs<ExtArgs>>): Prisma__SupplierClient<$Result.GetResult<Prisma.$SupplierPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     invoice<T extends Check$invoiceArgs<ExtArgs> = {}>(args?: Subset<T, Check$invoiceArgs<ExtArgs>>): Prisma__InvoiceClient<$Result.GetResult<Prisma.$InvoicePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+    purchaseInvoice<T extends Check$purchaseInvoiceArgs<ExtArgs> = {}>(args?: Subset<T, Check$purchaseInvoiceArgs<ExtArgs>>): Prisma__PurchaseInvoiceClient<$Result.GetResult<Prisma.$PurchaseInvoicePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
      * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -43081,6 +43110,7 @@ export namespace Prisma {
     readonly customerId: FieldRef<"Check", 'String'>
     readonly supplierId: FieldRef<"Check", 'String'>
     readonly invoiceId: FieldRef<"Check", 'String'>
+    readonly purchaseInvoiceId: FieldRef<"Check", 'String'>
     readonly payeeName: FieldRef<"Check", 'String'>
     readonly description: FieldRef<"Check", 'String'>
     readonly journalEntryId: FieldRef<"Check", 'String'>
@@ -43536,6 +43566,25 @@ export namespace Prisma {
      */
     include?: InvoiceInclude<ExtArgs> | null
     where?: InvoiceWhereInput
+  }
+
+  /**
+   * Check.purchaseInvoice
+   */
+  export type Check$purchaseInvoiceArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the PurchaseInvoice
+     */
+    select?: PurchaseInvoiceSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the PurchaseInvoice
+     */
+    omit?: PurchaseInvoiceOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: PurchaseInvoiceInclude<ExtArgs> | null
+    where?: PurchaseInvoiceWhereInput
   }
 
   /**
@@ -56158,6 +56207,7 @@ export namespace Prisma {
     Supplier?: boolean | PurchaseInvoice$SupplierArgs<ExtArgs>
     Warehouse?: boolean | WarehouseDefaultArgs<ExtArgs>
     journalEntry?: boolean | PurchaseInvoice$journalEntryArgs<ExtArgs>
+    Checks?: boolean | PurchaseInvoice$ChecksArgs<ExtArgs>
     items?: boolean | PurchaseInvoice$itemsArgs<ExtArgs>
     _count?: boolean | PurchaseInvoiceCountOutputTypeDefaultArgs<ExtArgs>
   }, ExtArgs["result"]["purchaseInvoice"]>
@@ -56251,6 +56301,7 @@ export namespace Prisma {
     Supplier?: boolean | PurchaseInvoice$SupplierArgs<ExtArgs>
     Warehouse?: boolean | WarehouseDefaultArgs<ExtArgs>
     journalEntry?: boolean | PurchaseInvoice$journalEntryArgs<ExtArgs>
+    Checks?: boolean | PurchaseInvoice$ChecksArgs<ExtArgs>
     items?: boolean | PurchaseInvoice$itemsArgs<ExtArgs>
     _count?: boolean | PurchaseInvoiceCountOutputTypeDefaultArgs<ExtArgs>
   }
@@ -56274,6 +56325,7 @@ export namespace Prisma {
       Supplier: Prisma.$SupplierPayload<ExtArgs> | null
       Warehouse: Prisma.$WarehousePayload<ExtArgs>
       journalEntry: Prisma.$JournalEntryPayload<ExtArgs> | null
+      Checks: Prisma.$CheckPayload<ExtArgs>[]
       items: Prisma.$PurchaseInvoiceItemPayload<ExtArgs>[]
     }
     scalars: $Extensions.GetPayloadResult<{
@@ -56697,6 +56749,7 @@ export namespace Prisma {
     Supplier<T extends PurchaseInvoice$SupplierArgs<ExtArgs> = {}>(args?: Subset<T, PurchaseInvoice$SupplierArgs<ExtArgs>>): Prisma__SupplierClient<$Result.GetResult<Prisma.$SupplierPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     Warehouse<T extends WarehouseDefaultArgs<ExtArgs> = {}>(args?: Subset<T, WarehouseDefaultArgs<ExtArgs>>): Prisma__WarehouseClient<$Result.GetResult<Prisma.$WarehousePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
     journalEntry<T extends PurchaseInvoice$journalEntryArgs<ExtArgs> = {}>(args?: Subset<T, PurchaseInvoice$journalEntryArgs<ExtArgs>>): Prisma__JournalEntryClient<$Result.GetResult<Prisma.$JournalEntryPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+    Checks<T extends PurchaseInvoice$ChecksArgs<ExtArgs> = {}>(args?: Subset<T, PurchaseInvoice$ChecksArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$CheckPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     items<T extends PurchaseInvoice$itemsArgs<ExtArgs> = {}>(args?: Subset<T, PurchaseInvoice$itemsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$PurchaseInvoiceItemPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
@@ -57180,6 +57233,30 @@ export namespace Prisma {
      */
     include?: JournalEntryInclude<ExtArgs> | null
     where?: JournalEntryWhereInput
+  }
+
+  /**
+   * PurchaseInvoice.Checks
+   */
+  export type PurchaseInvoice$ChecksArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the Check
+     */
+    select?: CheckSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the Check
+     */
+    omit?: CheckOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: CheckInclude<ExtArgs> | null
+    where?: CheckWhereInput
+    orderBy?: CheckOrderByWithRelationInput | CheckOrderByWithRelationInput[]
+    cursor?: CheckWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: CheckScalarFieldEnum | CheckScalarFieldEnum[]
   }
 
   /**
@@ -68883,6 +68960,7 @@ export namespace Prisma {
     customerId: 'customerId',
     supplierId: 'supplierId',
     invoiceId: 'invoiceId',
+    purchaseInvoiceId: 'purchaseInvoiceId',
     payeeName: 'payeeName',
     description: 'description',
     journalEntryId: 'journalEntryId',
@@ -72416,6 +72494,7 @@ export namespace Prisma {
     customerId?: StringNullableFilter<"Check"> | string | null
     supplierId?: StringNullableFilter<"Check"> | string | null
     invoiceId?: StringNullableFilter<"Check"> | string | null
+    purchaseInvoiceId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
@@ -72425,6 +72504,7 @@ export namespace Prisma {
     customer?: XOR<CustomerNullableScalarRelationFilter, CustomerWhereInput> | null
     supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
     invoice?: XOR<InvoiceNullableScalarRelationFilter, InvoiceWhereInput> | null
+    purchaseInvoice?: XOR<PurchaseInvoiceNullableScalarRelationFilter, PurchaseInvoiceWhereInput> | null
   }
 
   export type CheckOrderByWithRelationInput = {
@@ -72441,6 +72521,7 @@ export namespace Prisma {
     customerId?: SortOrderInput | SortOrder
     supplierId?: SortOrderInput | SortOrder
     invoiceId?: SortOrderInput | SortOrder
+    purchaseInvoiceId?: SortOrderInput | SortOrder
     payeeName?: SortOrderInput | SortOrder
     description?: SortOrderInput | SortOrder
     journalEntryId?: SortOrderInput | SortOrder
@@ -72450,6 +72531,7 @@ export namespace Prisma {
     customer?: CustomerOrderByWithRelationInput
     supplier?: SupplierOrderByWithRelationInput
     invoice?: InvoiceOrderByWithRelationInput
+    purchaseInvoice?: PurchaseInvoiceOrderByWithRelationInput
   }
 
   export type CheckWhereUniqueInput = Prisma.AtLeast<{
@@ -72469,6 +72551,7 @@ export namespace Prisma {
     customerId?: StringNullableFilter<"Check"> | string | null
     supplierId?: StringNullableFilter<"Check"> | string | null
     invoiceId?: StringNullableFilter<"Check"> | string | null
+    purchaseInvoiceId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
@@ -72478,6 +72561,7 @@ export namespace Prisma {
     customer?: XOR<CustomerNullableScalarRelationFilter, CustomerWhereInput> | null
     supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
     invoice?: XOR<InvoiceNullableScalarRelationFilter, InvoiceWhereInput> | null
+    purchaseInvoice?: XOR<PurchaseInvoiceNullableScalarRelationFilter, PurchaseInvoiceWhereInput> | null
   }, "id">
 
   export type CheckOrderByWithAggregationInput = {
@@ -72494,6 +72578,7 @@ export namespace Prisma {
     customerId?: SortOrderInput | SortOrder
     supplierId?: SortOrderInput | SortOrder
     invoiceId?: SortOrderInput | SortOrder
+    purchaseInvoiceId?: SortOrderInput | SortOrder
     payeeName?: SortOrderInput | SortOrder
     description?: SortOrderInput | SortOrder
     journalEntryId?: SortOrderInput | SortOrder
@@ -72523,6 +72608,7 @@ export namespace Prisma {
     customerId?: StringNullableWithAggregatesFilter<"Check"> | string | null
     supplierId?: StringNullableWithAggregatesFilter<"Check"> | string | null
     invoiceId?: StringNullableWithAggregatesFilter<"Check"> | string | null
+    purchaseInvoiceId?: StringNullableWithAggregatesFilter<"Check"> | string | null
     payeeName?: StringNullableWithAggregatesFilter<"Check"> | string | null
     description?: StringNullableWithAggregatesFilter<"Check"> | string | null
     journalEntryId?: StringNullableWithAggregatesFilter<"Check"> | string | null
@@ -73588,6 +73674,7 @@ export namespace Prisma {
     Supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
     Warehouse?: XOR<WarehouseScalarRelationFilter, WarehouseWhereInput>
     journalEntry?: XOR<JournalEntryNullableScalarRelationFilter, JournalEntryWhereInput> | null
+    Checks?: CheckListRelationFilter
     items?: PurchaseInvoiceItemListRelationFilter
   }
 
@@ -73618,6 +73705,7 @@ export namespace Prisma {
     Supplier?: SupplierOrderByWithRelationInput
     Warehouse?: WarehouseOrderByWithRelationInput
     journalEntry?: JournalEntryOrderByWithRelationInput
+    Checks?: CheckOrderByRelationAggregateInput
     items?: PurchaseInvoiceItemOrderByRelationAggregateInput
   }
 
@@ -73652,6 +73740,7 @@ export namespace Prisma {
     Supplier?: XOR<SupplierNullableScalarRelationFilter, SupplierWhereInput> | null
     Warehouse?: XOR<WarehouseScalarRelationFilter, WarehouseWhereInput>
     journalEntry?: XOR<JournalEntryNullableScalarRelationFilter, JournalEntryWhereInput> | null
+    Checks?: CheckListRelationFilter
     items?: PurchaseInvoiceItemListRelationFilter
   }, "id" | "number_tenantId">
 
@@ -78101,6 +78190,7 @@ export namespace Prisma {
     customer?: CustomerCreateNestedOneWithoutChecksInput
     supplier?: SupplierCreateNestedOneWithoutChecksInput
     invoice?: InvoiceCreateNestedOneWithoutChecksInput
+    purchaseInvoice?: PurchaseInvoiceCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateInput = {
@@ -78117,6 +78207,7 @@ export namespace Prisma {
     customerId?: string | null
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -78143,6 +78234,7 @@ export namespace Prisma {
     customer?: CustomerUpdateOneWithoutChecksNestedInput
     supplier?: SupplierUpdateOneWithoutChecksNestedInput
     invoice?: InvoiceUpdateOneWithoutChecksNestedInput
+    purchaseInvoice?: PurchaseInvoiceUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateInput = {
@@ -78159,6 +78251,7 @@ export namespace Prisma {
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -78180,6 +78273,7 @@ export namespace Prisma {
     customerId?: string | null
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -78218,6 +78312,7 @@ export namespace Prisma {
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -79416,6 +79511,7 @@ export namespace Prisma {
     Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
     Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
     journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -79442,6 +79538,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -79468,6 +79565,7 @@ export namespace Prisma {
     Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
     Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -79494,6 +79592,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -83084,6 +83183,11 @@ export namespace Prisma {
     isNot?: SupplierWhereInput | null
   }
 
+  export type PurchaseInvoiceNullableScalarRelationFilter = {
+    is?: PurchaseInvoiceWhereInput | null
+    isNot?: PurchaseInvoiceWhereInput | null
+  }
+
   export type CheckCountOrderByAggregateInput = {
     id?: SortOrder
     tenantId?: SortOrder
@@ -83098,6 +83202,7 @@ export namespace Prisma {
     customerId?: SortOrder
     supplierId?: SortOrder
     invoiceId?: SortOrder
+    purchaseInvoiceId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -83123,6 +83228,7 @@ export namespace Prisma {
     customerId?: SortOrder
     supplierId?: SortOrder
     invoiceId?: SortOrder
+    purchaseInvoiceId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -83144,6 +83250,7 @@ export namespace Prisma {
     customerId?: SortOrder
     supplierId?: SortOrder
     invoiceId?: SortOrder
+    purchaseInvoiceId?: SortOrder
     payeeName?: SortOrder
     description?: SortOrder
     journalEntryId?: SortOrder
@@ -88035,6 +88142,12 @@ export namespace Prisma {
     connect?: InvoiceWhereUniqueInput
   }
 
+  export type PurchaseInvoiceCreateNestedOneWithoutChecksInput = {
+    create?: XOR<PurchaseInvoiceCreateWithoutChecksInput, PurchaseInvoiceUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: PurchaseInvoiceCreateOrConnectWithoutChecksInput
+    connect?: PurchaseInvoiceWhereUniqueInput
+  }
+
   export type TenantUpdateOneRequiredWithoutChecksNestedInput = {
     create?: XOR<TenantCreateWithoutChecksInput, TenantUncheckedCreateWithoutChecksInput>
     connectOrCreate?: TenantCreateOrConnectWithoutChecksInput
@@ -88071,6 +88184,16 @@ export namespace Prisma {
     delete?: InvoiceWhereInput | boolean
     connect?: InvoiceWhereUniqueInput
     update?: XOR<XOR<InvoiceUpdateToOneWithWhereWithoutChecksInput, InvoiceUpdateWithoutChecksInput>, InvoiceUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type PurchaseInvoiceUpdateOneWithoutChecksNestedInput = {
+    create?: XOR<PurchaseInvoiceCreateWithoutChecksInput, PurchaseInvoiceUncheckedCreateWithoutChecksInput>
+    connectOrCreate?: PurchaseInvoiceCreateOrConnectWithoutChecksInput
+    upsert?: PurchaseInvoiceUpsertWithoutChecksInput
+    disconnect?: PurchaseInvoiceWhereInput | boolean
+    delete?: PurchaseInvoiceWhereInput | boolean
+    connect?: PurchaseInvoiceWhereUniqueInput
+    update?: XOR<XOR<PurchaseInvoiceUpdateToOneWithWhereWithoutChecksInput, PurchaseInvoiceUpdateWithoutChecksInput>, PurchaseInvoiceUncheckedUpdateWithoutChecksInput>
   }
 
   export type TenantCreateNestedOneWithoutFiscalYearsInput = {
@@ -88605,11 +88728,25 @@ export namespace Prisma {
     connect?: JournalEntryWhereUniqueInput
   }
 
+  export type CheckCreateNestedManyWithoutPurchaseInvoiceInput = {
+    create?: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput> | CheckCreateWithoutPurchaseInvoiceInput[] | CheckUncheckedCreateWithoutPurchaseInvoiceInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutPurchaseInvoiceInput | CheckCreateOrConnectWithoutPurchaseInvoiceInput[]
+    createMany?: CheckCreateManyPurchaseInvoiceInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+  }
+
   export type PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput = {
     create?: XOR<PurchaseInvoiceItemCreateWithoutPurchaseInvoiceInput, PurchaseInvoiceItemUncheckedCreateWithoutPurchaseInvoiceInput> | PurchaseInvoiceItemCreateWithoutPurchaseInvoiceInput[] | PurchaseInvoiceItemUncheckedCreateWithoutPurchaseInvoiceInput[]
     connectOrCreate?: PurchaseInvoiceItemCreateOrConnectWithoutPurchaseInvoiceInput | PurchaseInvoiceItemCreateOrConnectWithoutPurchaseInvoiceInput[]
     createMany?: PurchaseInvoiceItemCreateManyPurchaseInvoiceInputEnvelope
     connect?: PurchaseInvoiceItemWhereUniqueInput | PurchaseInvoiceItemWhereUniqueInput[]
+  }
+
+  export type CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput = {
+    create?: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput> | CheckCreateWithoutPurchaseInvoiceInput[] | CheckUncheckedCreateWithoutPurchaseInvoiceInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutPurchaseInvoiceInput | CheckCreateOrConnectWithoutPurchaseInvoiceInput[]
+    createMany?: CheckCreateManyPurchaseInvoiceInputEnvelope
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
   }
 
   export type PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput = {
@@ -88655,6 +88792,20 @@ export namespace Prisma {
     update?: XOR<XOR<JournalEntryUpdateToOneWithWhereWithoutPurchaseInvoicesInput, JournalEntryUpdateWithoutPurchaseInvoicesInput>, JournalEntryUncheckedUpdateWithoutPurchaseInvoicesInput>
   }
 
+  export type CheckUpdateManyWithoutPurchaseInvoiceNestedInput = {
+    create?: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput> | CheckCreateWithoutPurchaseInvoiceInput[] | CheckUncheckedCreateWithoutPurchaseInvoiceInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutPurchaseInvoiceInput | CheckCreateOrConnectWithoutPurchaseInvoiceInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutPurchaseInvoiceInput | CheckUpsertWithWhereUniqueWithoutPurchaseInvoiceInput[]
+    createMany?: CheckCreateManyPurchaseInvoiceInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutPurchaseInvoiceInput | CheckUpdateWithWhereUniqueWithoutPurchaseInvoiceInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutPurchaseInvoiceInput | CheckUpdateManyWithWhereWithoutPurchaseInvoiceInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
+  }
+
   export type PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput = {
     create?: XOR<PurchaseInvoiceItemCreateWithoutPurchaseInvoiceInput, PurchaseInvoiceItemUncheckedCreateWithoutPurchaseInvoiceInput> | PurchaseInvoiceItemCreateWithoutPurchaseInvoiceInput[] | PurchaseInvoiceItemUncheckedCreateWithoutPurchaseInvoiceInput[]
     connectOrCreate?: PurchaseInvoiceItemCreateOrConnectWithoutPurchaseInvoiceInput | PurchaseInvoiceItemCreateOrConnectWithoutPurchaseInvoiceInput[]
@@ -88667,6 +88818,20 @@ export namespace Prisma {
     update?: PurchaseInvoiceItemUpdateWithWhereUniqueWithoutPurchaseInvoiceInput | PurchaseInvoiceItemUpdateWithWhereUniqueWithoutPurchaseInvoiceInput[]
     updateMany?: PurchaseInvoiceItemUpdateManyWithWhereWithoutPurchaseInvoiceInput | PurchaseInvoiceItemUpdateManyWithWhereWithoutPurchaseInvoiceInput[]
     deleteMany?: PurchaseInvoiceItemScalarWhereInput | PurchaseInvoiceItemScalarWhereInput[]
+  }
+
+  export type CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput = {
+    create?: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput> | CheckCreateWithoutPurchaseInvoiceInput[] | CheckUncheckedCreateWithoutPurchaseInvoiceInput[]
+    connectOrCreate?: CheckCreateOrConnectWithoutPurchaseInvoiceInput | CheckCreateOrConnectWithoutPurchaseInvoiceInput[]
+    upsert?: CheckUpsertWithWhereUniqueWithoutPurchaseInvoiceInput | CheckUpsertWithWhereUniqueWithoutPurchaseInvoiceInput[]
+    createMany?: CheckCreateManyPurchaseInvoiceInputEnvelope
+    set?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    disconnect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    delete?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    connect?: CheckWhereUniqueInput | CheckWhereUniqueInput[]
+    update?: CheckUpdateWithWhereUniqueWithoutPurchaseInvoiceInput | CheckUpdateWithWhereUniqueWithoutPurchaseInvoiceInput[]
+    updateMany?: CheckUpdateManyWithWhereWithoutPurchaseInvoiceInput | CheckUpdateManyWithWhereWithoutPurchaseInvoiceInput[]
+    deleteMany?: CheckScalarWhereInput | CheckScalarWhereInput[]
   }
 
   export type PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput = {
@@ -90370,6 +90535,7 @@ export namespace Prisma {
     customer?: CustomerCreateNestedOneWithoutChecksInput
     supplier?: SupplierCreateNestedOneWithoutChecksInput
     invoice?: InvoiceCreateNestedOneWithoutChecksInput
+    purchaseInvoice?: PurchaseInvoiceCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateWithoutTenantInput = {
@@ -90385,6 +90551,7 @@ export namespace Prisma {
     customerId?: string | null
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -90838,6 +91005,7 @@ export namespace Prisma {
     Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
     Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
     journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -90863,6 +91031,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -91976,6 +92145,7 @@ export namespace Prisma {
     customerId?: StringNullableFilter<"Check"> | string | null
     supplierId?: StringNullableFilter<"Check"> | string | null
     invoiceId?: StringNullableFilter<"Check"> | string | null
+    purchaseInvoiceId?: StringNullableFilter<"Check"> | string | null
     payeeName?: StringNullableFilter<"Check"> | string | null
     description?: StringNullableFilter<"Check"> | string | null
     journalEntryId?: StringNullableFilter<"Check"> | string | null
@@ -97018,6 +97188,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutChecksInput
     supplier?: SupplierCreateNestedOneWithoutChecksInput
     invoice?: InvoiceCreateNestedOneWithoutChecksInput
+    purchaseInvoice?: PurchaseInvoiceCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateWithoutCustomerInput = {
@@ -97033,6 +97204,7 @@ export namespace Prisma {
     status?: string
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -98272,6 +98444,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutChecksInput
     customer?: CustomerCreateNestedOneWithoutChecksInput
     supplier?: SupplierCreateNestedOneWithoutChecksInput
+    purchaseInvoice?: PurchaseInvoiceCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateWithoutInvoiceInput = {
@@ -98287,6 +98460,7 @@ export namespace Prisma {
     status?: string
     customerId?: string | null
     supplierId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -100503,6 +100677,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutPurchaseInvoicesInput
     Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
     Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -100528,6 +100703,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -103103,6 +103279,63 @@ export namespace Prisma {
     create: XOR<InvoiceCreateWithoutChecksInput, InvoiceUncheckedCreateWithoutChecksInput>
   }
 
+  export type PurchaseInvoiceCreateWithoutChecksInput = {
+    id?: string
+    number: string
+    invoiceDate?: Date | string
+    dueDate?: Date | string | null
+    status?: string
+    paymentType?: string
+    subTotal?: Decimal | DecimalJsLike | number | string
+    discountAmount?: Decimal | DecimalJsLike | number | string
+    taxAmount?: Decimal | DecimalJsLike | number | string
+    totalAmount?: Decimal | DecimalJsLike | number | string
+    paidAmount?: Decimal | DecimalJsLike | number | string
+    remainingAmount?: Decimal | DecimalJsLike | number | string
+    description?: string | null
+    cashierId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    invoiceType?: string
+    originalPurchaseInvoiceId?: string | null
+    Tenant: TenantCreateNestedOneWithoutPurchaseInvoicesInput
+    Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
+    Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
+    journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
+  }
+
+  export type PurchaseInvoiceUncheckedCreateWithoutChecksInput = {
+    id?: string
+    tenantId: string
+    supplierId?: string | null
+    number: string
+    invoiceDate?: Date | string
+    dueDate?: Date | string | null
+    status?: string
+    paymentType?: string
+    subTotal?: Decimal | DecimalJsLike | number | string
+    discountAmount?: Decimal | DecimalJsLike | number | string
+    taxAmount?: Decimal | DecimalJsLike | number | string
+    totalAmount?: Decimal | DecimalJsLike | number | string
+    paidAmount?: Decimal | DecimalJsLike | number | string
+    remainingAmount?: Decimal | DecimalJsLike | number | string
+    warehouseId: string
+    journalEntryId?: string | null
+    description?: string | null
+    cashierId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    invoiceType?: string
+    originalPurchaseInvoiceId?: string | null
+    items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
+  }
+
+  export type PurchaseInvoiceCreateOrConnectWithoutChecksInput = {
+    where: PurchaseInvoiceWhereUniqueInput
+    create: XOR<PurchaseInvoiceCreateWithoutChecksInput, PurchaseInvoiceUncheckedCreateWithoutChecksInput>
+  }
+
   export type TenantUpsertWithoutChecksInput = {
     update: XOR<TenantUpdateWithoutChecksInput, TenantUncheckedUpdateWithoutChecksInput>
     create: XOR<TenantCreateWithoutChecksInput, TenantUncheckedCreateWithoutChecksInput>
@@ -103437,6 +103670,69 @@ export namespace Prisma {
     installmentPlan?: InstallmentPlanUncheckedUpdateOneWithoutInvoiceNestedInput
     onlinePayments?: OnlinePaymentUncheckedUpdateManyWithoutInvoiceNestedInput
     cardPayments?: CardPaymentUncheckedUpdateManyWithoutInvoiceNestedInput
+  }
+
+  export type PurchaseInvoiceUpsertWithoutChecksInput = {
+    update: XOR<PurchaseInvoiceUpdateWithoutChecksInput, PurchaseInvoiceUncheckedUpdateWithoutChecksInput>
+    create: XOR<PurchaseInvoiceCreateWithoutChecksInput, PurchaseInvoiceUncheckedCreateWithoutChecksInput>
+    where?: PurchaseInvoiceWhereInput
+  }
+
+  export type PurchaseInvoiceUpdateToOneWithWhereWithoutChecksInput = {
+    where?: PurchaseInvoiceWhereInput
+    data: XOR<PurchaseInvoiceUpdateWithoutChecksInput, PurchaseInvoiceUncheckedUpdateWithoutChecksInput>
+  }
+
+  export type PurchaseInvoiceUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    invoiceDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    status?: StringFieldUpdateOperationsInput | string
+    paymentType?: StringFieldUpdateOperationsInput | string
+    subTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    discountAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    taxAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    totalAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    paidAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    remainingAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    cashierId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    invoiceType?: StringFieldUpdateOperationsInput | string
+    originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Tenant?: TenantUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
+    Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
+    Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
+    journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
+  }
+
+  export type PurchaseInvoiceUncheckedUpdateWithoutChecksInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    number?: StringFieldUpdateOperationsInput | string
+    invoiceDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    status?: StringFieldUpdateOperationsInput | string
+    paymentType?: StringFieldUpdateOperationsInput | string
+    subTotal?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    discountAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    taxAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    totalAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    paidAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    remainingAmount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    warehouseId?: StringFieldUpdateOperationsInput | string
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    cashierId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    invoiceType?: StringFieldUpdateOperationsInput | string
+    originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
   export type TenantCreateWithoutFiscalYearsInput = {
@@ -105532,6 +105828,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutPurchaseInvoicesInput
     Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
     journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -105557,6 +105854,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -106982,6 +107280,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutPurchaseInvoicesInput
     Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
     journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -107007,6 +107306,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
     items?: PurchaseInvoiceItemUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
@@ -107038,6 +107338,7 @@ export namespace Prisma {
     Tenant: TenantCreateNestedOneWithoutChecksInput
     customer?: CustomerCreateNestedOneWithoutChecksInput
     invoice?: InvoiceCreateNestedOneWithoutChecksInput
+    purchaseInvoice?: PurchaseInvoiceCreateNestedOneWithoutChecksInput
   }
 
   export type CheckUncheckedCreateWithoutSupplierInput = {
@@ -107053,6 +107354,7 @@ export namespace Prisma {
     status?: string
     customerId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -107513,6 +107815,58 @@ export namespace Prisma {
     create: XOR<JournalEntryCreateWithoutPurchaseInvoicesInput, JournalEntryUncheckedCreateWithoutPurchaseInvoicesInput>
   }
 
+  export type CheckCreateWithoutPurchaseInvoiceInput = {
+    id?: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+    Tenant: TenantCreateNestedOneWithoutChecksInput
+    customer?: CustomerCreateNestedOneWithoutChecksInput
+    supplier?: SupplierCreateNestedOneWithoutChecksInput
+    invoice?: InvoiceCreateNestedOneWithoutChecksInput
+  }
+
+  export type CheckUncheckedCreateWithoutPurchaseInvoiceInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    customerId?: string | null
+    supplierId?: string | null
+    invoiceId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
+  }
+
+  export type CheckCreateOrConnectWithoutPurchaseInvoiceInput = {
+    where: CheckWhereUniqueInput
+    create: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput>
+  }
+
+  export type CheckCreateManyPurchaseInvoiceInputEnvelope = {
+    data: CheckCreateManyPurchaseInvoiceInput | CheckCreateManyPurchaseInvoiceInput[]
+    skipDuplicates?: boolean
+  }
+
   export type PurchaseInvoiceItemCreateWithoutPurchaseInvoiceInput = {
     id?: string
     productName: string
@@ -107845,6 +108199,22 @@ export namespace Prisma {
     FixedAssets?: FixedAssetUncheckedUpdateManyWithoutJournalEntryNestedInput
   }
 
+  export type CheckUpsertWithWhereUniqueWithoutPurchaseInvoiceInput = {
+    where: CheckWhereUniqueInput
+    update: XOR<CheckUpdateWithoutPurchaseInvoiceInput, CheckUncheckedUpdateWithoutPurchaseInvoiceInput>
+    create: XOR<CheckCreateWithoutPurchaseInvoiceInput, CheckUncheckedCreateWithoutPurchaseInvoiceInput>
+  }
+
+  export type CheckUpdateWithWhereUniqueWithoutPurchaseInvoiceInput = {
+    where: CheckWhereUniqueInput
+    data: XOR<CheckUpdateWithoutPurchaseInvoiceInput, CheckUncheckedUpdateWithoutPurchaseInvoiceInput>
+  }
+
+  export type CheckUpdateManyWithWhereWithoutPurchaseInvoiceInput = {
+    where: CheckScalarWhereInput
+    data: XOR<CheckUpdateManyMutationInput, CheckUncheckedUpdateManyWithoutPurchaseInvoiceInput>
+  }
+
   export type PurchaseInvoiceItemUpsertWithWhereUniqueWithoutPurchaseInvoiceInput = {
     where: PurchaseInvoiceItemWhereUniqueInput
     update: XOR<PurchaseInvoiceItemUpdateWithoutPurchaseInvoiceInput, PurchaseInvoiceItemUncheckedUpdateWithoutPurchaseInvoiceInput>
@@ -107884,6 +108254,7 @@ export namespace Prisma {
     Supplier?: SupplierCreateNestedOneWithoutPurchaseInvoicesInput
     Warehouse: WarehouseCreateNestedOneWithoutPurchaseInvoicesInput
     journalEntry?: JournalEntryCreateNestedOneWithoutPurchaseInvoicesInput
+    Checks?: CheckCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
   export type PurchaseInvoiceUncheckedCreateWithoutItemsInput = {
@@ -107909,6 +108280,7 @@ export namespace Prisma {
     updatedAt?: Date | string
     invoiceType?: string
     originalPurchaseInvoiceId?: string | null
+    Checks?: CheckUncheckedCreateNestedManyWithoutPurchaseInvoiceInput
   }
 
   export type PurchaseInvoiceCreateOrConnectWithoutItemsInput = {
@@ -108001,6 +108373,7 @@ export namespace Prisma {
     Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
     Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
   export type PurchaseInvoiceUncheckedUpdateWithoutItemsInput = {
@@ -108026,6 +108399,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
   export type ProductUpsertWithoutPurchaseInvoiceItemsInput = {
@@ -111241,6 +111615,7 @@ export namespace Prisma {
     customerId?: string | null
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -112518,6 +112893,7 @@ export namespace Prisma {
     customer?: CustomerUpdateOneWithoutChecksNestedInput
     supplier?: SupplierUpdateOneWithoutChecksNestedInput
     invoice?: InvoiceUpdateOneWithoutChecksNestedInput
+    purchaseInvoice?: PurchaseInvoiceUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateWithoutTenantInput = {
@@ -112533,6 +112909,7 @@ export namespace Prisma {
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -112553,6 +112930,7 @@ export namespace Prisma {
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -112959,6 +113337,7 @@ export namespace Prisma {
     Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
     Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -112984,6 +113363,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -114436,6 +114816,7 @@ export namespace Prisma {
     status?: string
     supplierId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -114572,6 +114953,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
     supplier?: SupplierUpdateOneWithoutChecksNestedInput
     invoice?: InvoiceUpdateOneWithoutChecksNestedInput
+    purchaseInvoice?: PurchaseInvoiceUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateWithoutCustomerInput = {
@@ -114587,6 +114969,7 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -114607,6 +114990,7 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -115046,6 +115430,7 @@ export namespace Prisma {
     status?: string
     customerId?: string | null
     supplierId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -115248,6 +115633,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
     customer?: CustomerUpdateOneWithoutChecksNestedInput
     supplier?: SupplierUpdateOneWithoutChecksNestedInput
+    purchaseInvoice?: PurchaseInvoiceUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateWithoutInvoiceInput = {
@@ -115263,6 +115649,7 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -115283,6 +115670,7 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -115476,6 +115864,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
     Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -115501,6 +115890,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -115956,6 +116346,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     Supplier?: SupplierUpdateOneWithoutPurchaseInvoicesNestedInput
     journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -115981,6 +116372,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -116209,6 +116601,7 @@ export namespace Prisma {
     status?: string
     customerId?: string | null
     invoiceId?: string | null
+    purchaseInvoiceId?: string | null
     payeeName?: string | null
     description?: string | null
     journalEntryId?: string | null
@@ -116238,6 +116631,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     Warehouse?: WarehouseUpdateOneRequiredWithoutPurchaseInvoicesNestedInput
     journalEntry?: JournalEntryUpdateOneWithoutPurchaseInvoicesNestedInput
+    Checks?: CheckUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -116263,6 +116657,7 @@ export namespace Prisma {
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
     invoiceType?: StringFieldUpdateOperationsInput | string
     originalPurchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    Checks?: CheckUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
     items?: PurchaseInvoiceItemUncheckedUpdateManyWithoutPurchaseInvoiceNestedInput
   }
 
@@ -116308,6 +116703,7 @@ export namespace Prisma {
     Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
     customer?: CustomerUpdateOneWithoutChecksNestedInput
     invoice?: InvoiceUpdateOneWithoutChecksNestedInput
+    purchaseInvoice?: PurchaseInvoiceUpdateOneWithoutChecksNestedInput
   }
 
   export type CheckUncheckedUpdateWithoutSupplierInput = {
@@ -116323,6 +116719,7 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
@@ -116343,11 +116740,33 @@ export namespace Prisma {
     status?: StringFieldUpdateOperationsInput | string
     customerId?: NullableStringFieldUpdateOperationsInput | string | null
     invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    purchaseInvoiceId?: NullableStringFieldUpdateOperationsInput | string | null
     payeeName?: NullableStringFieldUpdateOperationsInput | string | null
     description?: NullableStringFieldUpdateOperationsInput | string | null
     journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+  }
+
+  export type CheckCreateManyPurchaseInvoiceInput = {
+    id?: string
+    tenantId: string
+    type?: string
+    checkNumber: string
+    bankName: string
+    branchName?: string | null
+    amount: Decimal | DecimalJsLike | number | string
+    issueDate: Date | string
+    dueDate: Date | string
+    status?: string
+    customerId?: string | null
+    supplierId?: string | null
+    invoiceId?: string | null
+    payeeName?: string | null
+    description?: string | null
+    journalEntryId?: string | null
+    createdAt?: Date | string
+    updatedAt?: Date | string
   }
 
   export type PurchaseInvoiceItemCreateManyPurchaseInvoiceInput = {
@@ -116362,6 +116781,69 @@ export namespace Prisma {
     taxAmount?: Decimal | DecimalJsLike | number | string
     lineTotal?: Decimal | DecimalJsLike | number | string
     returnReason?: string | null
+  }
+
+  export type CheckUpdateWithoutPurchaseInvoiceInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    Tenant?: TenantUpdateOneRequiredWithoutChecksNestedInput
+    customer?: CustomerUpdateOneWithoutChecksNestedInput
+    supplier?: SupplierUpdateOneWithoutChecksNestedInput
+    invoice?: InvoiceUpdateOneWithoutChecksNestedInput
+  }
+
+  export type CheckUncheckedUpdateWithoutPurchaseInvoiceInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
+  }
+
+  export type CheckUncheckedUpdateManyWithoutPurchaseInvoiceInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    tenantId?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    checkNumber?: StringFieldUpdateOperationsInput | string
+    bankName?: StringFieldUpdateOperationsInput | string
+    branchName?: NullableStringFieldUpdateOperationsInput | string | null
+    amount?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    issueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    dueDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    status?: StringFieldUpdateOperationsInput | string
+    customerId?: NullableStringFieldUpdateOperationsInput | string | null
+    supplierId?: NullableStringFieldUpdateOperationsInput | string | null
+    invoiceId?: NullableStringFieldUpdateOperationsInput | string | null
+    payeeName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    journalEntryId?: NullableStringFieldUpdateOperationsInput | string | null
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    updatedAt?: DateTimeFieldUpdateOperationsInput | Date | string
   }
 
   export type PurchaseInvoiceItemUpdateWithoutPurchaseInvoiceInput = {

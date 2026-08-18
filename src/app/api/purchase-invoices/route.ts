@@ -41,7 +41,7 @@ export const GET = withTenantAndPermission('accounting')(
       let invoices: any[] = []
       try {
         // ★ v8.9.3: Include supplier و warehouse برای نمایش نام‌ها
-        invoices = await tenantDb.purchaseInvoice.findMany({
+             invoices = await tenantDb.purchaseInvoice.findMany({
           where,
           include: {
             supplier: {
@@ -57,6 +57,17 @@ export const GET = withTenantAndPermission('accounting')(
                 name: true,
                 code: true,
               }
+            },
+            Checks: {
+              select: {
+                id: true,
+                status: true,
+                checkNumber: true,
+                bankName: true,
+                dueDate: true,
+              },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -127,9 +138,15 @@ export const GET = withTenantAndPermission('accounting')(
         }))
       }
 
+       const invoicesWithCheckStatus = invoices.map((inv: any) => ({
+        ...inv,
+        checkStatus: inv.Checks?.[0]?.status || null,
+        checkInfo: inv.Checks?.[0] || null,
+      }))
+
       return NextResponse.json({
         success: true,
-        data: invoices,
+        data: invoicesWithCheckStatus,
         pagination: {
           page, limit, total,
           totalPages: Math.ceil(total / limit),
@@ -498,7 +515,7 @@ if (pt === 'check' && checkData) {
       }
     }
 
-    createdCheck = await tenantDb.check.create({
+      createdCheck = await tenantDb.check.create({
       data: {
         tenantId,
         type: 'payable',
@@ -508,11 +525,11 @@ if (pt === 'check' && checkData) {
         amount: totalAmount,
         issueDate: checkData.issueDate ? new Date(checkData.issueDate) : new Date(),
         dueDate: checkData.dueDate ? new Date(checkData.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        // ★ عدم استفاده از supplierId (در مدل Check وجود ندارد)
-        // ★ استفاده از payeeName برای نمایش نام تامین‌کننده
+        supplierId: supplierId || null,
         payeeName: finalPayeeName || 'تامین‌کننده',
-        description: `چک پرداختنی بابت فاکتور خرید ${invoiceNumber}${supplierId ? ` (SupplierID: ${supplierId})` : ''}`,
+        description: `چک پرداختنی بابت فاکتور خرید ${invoiceNumber}`,
         status: 'pending',
+        purchaseInvoiceId: invoice.id,
       },
     })
     

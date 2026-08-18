@@ -262,7 +262,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
     let invoices: any[] = []
     try {
-      invoices = await db.client.invoice.findMany({
+         invoices = await db.client.invoice.findMany({
         where,
         include: {
           customer: { select: { id: true, firstName: true, lastName: true, mobile: true, portalToken: true } },
@@ -270,6 +270,17 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           items: true,
           payments: true,
           installmentPlan: { include: { schedules: { orderBy: { installmentNumber: 'asc' } } } },
+          checks: {
+            select: {
+              id: true,
+              status: true,
+              checkNumber: true,
+              bankName: true,
+              dueDate: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -292,7 +303,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
       }).catch(() => [])
     }
 
-    const result = invoices.map((inv: any) => {
+       const result = invoices.map((inv: any) => {
       let paymentStatus = 'PENDING'
       if (inv.paidAmount >= inv.totalAmount && inv.totalAmount > 0) paymentStatus = 'PAID'
       else if (inv.paidAmount > 0) paymentStatus = 'PARTIAL'
@@ -307,9 +318,10 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
         items: (inv.items || []).map((item: any) => ({ ...item, totalAmount: item.lineTotal || item.totalAmount || 0 })),
         installmentPlan: inv.installmentPlan || null,
         customerPortalToken: inv.customer?.portalToken || null,
+        checkStatus: inv.checks?.[0]?.status || null,
+        checkInfo: inv.checks?.[0] || null,
       }
     })
-
     const total = await db.client.invoice.count({ where })
 
     console.log('[Invoices GET] Found invoices:', result.length, 'with paymentType filter:', paymentType)

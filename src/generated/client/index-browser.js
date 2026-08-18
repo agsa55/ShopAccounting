@@ -591,6 +591,7 @@ exports.Prisma.CheckScalarFieldEnum = {
   customerId: 'customerId',
   supplierId: 'supplierId',
   invoiceId: 'invoiceId',
+  purchaseInvoiceId: 'purchaseInvoiceId',
   payeeName: 'payeeName',
   description: 'description',
   journalEntryId: 'journalEntryId',

@@ -908,13 +908,13 @@ model Check {
   supplierId String? @db.VarChar(450)
 
   // ★ v8.3: لینک به فاکتور (برای ردیابی چک‌های صادر شده از فاکتور)
-  invoiceId String? @db.VarChar(450)
-
-  payeeName      String?
-  description    String?
-  journalEntryId String?  @db.VarChar(450)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  invoiceId         String?  @db.VarChar(450)
+  purchaseInvoiceId String?  @db.VarChar(450)
+  payeeName         String?
+  description       String?
+  journalEntryId    String?  @db.VarChar(450)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   // ★★★ استفاده از Named Relations برای جلوگیری از conflict
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
@@ -922,7 +922,8 @@ model Check {
   supplier Supplier? @relation("SupplierChecks", fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: SetNull)
 
   // ★ v8.3: رابطه با فاکتور (Named Relation)
-  invoice Invoice? @relation("InvoiceChecks", fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  invoice         Invoice?         @relation("InvoiceChecks", fields: [invoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  purchaseInvoice PurchaseInvoice? @relation("PurchaseInvoiceChecks", fields: [purchaseInvoiceId], references: [id], onUpdate: NoAction, onDelete: SetNull)
 
   @@index([tenantId])
   @@index([tenantId, type])
@@ -931,6 +932,7 @@ model Check {
   @@index([customerId])
   @@index([supplierId])
   @@index([invoiceId]) // ★ v8.3: index برای جستجوی سریع چک‌های یک فاکتور
+  @@index([purchaseInvoiceId])
   @@map("Checks")
 }
 
@@ -1255,6 +1257,7 @@ model PurchaseInvoice {
   Supplier     Supplier?             @relation(fields: [supplierId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   Warehouse    Warehouse             @relation(fields: [warehouseId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   journalEntry JournalEntry?         @relation("PurchaseInvoiceJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  Checks       Check[]               @relation("PurchaseInvoiceChecks")
   items        PurchaseInvoiceItem[]
 
   @@unique([number, tenantId])
