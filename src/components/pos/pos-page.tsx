@@ -2669,20 +2669,27 @@ if (pt === 'check') {
           createdCheck: createdCheck ? '✓' : '✗',
         })
 
-        if (createdCheck) {
-          toast({
-            title: '✓ فاکتور و چک ثبت شد',
-            description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
-            duration: 5000,
-          })
-        } else {
-          toast({
-            title: '✓ فاکتور ثبت شد',
-            description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
-            duration: 5000,
-          })
-        }
-        
+      if (createdCheck && createdCheck._error) {
+  // ★ نمایش کامل خطای واقعی برای دیباگ
+  toast({
+    title: '❌ خطا در ثبت چک (فاکتور ثبت شد)',
+    description: `کد: ${createdCheck._errorCode || 'نامشخص'} | پیام: ${createdCheck._errorMessage || 'نامشخص'} | جزئیات: ${JSON.stringify(createdCheck._errorMeta || {})}`,
+    variant: 'destructive',
+    duration: 60000, // یک دقیقه باز می‌مونه
+  })
+} else if (createdCheck) {
+  toast({
+    title: '✓ فاکتور و چک ثبت شد',
+    description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
+    duration: 5000,
+  })
+} else {
+  toast({
+    title: '✓ فاکتور ثبت شد',
+    description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
+    duration: 5000,
+  })
+}
         // رویداد به‌روزرسانی چک‌ها
         window.dispatchEvent(new Event('checks-updated'))
       }
