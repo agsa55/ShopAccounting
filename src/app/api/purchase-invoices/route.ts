@@ -41,7 +41,7 @@ export const GET = withTenantAndPermission('accounting')(
       let invoices: any[] = []
       try {
         // ★ v8.9.3: Include supplier و warehouse برای نمایش نام‌ها
-             invoices = await tenantDb.purchaseInvoice.findMany({
+            invoices = await tenantDb.purchaseInvoice.findMany({
           where,
           include: {
             supplier: {
@@ -515,7 +515,7 @@ if (pt === 'check' && checkData) {
       }
     }
 
-      createdCheck = await tenantDb.check.create({
+     createdCheck = await tenantDb.check.create({
       data: {
         tenantId,
         type: 'payable',

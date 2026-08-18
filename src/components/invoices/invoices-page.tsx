@@ -255,6 +255,8 @@ function getPaymentTypeBadge(paymentType: string) {
     return <Badge className="bg-purple-50 text-purple-600 hover:bg-purple-50 text-[10px] gap-1"><CalendarDays className="w-3 h-3" />نسیه</Badge>
   if (pt === 'installment')
     return <Badge className="bg-orange-50 text-orange-600 hover:bg-orange-50 text-[10px] gap-1"><CreditCard className="w-3 h-3" />قسطی</Badge>
+  if (pt === 'check')
+    return <Badge className="bg-cyan-50 text-cyan-600 hover:bg-cyan-50 text-[10px] gap-1"><FileText className="w-3 h-3" />چک</Badge>
   return <Badge className="bg-gray-50 text-gray-600 hover:bg-gray-50 text-[10px]">{paymentType}</Badge>
 }
 
@@ -268,8 +270,9 @@ function getCheckStatusBadge(checkStatus: string | null | undefined) {
     returned: { label: 'پس داده شد', className: 'bg-gray-100 text-gray-600 border border-gray-200' },
   }
   const info = map[checkStatus] || { label: checkStatus, className: 'bg-gray-50 text-gray-500' }
-  return <Badge className={`${info.className} text-[10px] gap-1 hover:${info.className}`}>{info.label}</Badge>
+  return <Badge className={`${info.className} text-[10px] gap-1`}>{info.label}</Badge>
 }
+
 
 // ═══════════════════════════════════════════════════════════════
 // Filter Constants

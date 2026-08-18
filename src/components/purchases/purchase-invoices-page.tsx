@@ -470,6 +470,26 @@ function PersianNumberInput({ value, onChange, placeholder, className, dir = 'lt
 // ★ MobileInvoiceCard — کارت موبایل
 // ============================================================================
 
+function getCheckStatusBadge(checkStatus: string | null | undefined) {
+  if (!checkStatus) return null
+  const map: Record<string, { label: string; className: string }> = {
+    pending: { label: '⏳ در جریان', className: 'bg-amber-100 text-amber-700' },
+    deposited: { label: '🏦 نزد بانک', className: 'bg-blue-100 text-blue-700' },
+    cleared: { label: '✅ پاس شد', className: 'bg-emerald-100 text-emerald-700' },
+    bounced: { label: '❌ برگشتی', className: 'bg-red-100 text-red-700' },
+    returned: { label: '↩️ باطل شد', className: 'bg-gray-100 text-gray-700' },
+  }
+  const info = map[checkStatus] || { label: checkStatus, className: 'bg-gray-100 text-gray-500' }
+  return <Badge className={`text-[8px] ${info.className}`}>{info.label}</Badge>
+}
+
+
+
+
+// ============================================================================
+// ★ MobileInvoiceCard — کارت موبایل
+// ============================================================================
+
 function MobileInvoiceCard({
   inv,
   onPrint,
@@ -549,12 +569,7 @@ function MobileInvoiceCard({
      'نقدی'}
   </p>
   {inv.paymentType === 'check' && inv.checkStatus && (
-    <p className="text-[8px] mt-0.5 font-medium text-cyan-700">
-      {inv.checkStatus === 'cleared' ? '✅ پاس شد' :
-       inv.checkStatus === 'bounced' ? '❌ برگشتی' :
-       inv.checkStatus === 'returned' ? '↩️ باطل شد' :
-       '⏳ در جریان'}
-    </p>
+    <div className="mt-0.5">{getCheckStatusBadge(inv.checkStatus)}</div>
   )}
 </div>
         </div>
@@ -2061,19 +2076,7 @@ const filteredInvoices = useMemo(() => {
        inv.paymentType === 'check' ? '🏛️ چک' :
        '💵 نقدی'}
     </Badge>
-        {inv.paymentType === 'check' && inv.checkStatus && (
-      <Badge className={`text-[8px] ${
-        inv.checkStatus === 'cleared' ? 'bg-emerald-100 text-emerald-700' :
-        inv.checkStatus === 'bounced' ? 'bg-red-100 text-red-700' :
-        inv.checkStatus === 'returned' ? 'bg-gray-100 text-gray-700' :
-        'bg-amber-100 text-amber-700'
-      }`}>
-        {inv.checkStatus === 'cleared' ? '✅ پاس شد' :
-         inv.checkStatus === 'bounced' ? '❌ برگشتی' :
-         inv.checkStatus === 'returned' ? '↩️ باطل شد' :
-         '⏳ در جریان'}
-      </Badge>
-    )}
+         {inv.paymentType === 'check' && getCheckStatusBadge(inv.checkStatus)}
                                 {inv.invoiceType === 'service' && (
                                   <Badge className="text-[9px] bg-blue-50 text-blue-600 border border-blue-200">خدمات</Badge>
                                 )}
