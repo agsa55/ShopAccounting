@@ -522,9 +522,10 @@ if (pt === 'check' && checkData) {
       payeeName: createdCheck.payeeName,
       amount: totalAmount,
     })
-  } catch (checkErr: any) {
-    console.error('[PurchaseInvoice POST] ❌ Check creation failed:', checkErr?.message)
-  }
+ } catch (checkErr: any) {
+  console.error('[PurchaseInvoice POST] ❌ Check creation failed:', checkErr?.message)
+  createdCheck = { error: true, errorMessage: checkErr?.message, errorCode: checkErr?.code, errorMeta: checkErr?.meta }
+}
 }
 
       return NextResponse.json({

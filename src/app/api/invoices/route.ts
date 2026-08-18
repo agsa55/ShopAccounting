@@ -647,10 +647,11 @@ export const POST = withTenantAndPermission('pos')(async (
           invoiceId: createdCheck.invoiceId,
           amount: createdCheck.amount,
         })
-      } catch (err: any) {
-        console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
-        console.error('[Invoices POST] ❌ Stack:', err?.stack)
-      }
+     } catch (err: any) {
+  console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
+  console.error('[Invoices POST] ❌ Stack:', err?.stack)
+  createdCheck = { error: true, errorMessage: err?.message, errorCode: err?.code, errorMeta: err?.meta } as any
+}
     }
 
     // ایجاد سند حسابداری (بعد از transaction)
