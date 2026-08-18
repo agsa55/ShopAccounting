@@ -38,7 +38,8 @@ export const GET = withTenantAndPermission('accounting')(
         ]
       }
 
-      let invoices: any[] = []
+         let invoices: any[] = []
+      let debugIncludeError: string | null = null
       try {
         // ★ v8.9.3: Include supplier و warehouse برای نمایش نام‌ها
             invoices = await tenantDb.purchaseInvoice.findMany({
@@ -75,6 +76,7 @@ export const GET = withTenantAndPermission('accounting')(
           take: limit,
         })
       } catch (err: any) {
+        debugIncludeError = err?.message || String(err)
         console.error('[PurchaseInvoices GET] findMany with include error:', err?.message)
         // Fallback: بدون include
         try {
@@ -144,13 +146,14 @@ export const GET = withTenantAndPermission('accounting')(
         checkInfo: inv.Checks?.[0] || null,
       }))
 
-      return NextResponse.json({
+           return NextResponse.json({
         success: true,
         data: invoicesWithCheckStatus,
         pagination: {
           page, limit, total,
           totalPages: Math.ceil(total / limit),
         },
+        _debugIncludeError: debugIncludeError,
       })
     } catch (error: any) {
       console.error('[PurchaseInvoices GET] error:', error)
