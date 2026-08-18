@@ -647,11 +647,11 @@ export const POST = withTenantAndPermission('pos')(async (
           invoiceId: createdCheck.invoiceId,
           amount: createdCheck.amount,
         })
-     } catch (err: any) {
-  console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
-  console.error('[Invoices POST] ❌ Stack:', err?.stack)
-  createdCheck = { error: true, errorMessage: err?.message, errorCode: err?.code, errorMeta: err?.meta } as any
-}
+          } catch (err: any) {
+        console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
+        console.error('[Invoices POST] ❌ Stack:', err?.stack)
+        createdCheck = { error: true, errorMessage: err?.message, errorCode: err?.code, errorMeta: err?.meta } as any
+      }
     }
 
     // ایجاد سند حسابداری (بعد از transaction)
@@ -675,17 +675,21 @@ export const POST = withTenantAndPermission('pos')(async (
       success: true,
       data: {
         ...result,
+        _deployCheck: 'v2-debug-active',
         createdCheck: createdCheck ? {
           id: createdCheck.id,
           checkNumber: createdCheck.checkNumber,
           bankName: createdCheck.bankName,
           amount: createdCheck.amount,
           dueDate: createdCheck.dueDate,
+          _error: createdCheck.error || false,
+          _errorMessage: createdCheck.errorMessage || null,
+          _errorCode: createdCheck.errorCode || null,
+          _errorMeta: createdCheck.errorMeta || null,
         } : null,
       },
-      message: `فاکتور ${result.number} با موفقیت ثبت شد${createdCheck ? ' و چک دریافتی ایجاد شد' : ''}`,
+      message: `فاکتور ${result.number} با موفقیت ثبت شد${createdCheck && !createdCheck.error ? ' و چک دریافتی ایجاد شد' : ''}`,
     }, { status: 201 })
-
   } catch (error: any) {
     console.error('[Invoices POST] Error:', error?.message)
     console.error('[Invoices POST] Stack:', error?.stack)
