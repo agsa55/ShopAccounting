@@ -2668,8 +2668,7 @@ if (pt === 'check') {
           invoiceNumber: result.data?.number,
           createdCheck: createdCheck ? '✓' : '✗',
         })
-
-      if (createdCheck && createdCheck._error) {
+  if (createdCheck) {
   // ★ نمایش کامل خطای واقعی برای دیباگ
   toast({
     title: '❌ خطا در ثبت چک (فاکتور ثبت شد)',
@@ -2677,7 +2676,7 @@ if (pt === 'check') {
     variant: 'destructive',
     duration: 60000, // یک دقیقه باز می‌مونه
   })
-} else if (createdCheck) {
+}if (createdCheck) {
   toast({
     title: '✓ فاکتور و چک ثبت شد',
     description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
