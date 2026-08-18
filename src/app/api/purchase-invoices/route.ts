@@ -38,21 +38,20 @@ export const GET = withTenantAndPermission('accounting')(
         ]
       }
 
-         let invoices: any[] = []
-      let debugIncludeError: string | null = null
+      let invoices: any[] = []
       try {
-        // ★ v8.9.3: Include supplier و warehouse برای نمایش نام‌ها
-            invoices = await tenantDb.purchaseInvoice.findMany({
+        // ★ اصلاح شد: نام فیلدهای relation در schema با حروف بزرگ تعریف شده (Supplier, Warehouse)
+        const rawInvoices = await tenantDb.purchaseInvoice.findMany({
           where,
           include: {
-            supplier: {
+            Supplier: {
               select: {
                 id: true,
                 name: true,
                 code: true,
               }
             },
-            warehouse: {
+            Warehouse: {
               select: {
                 id: true,
                 name: true,
@@ -75,8 +74,14 @@ export const GET = withTenantAndPermission('accounting')(
           skip: (page - 1) * limit,
           take: limit,
         })
+
+        // ★ نگاشت به کلیدهای حروف کوچک برای سازگاری با فرانت‌اند
+        invoices = rawInvoices.map((inv: any) => ({
+          ...inv,
+          supplier: inv.Supplier || null,
+          warehouse: inv.Warehouse || null,
+        }))
       } catch (err: any) {
-        debugIncludeError = err?.message || String(err)
         console.error('[PurchaseInvoices GET] findMany with include error:', err?.message)
         // Fallback: بدون include
         try {
@@ -107,7 +112,7 @@ export const GET = withTenantAndPermission('accounting')(
 
       const total = await tenantDb.purchaseInvoice.count({ where })
 
-      // ★ v8.9.3: اگر supplier یا warehouse در include نبود، دستی join کن
+      // ★ اگر supplier یا warehouse در include نبود (یعنی fallback اجرا شد)، دستی join کن
       if (invoices.length > 0 && invoices[0].supplier === undefined) {
         console.log('[PurchaseInvoices GET] Manual join for supplier and warehouse...')
         
@@ -139,21 +144,19 @@ export const GET = withTenantAndPermission('accounting')(
           warehouse: inv.warehouseId ? warehouseMap.get(inv.warehouseId) || null : null,
         }))
       }
-
        const invoicesWithCheckStatus = invoices.map((inv: any) => ({
         ...inv,
         checkStatus: inv.Checks?.[0]?.status || null,
         checkInfo: inv.Checks?.[0] || null,
       }))
 
-           return NextResponse.json({
+            return NextResponse.json({
         success: true,
         data: invoicesWithCheckStatus,
         pagination: {
           page, limit, total,
           totalPages: Math.ceil(total / limit),
         },
-        _debugIncludeError: debugIncludeError,
       })
     } catch (error: any) {
       console.error('[PurchaseInvoices GET] error:', error)
