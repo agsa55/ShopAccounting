@@ -143,11 +143,20 @@ class SyncEngineClass {
     this.isRunning = true
     const result: SyncResult = { processed: 0, succeeded: 0, failed: 0, errors: [] }
 
-    try {
+       try {
       const queue = await getSyncQueue()
 
       for (const item of queue) {
         result.processed++
+
+        // ★ اگر به حداکثر تلاش رسیده، از صف حذفش کن (به‌جای گیر کردن دائمی)
+        if (item.retryCount >= this.maxRetries) {
+          console.warn(`[SyncEngine] Item exceeded max retries, removing:`, item.type, item.lastError)
+          await removeFromSyncQueue(item.id)
+          result.failed++
+          result.errors.push(`${item.type}: حداکثر تلاش انجام شد و حذف شد — ${item.lastError || ''}`)
+          continue
+        }
 
         try {
           const success = await this.processItem(item)
