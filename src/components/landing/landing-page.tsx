@@ -1,7 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/landing/landing-page.tsx (v6.0 — بدون قیمت، فقط شروع رایگان)
+// src/components/landing/landing-page.tsx (v7.0 — پشتیبانی از showPrice)
+// ★ v7.0: نمایش شرطی قیمت بر اساس toggle در پنل مدیریت
 // ============================================================================
 
 import { useState, useEffect, useRef } from 'react'
@@ -11,7 +12,7 @@ import {
   ShoppingCart, Package, Users, CreditCard, BookOpen, BarChart3,
   CheckCircle2, Crown, Zap, Building2, ChevronDown,
   Star, TrendingUp, ShieldCheck, Clock, ArrowLeft, Sparkles,
-  Menu, X, LogIn,
+  Menu, X, LogIn, Percent,Infinity,
 } from 'lucide-react'
 import { useSiteContent } from '@/lib/site-content'
 
@@ -345,7 +346,7 @@ export default function LandingPage() {
   
   const { content: siteContent } = useSiteContent()
   
-  // ★ ساخت لیست پلن‌ها — بدون قیمت
+  // ★ v7.0: ساخت لیست پلن‌ها — با پشتیبانی از showPrice
   const displayPlans = (siteContent.plans || []).map(plan => {
     const ui = PLAN_UI_CONFIG[plan.name] || PLAN_UI_CONFIG.simple
     return {
@@ -354,6 +355,10 @@ export default function LandingPage() {
       description: plan.description,
       popular: plan.popular || false,
       features: plan.features || [],
+      showPrice: (plan as any).showPrice || false,
+      annualPrice: (plan as any).annualPrice || 0,
+      lifetimePrice: (plan as any).lifetimePrice || 0,
+      discountPercent: (plan as any).discountPercent || 0,
       icon: ui.icon,
       color: ui.color,
       bgColor: ui.bgColor,
@@ -401,7 +406,7 @@ export default function LandingPage() {
     router.push(`/auth/register?plan=${tierName}`)
   }
 
-   // ★ v6.1: شروع رایگان → هدایت به بخش پلن‌ها (کاربر خودش پلن را انتخاب می‌کند)
+  // ★ v6.1: شروع رایگان → هدایت به بخش پلن‌ها (کاربر خودش پلن را انتخاب می‌کند)
   const handleStartFree = () => {
     setMobileMenuOpen(false)
     pricingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -476,7 +481,7 @@ export default function LandingPage() {
               <span>ورود</span>
             </button>
 
-                      <button
+            <button
               onClick={handleStartFree}
               className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-gradient-to-l from-amber-500 to-orange-500 rounded-xl hover:shadow-lg hover:shadow-amber-200/60 hover:scale-105 transition-all whitespace-nowrap"
             >
@@ -529,7 +534,7 @@ export default function LandingPage() {
                   <LogIn className="w-4 h-4" />
                   ورود به حساب
                 </button>
-                              <button
+                <button
                   onClick={handleStartFree}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white bg-gradient-to-l from-amber-500 to-orange-500 rounded-xl font-bold text-sm hover:shadow-lg transition-all"
                 >
@@ -586,7 +591,7 @@ export default function LandingPage() {
               className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start animate-fade-in-up pt-2"
               style={{ animationDelay: '0.3s' }}
             >
-                          <button
+              <button
                 onClick={handleStartFree}
                 className="group relative px-7 py-4 bg-gradient-to-l from-amber-500 to-orange-500 text-white rounded-2xl font-bold text-base hover:shadow-2xl hover:shadow-amber-500/30 hover:scale-105 transition-all animate-pulse-glow flex items-center justify-center gap-2.5 overflow-hidden"
               >
@@ -753,7 +758,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══════════════════════════ PLANS (بدون قیمت) ═════════════════ */}
+      {/* ═══════════════════════════ PLANS ═════════════════════════════ */}
       <section ref={pricingRef} className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 bg-white scroll-mt-20">
         <div className="max-w-6xl mx-auto">
 
@@ -771,7 +776,7 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* ★ کارت‌های پلن — بدون قیمت */}
+          {/* ★ کارت‌های پلن */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 items-stretch">
             {displayPlans.map((plan, idx) => {
               return (
@@ -821,21 +826,51 @@ export default function LandingPage() {
                       ))}
                     </div>
 
-                    <div className="p-6 sm:p-7 pt-0">
-                      <button
-                        onClick={() => handlePlanSelect(plan.name)}
-                        className={`w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:scale-[1.02] ${
-                          plan.popular
-                            ? 'bg-gradient-to-l from-violet-600 to-purple-600 text-white shadow-md shadow-violet-200'
-                            : plan.name === 'simple'
-                              ? 'bg-gradient-to-l from-blue-600 to-indigo-600 text-white'
-                              : 'bg-gradient-to-l from-purple-600 to-fuchsia-600 text-white'
-                        }`}
-                      >
-                        شروع رایگان با {plan.nameFa}
-                        <ArrowLeft className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {/* ═══════════════════════════════════════════════════
+                        ★ v7.0: نمایش قیمت — فقط اگر showPrice فعال باشد
+                    ═══════════════════════════════════════════════════ */}
+                  {/* ═══════════════════════════════════════════════════
+    ★ v8.0: نمایش قیمت مادام‌العمر — فقط اگر showPrice فعال باشد
+═══════════════════════════════════════════════════ */}
+{plan.showPrice && (
+  <div className="px-6 sm:px-7 pb-2">
+    <div className={`text-center p-4 rounded-2xl border-2 ${
+      plan.popular
+        ? 'bg-gradient-to-br from-violet-50 to-purple-50 border-violet-200'
+        : 'bg-gradient-to-br from-gray-50 to-white border-gray-200'
+    }`}>
+      <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-500 mb-1.5 font-medium">
+        <Infinity className="w-3.5 h-3.5" />
+        پرداخت یک‌بار، استفاده مادام‌العمر
+      </div>
+      <div className={`text-3xl font-black ${plan.popular ? 'text-violet-700' : 'text-gray-900'}`}>
+        {formatPrice(plan.lifetimePrice)}
+        <span className="text-sm font-medium text-gray-500 mr-1">تومان</span>
+      </div>
+      <div className="mt-2 pt-2 border-t border-gray-200/60">
+        <span className={`text-[11px] font-bold ${plan.popular ? 'text-violet-600' : 'text-gray-600'}`}>
+          ♾️ دسترسی همیشگی — بدون تمدید
+        </span>
+      </div>
+    </div>
+  </div>
+)}
+
+<div className="p-6 sm:p-7 pt-2">
+  <button
+    onClick={() => handlePlanSelect(plan.name)}
+    className={`w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:scale-[1.02] ${
+      plan.popular
+        ? 'bg-gradient-to-l from-violet-600 to-purple-600 text-white shadow-md shadow-violet-200'
+        : plan.name === 'simple'
+          ? 'bg-gradient-to-l from-blue-600 to-indigo-600 text-white'
+          : 'bg-gradient-to-l from-purple-600 to-fuchsia-600 text-white'
+    }`}
+  >
+    {plan.showPrice ? 'خرید مادام‌العمر' : 'شروع رایگان'} با {plan.nameFa}
+    <ArrowLeft className="w-4 h-4" />
+  </button>
+</div>
                   </div>
                 </div>
               )
@@ -928,7 +963,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
-                       <button
+            <button
               onClick={handleStartFree}
               className="group px-8 sm:px-10 py-4 bg-gradient-to-l from-amber-500 to-orange-500 text-white rounded-2xl font-black text-base sm:text-lg hover:shadow-2xl hover:shadow-amber-500/30 hover:scale-105 transition-all flex items-center justify-center gap-3"
             >
@@ -1025,7 +1060,7 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <p>رهگشا v6.0 — سیستم حسابداری فروشگاهی هوشمند</p>
+            <p>رهگشا v7.0 — سیستم حسابداری فروشگاهی هوشمند</p>
             <p>© ۱۴۰۴ تمام حقوق محفوظ است.</p>
           </div>
         </div>

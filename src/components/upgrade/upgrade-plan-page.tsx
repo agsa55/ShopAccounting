@@ -1,16 +1,17 @@
 'use client'
 
 // ============================================================================
-// src/components/upgrade/upgrade-plan-page.tsx (v10.4 ★★★)
-// ★ فقط پلن فعلی + به‌روزرسانی مادام‌العمر + تخفیف زودهنگام
+// src/components/upgrade/upgrade-plan-page.tsx (v11.0 ★★★)
+// ★ v11.0: دریافت ویژگی‌ها و قیمت به‌روزرسانی از Site Content
 // ★ v10.4: تشخیص SUBSCRIPTION_EXPIRED از middleware
 // ★ v10.4: مخفی کردن "بعداً پرداخت" در حالت قفل
 // ★ v10.4: redirect خودکار بعد از پرداخت موفق
 // ============================================================================
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useStore } from '@/lib/store'
 import { PLANS, resolvePlan, type PlanName } from '@/lib/plan-features'
+import { useSiteContent } from '@/lib/site-content'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -64,10 +65,10 @@ const PLAN_STYLES: Record<PlanName, {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  قابلیت‌های هر پلن
+//  ★ v11.0: ویژگی‌های پیش‌فرض (fallback اگر Site Content نبود)
 // ═══════════════════════════════════════════════════════════════
 
-const PLAN_FEATURES: Record<PlanName, string[]> = {
+const DEFAULT_FEATURES: Record<PlanName, string[]> = {
   simple: [
     'فروش نقدی و صدور فاکتور',
     'مدیریت محصولات و مشتریان',
@@ -123,10 +124,54 @@ export default function UpgradePlanPage() {
   const [processing, setProcessing] = useState(false)
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
 
+  // ★ v11.0: دریافت محتوای سایت
+  const { content: siteContent } = useSiteContent()
+
   const currentPlan = resolvePlan(planName)
   const currentPlanName = currentPlan.planName
   const style = PLAN_STYLES[currentPlanName]
   const Icon = style.icon
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.0: استخراج اطلاعات پلن از Site Content
+  // ═══════════════════════════════════════════════════════════════
+  const planContent = useMemo(() => {
+    if (!siteContent?.plans) return null
+    return siteContent.plans.find(p => p.name === currentPlanName) || null
+  }, [siteContent, currentPlanName])
+
+  // ویژگی‌های پلن از Site Content (با fallback)
+  const planFeatures = useMemo(() => {
+    if (planContent?.features && planContent.features.length > 0) {
+      return planContent.features
+    }
+    return DEFAULT_FEATURES[currentPlanName]
+  }, [planContent, currentPlanName])
+
+  // نام فارسی پلن از Site Content (با fallback)
+  const planLabel = planContent?.nameFa || currentPlan.label
+
+  // توضیحات پلن از Site Content
+  const planDescription = planContent?.description || ''
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.0: محاسبه قیمت به‌روزرسانی از Site Content
+  // ═══════════════════════════════════════════════════════════════
+  const planData: any = PLANS[currentPlanName]
+  
+  // اولویت: updatePrice از Site Content > lifetimePrice از Site Content > مقدار hardcoded
+  const baseUpdatePrice = useMemo(() => {
+    if (planContent) {
+      const updatePrice = (planContent as any).updatePrice
+      if (updatePrice && updatePrice > 0) return updatePrice
+      if (planContent.lifetimePrice && planContent.lifetimePrice > 0) return planContent.lifetimePrice
+    }
+    return planData?.lifetimePrice || planData?.annualPrice || 0
+  }, [planContent, planData])
+
+  const discountPercent = updateStatus?.discountPercent || 0
+  const discountedPrice = Math.round(baseUpdatePrice * (1 - discountPercent / 100))
+  const savings = baseUpdatePrice - discountedPrice
 
   // ★ بارگذاری وضعیت به‌روزرسانی
   // ★ v10.4: تشخیص SUBSCRIPTION_EXPIRED از middleware (403)
@@ -212,7 +257,6 @@ export default function UpgradePlanPage() {
   }, [updateStatus])
 
   // ★ v10.4: تشخیص پارامترهای URL بعد از بازگشت از درگاه پرداخت
-  // وقتی کاربر از درگاه پرداخت برمی‌گردد، URL شامل ?success=1 یا ?error=... است
   useEffect(() => {
     if (typeof window === 'undefined') return
     
@@ -224,15 +268,12 @@ export default function UpgradePlanPage() {
     if (success === '1') {
       console.log('[UpgradePage] 🎉 Payment successful — refreshing status...')
       
-      // پاک کردن پارامترهای URL
       window.history.replaceState({}, '', window.location.pathname)
       
-      // نمایش پیام موفقیت
       if (duplicate === '1') {
         console.log('[UpgradePage] ⚠️ Duplicate payment detected')
       }
       
-      // رفرش کردن وضعیت بعد از ۱ ثانیه (صبر برای اعمال تغییرات دیتابیس)
       setTimeout(async () => {
         setLoading(true)
         try {
@@ -245,7 +286,6 @@ export default function UpgradePlanPage() {
             
             let newData: any = null
             
-            // تشخیص SUBSCRIPTION_EXPIRED
             if (res.status === 403) {
               try {
                 newData = await res.json()
@@ -270,7 +310,6 @@ export default function UpgradePlanPage() {
             if (newData?.success && newData.data) {
               setUpdateStatus(newData.data)
               
-              // اگر قفل باز شده، بعد از ۲ ثانیه به داشبورد برگرد
               if (!newData.data.isLocked && newData.data.daysUntilUpdate === -1) {
                 console.log('[UpgradePage] 🔓 Lock released — redirecting to dashboard in 2s')
                 setTimeout(() => {
@@ -293,13 +332,6 @@ export default function UpgradePlanPage() {
     }
   }, [])
 
-  // ★ محاسبه قیمت با تخفیف
-  const planData: any = PLANS[currentPlanName]
-  const basePrice = planData?.lifetimePrice || planData?.annualPrice || 0
-  const discountPercent = updateStatus?.discountPercent || 0
-  const discountedPrice = Math.round(basePrice * (1 - discountPercent / 100))
-  const savings = basePrice - discountedPrice
-
   // ★ شروع پرداخت
   const handlePayment = async () => {
     setProcessing(true)
@@ -310,7 +342,6 @@ export default function UpgradePlanPage() {
         return
       }
 
-      // ساخت تراکنش در سرور
       const res = await fetch('/api/payments/create-update-payment', {
         method: 'POST',
         headers: {
@@ -328,7 +359,6 @@ export default function UpgradePlanPage() {
       const data = await res.json()
 
       if (data.success && data.data?.paymentUrl) {
-        // هدایت به درگاه زرین‌پال
         window.location.href = data.data.paymentUrl
       } else {
         alert(data.error || 'خطا در ایجاد تراکنش')
@@ -357,7 +387,7 @@ export default function UpgradePlanPage() {
           <h1 className="text-lg font-bold">به‌روزرسانی سیستم</h1>
         </div>
         <Badge className={`text-xs ${style.badge}`}>
-          {currentPlan.label}
+          {planLabel}
         </Badge>
       </div>
 
@@ -412,7 +442,7 @@ export default function UpgradePlanPage() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-1">
-                    {currentPlan.label}
+                    {planLabel}
                   </h2>
                   <p className="text-sm text-gray-600">
                     {storeName || 'فروشگاه شما'}
@@ -424,23 +454,29 @@ export default function UpgradePlanPage() {
               </Badge>
             </div>
 
-            {/* توضیح چرا فقط این پلن */}
+            {/* توضیح */}
             <div className="bg-white/60 backdrop-blur rounded-lg p-3 mb-6">
               <p className="text-xs text-gray-700 leading-relaxed">
-                💡این به روز رسانی مخصوص پلن پایه <strong>{currentPlan.label}</strong> می باشد.
-              با پرداخت هزینه پشتیبانی عملکرد سیستم به روزتر و بهتر می شود.
+                💡 این به‌روزرسانی مخصوص پلن <strong>{planLabel}</strong> می‌باشد.
+                با پرداخت هزینه پشتیبانی، عملکرد سیستم به‌روزتر و بهتر می‌شود.
               </p>
+              {/* ★ v11.0: نمایش توضیحات پلن از Site Content */}
+              {planDescription && (
+                <p className="text-[11px] text-gray-600 leading-relaxed mt-1.5 pt-1.5 border-t border-gray-200/50">
+                  {planDescription}
+                </p>
+              )}
             </div>
 
             {/* ═══ بخش قیمت ═══ */}
             <div className="bg-white rounded-2xl p-6 shadow-md mb-6">
               <div className="flex items-center gap-2 mb-4">
-                <Infinity className="w-5 h-5 text-purple-600" />
+                <RefreshCw className="w-5 h-5 text-amber-600" />
                 <span className="text-sm font-bold text-gray-900">
-                 به روز رسانی کنید
+                  هزینه به‌روزرسانی
                 </span>
-                <Badge className="bg-purple-100 text-purple-700 text-[10px]">
-                 سیستم به روزتر هوشمندتر و سریعتر می شود.
+                <Badge className="bg-amber-100 text-amber-700 text-[10px]">
+                  تمدید پشتیبانی و به‌روزرسانی
                 </Badge>
               </div>
 
@@ -450,7 +486,7 @@ export default function UpgradePlanPage() {
                   <>
                     <div className="flex items-baseline justify-between">
                       <span className="text-sm text-gray-500 line-through">
-                        {basePrice.toLocaleString('fa-IR')} تومان
+                        {baseUpdatePrice.toLocaleString('fa-IR')} تومان
                       </span>
                       <Badge className="bg-red-100 text-red-700 text-xs px-2 py-1">
                         {discountPercent}٪ تخفیف
@@ -476,7 +512,7 @@ export default function UpgradePlanPage() {
                   <div className="flex items-baseline justify-between">
                     <div>
                       <span className="text-3xl sm:text-4xl font-black text-gray-900">
-                        {basePrice.toLocaleString('fa-IR')}
+                        {baseUpdatePrice.toLocaleString('fa-IR')}
                       </span>
                       <span className="text-sm text-gray-600 mr-2">تومان</span>
                     </div>
@@ -488,13 +524,18 @@ export default function UpgradePlanPage() {
               {/* دکمه پرداخت */}
               <Button
                 onClick={handlePayment}
-                disabled={processing}
+                disabled={processing || baseUpdatePrice <= 0}
                 className={`w-full h-14 mt-6 text-base font-bold gap-2 shadow-lg ${style.buttonClass}`}
               >
                 {processing ? (
                   <>
                     <RefreshCw className="w-5 h-5 animate-spin" />
                     در حال انتقال به درگاه...
+                  </>
+                ) : baseUpdatePrice <= 0 ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5" />
+                    قیمت به‌روزرسانی تنظیم نشده
                   </>
                 ) : (
                   <>
@@ -521,14 +562,19 @@ export default function UpgradePlanPage() {
               </div>
             </div>
 
-            {/* ═══ قابلیت‌ها ═══ */}
+            {/* ═══ قابلیت‌ها (از Site Content) ═══ */}
             <div className="mb-6">
               <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                 <CheckCircle2 className={`w-4 h-4 text-${style.accentColor}-600`} />
-                قابلیت‌های {currentPlan.label}
+                قابلیت‌های {planLabel}
+                {planContent?.features && (
+                  <span className="text-[10px] text-gray-400 font-normal">
+                    (از صفحه تولید محتوا)
+                  </span>
+                )}
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {PLAN_FEATURES[currentPlanName].map((feat, idx) => (
+                {planFeatures.map((feat, idx) => (
                   <div key={idx} className="flex items-center gap-2 bg-white/60 rounded-lg px-3 py-2">
                     <CheckCircle2 className={`w-4 h-4 text-${style.accentColor}-600 shrink-0`} />
                     <span className="text-xs text-gray-700">{feat}</span>
@@ -614,7 +660,6 @@ export default function UpgradePlanPage() {
         </Card>
 
         {/* ─── لینک‌های پشتیبانی ─────────────────────────── */}
-        {/* ★ v10.4: مخفی کردن "بعداً پرداخت" در حالت قفل */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 text-center">
           <button
             onClick={() => setCurrentView('tickets')}
@@ -624,7 +669,6 @@ export default function UpgradePlanPage() {
             <span>ارتباط با پشتیبانی</span>
           </button>
 
-          {/* ★ فقط وقتی قفل نیست، دکمه "بعداً پرداخت می‌کنم" را نشان بده */}
           {!updateStatus?.isLocked && (
             <>
               <span className="hidden sm:inline text-gray-300">|</span>
@@ -638,7 +682,6 @@ export default function UpgradePlanPage() {
             </>
           )}
 
-          {/* ★ وقتی قفل است، پیام بده که نمی‌تواند خارج شود */}
           {updateStatus?.isLocked && (
             <>
               <span className="hidden sm:inline text-gray-300">|</span>

@@ -3,6 +3,9 @@
 // ============================================================================
 // src/app/admin/site-content/page.tsx
 // مدیریت پلن‌ها و قیمت‌ها — با Accordion + نمایش محدودیت‌های واقعی
+// ★ v8.0: فقط قیمت مادام‌العمر (حذف قیمت سالانه و تخفیف)
+// ★ v7.2: Modern Toggle Switch برای نمایش قیمت
+// ★ v7.0: جابجایی ویژگی‌ها (↑↓)
 // ============================================================================
 
 import { useState, useEffect } from 'react'
@@ -13,7 +16,8 @@ import {
   TrendingUp, DollarSign, Eye, Users, Package, FileText,
   Warehouse, CreditCard, Receipt, BookOpen, BarChart3,
   Building, ShieldCheck, Calculator, Network, Printer,
-  Edit, X as XIcon, Info
+  Edit, X as XIcon, Info, ArrowUp, ArrowDown, EyeOff,
+  ToggleLeft, ToggleRight, GripVertical, Infinity as InfinityIcon
 } from 'lucide-react'
 import { useAdminSiteContent, DEFAULT_SITE_CONTENT, type SiteContent, type PlanTierData } from '@/lib/site-content'
 import { PLANS, getPlanFeatures, resolvePlanTier, type PlanFeatureSet } from '@/lib/plan-features'
@@ -59,15 +63,103 @@ function getPlanStyle(name: string) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  Helper: دسترسی ایمن به showPrice
+// ═══════════════════════════════════════════════════════════════
+const getShowPrice = (plan: PlanTierData): boolean => {
+  return (plan as any).showPrice || false
+}
+
+const setShowPrice = (plan: PlanTierData, value: boolean): PlanTierData => {
+  return { ...plan, showPrice: value } as PlanTierData
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ v7.3: Modern Toggle Switch - اصلاح شده برای RTL
+// ═══════════════════════════════════════════════════════════════
+function ModernToggle({
+  checked,
+  onChange,
+  activeIcon: ActiveIcon = Eye,
+  inactiveIcon: InactiveIcon = EyeOff,
+  activeColor = 'from-indigo-500 to-blue-500',
+  activeLabel = 'فعال',
+  inactiveLabel = 'غیرفعال',
+}: {
+  checked: boolean
+  onChange: () => void
+  activeIcon?: React.ComponentType<{ className?: string }>
+  inactiveIcon?: React.ComponentType<{ className?: string }>
+  activeColor?: string
+  activeLabel?: string
+  inactiveLabel?: string
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onChange}
+        className={`
+          relative inline-flex items-center rounded-full
+          transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
+          focus:outline-none focus:ring-2 focus:ring-offset-2
+          shrink-0 cursor-pointer
+          ${checked
+            ? `bg-gradient-to-r ${activeColor} focus:ring-indigo-500 shadow-lg shadow-indigo-500/40`
+            : 'bg-gray-300 focus:ring-gray-400 shadow-inner'
+          }
+        `}
+        style={{ width: '60px', height: '32px' }}
+        aria-pressed={checked}
+      >
+        <span className="absolute inset-0 flex items-center justify-between px-2.5 pointer-events-none">
+          <span className={`transition-opacity duration-300 ${checked ? 'opacity-100' : 'opacity-0'}`}>
+            <ActiveIcon className="w-3 h-3 text-white/70" />
+          </span>
+          <span className={`transition-opacity duration-300 ${!checked ? 'opacity-100' : 'opacity-0'}`}>
+            <InactiveIcon className="w-3 h-3 text-gray-500" />
+          </span>
+        </span>
+
+        <span
+          className={`
+            absolute top-1/2 -translate-y-1/2
+            inline-flex items-center justify-center
+            rounded-full bg-white
+            transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]
+            shadow-lg
+            ${checked ? 'right-[3px]' : 'left-[3px]'}
+          `}
+          style={{ width: '26px', height: '26px' }}
+        >
+          {checked ? (
+            <ActiveIcon className="w-3.5 h-3.5 text-indigo-600" />
+          ) : (
+            <InactiveIcon className="w-3.5 h-3.5 text-gray-400" />
+          )}
+        </span>
+      </button>
+
+      <span
+        className={`
+          text-[11px] font-black transition-all duration-300
+          ${checked ? 'text-indigo-700' : 'text-gray-500'}
+        `}
+      >
+        {checked ? activeLabel : inactiveLabel}
+      </span>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Component: نمایش محدودیت‌های واقعی پلن (Read-only)
 // ═══════════════════════════════════════════════════════════════
 function PlanRealLimitsDisplay({ planName }: { planName: string }) {
   const [expanded, setExpanded] = useState(false)
-  
-  // دریافت اطلاعات واقعی از plan-features.ts
+
   const planInfo = PLANS[planName as keyof typeof PLANS]
   const tier = resolvePlanTier(planName)
-const features = getPlanFeatures(tier)
+  const features = getPlanFeatures(tier)
   const style = getPlanStyle(planName)
 
   if (!planInfo || !features) {
@@ -79,7 +171,6 @@ const features = getPlanFeatures(tier)
     )
   }
 
-  // دسته‌بندی قابلیت‌ها
   const capabilityGroups = [
     {
       title: 'فروش و فاکتور',
@@ -139,7 +230,6 @@ const features = getPlanFeatures(tier)
 
   return (
     <div className="space-y-3">
-      {/* دکمه باز/بسته کردن */}
       <button
         onClick={() => setExpanded(!expanded)}
         className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all ${
@@ -159,51 +249,48 @@ const features = getPlanFeatures(tier)
         />
       </button>
 
-      {/* محتوای قابل گسترش */}
       {expanded && (
         <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
-          
-          {/* محدودیت‌های کمی */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-  <div className="bg-white p-3 rounded-lg border border-gray-200">
-    <div className="flex items-center gap-2 mb-1">
-      <Users className="w-3.5 h-3.5 text-blue-600" />
-      <span className="text-[10px] text-gray-500">کاربران</span>
-    </div>
-    <p className="text-sm font-black text-gray-900">
-      {planInfo.maxUsers === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxUsers)}
-    </p>
-  </div>
-  <div className="bg-white p-3 rounded-lg border border-gray-200">
-    <div className="flex items-center gap-2 mb-1">
-      <Package className="w-3.5 h-3.5 text-emerald-600" />
-      <span className="text-[10px] text-gray-500">محصولات</span>
-    </div>
-    <p className="text-sm font-black text-gray-900">
-      {planInfo.maxProducts === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxProducts)}
-    </p>
-  </div>
-  <div className="bg-white p-3 rounded-lg border border-gray-200">
-    <div className="flex items-center gap-2 mb-1">
-      <FileText className="w-3.5 h-3.5 text-purple-600" />
-      <span className="text-[10px] text-gray-500">فاکتور</span>  {/* ★ تغییر: حذف "/ماه" */}
-    </div>
-    <p className="text-sm font-black text-gray-900">
-      {planInfo.maxInvoicesPerMonth === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxInvoicesPerMonth)}
-    </p>
-  </div>
-  <div className="bg-white p-3 rounded-lg border border-gray-200">
-    <div className="flex items-center gap-2 mb-1">
-      <Warehouse className="w-3.5 h-3.5 text-amber-600" />
-      <span className="text-[10px] text-gray-500">انبارها</span>
-    </div>
-    <p className="text-sm font-black text-gray-900">
-      {features.maxWarehouses === 0 ? '♾️ نامحدود' : toFaNum(features.maxWarehouses)}
-    </p>
-  </div>
-</div>
 
-          {/* روش‌های پرداخت */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-white p-3 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="w-3.5 h-3.5 text-blue-600" />
+                <span className="text-[10px] text-gray-500">کاربران</span>
+              </div>
+              <p className="text-sm font-black text-gray-900">
+                {planInfo.maxUsers === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxUsers)}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-2 mb-1">
+                <Package className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-[10px] text-gray-500">محصولات</span>
+              </div>
+              <p className="text-sm font-black text-gray-900">
+                {planInfo.maxProducts === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxProducts)}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-2 mb-1">
+                <FileText className="w-3.5 h-3.5 text-purple-600" />
+                <span className="text-[10px] text-gray-500">فاکتور</span>
+              </div>
+              <p className="text-sm font-black text-gray-900">
+                {planInfo.maxInvoicesPerMonth === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxInvoicesPerMonth)}
+              </p>
+            </div>
+            <div className="bg-white p-3 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-2 mb-1">
+                <Warehouse className="w-3.5 h-3.5 text-amber-600" />
+                <span className="text-[10px] text-gray-500">انبارها</span>
+              </div>
+              <p className="text-sm font-black text-gray-900">
+                {features.maxWarehouses === 0 ? '♾️ نامحدود' : toFaNum(features.maxWarehouses)}
+              </p>
+            </div>
+          </div>
+
           <div className="bg-gradient-to-l from-slate-50 to-white rounded-xl border border-gray-200 p-4">
             <h6 className="text-xs font-black text-gray-800 mb-3 flex items-center gap-2">
               <CreditCard className="w-4 h-4 text-emerald-600" />
@@ -225,7 +312,6 @@ const features = getPlanFeatures(tier)
             </div>
           </div>
 
-          {/* قابلیت‌های سیستم */}
           <div className="space-y-3">
             <h6 className="text-xs font-black text-gray-800 flex items-center gap-2">
               <Settings className="w-4 h-4 text-violet-600" />
@@ -268,7 +354,6 @@ const features = getPlanFeatures(tier)
             })}
           </div>
 
-          {/* توضیحات پلن */}
           <div className="bg-gradient-to-l from-violet-50 to-purple-50 rounded-xl border border-violet-200 p-4">
             <h6 className="text-xs font-black text-gray-800 mb-2 flex items-center gap-2">
               <Info className="w-4 h-4 text-violet-600" />
@@ -279,7 +364,6 @@ const features = getPlanFeatures(tier)
             </p>
           </div>
 
-          {/* هشدار */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
@@ -350,6 +434,37 @@ export default function AdminSiteContentPage() {
     updatePlan(planId, 'features', plan.features.filter((_, i) => i !== idx))
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // ★ v7.0: جابجایی ویژگی‌ها به بالا و پایین
+  // ═══════════════════════════════════════════════════════════
+  const moveFeatureUp = (planId: string, idx: number) => {
+    if (idx === 0) return
+    const plan = content.plans.find(p => p.id === planId)
+    if (!plan) return
+    const features = [...plan.features]
+    ;[features[idx - 1], features[idx]] = [features[idx], features[idx - 1]]
+    updatePlan(planId, 'features', features)
+  }
+
+  const moveFeatureDown = (planId: string, idx: number) => {
+    const plan = content.plans.find(p => p.id === planId)
+    if (!plan || idx === plan.features.length - 1) return
+    const features = [...plan.features]
+    ;[features[idx], features[idx + 1]] = [features[idx + 1], features[idx]]
+    updatePlan(planId, 'features', features)
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ★ v7.1: تغییر وضعیت نمایش قیمت
+  // ═══════════════════════════════════════════════════════════
+  const toggleShowPrice = (planId: string) => {
+    const plan = content.plans.find(p => p.id === planId)
+    if (!plan) return
+    const currentShowPrice = getShowPrice(plan)
+    const updatedPlan = setShowPrice(plan, !currentShowPrice)
+    updatePlans(content.plans.map(p => p.id === planId ? updatedPlan : p))
+  }
+
   const handleSave = async () => {
     const ok = await saveContent(content)
     if (ok) {
@@ -393,7 +508,7 @@ export default function AdminSiteContentPage() {
               <h1 className="text-xl sm:text-2xl font-black text-gray-900">
                 مدیریت <span className="bg-gradient-to-l from-violet-600 to-purple-600 bg-clip-text text-transparent">پلن‌ها و قیمت‌ها</span>
               </h1>
-              <p className="text-[11px] text-gray-500 mt-0.5">ویرایش قیمت‌ها، تخفیف‌ها و ویژگی‌های پلن‌ها</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">ویرایش قیمت مادام‌العمر و ویژگی‌های پلن‌ها</p>
             </div>
           </div>
 
@@ -478,9 +593,7 @@ export default function AdminSiteContentPage() {
               const isExpanded = expandedPlans.includes(plan.id)
               const style = getPlanStyle(plan.name)
               const PlanIcon = style.Icon
-              const discountedPrice = plan.discountPercent > 0
-                ? Math.round(plan.annualPrice * (1 - plan.discountPercent / 100))
-                : plan.annualPrice
+              const showPrice = getShowPrice(plan)
 
               return (
                 <div
@@ -502,36 +615,33 @@ export default function AdminSiteContentPage() {
                     </div>
 
                     <div className="flex-1 min-w-0 text-right">
-                      <div className="flex items-center gap-2 mb-0.5">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <h4 className="text-base font-black text-gray-900">{plan.nameFa}</h4>
                         {plan.popular && (
                           <span className="px-1.5 py-0.5 bg-gradient-to-l from-amber-400 to-orange-500 text-white text-[9px] font-black rounded-md shadow-sm">
                             محبوب
                           </span>
                         )}
-                        {plan.discountPercent > 0 && (
-                          <span className="px-1.5 py-0.5 bg-gradient-to-l from-red-500 to-rose-600 text-white text-[9px] font-black rounded-md shadow-sm flex items-center gap-0.5">
-                            <Percent className="w-2 h-2" />
-                            {toFaNum(plan.discountPercent)}٪ تخفیف
+                        {/* ★ v8.0: نشانگر وضعیت نمایش قیمت */}
+                        {showPrice ? (
+                          <span className="px-1.5 py-0.5 bg-gradient-to-l from-indigo-500 to-blue-500 text-white text-[9px] font-black rounded-md shadow-sm flex items-center gap-0.5">
+                            <Eye className="w-2.5 h-2.5" />
+                            قیمت فعال
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[9px] font-black rounded-md flex items-center gap-0.5">
+                            <EyeOff className="w-2.5 h-2.5" />
+                            بدون قیمت
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        {plan.discountPercent > 0 ? (
-                          <>
-                            <span className="text-xs text-gray-400 line-through">
-                              {formatPrice(plan.annualPrice)}
-                            </span>
-                            <span className={`text-sm font-black ${style.text}`}>
-                              {formatPrice(discountedPrice)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className={`text-sm font-black ${style.text}`}>
-                            {formatPrice(plan.annualPrice)}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-gray-400">تومان / سال</span>
+                        {/* ★ v8.0: فقط قیمت مادام‌العمر */}
+                        <span className={`text-sm font-black ${style.text} flex items-center gap-1`}>
+                          <InfinityIcon className="w-3.5 h-3.5" />
+                          {formatPrice(plan.lifetimePrice)}
+                        </span>
+                        <span className="text-[10px] text-gray-400">تومان / مادام‌العمر</span>
                         <span className="text-gray-300">•</span>
                         <span className="text-[10px] text-gray-500">
                           {toFaNum(plan.features.length)} ویژگی
@@ -566,86 +676,195 @@ export default function AdminSiteContentPage() {
                           <p className="text-xs text-gray-600 leading-relaxed">{plan.description}</p>
                         </div>
 
-                        {/* قیمت‌ها */}
-                        <div className="bg-gradient-to-l from-slate-50 to-white rounded-xl border border-gray-200 p-4 space-y-3">
-                          <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
-                            <DollarSign className="w-4 h-4 text-emerald-600" />
-                            <h5 className="text-xs font-black text-gray-800">قیمت‌گذاری</h5>
-                          </div>
+                        {/* ═══════════════════════════════════════════════════
+                            ★ v7.2: Toggle نمایش قیمت در لندینگ پیج
+                        ═══════════════════════════════════════════════════ */}
+                        <div
+                          className={`
+                            relative rounded-2xl border-2 p-4 transition-all duration-500 overflow-hidden
+                            ${showPrice
+                              ? 'bg-gradient-to-br from-indigo-50 via-blue-50 to-violet-50 border-indigo-300 shadow-md shadow-indigo-100'
+                              : 'bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200'
+                            }
+                          `}
+                        >
+                          {showPrice && (
+                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none" />
+                          )}
 
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            <div className="space-y-1.5">
-                              <label className="text-[11px] font-bold text-gray-700 flex items-center justify-between">
-                                <span>قیمت سالانه</span>
-                                <span className="text-[9px] text-gray-400 font-normal">تومان</span>
-                              </label>
-                              <input
-                                type="number"
-                                value={plan.annualPrice}
-                                onChange={e => updatePlan(plan.id, 'annualPrice', Number(e.target.value))}
-                                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-[11px] font-bold text-gray-700 flex items-center justify-between">
-                                <span>مادام‌العمر</span>
-                                <span className="text-[9px] text-gray-400 font-normal">تومان</span>
-                              </label>
-                              <input
-                                type="number"
-                                value={plan.lifetimePrice}
-                                onChange={e => updatePlan(plan.id, 'lifetimePrice', Number(e.target.value))}
-                                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-[11px] font-bold text-gray-700 flex items-center justify-between">
-                                <span>درصد تخفیف</span>
-                                <span className="text-[9px] text-gray-400 font-normal">فقط سالانه</span>
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max="100"
-                                  value={plan.discountPercent}
-                                  onChange={e => updatePlan(plan.id, 'discountPercent', Math.max(0, Math.min(100, Number(e.target.value))))}
-                                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white pl-10 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
-                                />
-                                <Percent className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                          <div className="relative flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div
+                                className={`
+                                  relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0
+                                  transition-all duration-500
+                                  ${showPrice
+                                    ? 'bg-gradient-to-br from-indigo-500 via-blue-500 to-violet-500 shadow-lg shadow-indigo-300/50'
+                                    : 'bg-gray-200 shadow-inner'
+                                  }
+                                `}
+                              >
+                                {showPrice ? (
+                                  <>
+                                    <Eye className="w-5 h-5 text-white relative z-10" />
+                                    <span className="absolute inset-0 rounded-xl bg-indigo-400 animate-ping opacity-20" />
+                                  </>
+                                ) : (
+                                  <EyeOff className="w-5 h-5 text-gray-500" />
+                                )}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                  <span className="text-sm font-black text-gray-900">
+                                    نمایش قیمت در لندینگ پیج
+                                  </span>
+                                  <span
+                                    className={`
+                                      px-2 py-0.5 rounded-md text-[10px] font-black
+                                      transition-all duration-300
+                                      ${showPrice
+                                        ? 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-sm'
+                                        : 'bg-gray-200 text-gray-600'
+                                      }
+                                    `}
+                                  >
+                                    {showPrice ? '🟢 ON' : '⚪ OFF'}
+                                  </span>
+                                </div>
+                                <p className={`text-[11px] leading-relaxed transition-colors duration-300 ${
+                                  showPrice ? 'text-indigo-700' : 'text-gray-500'
+                                }`}>
+                                  {showPrice
+                                    ? '💰 قیمت این پلن در صفحه اصلی سایت به کاربران نمایش داده می‌شود.'
+                                    : '🔒 قیمت مخفی است و فقط دکمه «شروع رایگان» نمایش داده می‌شود.'}
+                                </p>
                               </div>
                             </div>
+
+                            <div className="shrink-0">
+                              <ModernToggle
+                                checked={showPrice}
+                                onChange={() => toggleShowPrice(plan.id)}
+                                activeLabel="✓ فعال"
+                                inactiveLabel="✗ غیرفعال"
+                              />
+                            </div>
                           </div>
 
-                          <div className="bg-gradient-to-l from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Eye className="w-3.5 h-3.5 text-emerald-600" />
-                              <p className="text-[10px] text-emerald-700 font-bold">پیش‌نمایش قیمت سالانه:</p>
-                            </div>
-                            <div className="flex items-center gap-3 flex-wrap text-xs">
-                              {plan.discountPercent > 0 ? (
-                                <>
-                                  <span className="line-through text-gray-400 text-sm">
-                                    {formatPrice(plan.annualPrice)}
-                                  </span>
-                                  <span className="font-black text-emerald-700 text-lg">
-                                    {formatPrice(discountedPrice)}
-                                  </span>
-                                  <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-md text-[10px] font-black flex items-center gap-0.5">
-                                    <Percent className="w-2.5 h-2.5" />
-                                    {toFaNum(plan.discountPercent)}٪ تخفیف
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="font-black text-gray-800 text-lg">{formatPrice(plan.annualPrice)}</span>
-                                  <span className="text-gray-500">تومان / سال</span>
-                                  <span className="text-[10px] text-gray-400">(بدون تخفیف)</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
+                          <div className={`
+                            absolute bottom-0 left-0 right-0 h-1 transition-all duration-500
+                            ${showPrice
+                              ? 'bg-gradient-to-r from-indigo-500 via-blue-500 to-violet-500 opacity-100'
+                              : 'bg-gray-300 opacity-30'
+                            }
+                          `} />
                         </div>
+
+                        {/* ═══════════════════════════════════════════════════
+                            ★ v8.0: قیمت‌گذاری — فقط مادام‌العمر
+                        ═══════════════════════════════════════════════════ */}
+                     {/* ═══════════════════════════════════════════════════
+    ★ v9.0: قیمت‌گذاری — مادام‌العمر + به‌روزرسانی
+═══════════════════════════════════════════════════ */}
+<div className="bg-gradient-to-l from-slate-50 to-white rounded-xl border border-gray-200 p-4 space-y-3">
+  <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+    <DollarSign className="w-4 h-4 text-emerald-600" />
+    <h5 className="text-xs font-black text-gray-800">قیمت‌گذاری</h5>
+    <span className="px-2 py-0.5 bg-violet-100 text-violet-700 rounded text-[9px] font-bold flex items-center gap-1">
+      <InfinityIcon className="w-3 h-3" />
+      فقط مادام‌العمر
+    </span>
+  </div>
+
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+    {/* قیمت مادام‌العمر */}
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-gray-700 flex items-center justify-between">
+        <span className="flex items-center gap-1.5">
+          <InfinityIcon className="w-3.5 h-3.5 text-violet-600" />
+          قیمت مادام‌العمر
+        </span>
+        <span className="text-[9px] text-gray-400 font-normal">تومان</span>
+      </label>
+      <input
+        type="number"
+        value={plan.lifetimePrice}
+        onChange={e => updatePlan(plan.id, 'lifetimePrice', Number(e.target.value))}
+        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+        placeholder="مثلاً: 4500000"
+      />
+      <p className="text-[9px] text-gray-400">💎 قیمت ثبت‌نام اولیه در لندینگ پیج</p>
+    </div>
+
+    {/* ★ v9.0: قیمت به‌روزرسانی */}
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-gray-700 flex items-center justify-between">
+        <span className="flex items-center gap-1.5">
+          <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+          قیمت به‌روزرسانی
+        </span>
+        <span className="text-[9px] text-gray-400 font-normal">تومان</span>
+      </label>
+      <input
+        type="number"
+        value={(plan as any).updatePrice || 0}
+        onChange={e => {
+          const newPrice = Number(e.target.value)
+          const updatedPlan = { ...plan, updatePrice: newPrice } as PlanTierData
+          updatePlans(content.plans.map(p => p.id === plan.id ? updatedPlan : p))
+        }}
+        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none transition"
+        placeholder="مثلاً: 900000"
+      />
+      <p className="text-[9px] text-gray-400">🔄 هزینه تمدید در صفحه به‌روزرسانی</p>
+    </div>
+
+    {/* پیش‌نمایش */}
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
+        <Eye className="w-3.5 h-3.5 text-emerald-600" />
+        پیش‌نمایش
+      </label>
+      <div className="space-y-1.5">
+        {/* پیش‌نمایش قیمت مادام‌العمر */}
+        <div className="px-2 py-1.5 bg-gradient-to-l from-violet-50 to-purple-50 border border-violet-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] text-violet-600 font-bold">مادام‌العمر</span>
+            <span className="text-xs font-black text-violet-700">
+              {formatPrice(plan.lifetimePrice)}
+            </span>
+          </div>
+        </div>
+        {/* پیش‌نمایش قیمت به‌روزرسانی */}
+        <div className="px-2 py-1.5 bg-gradient-to-l from-amber-50 to-orange-50 border border-amber-200 rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] text-amber-700 font-bold">به‌روزرسانی</span>
+            <span className="text-xs font-black text-amber-700">
+              {formatPrice((plan as any).updatePrice || 0)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {/* راهنما */}
+  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+    <div className="flex items-start gap-2">
+      <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+      <div className="text-[10px] text-blue-800 leading-relaxed">
+        <p className="font-bold mb-0.5">💡 تفاوت دو قیمت:</p>
+        <p>
+          <strong className="text-violet-700">مادام‌العمر:</strong> قیمتی که کاربر در لندینگ پیج هنگام ثبت‌نام اولیه پرداخت می‌کند.
+          <br />
+          <strong className="text-amber-700">به‌روزرسانی:</strong> هزینه‌ای که کاربر در صفحه «به‌روزرسانی سیستم» برای تمدید پشتیبانی پرداخت می‌کند.
+          {showPrice ? ' هر دو قیمت فعال هستند.' : ' قیمت‌ها فعلاً در لندینگ پیج مخفی هستند.'}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
 
                         {/* گزینه محبوب */}
                         <div className="flex items-center gap-3 p-3 bg-gray-50/50 rounded-xl border border-gray-200">
@@ -661,7 +880,9 @@ export default function AdminSiteContentPage() {
                           </label>
                         </div>
 
-                        {/* ویژگی‌ها */}
+                        {/* ═══════════════════════════════════════════════════
+                            ★ v7.0: ویژگی‌ها با قابلیت جابجایی ↑↓
+                        ═══════════════════════════════════════════════════ */}
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -679,20 +900,50 @@ export default function AdminSiteContentPage() {
                               افزودن
                             </button>
                           </div>
+
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50 border border-blue-100 rounded-lg">
+                            <GripVertical className="w-3 h-3 text-blue-500" />
+                            <span className="text-[9px] text-blue-600 font-medium">
+                              با دکمه‌های ↑ و ↓ ترتیب ویژگی‌ها را تغییر دهید — ترتیب در لندینگ پیج اعمال می‌شود
+                            </span>
+                          </div>
+
                           <div className="space-y-1.5">
                             {plan.features.map((feat, i) => (
                               <div key={i} className="flex items-center gap-2 group">
                                 <div className={`w-5 h-5 rounded-full ${style.bg} flex items-center justify-center shrink-0`}>
-                                  <CheckCircle2 className={`w-3 h-3 ${style.text}`} />
+                                  <span className={`text-[9px] font-black ${style.text}`}>{toFaNum(i + 1)}</span>
                                 </div>
+
                                 <input
                                   value={feat}
                                   onChange={e => updateFeature(plan.id, i, e.target.value)}
                                   className="flex-1 px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-violet-500 outline-none bg-white group-hover:border-gray-300 transition"
                                 />
+
+                                <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => moveFeatureUp(plan.id, i)}
+                                    disabled={i === 0}
+                                    className="p-1 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition disabled:opacity-20 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                    title="جابجایی به بالا"
+                                  >
+                                    <ArrowUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => moveFeatureDown(plan.id, i)}
+                                    disabled={i === plan.features.length - 1}
+                                    className="p-1 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition disabled:opacity-20 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                    title="جابجایی به پایین"
+                                  >
+                                    <ArrowDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
                                 <button
                                   onClick={() => deleteFeature(plan.id, i)}
                                   className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition opacity-0 group-hover:opacity-100"
+                                  title="حذف"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -701,7 +952,6 @@ export default function AdminSiteContentPage() {
                           </div>
                         </div>
 
-                        {/* ═══════════════════ بخش جدید: نمایش محدودیت‌های واقعی ═══════════════════ */}
                         <PlanRealLimitsDisplay planName={plan.name} />
                       </div>
                     </div>
