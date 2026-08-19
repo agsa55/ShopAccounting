@@ -1,12 +1,8 @@
 // ============================================================================
 // src/app/api/purchase-invoices/[id]/route.ts — GET / PUT / DELETE
 // فاکتور خرید: مشاهده، ویرایش، حذف (با rollback کامل موجودی و سند)
+// ★ v8.9.3: تضمین پر شدن checkInfo با فرمت صحیح تاریخ
 // ============================================================================
-// ★★★ v6.1.4: اضافه شدن console.log برای ایجاد آیتم‌های جدید (برای خطایابی)
-// ★★★ v6.1.3: GET بدون include (کوئری‌های جداگانه برای items/supplier/warehouse)
-// ★★★ Next.js 16: params یک Promise است و باید await شود
-// ============================================================================
-
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
@@ -17,7 +13,6 @@ import { db } from '@/lib/db'
 async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) {
   const invoiceId = invoice.id
   const warehouseId = invoice.warehouseId
-
   console.log(`[Rollback] شروع rollback فاکتور ${invoice.number} (id=${invoiceId})`)
 
   const items = await tx.purchaseInvoiceItem.findMany({
@@ -35,7 +30,7 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     await tx.product.update({
       where: { id: item.productId },
       data: { currentStock: { decrement: item.quantity } },
-    }).catch(err => console.error(`[Rollback] خطا در Product.update:`, err?.message))
+    }).catch((err: any) => console.error(`[Rollback] خطا در Product.update:`, err?.message))
 
     const stockLevel = await tx.stockLevel.findUnique({
       where: { warehouseId_productId: { warehouseId, productId: item.productId } },
@@ -48,12 +43,12 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
       await tx.stockLevel.update({
         where: { warehouseId_productId: { warehouseId, productId: item.productId } },
         data: { quantity: { decrement: item.quantity }, averageCost: newAvgCost },
-      }).catch(err => console.error(`[Rollback] خطا در StockLevel.update:`, err?.message))
+      }).catch((err: any) => console.error(`[Rollback] خطا در StockLevel.update:`, err?.message))
     }
 
     await tx.stockMovement.deleteMany({
       where: { referenceType: 'purchase_invoice', referenceId: invoiceId, productId: item.productId },
-    }).catch(err => console.warn(`[Rollback] خطا در StockMovement.deleteMany:`, err?.message))
+    }).catch((err: any) => console.warn(`[Rollback] خطا در StockMovement.deleteMany:`, err?.message))
   }
 
   if (invoice.journalEntryId) {
@@ -61,7 +56,7 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     await tx.journalEntry.update({
       where: { id: invoice.journalEntryId },
       data: { status: 'cancelled', description: `ابطال شده — فاکتور خرید ${invoice.number} حذف/ویرایش شد` },
-    }).catch(err => console.warn(`[Rollback] خطا در JournalEntry.update:`, err?.message))
+    }).catch((err: any) => console.warn(`[Rollback] خطا در JournalEntry.update:`, err?.message))
   }
 
   if (invoice.paymentType === 'credit' && invoice.supplierId) {
@@ -69,7 +64,7 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     await tx.supplier.update({
       where: { id: invoice.supplierId },
       data: { currentBalance: { decrement: invoice.totalAmount } },
-    }).catch(err => console.warn(`[Rollback] خطا در Supplier.update:`, err?.message))
+    }).catch((err: any) => console.warn(`[Rollback] خطا در Supplier.update:`, err?.message))
   }
 
   console.log(`[Rollback] تکمیل rollback فاکتور ${invoice.number}`)
@@ -144,9 +139,44 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       }
     }
 
+    // ★ v8.9.3: گرفتن اطلاعات چک مرتبط با این فاکتور خرید (با همه فیلدها)
+    let checkInfo: any = null
+    try {
+      const rawCheck = await tenantDb.check.findFirst({
+        where: { purchaseInvoiceId: id, tenantId },
+        select: {
+          id: true,
+          status: true,
+          checkNumber: true,
+          bankName: true,
+          branchName: true,
+          dueDate: true,
+          payeeName: true,
+          amount: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (rawCheck) {
+        checkInfo = {
+          id: rawCheck.id,
+          status: rawCheck.status,
+          checkNumber: rawCheck.checkNumber,
+          bankName: rawCheck.bankName,
+          branchName: rawCheck.branchName,
+          dueDate: rawCheck.dueDate instanceof Date
+            ? rawCheck.dueDate.toISOString().split('T')[0]
+            : (typeof rawCheck.dueDate === 'string' ? rawCheck.dueDate.substring(0, 10) : rawCheck.dueDate),
+          payeeName: rawCheck.payeeName,
+          amount: rawCheck.amount,
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[GET] خطا در گرفتن checkInfo:`, err?.message)
+    }
+
     return NextResponse.json({
       success: true,
-      data: { ...invoice, items, supplier, warehouse, journalEntry },
+      data: { ...invoice, items, supplier, warehouse, journalEntry, checkInfo },
     })
   } catch (error: any) {
     console.error('[GET] Error:', error?.message || error)
@@ -179,7 +209,6 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
     }
 
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
-
     await txClient.$transaction(async (tx: any) => {
       await rollbackPurchaseInvoice(tx, invoice, tenantId)
 
@@ -219,19 +248,17 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const paramsObj: any = ctx.params && typeof ctx.params?.then === 'function' ? await ctx.params : ctx.params
     const id = paramsObj?.id
     const body = await req.json()
-    const { items, supplierId, warehouseId, paymentType, description, invoiceDate } = body
+    const { items, supplierId, warehouseId, paymentType, description, invoiceDate, checkData } = body
 
     console.log(`[PUT] شروع ویرایش فاکتور id=${id}, items count=${items?.length || 0}, invoiceDate=${invoiceDate || '(بدون تغییر)'}`)
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
     }
-
     if (!items || items.length === 0) {
       console.warn(`[PUT] items خالی است!`)
       return NextResponse.json({ success: false, error: 'حداقل یک آیتم الزامی است' }, { status: 400 })
     }
-
     if (!warehouseId) {
       return NextResponse.json({ success: false, error: 'انتخاب انبار الزامی است' }, { status: 400 })
     }
@@ -249,7 +276,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       return NextResponse.json({ success: false, error: 'انبار یافت نشد' }, { status: 400 })
     }
 
-    // ★ محاسبه مبالغ جدید
     let subTotal = 0, discountAmount = 0, taxAmount = 0
     const invoiceItems = (items || []).map((item: any) => {
       const lineTotal = item.quantity * item.unitPrice - (item.discountAmount || 0) + (item.taxAmount || 0)
@@ -273,17 +299,13 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const remainingAmount = isCredit ? totalAmount : 0
 
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
-
     const result = await txClient.$transaction(async (tx: any) => {
-      // ۱. rollback فاکتور قدیمی
       console.log(`[PUT] مرحله ۱: rollback فاکتور قدیمی`)
       await rollbackPurchaseInvoice(tx, oldInvoice, tenantId)
 
-      // ۲. حذف آیتم‌های قدیمی
       console.log(`[PUT] مرحله ۲: حذف آیتم‌های قدیمی`)
       await tx.purchaseInvoiceItem.deleteMany({ where: { purchaseInvoiceId: id } })
 
-      // ۳. به‌روزرسانی فاکتور
       console.log(`[PUT] مرحله ۳: به‌روزرسانی فاکتور با اطلاعات جدید`)
       await tx.purchaseInvoice.update({
         where: { id },
@@ -291,7 +313,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           supplierId: supplierId || null,
           warehouseId,
           paymentType: (paymentType || 'cash').toLowerCase(),
-          // ★★★ v6.2.1: به‌روزرسانی تاریخ فاکتور
           ...(invoiceDate ? { invoiceDate: new Date(invoiceDate) } : {}),
           subTotal,
           discountAmount,
@@ -305,7 +326,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         },
       })
 
-      // ۴. ایجاد آیتم‌های جدید + افزایش موجودی
       console.log(`[PUT] مرحله ۴: ایجاد ${invoiceItems.length} آیتم جدید`)
       for (let i = 0; i < invoiceItems.length; i++) {
         const item = invoiceItems[i]
@@ -328,7 +348,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
           })
-
           const netUnitCost = item.quantity > 0
             ? (item.unitPrice * item.quantity - item.discountAmount) / item.quantity
             : item.unitPrice
@@ -380,7 +399,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         }
       }
 
-      // ۵. ایجاد سند حسابداری جدید
       console.log(`[PUT] مرحله ۵: ایجاد سند حسابداری جدید`)
       try {
         const accounts = await tx.account.findMany({ where: { tenantId } })
@@ -411,9 +429,9 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         if (inventoryAccountId) {
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
           const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
-
           const lines: any[] = []
           const netAmount = subTotal - discountAmount
+
           lines.push({
             accountId: inventoryAccountId,
             debit: netAmount,
@@ -441,7 +459,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           }
 
           if (lines.length >= 2) {
-            const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
+            const totalDebit  = lines.reduce((s, l) => s + l.debit, 0)
             const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
 
             const journalEntry = await tx.journalEntry.create({
@@ -471,7 +489,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         console.warn(`[PUT] Auto journal entry failed:`, jeErr?.message)
       }
 
-      // ۶. به‌روزرسانی Supplier
       if (isCredit && supplierId) {
         try {
           await tx.supplier.update({
@@ -481,6 +498,59 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
         } catch (supErr: any) {
           console.warn(`[PUT] Supplier balance update failed:`, supErr?.message)
         }
+      }
+
+      // ۷. مدیریت چک پرداختنی (ایجاد/به‌روزرسانی/حذف)
+      const ptLower = (paymentType || 'cash').toLowerCase()
+      try {
+        const existingCheck = await tx.check.findFirst({
+          where: { purchaseInvoiceId: id, tenantId },
+        })
+
+        if (ptLower === 'check' && checkData) {
+          if (existingCheck) {
+            console.log(`[PUT] به‌روزرسانی چک موجود: ${existingCheck.id}`)
+            await tx.check.update({
+              where: { id: existingCheck.id },
+              data: {
+                checkNumber: checkData.checkNumber?.trim() || existingCheck.checkNumber,
+                bankName: checkData.bankName?.trim() || existingCheck.bankName,
+                branchName: checkData.branchName?.trim() || null,
+                dueDate: checkData.dueDate ? new Date(checkData.dueDate) : existingCheck.dueDate,
+                payeeName: checkData.payeeName?.trim() || null,
+                amount: totalAmount,
+                supplierId: supplierId || null,
+              },
+            })
+          } else {
+            console.log(`[PUT] ایجاد چک جدید برای فاکتور ویرایش‌شده`)
+            await tx.check.create({
+              data: {
+                tenantId,
+                type: 'payable',
+                checkNumber: checkData.checkNumber?.trim() || `CHK-${Date.now().toString().slice(-6)}`,
+                bankName: checkData.bankName?.trim() || 'نامشخص',
+                branchName: checkData.branchName?.trim() || null,
+                amount: totalAmount,
+                issueDate: new Date(),
+                dueDate: checkData.dueDate ? new Date(checkData.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                supplierId: supplierId || null,
+                payeeName: checkData.payeeName?.trim() || null,
+                description: `چک پرداختنی بابت فاکتور خرید ${oldInvoice.number}`,
+                status: 'pending',
+                purchaseInvoiceId: id,
+              },
+            })
+          }
+        } else if (ptLower !== 'check' && existingCheck) {
+          console.log(`[PUT] پرداخت از چک خارج شد — حذف ارتباط چک قبلی`)
+          await tx.check.update({
+            where: { id: existingCheck.id },
+            data: { purchaseInvoiceId: null },
+          })
+        }
+      } catch (checkErr: any) {
+        console.warn(`[PUT] Check handling failed:`, checkErr?.message)
       }
 
       console.log(`[PUT] ویرایش کامل شد`)

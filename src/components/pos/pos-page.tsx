@@ -1,7 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/pos/pos-page.tsx — v11.1 ★ POS INTEGRATION SUPPORT
+// src/components/pos/pos-page.tsx — v11.5 ★ PROFESSIONAL SEARCH DROPDOWN
+// ★ v11.5: جستجوی حرفه‌ای با Navigation کیبورد (ArrowDown/ArrowUp/Enter)
 // ★ جستجوی آفلاین از IndexedDB + localStorage
 // ★ بارگذاری محصولات، مشتریان، انبارها از cache
 // ★ v11.1: یکپارچه‌سازی با کارتخوان (نمایش/مخفی کردن دکمه Card)
@@ -63,7 +64,7 @@ import {
   Crown,
   Camera,
   ScanLine,
-    Store, Building2, Landmark, CreditCard as CreditCardIcon
+  Store, Building2, Landmark, CreditCard as CreditCardIcon
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { usePosProductSearch } from '@/lib/use-pos-product-search'
@@ -465,6 +466,7 @@ function toFaNum(n: number | string): string {
 function toEnNum(s: string): string {
   return s.replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
 }
+
 // ============ Jalali Date Conversion ============
 
 function div(a: number, b: number): number { return Math.floor(a / b) }
@@ -767,14 +769,31 @@ export default function PosPage() {
   const { toast } = useToast()
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-const isProcessingScan = useRef(false);
+  const isProcessingScan = useRef(false)
   const hasHydrated = useStore((s) => s._hasHydrated)
-// Barcode scanner
+  // Barcode scanner
   const lastKeyTimeRef = useRef<number>(0)
   const barcodeBufferRef = useRef<string>('')
-
   const barcodeTimerRef = useRef<NodeJS.Timeout | null>(null)
- 
+
+  // ═══════════════════════════════════════════════════════════════
+  //  ★★★ v11.5: تابع Highlight کردن متن جستجو
+  //  (باید در ابتدای کامپوننت تعریف شود تا همه جا در دسترس باشد)
+  // ═══════════════════════════════════════════════════════════════
+  const highlightText = (text: string, query: string): React.ReactNode => {
+    if (!query || query.length < 2) return text
+    try {
+      const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+      const parts = text.split(regex)
+      return parts.map((part, i) =>
+        regex.test(part)
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 font-bold px-0.5 rounded">{part}</mark>
+          : part
+      )
+    } catch {
+      return text
+    }
+  }
 
   // Store state
   const cart = useStore((s) => s.cart) ?? []
@@ -794,14 +813,13 @@ const isProcessingScan = useRef(false);
 
   const storeName = useStore((s) => s.storeName)
   const user = useStore((s) => s.user)
-   const branchId = user?.branchId || null
+  const branchId = user?.branchId || null
 
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
 
   // ═══════════════════════════════════════════════════════════════
   //  ★★★ v11.1: یکپارچه‌سازی با کارتخوان
-  //  خواندن وضعیت از localStorage + گوش دادن به تغییرات
   // ═══════════════════════════════════════════════════════════════
   const [posIntegrationEnabled, setPosIntegrationEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true
@@ -809,9 +827,7 @@ const isProcessingScan = useRef(false);
     return cached !== null ? cached === 'true' : true
   })
 
-  // گوش دادن به تغییرات از تب کارتخوان
- // گوش دادن به تغییرات از تب کارتخوان
-   useEffect(() => {
+  useEffect(() => {
     const handleIntegrationChange = (e: Event) => {
       const customEvent = e as CustomEvent<{ enabled: boolean }>
       if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
@@ -819,16 +835,16 @@ const isProcessingScan = useRef(false);
         console.log('[POS] 🔄 یکپارچه‌سازی کارتخوان تغییر کرد:', customEvent.detail.enabled)
       }
     }
-    
+
     window.addEventListener('pos-integration-changed', handleIntegrationChange)
-    
+
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'pos_integration_enabled' && e.newValue !== null) {
         setPosIntegrationEnabled(e.newValue === 'true')
       }
     }
     window.addEventListener('storage', handleStorageChange)
-    
+
     const handleFocus = () => {
       const cached = localStorage.getItem('pos_integration_enabled')
       if (cached !== null) {
@@ -843,13 +859,12 @@ const isProcessingScan = useRef(false);
       window.removeEventListener('focus', handleFocus)
     }
   }, [])
-  
+
   // ★★★ v11.1: فیلتر روش‌های پرداخت بر اساس یکپارچه‌سازی با کارتخوان
   const allowedPaymentTypes = useMemo(() => {
     const allowed = planFeatures.posPaymentTypes
     return paymentTypeConfig.filter((pt) => {
       const key = pt.value.toLowerCase()
-      // اگر یکپارچه‌سازی غیرفعال است، دکمه Card را حذف کن
       if (key === 'card' && !posIntegrationEnabled) return false
       return allowed.includes(key as any)
     })
@@ -881,6 +896,9 @@ const isProcessingScan = useRef(false);
   })
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
 
+  // ★★★ v11.5: state برای navigation کیبورد در dropdown جستجو
+  const [highlightedIndex, setHighlightedIndex] = useState(-1)
+
   // Installment dialog state
   const [installmentDialogOpen, setInstallmentDialogOpen] = useState(false)
   const [installmentDownPayment, setInstallmentDownPayment] = useState(0)
@@ -888,22 +906,20 @@ const isProcessingScan = useRef(false);
   const [installmentInterestRate, setInstallmentInterestRate] = useState(0)
   const [installmentPeriod, setInstallmentPeriod] = useState<'monthly' | 'biweekly' | 'weekly'>('monthly')
 
- // Credit dialog state
-const [creditDialogOpen, setCreditDialogOpen] = useState(false)
-const [creditDueDate, setCreditDueDate] = useState('')
-const [creditDescription, setCreditDescription] = useState('')
+  // Credit dialog state
+  const [creditDialogOpen, setCreditDialogOpen] = useState(false)
+  const [creditDueDate, setCreditDueDate] = useState('')
+  const [creditDescription, setCreditDescription] = useState('')
 
-// ★ v11.2: Check dialog state
-const [checkDialogOpen, setCheckDialogOpen] = useState(false)
-const [checkNumber, setCheckNumber] = useState('')
-const [checkBank, setCheckBank] = useState('')
-const [checkDueDate, setCheckDueDate] = useState('')
-const [checkPayee, setCheckPayee] = useState('')
-const [checkCustomerSearch, setCheckCustomerSearch] = useState('')
-const [checkSelectedCustomerId, setCheckSelectedCustomerId] = useState<string | null>(null)
-const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
-
-
+  // ★ v11.2: Check dialog state
+  const [checkDialogOpen, setCheckDialogOpen] = useState(false)
+  const [checkNumber, setCheckNumber] = useState('')
+  const [checkBank, setCheckBank] = useState('')
+  const [checkDueDate, setCheckDueDate] = useState('')
+  const [checkPayee, setCheckPayee] = useState('')
+  const [checkCustomerSearch, setCheckCustomerSearch] = useState('')
+  const [checkSelectedCustomerId, setCheckSelectedCustomerId] = useState<string | null>(null)
+  const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
 
   // Card payment state
   const [cardPaymentDialogOpen, setCardPaymentDialogOpen] = useState(false)
@@ -920,7 +936,6 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
   // Tax override
   const [taxOverrideAmount, setTaxOverrideAmount] = useState<number | null>(null)
 
-  
   // Scanner & thermal print
   const [scannerOpen, setScannerOpen] = useState(false)
   const [thermalPrintOpen, setThermalPrintOpen] = useState(false)
@@ -949,6 +964,7 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
   const [printSubmitting, setPrintSubmitting] = useState(false)
   const [invoiceDiscountPercent, setInvoiceDiscountPercent] = useState<string>('')
   const [branches, setBranches] = useState<any[]>([])
+
   // ============ Effects ============
 
   // ★★★ دریافت لیست شعبه‌ها هنگام لود صفحه
@@ -982,7 +998,6 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
     }
   }, [thermalPrintOpen, thermalPrintTemplate])
 
-  
   const {
     searchQuery: posSearchQuery,
     setSearchQuery: posSearchSetQuery,
@@ -995,7 +1010,7 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
     recentsLoading: posRecentsLoading,
   } = usePosProductSearch()
 
-    // ★ OFFLINE-OPTIMIZED: بارگذاری داده‌ها از cache یا سرور
+  // ★ OFFLINE-OPTIMIZED: بارگذاری داده‌ها از cache یا سرور
   const loadData = useCallback(async () => {
     console.log('[POS] 🔄 شروع بارگذاری داده‌ها...')
     setLoading(true)
@@ -1097,7 +1112,6 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
       )
       console.log(`[POS] ✅ ${cats.length} دسته بارگذاری شد`)
 
-      // ★ Cache categories
       try {
         const { cacheCategories } = await import('@/lib/offline-db')
         await cacheCategories(cats)
@@ -1120,7 +1134,6 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
       }
       console.log(`[POS] ✅ ${warehouses.length} انبار بارگذاری شد`)
 
-      // ★ Cache warehouses
       try {
         const { cacheWarehousesMeta } = await import('@/lib/offline-db')
         await cacheWarehousesMeta(warehouses)
@@ -1140,15 +1153,15 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
       setCustomers(custs)
       console.log(`[POS] ✅ ${custs.length} مشتری بارگذاری شد`)
 
-      // ★ Cache customers
       try {
         const { cacheCustomers } = await import('@/lib/offline-db')
         await cacheCustomers(custs)
       } catch {}
-       } else {
+    } else {
       setCustomers([])
       console.warn('[POS] ⚠️ مشتریان بارگذاری نشد')
     }
+
     // Load recents
     try {
       await posLoadRecents()
@@ -1164,23 +1177,22 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
 
   useEffect(() => {
     let mounted = true
-    
+
     if (mounted) {
       loadData()
     }
-    
+
     return () => {
       mounted = false
     }
   }, [loadData])
 
-    // ★ OFFLINE-FIX: گوش دادن به تغییرات اتصال شبکه
+  // ★ OFFLINE-FIX: گوش دادن به تغییرات اتصال شبکه
   useEffect(() => {
     const handleOnline = () => {
       console.log('[POS] 🟢 آنلاین شد — بارگذاری مجدد داده‌ها...')
       useStore.getState().setOnline(true)
       loadData()
-      // ★ sync خودکار صف آفلاین
       import('@/lib/sync-engine').then(({ syncEngine }) => {
         syncEngine.init()
         syncEngine.sync().catch(() => {})
@@ -1207,7 +1219,6 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
       window.removeEventListener('offline', handleOffline)
     }
   }, [loadData, toast])
-
 
   useEffect(() => {
     const handleInventoryChanged = async () => {
@@ -1308,15 +1319,15 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
     setTaxOverrideAmount(null)
   }, [cartItemsSignature])
 
-    // ============ Derived data ============
+  // ============ Derived data ============
 
-    const filteredProducts = useMemo(() => {
+  // ★★★ v11.5: filteredProducts باید قبل از handleSearchKeyDown تعریف شود
+  const filteredProducts = useMemo(() => {
     const searchQ = posSearchQuery.trim()
     if (searchQ.length >= 2) {
       // ★ OFFLINE-FIX: جستجوی محلی از posRecents + products (fallback)
       if (!isOnline || !navigator.onLine) {
         const q = searchQ.toLowerCase()
-        // ★ اصلاح: اگر posRecents خالی بود، از products state استفاده کن
         const offlineSource = posRecents.length > 0 ? posRecents : products
         let offlineResults = offlineSource.filter((p) => {
           if (p.isActive === false) return false
@@ -1335,16 +1346,29 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
         console.log(`[POS] 📡 جستجوی آفلاین: ${offlineResults.length} نتیجه (منبع: ${posRecents.length > 0 ? 'posRecents' : 'products-cache'})`)
         return offlineResults
       }
-      // ★ ONLINE: جستجوی سرور
+      // ★ ONLINE: جستجوی سرور + فیلتر سمت کلاینت برای دقت بیشتر
       if (posSearchStatus === 'searching') return []
       let results = posSearchResults.filter((p) => p.isActive !== false)
+
+      // ★ v11.5: فیلتر مجدد سمت کلاینت برای اطمینان از دقت نتایج
+      const q = searchQ.toLowerCase()
+      results = results.filter((p) => {
+        return (
+          p.name?.toLowerCase().includes(q) ||
+          p.name?.includes(searchQ) ||
+          p.code?.toLowerCase() === q ||
+          p.code?.includes(searchQ) ||
+          p.barcode === searchQ ||
+          p.barcode?.includes(searchQ)
+        )
+      })
+
       if (selectedCategory !== 'all') {
         results = results.filter((p) => p.categoryId === selectedCategory)
       }
       return results
     }
     // ★ بدون جستجو: نمایش محصولات اخیر
-    // ★ OFFLINE-FIX: اگر posRecents خالی بود، از products استفاده کن
     const recentsSource = posRecents.length > 0 ? posRecents : products
     if (recentsSource.length === 0) return []
     let recents = recentsSource.filter((p) => p.isActive !== false)
@@ -1357,10 +1381,22 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
     posSearchResults,
     posSearchStatus,
     posRecents,
-    products,       // ★ OFFLINE-FIX: اضافه شد
+    products,
     selectedCategory,
     isOnline,
   ])
+
+  // ★★★ v11.5: ریست highlight هنگام تغییر نتایج جستجو
+  useEffect(() => {
+    setHighlightedIndex(filteredProducts.length > 0 ? 0 : -1)
+  }, [filteredProducts])
+
+  // ★★★ v11.5: ریست highlight هنگام پاک شدن جستجو
+  useEffect(() => {
+    if (posSearchQuery.length < 2) {
+      setHighlightedIndex(-1)
+    }
+  }, [posSearchQuery])
 
   const cartTotals = useMemo(() => {
     let subTotal = 0
@@ -1407,311 +1443,285 @@ const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
   // ============ Handlers ============
 
   const handleAddToCart = useCallback(
-  (product: any) => {
-    console.log('1️⃣ [START] handleAddToCart فراخوانی شد برای:', product.name);
-    console.log('2️⃣ [STOCK] مقدار currentStock محصول:', product.currentStock);
+    (product: any) => {
+      console.log('1️⃣ [START] handleAddToCart فراخوانی شد برای:', product.name)
+      console.log('2️⃣ [STOCK] مقدار currentStock محصول:', product.currentStock)
 
-    // بررسی موجودی
-    if (product.currentStock <= 0) {
-      console.log('❌ [BLOCKED] موجودی محصول صفر یا کمتر است');
-      toast({
-        title: 'محصول ناموجود است',
-        description: `${product.name} در انبار موجود نیست`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // به‌روزرسانی کش محصولات
-    setProducts((prev: any[]) => {
-      if (prev.find((p) => p.id === product.id)) return prev;
-      const updatedProducts = [...prev, product];
-      import('@/lib/offline-db').then(({ cacheProducts }: any) => {
-        cacheProducts(updatedProducts).catch((err: any) => console.warn('[POS] Cache failed:', err));
-      }).catch(() => {});
-      return updatedProducts;
-    });
-
-    console.log('3️⃣ [CART CHECK] طول فعلی سبد خرید:', cart.length);
-    const existingItem = cart.find((c: any) => c.productId === product.id);
-    
-    if (existingItem && existingItem.quantity >= product.currentStock) {
-      console.log('❌ [BLOCKED] تعداد در سبد از موجودی انبار بیشتر است');
-      toast({
-        title: 'موجودی کافی نیست',
-        description: `موجودی فعلی: ${product.currentStock}`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (typeof addToCart !== 'function') {
-      console.log('❌ [BLOCKED] تابع addToCart تعریف نشده است');
-      toast({ title: 'لطفاً صبر کنید', description: 'سیستم در حال بارگذاری است' });
-      return;
-    }
-
-    console.log('4️⃣ [EXECUTING] در حال محاسبه و فراخوانی addToCart...');
-    const lineTotal = computeLineTotal(1, product.salePrice, 0, product.taxRate);
-
-    const newItem = {
-      productId: product.id,
-      productName: product.name,
-      quantity: 1,
-      unitPrice: product.salePrice,
-      discount: 0,
-      taxRate: product.taxRate,
-      lineTotal,
-      currentStock: product.currentStock,
-      unitLabel: getUnitLabel(product),
-    };
-
-    console.log('5️⃣ [PAYLOAD] آبجکت ارسالی به addToCart:', newItem);
-    
-    // فراخوانی اصلی
-    addToCart(newItem);
-    
-    console.log('✅ [SUCCESS] addToCart اجرا شد. اگر UI آپدیت نشد، مشکل از تعریف addToCart یا رندر لیست است.');
-
-    if (!isOnline) {
-      toast({
-        title: '📡 آفلاین',
-        description: 'تغییرات شما ذخیره و پس از اتصال ثبت می‌شوند',
-        duration: 3000,
-      });
-    }
-  },
-  [addToCart, cart, toast, isOnline, setProducts, computeLineTotal, getUnitLabel]
-);
-
- // ══════════════════════════════════════════════════════════════
-// ★ بارکدخوان هوشمند در سطح کل صفحه (با پشتیبانی کامل آفلاین)
-// ★★★ v2.1: رفع باگ اسکن دوگانه + پشتیبانی صریح و قطعی از حالت آفلاین
-// ══════════════════════════════════════════════════════════════
-useEffect(() => {
-  const handleGlobalKeyDown = async (e: KeyboardEvent) => {
-    // ★★★ جلوگیری از پردازش همزمان (رفع باگ اسکن دوتایی)
-    if (isProcessingScan.current) {
-      e.preventDefault()
-      return
-    }
-
-    // ۱. اگر فوکوس روی اینپوت جستجوی خودمان است، اجازه دهیم handleSearchKeyDown کار کند
-    if (document.activeElement === searchInputRef.current) return
-
-    // ۲. اگر فوکوس روی هر اینپوت/textarea/select/contentEditable دیگری است، کاری نکنیم
-    const activeEl = document.activeElement as HTMLElement | null
-    if (activeEl) {
-      const tagName = activeEl.tagName.toLowerCase()
-      if (
-        tagName === 'input' ||
-        tagName === 'textarea' ||
-        tagName === 'select' ||
-        activeEl.isContentEditable
-      ) {
-        return
-      }
-    }
-
-    // ۳. پردازش کلید Enter: اگر بافر بارکد غیرخالی است، آن را جستجو کن
-    if (e.key === 'Enter') {
-      const barcode = barcodeBufferRef.current.trim()
-      if (barcode.length >= 3) {
-        e.preventDefault()
-        
-        // ★★★ فعال کردن flag برای جلوگیری از اسکن مجدد
-        isProcessingScan.current = true
-
-        try {
-          // ==========================================================
-          // ★★★ حالت آفلاین: جستجو مستقیم و سریع در کش محلی
-          // ==========================================================
-          if (!navigator.onLine) {
-            const offlineSource = posRecents.length > 0 ? posRecents : products
-            const cachedProduct = offlineSource.find(
-              (p) => p.isActive !== false && (p.barcode === barcode || p.code === barcode)
-            )
-            
-            if (cachedProduct) {
-              handleAddToCart(cachedProduct)
-              toast({ 
-                title: '✓ افزودن به سبد (آفلاین)', 
-                description: cachedProduct.name 
-              })
-            } else {
-              toast({
-                title: '📡 آفلاین — یافت نشد',
-                description: `بارکد "${barcode}" در حافظه محلی ثبت نشده است`,
-                variant: 'destructive',
-              })
-            }
-          } 
-          // ==========================================================
-          // ★★★ حالت آنلاین: جستجو در سرور
-          // ==========================================================
-          else {
-            const foundByBarcode = await posLookupByBarcode(barcode)
-            if (foundByBarcode && foundByBarcode.id) {
-              handleAddToCart(foundByBarcode)
-              toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
-            } else {
-              // تلاش دوم: جستجو به عنوان کد محصول
-              const codeFound = await posLookupByCode(barcode)
-              if (codeFound && codeFound.id) {
-                handleAddToCart(codeFound)
-                toast({ title: '✓ افزودن به سبد', description: codeFound.name })
-              } else {
-                toast({
-                  title: 'یافت نشد',
-                  description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
-                  variant: 'destructive',
-                })
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[POS] Global barcode scan error:', err)
-          toast({ title: 'خطا', description: 'خطا در پردازش بارکد', variant: 'destructive' })
-        } finally {
-          // پاک کردن بافر و ریست کردن تایمر
-          barcodeBufferRef.current = ''
-          if (barcodeTimerRef.current) {
-            clearTimeout(barcodeTimerRef.current)
-            barcodeTimerRef.current = null
-          }
-          
-          // ★★★ غیرفعال کردن flag بعد از ۵۰۰ میلی‌ثانیه (Debounce)
-          setTimeout(() => {
-            isProcessingScan.current = false
-          }, 500)
-        }
-      }
-      return
-    }
-
-    // ۴. کلید Escape: پاک کردن بافر
-    if (e.key === 'Escape') {
-      barcodeBufferRef.current = ''
-      if (barcodeTimerRef.current) {
-        clearTimeout(barcodeTimerRef.current)
-        barcodeTimerRef.current = null
-      }
-      return
-    }
-
-    // ۵. نادیده گرفتن کلیدهای کنترلی و کلیدهای خاص
-    if (e.key.length > 1) return
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-
-    // ۶. اضافه کردن کاراکتر به بافر بارکد
-    barcodeBufferRef.current += e.key
-
-    // ۷. تنظیم تایمر: اگر ۲ ثانیه کلیدی زده نشد، بافر را پاک کن
-    if (barcodeTimerRef.current) {
-      clearTimeout(barcodeTimerRef.current)
-    }
-    barcodeTimerRef.current = setTimeout(() => {
-      barcodeBufferRef.current = ''
-    }, 2000)
-  }
-
-  window.addEventListener('keydown', handleGlobalKeyDown)
-  return () => {
-    window.removeEventListener('keydown', handleGlobalKeyDown)
-    if (barcodeTimerRef.current) {
-      clearTimeout(barcodeTimerRef.current)
-    }
-  }
-}, [posLookupByBarcode, posLookupByCode, handleAddToCart, toast, posRecents, products])
-
-  const handleIncreaseQuantity = useCallback(
-  (productId: string) => {
-    const item = cart.find((c) => c.productId === productId)
-    if (item) {
-      const product = products.find((p) => p.id === productId)
-      const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
-      // ★ DECIMAL: تشخیص واحد اعشاری
-      const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
-      const step = getQuantityStep(isDecimal)
-      const newQty = roundQuantity(item.quantity + step, isDecimal)
-      if (newQty > maxStock) {
+      if (product.currentStock <= 0) {
+        console.log('❌ [BLOCKED] موجودی محصول صفر یا کمتر است')
         toast({
-          title: 'موجودی کافی نیست',
-          description: `موجودی فعلی: ${formatPrice(maxStock)} ${product ? getUnitLabel(product) : item.unitLabel || 'عدد'}`,
+          title: 'محصول ناموجود است',
+          description: `${product.name} در انبار موجود نیست`,
           variant: 'destructive',
         })
         return
       }
-      const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
-      useStore.setState((state) => ({
-        cart: state.cart.map((c) =>
-          c.productId === productId
-            ? { ...c, quantity: newQty, lineTotal: newLineTotal }
-            : c
-        ),
-      }))
+
+      setProducts((prev: any[]) => {
+        if (prev.find((p) => p.id === product.id)) return prev
+        const updatedProducts = [...prev, product]
+        import('@/lib/offline-db').then(({ cacheProducts }: any) => {
+          cacheProducts(updatedProducts).catch((err: any) => console.warn('[POS] Cache failed:', err))
+        }).catch(() => {})
+        return updatedProducts
+      })
+
+      console.log('3️⃣ [CART CHECK] طول فعلی سبد خرید:', cart.length)
+      const existingItem = cart.find((c: any) => c.productId === product.id)
+
+      if (existingItem && existingItem.quantity >= product.currentStock) {
+        console.log('❌ [BLOCKED] تعداد در سبد از موجودی انبار بیشتر است')
+        toast({
+          title: 'موجودی کافی نیست',
+          description: `موجودی فعلی: ${product.currentStock}`,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      if (typeof addToCart !== 'function') {
+        console.log('❌ [BLOCKED] تابع addToCart تعریف نشده است')
+        toast({ title: 'لطفاً صبر کنید', description: 'سیستم در حال بارگذاری است' })
+        return
+      }
+
+      console.log('4️⃣ [EXECUTING] در حال محاسبه و فراخوانی addToCart...')
+      const lineTotal = computeLineTotal(1, product.salePrice, 0, product.taxRate)
+
+      const newItem = {
+        productId: product.id,
+        productName: product.name,
+        quantity: 1,
+        unitPrice: product.salePrice,
+        discount: 0,
+        taxRate: product.taxRate,
+        lineTotal,
+        currentStock: product.currentStock,
+        unitLabel: getUnitLabel(product),
+      }
+
+      console.log('5️⃣ [PAYLOAD] آبجکت ارسالی به addToCart:', newItem)
+
+      addToCart(newItem)
+
+      console.log('✅ [SUCCESS] addToCart اجرا شد.')
+
+      if (!isOnline) {
+        toast({
+          title: '📡 آفلاین',
+          description: 'تغییرات شما ذخیره و پس از اتصال ثبت می‌شوند',
+          duration: 3000,
+        })
+      }
+    },
+    [addToCart, cart, toast, isOnline, setProducts]
+  )
+
+  // ══════════════════════════════════════════════════════════════
+  // ★ بارکدخوان هوشمند در سطح کل صفحه (با پشتیبانی کامل آفلاین)
+  // ══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
+      if (isProcessingScan.current) {
+        e.preventDefault()
+        return
+      }
+
+      if (document.activeElement === searchInputRef.current) return
+
+      const activeEl = document.activeElement as HTMLElement | null
+      if (activeEl) {
+        const tagName = activeEl.tagName.toLowerCase()
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          tagName === 'select' ||
+          activeEl.isContentEditable
+        ) {
+          return
+        }
+      }
+
+      if (e.key === 'Enter') {
+        const barcode = barcodeBufferRef.current.trim()
+        if (barcode.length >= 3) {
+          e.preventDefault()
+
+          isProcessingScan.current = true
+
+          try {
+            if (!navigator.onLine) {
+              const offlineSource = posRecents.length > 0 ? posRecents : products
+              const cachedProduct = offlineSource.find(
+                (p) => p.isActive !== false && (p.barcode === barcode || p.code === barcode)
+              )
+
+              if (cachedProduct) {
+                handleAddToCart(cachedProduct)
+                toast({
+                  title: '✓ افزودن به سبد (آفلاین)',
+                  description: cachedProduct.name
+                })
+              } else {
+                toast({
+                  title: '📡 آفلاین — یافت نشد',
+                  description: `بارکد "${barcode}" در حافظه محلی ثبت نشده است`,
+                  variant: 'destructive',
+                })
+              }
+            } else {
+              const foundByBarcode = await posLookupByBarcode(barcode)
+              if (foundByBarcode && foundByBarcode.id) {
+                handleAddToCart(foundByBarcode)
+                toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
+              } else {
+                const codeFound = await posLookupByCode(barcode)
+                if (codeFound && codeFound.id) {
+                  handleAddToCart(codeFound)
+                  toast({ title: '✓ افزودن به سبد', description: codeFound.name })
+                } else {
+                  toast({
+                    title: 'یافت نشد',
+                    description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
+                    variant: 'destructive',
+                  })
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[POS] Global barcode scan error:', err)
+            toast({ title: 'خطا', description: 'خطا در پردازش بارکد', variant: 'destructive' })
+          } finally {
+            barcodeBufferRef.current = ''
+            if (barcodeTimerRef.current) {
+              clearTimeout(barcodeTimerRef.current)
+              barcodeTimerRef.current = null
+            }
+
+            setTimeout(() => {
+              isProcessingScan.current = false
+            }, 500)
+          }
+        }
+        return
+      }
+
+      if (e.key === 'Escape') {
+        barcodeBufferRef.current = ''
+        if (barcodeTimerRef.current) {
+          clearTimeout(barcodeTimerRef.current)
+          barcodeTimerRef.current = null
+        }
+        return
+      }
+
+      if (e.key.length > 1) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+
+      barcodeBufferRef.current += e.key
+
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current)
+      }
+      barcodeTimerRef.current = setTimeout(() => {
+        barcodeBufferRef.current = ''
+      }, 2000)
     }
-  },
-  [cart, products, toast]
-)
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current)
+      }
+    }
+  }, [posLookupByBarcode, posLookupByCode, handleAddToCart, toast, posRecents, products])
+
+  const handleIncreaseQuantity = useCallback(
+    (productId: string) => {
+      const item = cart.find((c) => c.productId === productId)
+      if (item) {
+        const product = products.find((p) => p.id === productId)
+        const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
+        const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+        const step = getQuantityStep(isDecimal)
+        const newQty = roundQuantity(item.quantity + step, isDecimal)
+        if (newQty > maxStock) {
+          toast({
+            title: 'موجودی کافی نیست',
+            description: `موجودی فعلی: ${formatPrice(maxStock)} ${product ? getUnitLabel(product) : item.unitLabel || 'عدد'}`,
+            variant: 'destructive',
+          })
+          return
+        }
+        const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
+        useStore.setState((state) => ({
+          cart: state.cart.map((c) =>
+            c.productId === productId
+              ? { ...c, quantity: newQty, lineTotal: newLineTotal }
+              : c
+          ),
+        }))
+      }
+    },
+    [cart, products, toast]
+  )
 
   const handleDecreaseQuantity = useCallback(
-  (productId: string) => {
-    const item = cart.find((c) => c.productId === productId)
-    if (item) {
+    (productId: string) => {
+      const item = cart.find((c) => c.productId === productId)
+      if (item) {
+        const product = products.find((p) => p.id === productId)
+        const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+        const step = getQuantityStep(isDecimal)
+        const minQty = getMinQuantity(isDecimal)
+        if (item.quantity <= minQty) return
+        const newQty = roundQuantity(item.quantity - step, isDecimal)
+        if (newQty < minQty) return
+        const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
+        useStore.setState((state) => ({
+          cart: state.cart.map((c) =>
+            c.productId === productId
+              ? { ...c, quantity: newQty, lineTotal: newLineTotal }
+              : c
+          ),
+        }))
+      }
+    },
+    [cart, products]
+  )
+
+  // ★ DECIMAL: ویرایش مستقیم تعداد (با پشتیبانی اعشار)
+  const handleQuantityChange = useCallback(
+    (productId: string, newQuantity: number) => {
+      const item = cart.find((c) => c.productId === productId)
+      if (!item) return
+      if (isNaN(newQuantity) || newQuantity <= 0) return
       const product = products.find((p) => p.id === productId)
-      // ★ DECIMAL: تشخیص واحد اعشاری
       const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
-      const step = getQuantityStep(isDecimal)
-      const minQty = getMinQuantity(isDecimal)
-      if (item.quantity <= minQty) return
-      const newQty = roundQuantity(item.quantity - step, isDecimal)
-      if (newQty < minQty) return
-      const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
+      let qty = roundQuantity(newQuantity, isDecimal)
+      const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
+      if (qty > maxStock) {
+        qty = roundQuantity(maxStock, isDecimal)
+        toast({
+          title: 'موجودی کافی نیست',
+          description: `حداکثر موجودی: ${formatPrice(maxStock)} ${product ? getUnitLabel(product) : item.unitLabel || 'عدد'} — همان مقدار اعمال شد`,
+          variant: 'destructive',
+          duration: 4000,
+        })
+      }
+      if (qty === item.quantity) return
+      const newLineTotal = computeLineTotal(qty, item.unitPrice, item.discount, item.taxRate)
       useStore.setState((state) => ({
         cart: state.cart.map((c) =>
           c.productId === productId
-            ? { ...c, quantity: newQty, lineTotal: newLineTotal }
+            ? { ...c, quantity: qty, lineTotal: newLineTotal }
             : c
         ),
       }))
-    }
-  },
-  [cart, products]
-)
-
-// ★ DECIMAL: ویرایش مستقیم تعداد (با پشتیبانی اعشار)
-const handleQuantityChange = useCallback(
-  (productId: string, newQuantity: number) => {
-    const item = cart.find((c) => c.productId === productId)
-    if (!item) return
-    if (isNaN(newQuantity) || newQuantity <= 0) return
-    const product = products.find((p) => p.id === productId)
-    const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
-    let qty = roundQuantity(newQuantity, isDecimal)
-    // ★ بررسی موجودی — اگر بیشتر از موجودی بود، به حداکثر موجودی محدود می‌شود
-    const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
-    if (qty > maxStock) {
-      qty = roundQuantity(maxStock, isDecimal)
-      toast({
-        title: 'موجودی کافی نیست',
-        description: `حداکثر موجودی: ${formatPrice(maxStock)} ${product ? getUnitLabel(product) : item.unitLabel || 'عدد'} — همان مقدار اعمال شد`,
-        variant: 'destructive',
-        duration: 4000,
-      })
-    }
-    if (qty === item.quantity) return
-    const newLineTotal = computeLineTotal(qty, item.unitPrice, item.discount, item.taxRate)
-    useStore.setState((state) => ({
-      cart: state.cart.map((c) =>
-        c.productId === productId
-          ? { ...c, quantity: qty, lineTotal: newLineTotal }
-          : c
-      ),
-    }))
-  },
-  [cart, products, toast]
-)
+    },
+    [cart, products, toast]
+  )
 
   const handleUnitPriceChange = useCallback(
     (productId: string, newPrice: number) => {
@@ -1745,133 +1755,204 @@ const handleQuantityChange = useCallback(
     []
   )
 
-
-
-// ۲. تابع handleSearchKeyDown را کاملاً با این نسخه جایگزین کنید:
-const handleSearchKeyDown = useCallback(
-  async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-
-      if (isProcessingScan.current) return;
-
-      const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '');
-      if (!q) return;
-
-      isProcessingScan.current = true;
-      const offline = !isOnline || !navigator.onLine;
-
-      try {
-        if (offline) {
-          const qLower = q.toLowerCase();
-          const offlineSource = posRecents.length > 0 ? posRecents : products;
-          
-          const byBarcode = offlineSource.find(
-            (p) => p.isActive !== false && p.barcode === q
-          );
-          if (byBarcode) {
-            handleAddToCart(byBarcode);
-            posSearchSetQuery('');
-            return;
-          }
-          
-          const byCode = offlineSource.find(
-            (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
-          );
-          if (byCode) {
-            handleAddToCart(byCode);
-            posSearchSetQuery('');
-            return;
-          }
-
-          const byName = offlineSource.find(
-            (p) =>
-              p.isActive !== false &&
-              (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
-          );
-          if (byName) {
-            handleAddToCart(byName);
-            posSearchSetQuery('');
-            return;
-          }
-
-          if (filteredProducts.length > 0) {
-            handleAddToCart(filteredProducts[0]);
-            posSearchSetQuery('');
-            return;
-          }
-          
-          toast({
-            title: '📡 آفلاین — یافت نشد',
-            description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
-            variant: 'destructive',
-          });
-          return;
+  // ══════════════════════════════════════════════════════════════
+  // ★ v11.5: هندل کامل کیبورد برای dropdown جستجو
+  // ArrowDown/ArrowUp/Escape/Tab/Enter با پشتیبانی آفلاین
+  // ══════════════════════════════════════════════════════════════
+  const handleSearchKeyDown = useCallback(
+    async (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // ─── Arrow Down: حرکت به آیتم بعدی ───
+      if (e.key === 'ArrowDown') {
+        if (filteredProducts.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          setHighlightedIndex(prev => {
+            const next = prev < filteredProducts.length - 1 ? prev + 1 : 0
+            setTimeout(() => {
+              document.getElementById(`pos-product-item-${next}`)?.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth',
+              })
+            }, 0)
+            return next
+          })
         }
-
-        // ★ جستجو به عنوان بارکد
-        const foundByBarcode = await posLookupByBarcode(q);
-        if (foundByBarcode && foundByBarcode.id) {
-          handleAddToCart(foundByBarcode);
-          posSearchSetQuery('');
-          return;
-        }
-
-        // ★ جستجو به عنوان کد محصول
-        const codeFound = await posLookupByCode(q);
-        if (codeFound && codeFound.id) {
-          handleAddToCart(codeFound);
-          posSearchSetQuery('');
-          return;
-        }
-
-        // ★ استفاده از اولین نتیجه جستجوی متنی
-        if (posSearchResults.length > 0) {
-          const firstResult = posSearchResults[0];
-          if (firstResult && firstResult.id) {
-            handleAddToCart(firstResult);
-            posSearchSetQuery('');
-            return;
-          }
-        }
-
-        toast({
-          title: 'یافت نشد',
-          description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
-          variant: 'destructive',
-        });
-
-      } catch (error) {
-        console.error('Barcode scan error:', error);
-        toast({ title: 'خطا', description: 'خطا در پردازش اسکن', variant: 'destructive' });
-      } finally {
-        setTimeout(() => {
-          isProcessingScan.current = false;
-        }, 500);
+        return
       }
-    }
 
-    if (e.key === 'Escape') {
-      posSearchSetQuery('');
-      searchInputRef.current?.blur();
-    }
-  },
-  [
-    posSearchResults,
-    posRecents,
-    posLookupByBarcode,
-    posLookupByCode,
-    posSearchSetQuery,
-    handleAddToCart,
-    filteredProducts,
-    toast,
-    isOnline,
-    products,
-  ]
-);
+      // ─── Arrow Up: حرکت به آیتم قبلی ───
+      if (e.key === 'ArrowUp') {
+        if (filteredProducts.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          setHighlightedIndex(prev => {
+            const next = prev > 0 ? prev - 1 : filteredProducts.length - 1
+            setTimeout(() => {
+              document.getElementById(`pos-product-item-${next}`)?.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth',
+              })
+            }, 0)
+            return next
+          })
+        }
+        return
+      }
 
-  
-  const handleBarcodeDetected = useCallback(
+      // ─── Escape: بستن dropdown و پاک کردن جستجو ───
+      if (e.key === 'Escape') {
+        posSearchSetQuery('')
+        setHighlightedIndex(-1)
+        searchInputRef.current?.blur()
+        return
+      }
+
+      // ─── Tab: بستن dropdown و رفتن به فیلد بعدی ───
+      if (e.key === 'Tab') {
+        setHighlightedIndex(-1)
+        return
+      }
+
+      // ─── Enter: افزودن محصول هایلایت‌شده یا جستجوی بارکد ───
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+
+        if (isProcessingScan.current) return
+
+        const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '')
+        if (!q) return
+
+        isProcessingScan.current = true
+        const offline = !isOnline || !navigator.onLine
+
+        try {
+          // ★ اولویت ۱: اگر آیتمی هایلایت شده، مستقیماً آن را اضافه کن (سریع‌ترین راه)
+          if (highlightedIndex >= 0 && highlightedIndex < filteredProducts.length) {
+            const product = filteredProducts[highlightedIndex]
+            if (product && product.id && product.currentStock > 0) {
+              handleAddToCart(product)
+              toast({ title: '✓ افزودن به سبد', description: product.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              searchInputRef.current?.focus()
+              return
+            }
+          }
+
+          // ★ حالت آفلاین: جستجو در cache
+          if (offline) {
+            const qLower = q.toLowerCase()
+            const offlineSource = posRecents.length > 0 ? posRecents : products
+
+            const byBarcode = offlineSource.find(
+              (p) => p.isActive !== false && p.barcode === q
+            )
+            if (byBarcode) {
+              handleAddToCart(byBarcode)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byBarcode.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            const byCode = offlineSource.find(
+              (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
+            )
+            if (byCode) {
+              handleAddToCart(byCode)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byCode.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            const byName = offlineSource.find(
+              (p) =>
+                p.isActive !== false &&
+                (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
+            )
+            if (byName) {
+              handleAddToCart(byName)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byName.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            toast({
+              title: '📡 آفلاین — یافت نشد',
+              description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
+              variant: 'destructive',
+            })
+            return
+          }
+
+          // ★ حالت آنلاین: جستجو در سرور
+          // اول بارکد را چک کن
+          const foundByBarcode = await posLookupByBarcode(q)
+          if (foundByBarcode && foundByBarcode.id) {
+            handleAddToCart(foundByBarcode)
+            toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
+            posSearchSetQuery('')
+            setHighlightedIndex(-1)
+            return
+          }
+
+          // سپس کد محصول را چک کن
+          const codeFound = await posLookupByCode(q)
+          if (codeFound && codeFound.id) {
+            handleAddToCart(codeFound)
+            toast({ title: '✓ افزودن به سبد', description: codeFound.name })
+            posSearchSetQuery('')
+            setHighlightedIndex(-1)
+            return
+          }
+
+          // استفاده از اولین نتیجه جستجوی متنی
+          if (posSearchResults.length > 0) {
+            const firstResult = posSearchResults[0]
+            if (firstResult && firstResult.id) {
+              handleAddToCart(firstResult)
+              toast({ title: '✓ افزودن به سبد', description: firstResult.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+          }
+
+          toast({
+            title: 'یافت نشد',
+            description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
+            variant: 'destructive',
+          })
+
+        } catch (error) {
+          console.error('Barcode scan error:', error)
+          toast({ title: 'خطا', description: 'خطا در پردازش اسکن', variant: 'destructive' })
+        } finally {
+          setTimeout(() => {
+            isProcessingScan.current = false
+          }, 500)
+        }
+      }
+    },
+    [
+      filteredProducts,
+      highlightedIndex,
+      posSearchResults,
+      posRecents,
+      posLookupByBarcode,
+      posLookupByCode,
+      posSearchSetQuery,
+      handleAddToCart,
+      toast,
+      isOnline,
+      products,
+    ]
+  )
+
+    const handleBarcodeDetected = useCallback(
     async (barcode: string) => {
       // ★ OFFLINE: جستجو در cache
       if (!navigator.onLine) {
@@ -1935,27 +2016,26 @@ const handleSearchKeyDown = useCallback(
       return
     }
 
-  if (pt === 'installment') {
-  setInstallmentDownPayment(0)
-  setInstallmentCount(3)
-  setInstallmentInterestRate(0)
-  setInstallmentPeriod('monthly')
-  setInstallmentDialogOpen(true)
-  console.log('[POS] Installment dialog opened')
-  return
-}
+    if (pt === 'installment') {
+      setInstallmentDownPayment(0)
+      setInstallmentCount(3)
+      setInstallmentInterestRate(0)
+      setInstallmentPeriod('monthly')
+      setInstallmentDialogOpen(true)
+      console.log('[POS] Installment dialog opened')
+      return
+    }
 
-// ★ v11.2: باز کردن مودال ثبت چک
-if (pt === 'check') {
-  setCheckNumber('')
-  setCheckBank('')
-  setCheckDueDate('')
-  setCheckPayee('')
-  setCheckDialogOpen(true)
-  console.log('[POS] Check dialog opened')
-  return
-}
-
+    // ★ v11.2: باز کردن مودال ثبت چک
+    if (pt === 'check') {
+      setCheckNumber('')
+      setCheckBank('')
+      setCheckDueDate('')
+      setCheckPayee('')
+      setCheckDialogOpen(true)
+      console.log('[POS] Check dialog opened')
+      return
+    }
 
     if (pt === 'card') {
       if (openCardPaymentDialogRef.current) {
@@ -1987,7 +2067,7 @@ if (pt === 'check') {
     }
   }, [])
 
-   const openCardPaymentDialog = useCallback(async () => {
+  const openCardPaymentDialog = useCallback(async () => {
     setCardPaymentResult(null)
     setManualReferenceNumber('')
     setManualReferenceType('rrn')
@@ -2006,26 +2086,22 @@ if (pt === 'check') {
     }
 
     setActivePosDevice(device)
-    console.log('[POS] Active POS device:', { 
-      id: device.id, 
-      name: device.name, 
+    console.log('[POS] Active POS device:', {
+      id: device.id,
+      name: device.name,
       type: device.terminalType,
-      config: device.config 
+      config: device.config
     })
 
     // ═══════════════════════════════════════════════════════════════
-    //  ★★★ v11.1: چک شبیه‌ساز (قبل از هر چیز دیگری!)
-    //  دو روش تشخیص:
-    //  ۱. فیلد config شامل isSimulator: true
-    //  ۲. نام دستگاه شامل "شبیه‌ساز" یا "Simulator"
+    //  ★★★ v11.1: چک شبیه‌ساز
     // ═══════════════════════════════════════════════════════════════
     let isSimulatorDevice = false
-    
-    // روش ۱: چک config
+
     try {
       if (device.config) {
-        const deviceConfig = typeof device.config === 'string' 
-          ? JSON.parse(device.config) 
+        const deviceConfig = typeof device.config === 'string'
+          ? JSON.parse(device.config)
           : device.config
         if (deviceConfig?.isSimulator === true) {
           isSimulatorDevice = true
@@ -2034,8 +2110,7 @@ if (pt === 'check') {
     } catch (e) {
       console.warn('[POS] Failed to parse device config:', e)
     }
-    
-    // روش ۲: چک نام دستگاه (backup)
+
     if (!isSimulatorDevice && device.name) {
       const nameLower = device.name.toLowerCase()
       if (nameLower.includes('شبیه‌ساز') || nameLower.includes('simulator') || nameLower.includes('🧪')) {
@@ -2050,9 +2125,8 @@ if (pt === 'check') {
     // ═══════════════════════════════════════════════════════════════
     if (isSimulatorDevice) {
       console.log('[POS] 🧪 حالت شبیه‌سازی فعال است — بدون نیاز به دستگاه واقعی')
-      
+
       try {
-        // شبیه‌سازی مرحله به مرحله
         setCardPaymentStatus('connecting')
         setCardPaymentMessage('🧪 در حال اتصال به شبیه‌ساز کارتخوان...')
         await new Promise(resolve => setTimeout(resolve, 800))
@@ -2069,11 +2143,9 @@ if (pt === 'check') {
         setCardPaymentMessage('🧪 در حال پردازش تراکنش...')
         await new Promise(resolve => setTimeout(resolve, 1500))
 
-        // تولید نتیجه تصادفی (۹۰٪ موفق)
         const isSuccess = Math.random() * 100 < 90
-        
+
         if (isSuccess) {
-          // تولید اطلاعات تراکنش موفق
           const referenceNumber = String(Math.floor(100000 + Math.random() * 900000))
           const traceNumber = String(Math.floor(100000 + Math.random() * 900000))
           const cardPrefixes = ['6037', '6221', '6274', '6279', '5022']
@@ -2093,7 +2165,6 @@ if (pt === 'check') {
             `🧪 شبیه‌سازی موفق!\nشماره پیرو: ${referenceNumber}\nکارت: ****${cardLast4} (${cardType})`
           )
 
-          // ثبت تراکنش در دیتابیس (مثل تراکنش واقعی)
           const tid = getTenantIdFromStore()
           try {
             await fetch(`/api/payments/card?tenantId=${tid}`, {
@@ -2116,13 +2187,11 @@ if (pt === 'check') {
             console.warn('[POS Simulator] Failed to record transaction:', err)
           }
 
-          // بعد از ۲ ثانیه، dialog را ببند و فاکتور را تأیید کن
           setTimeout(() => {
             setCardPaymentDialogOpen(false)
             setConfirmDialogOpen(true)
           }, 2000)
         } else {
-          // تراکنش ناموفق
           const errors = [
             'عدم موجودی کافی',
             'رمز اشتباه است',
@@ -2138,7 +2207,7 @@ if (pt === 'check') {
         setCardPaymentStatus('failed')
         setCardPaymentMessage('خطا در شبیه‌سازی: ' + (err?.message || 'خطای ناشناخته'))
       }
-      return // ★★★ مهم: اینجا return می‌کنیم تا کد اصلی اجرا نشود
+      return
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2323,19 +2392,148 @@ if (pt === 'check') {
     return config?.label ?? type
   }, [])
 
- const handleConfirmInvoiceFinal = useCallback(async () => {
-  // ═══════════════════════════════════════════════════════════════
-  // ★ OFFLINE: ذخیره در صف
-  // ═══════════════════════════════════════════════════════════════
-  if (!navigator.onLine) {
-    console.log('[POS] 🔴 آفلاین — فاکتور به صف اضافه می‌شود')
+  const handleConfirmInvoiceFinal = useCallback(async () => {
+    // ═══════════════════════════════════════════════════════════════
+    // ★ OFFLINE: ذخیره در صف
+    // ═══════════════════════════════════════════════════════════════
+    if (!navigator.onLine) {
+      console.log('[POS] 🔴 آفلاین — فاکتور به صف اضافه می‌شود')
 
-    useStore.getState().setOnline(false)
+      useStore.getState().setOnline(false)
+
+      try {
+        const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
+
+        const offlineNumber = `OFF-${Date.now()}`
+
+        const invoiceItems = cart.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountAmount: Math.round(item.quantity * item.unitPrice * (item.discount / 100)),
+          taxAmount: Math.round(
+            item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
+          ),
+        }))
+
+        const ptFinal = (paymentType || '').toLowerCase()
+        const isCreditOrInstallment =
+          ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
+
+        const currentInstPlanOffline = useStore.getState().installmentPlan
+        const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
+        const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
+        const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
+
+        const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
+          downPayment: downPaymentAmountOffline,
+          numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
+          remainingAmount: remainingAmountOffline,
+          schedules: installmentCalc?.schedule || [],
+        } : undefined
+
+        // ★ v11.2: اولویت مشتری از مودال چک، سپس از POS
+        const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
+
+        await addToSyncQueue('invoice', {
+          method: 'POST',
+          url: '/api/invoices',
+          body: {
+            tenantId: getTenantIdFromStore(),
+            branchId: branchId || undefined,
+            customerId: finalCustomerId,
+            paymentType: ptFinal,
+            items: invoiceItems,
+            discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
+            taxAmount: cartTotals.taxAmount,
+            paidAmount: paidAmountOffline,
+            remainingAmount: remainingAmountOffline,
+            warehouseId: selectedWarehouseId || undefined,
+            ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
+            // ★ v11.4: اطلاعات چک داخل body فاکتور
+            ...(ptFinal === 'check' && {
+              checkNumber: checkNumber.trim(),
+              checkBankName: checkBank.trim(),
+              checkDueDate: checkDueDate,
+              checkPayee: checkPayee.trim() || null,
+            }),
+          },
+        })
+
+        try {
+          const { updateCachedProductStock } = await import('@/lib/offline-db')
+          for (const item of cart) {
+            setProducts((prev) =>
+              prev.map((p) =>
+                p.id === item.productId
+                  ? { ...p, currentStock: Math.max(0, p.currentStock - item.quantity) }
+                  : p
+              )
+            )
+            const product = products.find((p) => p.id === item.productId)
+            if (product) {
+              const newStock = Math.max(0, product.currentStock - item.quantity)
+              await updateCachedProductStock(item.productId, newStock)
+            }
+          }
+          console.log('[POS] ✅ موجودی cache آفلاین بروزرسانی شد')
+        } catch (stockErr) {
+          console.warn('[POS] ⚠️ خطا در بروزرسانی موجودی cache:', stockErr)
+        }
+
+        const count = await getSyncQueueCount()
+        useStore.getState().setPendingSyncCount(count)
+
+        toast({
+          title: '📡 فاکتور در صف ذخیره شد',
+          description: `شماره آفلاین: ${offlineNumber} — پس از اتصال ثبت خواهد شد`,
+          duration: 5000,
+        })
+
+        // ریست state های مودال چک
+        setCheckNumber('')
+        setCheckBank('')
+        setCheckDueDate('')
+        setCheckPayee('')
+        setCheckCustomerSearch('')
+        setCheckSelectedCustomerId(null)
+        setCheckSelectedCustomerName('')
+
+        clearCart()
+        posSearchSetQuery('')
+        setSelectedCategory('all')
+        setPaymentType(null as any)
+        setTaxOverrideAmount(null)
+        setInvoiceDiscountPercent('')
+        setConfirmDialogOpen(false)
+        setSubmitting(false)
+        return
+
+      } catch (err: any) {
+        console.error('[POS] خطا در ذخیره آفلاین:', err)
+        toast({
+          title: '❌ خطا در ذخیره آفلاین',
+          description: err?.message || 'خطای ناشناخته',
+          variant: 'destructive',
+        })
+        setSubmitting(false)
+        return
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ ONLINE: ارسال به سرور
+    // ═══════════════════════════════════════════════════════════════
+    setSubmitting(true)
+    setConfirmDialogOpen(false)
 
     try {
-      const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
-
-      const offlineNumber = `OFF-${Date.now()}`
+      const tenantId = getTenantIdFromStore()
 
       const invoiceItems = cart.map((item) => ({
         productId: item.productId,
@@ -2347,556 +2545,426 @@ if (pt === 'check') {
           item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
         ),
       }))
-
       const ptFinal = (paymentType || '').toLowerCase()
       const isCreditOrInstallment =
         ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
 
-      const currentInstPlanOffline = useStore.getState().installmentPlan
-      const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
-      const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
-      const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
+      const currentInstPlan = useStore.getState().installmentPlan
+      const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
+      const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
+      const remainingAmount = cartTotals.totalAmount - paidAmount
+      const payments =
+        cartTotals.totalAmount > 0
+          ? [
+              {
+                amount: paidAmount,
+                paymentType:
+                  ptFinal === 'card'
+                    ? 'card'
+                    : ptFinal === 'credit'
+                    ? 'credit'
+                    : ptFinal === 'installment'
+                    ? 'installment'
+                    : 'cash',
+              },
+            ]
+          : []
 
-      const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
-        downPayment: downPaymentAmountOffline,
-        numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
-        interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
-        installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
-        totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
-        installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
-        remainingAmount: remainingAmountOffline,
-        schedules: installmentCalc?.schedule || [],
-      } : undefined
-
-      // ★ v11.2: اولویت مشتری از مودال چک، سپس از POS
+      // ★ v11.2: اولویت مشتری از مودال چک
       const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
 
-       await addToSyncQueue('invoice', {
-        method: 'POST',
-        url: '/api/invoices',
-        body: {
-          tenantId: getTenantIdFromStore(),
-          branchId: branchId || undefined,
-          customerId: finalCustomerId,
-          paymentType: ptFinal,
-          items: invoiceItems,
-          discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
-          taxAmount: cartTotals.taxAmount,
-          paidAmount: paidAmountOffline,
-          remainingAmount: remainingAmountOffline,
-          warehouseId: selectedWarehouseId || undefined,
-          ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
-          // ★ v11.4: اطلاعات چک داخل body فاکتور
-          ...(ptFinal === 'check' && {
-            checkNumber: checkNumber.trim(),
-            checkBankName: checkBank.trim(),
-            checkDueDate: checkDueDate,
-            checkPayee: checkPayee.trim() || null,
-          }),
-        },
-      })
-   
+      const requestBody: any = {
+        tenantId,
+        branchId: branchId || undefined,
+        customerId: finalCustomerId,
+        paymentType: (paymentType || 'cash').toLowerCase(),
+        items: invoiceItems,
+        payments,
+        discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
+        taxAmount: cartTotals.taxAmount,
+        paidAmount,
+        remainingAmount,
+        warehouseId: selectedWarehouseId || undefined,
+      }
+
+      // ارسال داده‌های اقساط
+      const currentInstPlanReq = useStore.getState().installmentPlan
+      if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
+        const planData = {
+          downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
+          numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
+          remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
+        }
+
+        requestBody.installmentData = {
+          downPayment: planData.downPayment,
+          numberOfInstallments: planData.numberOfInstallments,
+          interestRate: planData.interestRate,
+          installmentPeriod: planData.installmentPeriod,
+          totalWithInterest: planData.totalWithInterest,
+          installmentAmount: planData.installmentAmount,
+          remainingAmount: planData.remainingAmount,
+          schedules: installmentCalc?.schedule || [],
+        }
+
+        requestBody.downPayment = planData.downPayment
+        requestBody.numberOfInstallments = planData.numberOfInstallments
+        requestBody.interestRate = planData.interestRate
+        requestBody.installmentPeriod = planData.installmentPeriod
+        requestBody.totalWithInterest = planData.totalWithInterest
+        requestBody.installmentAmount = planData.installmentAmount
+        requestBody.remainingAmount = planData.remainingAmount
+      }
+
+      if (ptFinal === 'credit') {
+        requestBody.creditData = {
+          dueDate: creditDueDate || undefined,
+          description: creditDescription || undefined,
+        }
+      }
+
+      // ★ v11.4: اطلاعات چک داخل body فاکتور
+      if (ptFinal === 'check') {
+        requestBody.checkNumber = checkNumber.trim()
+        requestBody.checkBankName = checkBank.trim()
+        requestBody.checkDueDate = checkDueDate
+        requestBody.checkPayee = checkPayee.trim() || null
+      }
+
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
+      let res: Response
       try {
-        const { updateCachedProductStock } = await import('@/lib/offline-db')
-        for (const item of cart) {
-          setProducts((prev) =>
-            prev.map((p) =>
-              p.id === item.productId
-                ? { ...p, currentStock: Math.max(0, p.currentStock - item.quantity) }
-                : p
-            )
-          )
-          const product = products.find((p) => p.id === item.productId)
-          if (product) {
-            const newStock = Math.max(0, product.currentStock - item.quantity)
-            await updateCachedProductStock(item.productId, newStock)
+        res = await fetch('/api/invoices', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(requestBody),
+        })
+      } catch (networkErr: any) {
+        console.error('[POS] Network error during invoice submit:', networkErr)
+        useStore.getState().setOnline(false)
+
+        try {
+          const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
+          await addToSyncQueue('invoice', {
+            method: 'POST',
+            url: '/api/invoices',
+            body: requestBody,
+          })
+          const count = await getSyncQueueCount()
+          useStore.getState().setPendingSyncCount(count)
+
+          toast({
+            title: '📡 اتصال قطع شد',
+            description: 'فاکتور در صف ذخیره شد و پس از اتصال ثبت خواهد شد',
+            duration: 5000,
+          })
+
+          clearCart()
+          posSearchSetQuery('')
+          setSelectedCategory('all')
+          setPaymentType(null as any)
+          setTaxOverrideAmount(null)
+          setInvoiceDiscountPercent('')
+        } catch (queueErr) {
+          toast({
+            title: '❌ خطای شبکه',
+            description: 'اتصال قطع شد و امکان ذخیره آفلاین وجود ندارد',
+            variant: 'destructive',
+          })
+        }
+
+        setSubmitting(false)
+        return
+      }
+
+      let result: any
+      try {
+        result = await res.json()
+      } catch (parseErr) {
+        console.error('[POS] Failed to parse invoice response:', parseErr)
+        toast({
+          title: 'خطای سرور',
+          description: `خطا در ثبت فاکتور (کد ${res.status})`,
+          variant: 'destructive',
+        })
+        setSubmitting(false)
+        return
+      }
+
+      console.log('[POS] Invoice API response:', {
+        status: res.status,
+        success: result.success,
+        error: result.error,
+        invoiceId: result.data?.id,
+        invoiceNumber: result.data?.number,
+      })
+
+      if (res.ok && result.success) {
+        const isInstallment = ptFinal === 'installment'
+        const isCredit = ptFinal === 'credit'
+        const isCheck = ptFinal === 'check'
+
+        if (isInstallment && result.data?.installmentPlan) {
+          const plan = result.data.installmentPlan
+          toast({
+            title: 'فاکتور قسطی ثبت شد',
+            description: `فاکتور با ${(plan.numberOfInstallments || 0).toLocaleString('fa-IR')} قسط و پیش‌پرداخت ${formatPrice(plan.downPayment)} ریال ثبت شد.`,
+          })
+        } else if (isInstallment) {
+          toast({
+            title: 'فاکتور قسطی ثبت شد',
+            description: `فاکتور قسطی با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
+          })
+        } else if (isCredit) {
+          toast({
+            title: 'فاکتور نسیه ثبت شد',
+            description: `فاکتور نسیه با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
+          })
+        } else if (!isCheck) {
+          toast({
+            title: 'فاکتور تأیید شد',
+            description: `فاکتور با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد`,
+          })
+        }
+
+        // ★ v11.4: چک در همان API فاکتور ایجاد شده
+        if (isCheck) {
+          const invoiceNumber = result.data?.number || ''
+          const createdCheck = (result.data as any)?.createdCheck || null
+
+          console.log('[POS] 📥 Invoice response:', {
+            invoiceId: result.data?.id,
+            invoiceNumber: result.data?.number,
+            createdCheck: createdCheck ? '✓' : '✗',
+          })
+
+          if (createdCheck && !createdCheck.error) {
+            toast({
+              title: '✓ فاکتور و چک ثبت شد',
+              description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
+              duration: 5000,
+            })
+          } else if (createdCheck && createdCheck.error) {
+            toast({
+              title: '❌ خطا در ثبت چک (فاکتور ثبت شد)',
+              description: `پیام: ${createdCheck.errorMessage || 'نامشخص'}`,
+              variant: 'destructive',
+              duration: 10000,
+            })
+          } else {
+            toast({
+              title: '✓ فاکتور ثبت شد',
+              description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
+              duration: 5000,
+            })
+          }
+          // رویداد به‌روزرسانی چک‌ها
+          window.dispatchEvent(new Event('checks-updated'))
+        }
+        setInstallmentPlan(null)
+        setInstallmentDialogOpen(false)
+        setConfirmDialogOpen(false)
+        setPaymentType(null as any)
+        setTaxOverrideAmount(null)
+        setInvoiceDiscountPercent('')
+
+        // ریست state های مودال چک
+        setCheckNumber('')
+        setCheckBank('')
+        setCheckDueDate('')
+        setCheckPayee('')
+        setCheckCustomerSearch('')
+        setCheckSelectedCustomerId(null)
+        setCheckSelectedCustomerName('')
+
+        const printSettings =
+          typeof window !== 'undefined'
+            ? localStorage.getItem('auto-print-settings')
+            : null
+        if (printSettings) {
+          try {
+            const ps = JSON.parse(printSettings)
+            if (ps.enabled && ps.paymentTypes && ps.paymentTypes.length > 0) {
+              const currentPaymentType = (paymentType || 'cash').toLowerCase()
+              if (ps.paymentTypes.includes(currentPaymentType)) {
+                const cartCopy = [...cart]
+                const totalsCopy = { ...cartTotals }
+                const customerCopy = customers.find((c) => c.id === finalCustomerId)
+                const paymentTypeCopy = paymentType
+
+                const savedTemplate = ps.template || '8cm'
+                const mappedTemplate: PrintTemplate =
+                  savedTemplate === 'a4'
+                    ? 'a4'
+                    : savedTemplate === '58mm'
+                    ? 'thermal-58mm'
+                    : 'thermal-80mm'
+                setThermalPrintTemplate(mappedTemplate)
+
+                const customerNameForPrint = customerCopy
+                  ? `${customerCopy.firstName || ''} ${customerCopy.lastName || ''}`.trim()
+                  : 'فروش عمومی'
+
+                const paymentTypeLabelForPrint = (() => {
+                  const cfg = paymentTypeConfig.find((c) => c.value === paymentTypeCopy)
+                  return cfg?.label ?? (paymentTypeCopy || 'نقدی')
+                })()
+
+                const pt = (paymentTypeCopy || '').toLowerCase()
+                const paidAmountForPrint =
+                  pt === 'credit'
+                    ? 0
+                    : pt === 'installment'
+                    ? installmentDownPayment
+                    : totalsCopy.totalAmount
+
+                const settings: any = (() => {
+                  if (typeof window === 'undefined') return {}
+                  const saved = localStorage.getItem('invoice-template-settings')
+                  try {
+                    return saved ? JSON.parse(saved) : {}
+                  } catch {
+                    return {}
+                  }
+                })()
+
+                const autoPrintReceiptData: PrintReceiptData = {
+                  invoiceNumber:
+                    result.data?.number || `INV-${Date.now().toString().slice(-6)}`,
+                  invoiceDate: new Date().toLocaleDateString('fa-IR'),
+                  customerName: customerNameForPrint,
+                  cashierName: user?.username || undefined,
+                  items: cartCopy.map((item: any) => ({
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    discount: item.discount || 0,
+                    lineTotal: item.lineTotal,
+                    unitLabel: item.unitLabel,
+                  })),
+                  subTotal: totalsCopy.subTotal,
+                  discountAmount: totalsCopy.discountAmount,
+                  invoiceDiscountAmount: totalsCopy.invoiceDiscountAmount || 0,
+                  taxAmount: totalsCopy.taxAmount,
+                  totalAmount: totalsCopy.totalAmount,
+                  paidAmount: paidAmountForPrint,
+                  remainingAmount: Math.max(0, totalsCopy.totalAmount - paidAmountForPrint),
+                  paymentType: paymentTypeCopy || 'cash',
+                  paymentTypeLabel: paymentTypeLabelForPrint,
+                  storeName: storeName || 'فروشگاه',
+                  storeAddress: settings.storeAddress,
+                  storePhone: settings.storePhone,
+                  headerText: settings.headerText || 'فاکتور فروش',
+                  footerText: settings.footerText || 'با تشکر از خرید شما',
+                  bankAccounts: settings.bankAccounts,
+                  logoData: settings.logoData,
+                  currency: 'ریال',
+                }
+
+                pendingAutoPrintDataRef.current = autoPrintReceiptData
+                setAutoPrintMode(true)
+
+                setTimeout(() => {
+                  setThermalPrintOpen(true)
+                  toast({
+                    title: 'فاکتور ثبت شد',
+                    description: 'لطفاً قالب چاپ را انتخاب کنید',
+                  })
+                }, 500)
+              }
+            }
+          } catch (e) {
+            console.warn('[POS] Auto-print failed (non-blocking):', e)
           }
         }
-        console.log('[POS] ✅ موجودی cache آفلاین بروزرسانی شد')
-      } catch (stockErr) {
-        console.warn('[POS] ⚠️ خطا در بروزرسانی موجودی cache:', stockErr)
-      }
-
-      const count = await getSyncQueueCount()
-      useStore.getState().setPendingSyncCount(count)
-
-      toast({
-        title: '📡 فاکتور در صف ذخیره شد',
-        description: `شماره آفلاین: ${offlineNumber} — پس از اتصال ثبت خواهد شد`,
-        duration: 5000,
-      })
-
-      // ریست state های مودال چک
-      setCheckNumber('')
-      setCheckBank('')
-      setCheckDueDate('')
-      setCheckPayee('')
-      setCheckCustomerSearch('')
-      setCheckSelectedCustomerId(null)
-      setCheckSelectedCustomerName('')
-
-      clearCart()
-      posSearchSetQuery('')
-      setSelectedCategory('all')
-      setPaymentType(null as any)
-      setTaxOverrideAmount(null)
-      setInvoiceDiscountPercent('')
-      setConfirmDialogOpen(false)
-      setSubmitting(false)
-      return
-
-    } catch (err: any) {
-      console.error('[POS] خطا در ذخیره آفلاین:', err)
-      toast({
-        title: '❌ خطا در ذخیره آفلاین',
-        description: err?.message || 'خطای ناشناخته',
-        variant: 'destructive',
-      })
-      setSubmitting(false)
-      return
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // ★ ONLINE: ارسال به سرور
-  // ═══════════════════════════════════════════════════════════════
-  setSubmitting(true)
-  setConfirmDialogOpen(false)
-
-  try {
-    const tenantId = getTenantIdFromStore()
-
-    const invoiceItems = cart.map((item) => ({
-      productId: item.productId,
-      productName: item.productName,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      discountAmount: Math.round(item.quantity * item.unitPrice * (item.discount / 100)),
-      taxAmount: Math.round(
-        item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
-      ),
-    }))
-    const ptFinal = (paymentType || '').toLowerCase()
-    const isCreditOrInstallment =
-      ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-
-    const currentInstPlan = useStore.getState().installmentPlan
-    const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
-    const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
-    const remainingAmount = cartTotals.totalAmount - paidAmount
-    const payments =
-      cartTotals.totalAmount > 0
-        ? [
-            {
-              amount: paidAmount,
-              paymentType:
-                ptFinal === 'card'
-                  ? 'card'
-                  : ptFinal === 'credit'
-                  ? 'credit'
-                  : ptFinal === 'installment'
-                  ? 'installment'
-                  : 'cash',
-            },
-          ]
-        : []
-
-    // ★ v11.2: اولویت مشتری از مودال چک
-    const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
-
-    const requestBody: any = {
-      tenantId,
-      branchId: branchId || undefined,
-      customerId: finalCustomerId,
-      paymentType: (paymentType || 'cash').toLowerCase(),
-      items: invoiceItems,
-      payments,
-      discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
-      taxAmount: cartTotals.taxAmount,
-      paidAmount,
-      remainingAmount,
-      warehouseId: selectedWarehouseId || undefined,
-    }
-
-    // ارسال داده‌های اقساط
-    const currentInstPlanReq = useStore.getState().installmentPlan
-    if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
-      const planData = {
-        downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
-        numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
-        interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
-        installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
-        totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
-        installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
-        remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
-      }
-
-      requestBody.installmentData = {
-        downPayment: planData.downPayment,
-        numberOfInstallments: planData.numberOfInstallments,
-        interestRate: planData.interestRate,
-        installmentPeriod: planData.installmentPeriod,
-        totalWithInterest: planData.totalWithInterest,
-        installmentAmount: planData.installmentAmount,
-        remainingAmount: planData.remainingAmount,
-        schedules: installmentCalc?.schedule || [],
-      }
-
-      requestBody.downPayment = planData.downPayment
-      requestBody.numberOfInstallments = planData.numberOfInstallments
-      requestBody.interestRate = planData.interestRate
-      requestBody.installmentPeriod = planData.installmentPeriod
-      requestBody.totalWithInterest = planData.totalWithInterest
-      requestBody.installmentAmount = planData.installmentAmount
-      requestBody.remainingAmount = planData.remainingAmount
-    }
-
-    if (ptFinal === 'credit') {
-      requestBody.creditData = {
-        dueDate: creditDueDate || undefined,
-        description: creditDescription || undefined,
-      }
-    }
-
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-
-    let res: Response
-    try {
-      res = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(requestBody),
-      })
-    } catch (networkErr: any) {
-      console.error('[POS] Network error during invoice submit:', networkErr)
-      useStore.getState().setOnline(false)
-
-      try {
-        const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
-        await addToSyncQueue('invoice', {
-          method: 'POST',
-          url: '/api/invoices',
-          body: requestBody,
-        })
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
-
-        toast({
-          title: '📡 اتصال قطع شد',
-          description: 'فاکتور در صف ذخیره شد و پس از اتصال ثبت خواهد شد',
-          duration: 5000,
-        })
 
         clearCart()
         posSearchSetQuery('')
         setSelectedCategory('all')
-        setPaymentType(null as any)
-        setTaxOverrideAmount(null)
-        setInvoiceDiscountPercent('')
-      } catch (queueErr) {
+        await posLoadRecents()
+        loadData()
+
+      } else {
+        const errorMsg =
+          result.error || result.message || `خطای سرور (کد ${res.status})`
+        console.error('[POS] Invoice creation failed:', errorMsg)
         toast({
-          title: '❌ خطای شبکه',
-          description: 'اتصال قطع شد و امکان ذخیره آفلاین وجود ندارد',
+          title: 'خطا در ثبت فاکتور',
+          description: errorMsg,
           variant: 'destructive',
+          duration: 7000,
         })
       }
-
-      setSubmitting(false)
-      return
-    }
-
-    let result: any
-    try {
-      result = await res.json()
-    } catch (parseErr) {
-      console.error('[POS] Failed to parse invoice response:', parseErr)
+    } catch (error: any) {
+      console.error('[POS] Invoice submission exception:', error)
       toast({
-        title: 'خطای سرور',
-        description: `خطا در ثبت فاکتور (کد ${res.status})`,
+        title: 'خطا',
+        description: error?.message || 'خطا در ثبت فاکتور',
         variant: 'destructive',
       })
-      setSubmitting(false)
-      return
     }
 
-    console.log('[POS] Invoice API response:', {
-      status: res.status,
-      success: result.success,
-      error: result.error,
-      invoiceId: result.data?.id,
-      invoiceNumber: result.data?.number,
-    })
-
-    if (res.ok && result.success) {
-      const isInstallment = ptFinal === 'installment'
-      const isCredit = ptFinal === 'credit'
-      const isCheck = ptFinal === 'check'
-
-      if (isInstallment && result.data?.installmentPlan) {
-        const plan = result.data.installmentPlan
-        toast({
-          title: 'فاکتور قسطی ثبت شد',
-          description: `فاکتور با ${(plan.numberOfInstallments || 0).toLocaleString('fa-IR')} قسط و پیش‌پرداخت ${formatPrice(plan.downPayment)} ریال ثبت شد.`,
-        })
-      } else if (isInstallment) {
-        toast({
-          title: 'فاکتور قسطی ثبت شد',
-          description: `فاکتور قسطی با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
-        })
-      } else if (isCredit) {
-        toast({
-          title: 'فاکتور نسیه ثبت شد',
-          description: `فاکتور نسیه با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
-        })
-      } else if (!isCheck) {
-        toast({
-          title: 'فاکتور تأیید شد',
-          description: `فاکتور با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد`,
-        })
-      }
-
-         // ★ v11.4: چک در همان API فاکتور ایجاد شده - فقط پیام موفقیت
-      if (isCheck) {
-        const invoiceNumber = result.data?.number || ''
-        const createdCheck = (result.data as any)?.createdCheck || null
-        
-        console.log('[POS] 📥 Invoice response:', {
-          invoiceId: result.data?.id,
-          invoiceNumber: result.data?.number,
-          createdCheck: createdCheck ? '✓' : '✗',
-        })
-  if (createdCheck) {
-  // ★ نمایش کامل خطای واقعی برای دیباگ
-  toast({
-    title: '❌ خطا در ثبت چک (فاکتور ثبت شد)',
-    description: `کد: ${createdCheck._errorCode || 'نامشخص'} | پیام: ${createdCheck._errorMessage || 'نامشخص'} | جزئیات: ${JSON.stringify(createdCheck._errorMeta || {})}`,
-    variant: 'destructive',
-    duration: 60000, // یک دقیقه باز می‌مونه
-  })
-}if (createdCheck) {
-  toast({
-    title: '✓ فاکتور و چک ثبت شد',
-    description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
-    duration: 5000,
-  })
-} else {
-  toast({
-    title: '✓ فاکتور ثبت شد',
-    description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
-    duration: 5000,
-  })
-}
-        // رویداد به‌روزرسانی چک‌ها
-        window.dispatchEvent(new Event('checks-updated'))
-      }
-      setInstallmentPlan(null)
-      setInstallmentDialogOpen(false)
-      setConfirmDialogOpen(false)
-      setPaymentType(null as any)
-      setTaxOverrideAmount(null)
-      setInvoiceDiscountPercent('')
-
-      // ریست state های مودال چک
-      setCheckNumber('')
-      setCheckBank('')
-      setCheckDueDate('')
-      setCheckPayee('')
-      setCheckCustomerSearch('')
-      setCheckSelectedCustomerId(null)
-      setCheckSelectedCustomerName('')
-
-      const printSettings =
-        typeof window !== 'undefined'
-          ? localStorage.getItem('auto-print-settings')
-          : null
-      if (printSettings) {
-        try {
-          const ps = JSON.parse(printSettings)
-          if (ps.enabled && ps.paymentTypes && ps.paymentTypes.length > 0) {
-            const currentPaymentType = (paymentType || 'cash').toLowerCase()
-            if (ps.paymentTypes.includes(currentPaymentType)) {
-              const cartCopy = [...cart]
-              const totalsCopy = { ...cartTotals }
-              const customerCopy = customers.find((c) => c.id === finalCustomerId)
-              const paymentTypeCopy = paymentType
-
-              const savedTemplate = ps.template || '8cm'
-              const mappedTemplate: PrintTemplate =
-                savedTemplate === 'a4'
-                  ? 'a4'
-                  : savedTemplate === '58mm'
-                  ? 'thermal-58mm'
-                  : 'thermal-80mm'
-              setThermalPrintTemplate(mappedTemplate)
-
-              const customerNameForPrint = customerCopy
-                ? `${customerCopy.firstName || ''} ${customerCopy.lastName || ''}`.trim()
-                : 'فروش عمومی'
-
-              const paymentTypeLabelForPrint = (() => {
-                const cfg = paymentTypeConfig.find((c) => c.value === paymentTypeCopy)
-                return cfg?.label ?? (paymentTypeCopy || 'نقدی')
-              })()
-
-              const pt = (paymentTypeCopy || '').toLowerCase()
-              const paidAmountForPrint =
-                pt === 'credit'
-                  ? 0
-                  : pt === 'installment'
-                  ? installmentDownPayment
-                  : totalsCopy.totalAmount
-
-              const settings: any = (() => {
-                if (typeof window === 'undefined') return {}
-                const saved = localStorage.getItem('invoice-template-settings')
-                try {
-                  return saved ? JSON.parse(saved) : {}
-                } catch {
-                  return {}
-                }
-              })()
-
-              const autoPrintReceiptData: PrintReceiptData = {
-                invoiceNumber:
-                  result.data?.number || `INV-${Date.now().toString().slice(-6)}`,
-                invoiceDate: new Date().toLocaleDateString('fa-IR'),
-                customerName: customerNameForPrint,
-                cashierName: user?.username || undefined,
-                items: cartCopy.map((item: any) => ({
-                  productName: item.productName,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  discount: item.discount || 0,
-                  lineTotal: item.lineTotal,
-                  unitLabel: item.unitLabel,
-                })),
-                subTotal: totalsCopy.subTotal,
-                discountAmount: totalsCopy.discountAmount,
-                invoiceDiscountAmount: totalsCopy.invoiceDiscountAmount || 0,
-                taxAmount: totalsCopy.taxAmount,
-                totalAmount: totalsCopy.totalAmount,
-                paidAmount: paidAmountForPrint,
-                remainingAmount: Math.max(0, totalsCopy.totalAmount - paidAmountForPrint),
-                paymentType: paymentTypeCopy || 'cash',
-                paymentTypeLabel: paymentTypeLabelForPrint,
-                storeName: storeName || 'فروشگاه',
-                storeAddress: settings.storeAddress,
-                storePhone: settings.storePhone,
-                headerText: settings.headerText || 'فاکتور فروش',
-                footerText: settings.footerText || 'با تشکر از خرید شما',
-                bankAccounts: settings.bankAccounts,
-                logoData: settings.logoData,
-                currency: 'ریال',
-              }
-
-              pendingAutoPrintDataRef.current = autoPrintReceiptData
-              setAutoPrintMode(true)
-
-              setTimeout(() => {
-                setThermalPrintOpen(true)
-                toast({
-                  title: 'فاکتور ثبت شد',
-                  description: 'لطفاً قالب چاپ را انتخاب کنید',
-                })
-              }, 500)
-            }
-          }
-        } catch (e) {
-          console.warn('[POS] Auto-print failed (non-blocking):', e)
-        }
-      }
-
-      clearCart()
-      posSearchSetQuery('')
-      setSelectedCategory('all')
-      await posLoadRecents()
-      loadData()
-
-    } else {
-      const errorMsg =
-        result.error || result.message || `خطای سرور (کد ${res.status})`
-      console.error('[POS] Invoice creation failed:', errorMsg)
-      toast({
-        title: 'خطا در ثبت فاکتور',
-        description: errorMsg,
-        variant: 'destructive',
-        duration: 7000,
-      })
-    }
-  } catch (error: any) {
-    console.error('[POS] Invoice submission exception:', error)
-    toast({
-      title: 'خطا',
-      description: error?.message || 'خطا در ثبت فاکتور',
-      variant: 'destructive',
-    })
-  }
-
-  setSubmitting(false)
-}, [
-  cart,
-  cartTotals,
-  paymentType,
-  selectedCustomerId,
-  selectedCustomerName,
-  selectedWarehouseId,
-  clearCart,
-  loadData,
-  toast,
-  installmentCalc,
-  installmentDownPayment,
-  installmentCount,
-  installmentInterestRate,
-  installmentPeriod,
-  creditDueDate,
-  creditDescription,
-  setInstallmentPlan,
-  posSearchSetQuery,
-  posLoadRecents,
-  customers,
-  storeName,
-  user,
-  branchId,
-  products,
-  checkNumber,
-  checkBank,
-  checkDueDate,
-  checkPayee,
-  checkSelectedCustomerId,
-  checkSelectedCustomerName,
-  checkCustomerSearch,
-  setCheckNumber,
-  setCheckBank,
-  setCheckDueDate,
-  setCheckPayee,
-  setCheckCustomerSearch,
-  setCheckSelectedCustomerId,
-  setCheckSelectedCustomerName,
-])
+    setSubmitting(false)
+  }, [
+    cart,
+    cartTotals,
+    paymentType,
+    selectedCustomerId,
+    selectedCustomerName,
+    selectedWarehouseId,
+    clearCart,
+    loadData,
+    toast,
+    installmentCalc,
+    installmentDownPayment,
+    installmentCount,
+    installmentInterestRate,
+    installmentPeriod,
+    creditDueDate,
+    creditDescription,
+    setInstallmentPlan,
+    posSearchSetQuery,
+    posLoadRecents,
+    customers,
+    storeName,
+    user,
+    branchId,
+    products,
+    checkNumber,
+    checkBank,
+    checkDueDate,
+    checkPayee,
+    checkSelectedCustomerId,
+    checkSelectedCustomerName,
+    checkCustomerSearch,
+  ])
 
   // ★ v11.2: تأیید مودال چک و باز کردن مودال تأیید نهایی
-const handleConfirmCheck = useCallback(() => {
-  // Validation
-  if (!checkNumber.trim()) {
-    toast({ title: 'خطا', description: 'شماره چک الزامی است', variant: 'destructive' })
-    return
-  }
-  if (!checkBank.trim()) {
-    toast({ title: 'خطا', description: 'نام بانک الزامی است', variant: 'destructive' })
-    return
-  }
-  if (!checkDueDate) {
-    toast({ title: 'خطا', description: 'تاریخ سررسید الزامی است', variant: 'destructive' })
-    return
-  }
+  const handleConfirmCheck = useCallback(() => {
+    if (!checkNumber.trim()) {
+      toast({ title: 'خطا', description: 'شماره چک الزامی است', variant: 'destructive' })
+      return
+    }
+    if (!checkBank.trim()) {
+      toast({ title: 'خطا', description: 'نام بانک الزامی است', variant: 'destructive' })
+      return
+    }
+    if (!checkDueDate) {
+      toast({ title: 'خطا', description: 'تاریخ سررسید الزامی است', variant: 'destructive' })
+      return
+    }
 
-  // بستن مودال چک و باز کردن مودال تأیید نهایی
-  setCheckDialogOpen(false)
-  setConfirmDialogOpen(true)
-}, [checkNumber, checkBank, checkDueDate, toast])
+    setCheckDialogOpen(false)
+    setConfirmDialogOpen(true)
+  }, [checkNumber, checkBank, checkDueDate, toast])
 
   const handlePrintInvoice = useCallback(() => {
     if (cart.length === 0) {
@@ -2993,7 +3061,7 @@ const handleConfirmCheck = useCallback(() => {
     } finally {
       setPrintSubmitting(false)
     }
-  }, [autoPrintMode, pendingAutoPrintDataRef, receiptData, selectedPrintTemplate, toast])
+  }, [autoPrintMode, receiptData, selectedPrintTemplate, toast])
 
   const previewWidth = selectedPrintTemplate === 'thermal-58mm' ? 220 : selectedPrintTemplate === 'thermal-80mm' ? 300 : 460
 
@@ -3004,7 +3072,7 @@ const handleConfirmCheck = useCallback(() => {
       : receiptData
     if (!currentData) return ''
     return generatePrintHtml(selectedPrintTemplate, currentData)
-  }, [thermalPrintOpen, autoPrintMode, pendingAutoPrintDataRef, receiptData, selectedPrintTemplate])
+  }, [thermalPrintOpen, autoPrintMode, receiptData, selectedPrintTemplate])
 
   const handleInstallmentConfirm = useCallback(() => {
     if (!installmentCalc) return
@@ -3076,18 +3144,8 @@ const handleConfirmCheck = useCallback(() => {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleConfirmInvoice, posSearchSetQuery])
-    // ============ Render ============
 
-  if (!hasHydrated) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 gap-3">
-        <div className="animate-spin rounded-full h-10 w-10 border-3 border-emerald-200 border-t-emerald-600" />
-        <p className="text-slate-400 text-xs">در حال بارگذاری صندوق فروش...</p>
-      </div>
-    )
-  }
-
-   // ============ Render ============
+  // ============ Render ============
 
   if (!hasHydrated) {
     return (
@@ -3160,59 +3218,169 @@ const handleConfirmCheck = useCallback(() => {
                 focus:bg-white focus:border-emerald-400 focus:ring-emerald-400/20 
                 font-medium"
             />
-                         {/* وضعیت جستجو */}
-              <div className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {(!isOnline || !navigator.onLine) && posSearchQuery.trim().length >= 2 ? (
-                  <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded hidden sm:block flex items-center gap-0.5">
-                    <WifiOff className="w-2.5 h-2.5" />
-                    {toFaNum(filteredProducts.length)} نتیجه
-                  </span>
-                ) : posSearchStatus === 'searching' ? (
-                  <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                ) : posSearchQuery.trim().length >= 2 && posSearchStatus === 'success' ? (
-                  <span className="text-[9px] text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded hidden sm:block">
-                    {toFaNum(posSearchResults.length)} نتیجه
-                  </span>
-                ) : (
-                  <Barcode className="w-3.5 h-3.5 text-slate-300" />
-                )}
-              </div>
+            {/* وضعیت جستجو */}
+            <div className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {(!isOnline || !navigator.onLine) && posSearchQuery.trim().length >= 2 ? (
+                <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded hidden sm:block flex items-center gap-0.5">
+                  <WifiOff className="w-2.5 h-2.5" />
+                  {toFaNum(filteredProducts.length)} نتیجه
+                </span>
+              ) : posSearchStatus === 'searching' ? (
+                <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+              ) : posSearchQuery.trim().length >= 2 && posSearchStatus === 'success' ? (
+                <span className="text-[9px] text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded hidden sm:block">
+                  {toFaNum(filteredProducts.length)} نتیجه
+                </span>
+              ) : (
+                <Barcode className="w-3.5 h-3.5 text-slate-300" />
+              )}
+            </div>
 
-            {/* Lookup Dropdown */}
+            {/* ═══════════════════════════════════════════════════════════
+                ★★★ v11.5: Lookup Dropdown حرفه‌ای با Navigation کیبورد
+            ═══════════════════════════════════════════════════════════ */}
             {posSearchQuery.trim().length >= 2 && filteredProducts.length > 0 && (
               <div
-                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-[60vh] overflow-y-auto"
+                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl"
                 style={{ top: '100%', right: 0 }}
               >
-                <div className="sticky top-0 bg-slate-50 px-2.5 py-1.5 text-[10px] text-slate-600 border-b border-slate-100 flex items-center justify-between">
-                  <span className="flex items-center gap-1 font-medium">
+                {/* هدر dropdown */}
+                <div className="sticky top-0 bg-gradient-to-l from-emerald-50 via-emerald-50/50 to-white border-b border-slate-100 flex items-center justify-between px-3 py-2 z-10">
+                  <div className="flex items-center gap-1.5">
                     <Search className="w-3 h-3 text-emerald-500" />
-                    {toFaNum(filteredProducts.length)} نتیجه
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => posSearchSetQuery('')}
-                    className="text-slate-400 hover:text-red-500 flex items-center gap-0.5"
-                    title="بستن نتایج"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                    <span className="text-[10px] text-emerald-700 font-bold">
+                      {toFaNum(filteredProducts.length)} نتیجه یافت شد
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] text-slate-400 hidden sm:inline">
+                      ↑↓ ناوبری • Enter انتخاب • Esc بستن
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        posSearchSetQuery('')
+                        setHighlightedIndex(-1)
+                      }}
+                      className="text-slate-400 hover:text-red-500 flex items-center gap-0.5"
+                      title="بستن نتایج"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
-                {filteredProducts.map((product) => (
-                  <ProductLookupItem
-                    key={product.id}
-                    product={product}
-                    cartQuantity={cart.find((c) => c.productId === product.id)?.quantity || 0}
-                    onAdd={(p) => {
-                      handleAddToCart(p)
-                    }}
-                  />
-                ))}
+
+                {/* لیست نتایج */}
+                <div className="max-h-[60vh] overflow-y-auto">
+                  {filteredProducts.map((product, idx) => {
+                    const isHighlighted = idx === highlightedIndex
+                    const hasStock = (product.currentStock || 0) > 0
+                    const isLowStock = hasStock && (product.currentStock || 0) < 5
+                    const unitLabel = getUnitLabel(product)
+                    const cartQuantity = cart.find((c) => c.productId === product.id)?.quantity || 0
+
+                    return (
+                      <button
+                        key={product.id}
+                        id={`pos-product-item-${idx}`}
+                        type="button"
+                        disabled={!hasStock}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
+                        onClick={() => {
+                          if (!hasStock) return
+                          handleAddToCart(product)
+                          toast({ title: '✓ افزودن به سبد', description: product.name })
+                          posSearchSetQuery('')
+                          setHighlightedIndex(-1)
+                          searchInputRef.current?.focus()
+                        }}
+                        className={`w-full text-right px-3 py-2.5 border-b border-slate-50 last:border-0 transition-all duration-100 ${
+                          !hasStock
+                            ? 'opacity-40 cursor-not-allowed'
+                            : isHighlighted
+                              ? 'bg-gradient-to-l from-emerald-50 via-emerald-50/50 to-purple-50 border-r-4 border-r-emerald-500'
+                              : 'hover:bg-slate-50/70 border-r-4 border-r-transparent'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          {/* بخش چپ: اطلاعات محصول */}
+                          <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                            {cartQuantity > 0 && (
+                              <span className="bg-emerald-600 text-white text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                                {toFaNum(cartQuantity)}
+                              </span>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                <span className={`font-semibold text-xs truncate ${isHighlighted ? 'text-slate-900' : 'text-slate-700'}`}>
+                                  {highlightText(product.name, posSearchQuery)}
+                                </span>
+                                {!hasStock && (
+                                  <span className="text-[8px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 shrink-0 font-bold">
+                                    ناموجود
+                                  </span>
+                                )}
+                                {isLowStock && (
+                                  <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200 shrink-0 font-bold">
+                                    کم‌موجود
+                                  </span>
+                                )}
+                                {hasStock && !isLowStock && (
+                                  <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-100 shrink-0">
+                                    ✓ موجود
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <span className="font-mono font-medium bg-slate-100 px-1 rounded" dir="ltr">
+                                  {product.code}
+                                </span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-600">{unitLabel}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className={hasStock ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                                  موجودی: {toFaNum(product.currentStock || 0)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* بخش راست: قیمت فروش */}
+                          <div className="text-left shrink-0">
+                            <div className="text-[9px] text-slate-400 mb-0.5">قیمت فروش</div>
+                            <div className="text-xs font-bold text-emerald-700" dir="rtl">
+                              {formatPrice(product.salePrice || 0)}
+                            </div>
+                          </div>
+
+                          {/* نشانگر انتخاب */}
+                          {isHighlighted && hasStock && (
+                            <div className="shrink-0 self-center">
+                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* فوتر */}
+                <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[9px] text-slate-500 text-center flex items-center justify-center gap-1">
+                  <span>💡</span>
+                  <span>با ↑↓ کالا را انتخاب و Enter بزنید تا به سبد اضافه شود</span>
+                </div>
               </div>
             )}
+
+            {/* حالت هیچ نتیجه‌ای یافت نشد */}
             {posSearchQuery.trim().length >= 2 && filteredProducts.length === 0 && posSearchStatus !== 'searching' && (
               <div
-                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl p-4 text-center"
+                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl p-4 text-center"
                 style={{ top: '100%', right: 0 }}
               >
                 <Package className="w-6 h-6 mx-auto text-slate-300 mb-1.5" />
@@ -3267,11 +3435,9 @@ const handleConfirmCheck = useCallback(() => {
         </div>
       </div>
 
-
-            {/* ★★★ نوار اطلاعات شعبه و انبار فعال ★★★ */}
+      {/* ★★★ نوار اطلاعات شعبه و انبار فعال ★★★ */}
       <div className="bg-gradient-to-l from-emerald-50 via-teal-50 to-cyan-50 border-b border-emerald-200 px-2 sm:px-3 py-1.5 sm:py-2">
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* آیکون فروشگاه */}
           <div className="flex items-center gap-1.5">
             <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center shrink-0">
               <Store className="w-3.5 h-3.5 text-white" />
@@ -3281,10 +3447,8 @@ const handleConfirmCheck = useCallback(() => {
             </span>
           </div>
 
-          {/* جداکننده */}
           <div className="w-px h-4 bg-emerald-300" />
 
-          {/* شعبه */}
           <div className="flex items-center gap-1.5">
             <Building2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
             <span className="text-[10px] sm:text-xs text-slate-600">شعبه:</span>
@@ -3299,10 +3463,8 @@ const handleConfirmCheck = useCallback(() => {
             )}
           </div>
 
-          {/* جداکننده */}
           <div className="w-px h-4 bg-emerald-300" />
 
-          {/* انبار */}
           <div className="flex items-center gap-1.5">
             <Package className="w-3.5 h-3.5 text-blue-600 shrink-0" />
             <span className="text-[10px] sm:text-xs text-slate-600">انبار:</span>
@@ -3317,7 +3479,6 @@ const handleConfirmCheck = useCallback(() => {
             )}
           </div>
 
-          {/* وضعیت اتصال */}
           <div className="flex-1" />
           <div className="flex items-center gap-1">
             <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
@@ -3384,26 +3545,25 @@ const handleConfirmCheck = useCallback(() => {
               </div>
             ) : (
               <div className="p-1 sm:p-1.5 space-y-px">
-             {cart.map((item) => {
-  const product = products.find((p) => p.id === item.productId)
-  // ★ DECIMAL: واحد و نوع اعشاری بودن
-  const unitLabel = product ? getUnitLabel(product) : (item.unitLabel || 'عدد')
-  const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
-  return (
-    <CompactCartItemRow
-      key={item.productId}
-      item={item}
-      unitLabel={unitLabel}
-      isDecimal={isDecimal}
-      onIncrease={handleIncreaseQuantity}
-      onDecrease={handleDecreaseQuantity}
-      onRemove={removeFromCart}
-      onQuantityChange={handleQuantityChange}
-      onUnitPriceChange={handleUnitPriceChange}
-      onDiscountChange={handleDiscountChange}
-    />
-  )
-})}
+                {cart.map((item) => {
+                  const product = products.find((p) => p.id === item.productId)
+                  const unitLabel = product ? getUnitLabel(product) : (item.unitLabel || 'عدد')
+                  const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+                  return (
+                    <CompactCartItemRow
+                      key={item.productId}
+                      item={item}
+                      unitLabel={unitLabel}
+                      isDecimal={isDecimal}
+                      onIncrease={handleIncreaseQuantity}
+                      onDecrease={handleDecreaseQuantity}
+                      onRemove={removeFromCart}
+                      onQuantityChange={handleQuantityChange}
+                      onUnitPriceChange={handleUnitPriceChange}
+                      onDiscountChange={handleDiscountChange}
+                    />
+                  )
+                })}
               </div>
             )}
           </ScrollArea>
@@ -3492,14 +3652,12 @@ const handleConfirmCheck = useCallback(() => {
 
       {/* ==================== BOTTOM BAR ==================== */}
       <div className="bg-white border-t border-slate-200 shrink-0 shadow-[0_-2px_6px_rgba(0,0,0,0.05)]">
-              {/* نوع پرداخت */}
+        {/* نوع پرداخت */}
         <div className="px-2 sm:px-3 pt-2 pb-1.5 sm:pt-2.5 sm:pb-2">
-          {/* Label */}
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] sm:text-xs font-bold text-slate-700">نوع پرداخت <span className="text-red-500">*</span></span>
           </div>
 
-          {/* ★★★ v11.1: بنر اطلاع‌رسانی غیرفعال بودن یکپارچه‌سازی کارتخوان */}
           {!posIntegrationEnabled && (
             <div className="mb-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
@@ -3509,19 +3667,16 @@ const handleConfirmCheck = useCallback(() => {
             </div>
           )}
 
-          {/* Radio Buttons */}
           <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap flex-1">
             {paymentTypeConfig.map((pt) => {
               const Icon = pt.icon
               const isActive = paymentType === pt.value
-              // ★★★ v11.1: بررسی مجوز بر اساس پلن + یکپارچه‌سازی کارتخوان
               const isAllowedByPlan = planFeatures.posPaymentTypes.includes(pt.value.toLowerCase() as any)
               const isAllowedByIntegration = pt.value.toLowerCase() === 'card' ? posIntegrationEnabled : true
               const isAllowed = isAllowedByPlan && isAllowedByIntegration
-              
-              // ★★★ v11.1: اگر مجاز نیست، اصلاً رندر نکن (مخفی کردن کامل دکمه)
+
               if (!isAllowed) return null
-              
+
               return (
                 <label
                   key={pt.value}
@@ -3534,12 +3689,11 @@ const handleConfirmCheck = useCallback(() => {
                         : `${pt.inactiveBg} ${pt.inactiveBorder} ${pt.inactiveText} ${pt.hoverBg} cursor-pointer`
                   }`}
                   title={
-                    !isAllowedByIntegration 
-                      ? 'کارتخوان غیرفعال است - از تنظیمات فعال کنید' 
+                    !isAllowedByIntegration
+                      ? 'کارتخوان غیرفعال است - از تنظیمات فعال کنید'
                       : pt.label
                   }
                 >
-                  {/* Radio Circle */}
                   {!isAllowed ? (
                     <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-amber-400" />
                   ) : (
@@ -3556,10 +3710,8 @@ const handleConfirmCheck = useCallback(() => {
                     </span>
                   )}
 
-                  {/* Icon */}
                   <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${!isAllowed ? 'text-gray-300' : ''}`} />
 
-                  {/* Label Text */}
                   <span className={`font-bold whitespace-nowrap ${!isAllowed ? 'line-through' : ''}`}>
                     {pt.label}
                   </span>
@@ -3596,12 +3748,12 @@ const handleConfirmCheck = useCallback(() => {
                 ) : (
                   <>
                     {selectedCustomerId && (
-                     <button 
-  onClick={() => { setCustomer(null, null); setCustomerSearch('') }} 
-  className="w-full text-right p-2 hover:bg-gray-50 border-b"
->
-  <span className="text-[10px] text-gray-400">حذف انتخاب</span>
-</button>
+                      <button
+                        onClick={() => { setCustomer(null, null); setCustomerSearch('') }}
+                        className="w-full text-right p-2 hover:bg-gray-50 border-b"
+                      >
+                        <span className="text-[10px] text-gray-400">حذف انتخاب</span>
+                      </button>
                     )}
                     {customerSearchResults.filter((c: any) => !c.isBlacklisted).map((c: any) => {
                       const displayName = c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'بدون نام'
@@ -3623,7 +3775,6 @@ const handleConfirmCheck = useCallback(() => {
             )}
           </div>
 
-          {/* جداکننده */}
           <div className="hidden sm:block w-px h-6 bg-slate-200"></div>
 
           {/* جمع */}
@@ -3634,7 +3785,6 @@ const handleConfirmCheck = useCallback(() => {
             <span className="text-[8px] sm:text-[9px] text-slate-400">ریال</span>
           </div>
 
-          {/* جداکننده */}
           <div className="hidden sm:block w-px h-6 bg-slate-200"></div>
 
           {/* دکمه‌ها */}
@@ -3683,7 +3833,8 @@ const handleConfirmCheck = useCallback(() => {
           </div>
         </div>
       </div>
-            {/* ==================== MODALS ==================== */}
+
+      {/* ==================== MODALS ==================== */}
 
       {/* Card Payment */}
       <Dialog open={cardPaymentDialogOpen} onOpenChange={(open) => {
@@ -4070,146 +4221,139 @@ const handleConfirmCheck = useCallback(() => {
       </Dialog>
 
       {/* ★ v11.2: مودال ثبت چک */}
-<Dialog open={checkDialogOpen} onOpenChange={setCheckDialogOpen}>
-  <DialogContent className="sm:max-w-[500px] w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto" dir="rtl">
-    <DialogHeader>
-      <DialogTitle className="flex items-center gap-2 text-cyan-700 text-sm sm:text-base">
-        <Landmark className="w-4 h-4" />
-        ثبت چک دریافتنی
-      </DialogTitle>
-      <DialogDescription className="text-xs">
-        اطلاعات چک مشتری را وارد کنید
-      </DialogDescription>
-    </DialogHeader>
+      <Dialog open={checkDialogOpen} onOpenChange={setCheckDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-cyan-700 text-sm sm:text-base">
+              <Landmark className="w-4 h-4" />
+              ثبت چک دریافتنی
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              اطلاعات چک مشتری را وارد کنید
+            </DialogDescription>
+          </DialogHeader>
 
-    <div className="space-y-3 py-3 text-[11px] sm:text-xs">
-      {/* مبلغ کل */}
-      <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-cyan-50 border border-cyan-200">
-        <span className="text-cyan-700 font-medium">مبلغ چک:</span>
-        <span className="font-black text-sm text-cyan-900">
-          {formatPrice(cartTotals.totalAmount)} ریال
-        </span>
-      </div>
+          <div className="space-y-3 py-3 text-[11px] sm:text-xs">
+            <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-cyan-50 border border-cyan-200">
+              <span className="text-cyan-700 font-medium">مبلغ چک:</span>
+              <span className="font-black text-sm text-cyan-900">
+                {formatPrice(cartTotals.totalAmount)} ریال
+              </span>
+            </div>
 
-      {/* نوع چک */}
-      <div className="grid grid-cols-2 gap-1.5 mt-2">
-        <button
-          type="button"
-          className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-cyan-50 border-cyan-500 shadow-sm"
-        >
-          <Landmark className="w-5 h-5 text-cyan-600 shrink-0" />
-          <div className="text-right">
-            <span className="text-[11px] font-bold block leading-tight text-cyan-700">
-              دریافتنی
-            </span>
-            <span className="text-[9px] text-cyan-500 leading-tight block">
-              از مشتری
-            </span>
+            <div className="grid grid-cols-2 gap-1.5 mt-2">
+              <button
+                type="button"
+                className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-cyan-50 border-cyan-500 shadow-sm"
+              >
+                <Landmark className="w-5 h-5 text-cyan-600 shrink-0" />
+                <div className="text-right">
+                  <span className="text-[11px] font-bold block leading-tight text-cyan-700">
+                    دریافتنی
+                  </span>
+                  <span className="text-[9px] text-cyan-500 leading-tight block">
+                    از مشتری
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                disabled
+                className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed"
+              >
+                <CreditCardIcon className="w-5 h-5 text-gray-400 shrink-0" />
+                <div className="text-right">
+                  <span className="text-[11px] font-bold block leading-tight text-gray-400">
+                    پرداختنی
+                  </span>
+                  <span className="text-[9px] text-gray-400 leading-tight block">
+                    به تامین‌کننده
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                شماره چک <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="text"
+                value={checkNumber}
+                onChange={(e) => setCheckNumber(e.target.value)}
+                placeholder="مثلاً: 123456"
+                className="h-8 sm:h-9 text-xs"
+                dir="ltr"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                نام بانک <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="text"
+                value={checkBank}
+                onChange={(e) => setCheckBank(e.target.value)}
+                placeholder="مثلاً: بانک ملت"
+                className="h-8 sm:h-9 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                تاریخ سررسید <span className="text-red-500">*</span>
+              </Label>
+              <ShamsiDatePicker
+                value={checkDueDate}
+                onChange={setCheckDueDate}
+                placeholder="انتخاب تاریخ سررسید"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                در وجه (اختیاری)
+              </Label>
+              <Input
+                type="text"
+                value={checkPayee}
+                onChange={(e) => setCheckPayee(e.target.value)}
+                placeholder="نام شخص یا شرکت"
+                className="h-8 sm:h-9 text-xs"
+              />
+            </div>
+
+            {selectedCustomer && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-2 text-[10px] text-blue-700">
+                <div className="flex items-center gap-1.5">
+                  <User className="w-3 h-3" />
+                  <span className="font-medium">مشتری: </span>
+                  <span className="font-bold">{selectedCustomerName}</span>
+                </div>
+              </div>
+            )}
           </div>
-        </button>
-        <button
-          type="button"
-          disabled
-          className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed"
-        >
-          <CreditCardIcon className="w-5 h-5 text-gray-400 shrink-0" />
-          <div className="text-right">
-            <span className="text-[11px] font-bold block leading-tight text-gray-400">
-              پرداختنی
-            </span>
-            <span className="text-[9px] text-gray-400 leading-tight block">
-              به تامین‌کننده
-            </span>
-          </div>
-        </button>
-      </div>
 
-      {/* شماره چک */}
-      <div className="space-y-1">
-        <Label className="text-slate-600 font-medium">
-          شماره چک <span className="text-red-500">*</span>
-        </Label>
-        <Input
-          type="text"
-          value={checkNumber}
-          onChange={(e) => setCheckNumber(e.target.value)}
-          placeholder="مثلاً: 123456"
-          className="h-8 sm:h-9 text-xs"
-          dir="ltr"
-          autoFocus
-        />
-      </div>
-
-      {/* بانک */}
-      <div className="space-y-1">
-        <Label className="text-slate-600 font-medium">
-          نام بانک <span className="text-red-500">*</span>
-        </Label>
-        <Input
-          type="text"
-          value={checkBank}
-          onChange={(e) => setCheckBank(e.target.value)}
-          placeholder="مثلاً: بانک ملت"
-          className="h-8 sm:h-9 text-xs"
-        />
-      </div>
-
-      {/* تاریخ سررسید */}
-      <div className="space-y-1">
-        <Label className="text-slate-600 font-medium">
-          تاریخ سررسید <span className="text-red-500">*</span>
-        </Label>
-        <ShamsiDatePicker 
-          value={checkDueDate} 
-          onChange={setCheckDueDate} 
-          placeholder="انتخاب تاریخ سررسید"
-        />
-      </div>
-
-      {/* در وجه (اختیاری) */}
-      <div className="space-y-1">
-        <Label className="text-slate-600 font-medium">
-          در وجه (اختیاری)
-        </Label>
-        <Input
-          type="text"
-          value={checkPayee}
-          onChange={(e) => setCheckPayee(e.target.value)}
-          placeholder="نام شخص یا شرکت"
-          className="h-8 sm:h-9 text-xs"
-        />
-      </div>
-
-      {/* اطلاعات مشتری */}
-      {selectedCustomer && (
-        <div className="rounded-lg bg-blue-50 border border-blue-200 p-2 text-[10px] text-blue-700">
-          <div className="flex items-center gap-1.5">
-            <User className="w-3 h-3" />
-            <span className="font-medium">مشتری: </span>
-            <span className="font-bold">{selectedCustomerName}</span>
-          </div>
-        </div>
-      )}
-    </div>
-
-    <DialogFooter className="gap-2 sm:gap-0">
-      <Button 
-        variant="outline" 
-        onClick={() => setCheckDialogOpen(false)} 
-        className="border-slate-300 text-xs sm:text-sm h-8 sm:h-9"
-      >
-        انصراف
-      </Button>
-      <Button 
-        onClick={handleConfirmCheck} 
-        className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs sm:text-sm h-8 sm:h-9"
-      >
-        <Landmark className="w-3.5 h-3.5 ml-1" />
-        تأیید و ادامه
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setCheckDialogOpen(false)}
+              className="border-slate-300 text-xs sm:text-sm h-8 sm:h-9"
+            >
+              انصراف
+            </Button>
+            <Button
+              onClick={handleConfirmCheck}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs sm:text-sm h-8 sm:h-9"
+            >
+              <Landmark className="w-3.5 h-3.5 ml-1" />
+              تأیید و ادامه
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* اسکن دوربین */}
       <BarcodeScannerModal
@@ -4633,6 +4777,7 @@ interface CompactCartItemRowProps {
   onUnitPriceChange: (productId: string, newPrice: number) => void
   onDiscountChange: (productId: string, newDiscount: number) => void
 }
+
 function CompactCartItemRow({
   item,
   unitLabel,
@@ -4646,14 +4791,12 @@ function CompactCartItemRow({
 }: CompactCartItemRowProps) {
   const [localPrice, setLocalPrice] = useState(toFaNum(item.unitPrice))
   const [localDiscount, setLocalDiscount] = useState(toFaNum(item.discount))
-  // ★ DECIMAL: state محلی برای ویرایش تعداد
   const [localQty, setLocalQty] = useState(toFaNum(item.quantity))
   const priceInputRef = useRef<HTMLInputElement>(null)
   const discountInputRef = useRef<HTMLInputElement>(null)
   const qtyInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { setLocalPrice(toFaNum(item.unitPrice)) }, [item.unitPrice])
   useEffect(() => { setLocalDiscount(toFaNum(item.discount)) }, [item.discount])
-  // ★ DECIMAL: همگام‌سازی تعداد نمایشی با مقدار واقعی (پس از اعمال محدودیت موجودی)
   useEffect(() => { setLocalQty(toFaNum(item.quantity)) }, [item.quantity])
   const handlePriceBlur = useCallback(() => {
     const enVal = toEnNum(localPrice)
@@ -4673,7 +4816,6 @@ function CompactCartItemRow({
       setLocalDiscount(toFaNum(item.discount))
     }
   }, [localDiscount, item.discount, item.productId, onDiscountChange])
-  // ★ DECIMAL: ثبت تعداد ویرایش‌شده هنگام خروج از فیلد
   const handleQtyBlur = useCallback(() => {
     const newQty = parseQuantityInput(localQty)
     if (!isNaN(newQty) && newQty > 0 && newQty !== item.quantity) {
@@ -4699,7 +4841,7 @@ function CompactCartItemRow({
           {item.productName}
         </div>
       </div>
-      {/* ★ DECIMAL: تعداد قابل ویرایش + واحد */}
+      {/* تعداد قابل ویرایش + واحد */}
       <div className="flex items-center gap-1 shrink-0">
         <button
           type="button"
@@ -4762,68 +4904,5 @@ function CompactCartItemRow({
         {formatPrice(item.lineTotal)}
       </span>
     </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ★ Product Lookup Item
-// ══════════════════════════════════════════════════════════════════════════════
-
-interface ProductLookupItemProps {
-  product: Product
-  cartQuantity: number
-  onAdd: (product: Product) => void
-}
-
-function ProductLookupItem({ product, cartQuantity, onAdd }: ProductLookupItemProps) {
-  const isOutOfStock = product.currentStock <= 0
-  const dotColor = getStockDot(product.currentStock, product.minStock)
-  const unitLabel = getUnitLabel(product)
-
-  return (
-    <button
-      type="button"
-      onClick={() => !isOutOfStock && onAdd(product)}
-      disabled={isOutOfStock}
-      className={`w-full flex items-center justify-between gap-2 px-2 sm:px-2.5 py-2.5 text-right transition-colors border-b border-slate-50 last:border-0 text-[11px] sm:text-xs ${
-        isOutOfStock
-          ? 'opacity-40 cursor-not-allowed'
-          : cartQuantity > 0
-            ? 'bg-emerald-50/70 hover:bg-emerald-50'
-            : 'hover:bg-slate-50'
-      }`}
-    >
-      {/* نام + موجودی */}
-      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-        {cartQuantity > 0 && (
-          <span className="bg-emerald-600 text-white text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
-            {cartQuantity}
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <span className="text-[12px] sm:text-xs font-semibold text-slate-800 truncate block">
-            {product.name}
-          </span>
-          <span className="text-[9px] text-slate-400 block mt-0.5">
-            <span className={`w-1.5 h-1.5 rounded-full inline-block mr-1 ${dotColor}`}></span>
-            {toFaNum(formatPrice(product.currentStock))} {unitLabel}
-          </span>
-        </div>
-      </div>
-
-      {/* قیمت + دکمه */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className="font-bold text-emerald-600 text-[13px] whitespace-nowrap">
-          {formatPrice(product.salePrice)}
-        </span>
-        {isOutOfStock ? (
-          <AlertTriangle className="w-4 h-4 text-red-300" />
-        ) : (
-          <div className="w-6 h-6 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center transition-colors shadow-sm">
-            <Plus className="w-4 h-4 text-white font-bold" strokeWidth={3} />
-          </div>
-        )}
-      </div>
-    </button>
   )
 }

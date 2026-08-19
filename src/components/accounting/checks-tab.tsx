@@ -2,7 +2,8 @@
 
 // ============================================================================
 // src/components/accounting/checks-tab.tsx — Checks Tab
-// ShopAccounting v29 — با قابلیت آفلاین کامل + ریسپانسیو
+// ShopAccounting v29 — با قابلیت آفلاین کامل + ریسپانسیو + صفحه‌بندی
+// ★ v29.1: اضافه شدن صفحه‌بندی با محدودیت ۱۰ رکورد در هر صفحه
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
@@ -28,7 +29,8 @@ import {
 import {
   Plus, Search, Loader2, WifiOff, CreditCard, Eye,
   CheckCircle2, AlertCircle, Save, Pencil, Trash2, Calendar,
-  Ban, Clock, RefreshCw, Landmark,RotateCcw, XCircle, 
+  Ban, Clock, RefreshCw, Landmark, RotateCcw, XCircle,
+  ArrowLeft, ArrowRight,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -63,25 +65,16 @@ function formatCurrency(price: number | undefined | null): string {
 function formatDate(d: string): string {
   if (!d) return '—'
   try {
-    // Parse دستی ISO string بدون استفاده از Date (بدون مشکل timezone)
-    // فرمت‌های مورد انتظار:
-    //   - 2026-08-03
-    //   - 2026-08-03T00:00:00
-    //   - 2026-08-03T00:00:00.000Z
-    //   - 2026-08-03T10:30:00+03:30
     const isoMatch = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
     if (isoMatch) {
       const gy = parseInt(isoMatch[1], 10)
       const gm = parseInt(isoMatch[2], 10)
       const gd = parseInt(isoMatch[3], 10)
-      // اعتبارسنجی تاریخ
       if (gy >= 1900 && gy <= 2200 && gm >= 1 && gm <= 12 && gd >= 1 && gd <= 31) {
         const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
         return `${toFaNum(jy)}/${toFaNum(String(jm).padStart(2, '0'))}/${toFaNum(String(jd).padStart(2, '0'))}`
       }
     }
-
-    // Fallback: اگر فرمت ISO نبود، از Date استفاده کن (برای backward compatibility)
     const fallback = new Date(d)
     if (!isNaN(fallback.getTime())) {
       return fallback.toLocaleDateString('fa-IR', {
@@ -96,7 +89,6 @@ function formatDate(d: string): string {
   }
 }
 
-// ★ v9.4: فرمت طولانی تاریخ (مثلاً: ۱۳ مرداد ۱۴۰۵)
 function formatDateLong(d: string): string {
   if (!d) return '—'
   try {
@@ -449,7 +441,11 @@ export function ChecksTab() {
   // ─── State: Filter ────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'receivable' | 'payable'>('all')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'deposited' | 'cleared' | 'bounced'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'deposited' | 'cleared' | 'bounced' | 'returned'>('all')
+
+  // ─── State: Pagination (v29.1) ───────────────────────────
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
 
   // ─── State: Check Dialog (Add/Edit) ───────────────────────
   const [checkDialogOpen, setCheckDialogOpen] = useState(false)
@@ -479,14 +475,13 @@ export function ChecksTab() {
   const loadChecks = useCallback(async () => {
     setLoading(true)
     try {
-      // ۱. حالت آفلاین: خواندن از IndexedDB
       if (!isOnline) {
         const cachedChecks = await getCachedChecks()
         if (cachedChecks.length > 0) {
           setChecks(cachedChecks as Check[])
           toast({ 
             title: "حالت آفلاین", 
-            description: `${cachedChecks.length} چک از حافظه محلی بارگذاری شد`, 
+            description: `${toFaNum(cachedChecks.length)} چک از حافظه محلی بارگذاری شد`, 
             variant: "default" 
           })
         } else {
@@ -496,7 +491,6 @@ export function ChecksTab() {
         return
       }
 
-      // ۲. حالت آنلاین: دریافت از سرور
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/checks', { 
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } 
@@ -506,11 +500,9 @@ export function ChecksTab() {
         if (data.success && data.data) {
           const checkList = data.data.checks || data.data || []
           setChecks(checkList)
-          // ★★★ ذخیره در IndexedDB برای استفاده در حالت آفلاین
           await cacheChecks(checkList)
         }
       } else {
-        // اگر سرور خطا داد، از کش استفاده کن
         const cachedChecks = await getCachedChecks()
         if (cachedChecks.length > 0) {
           setChecks(cachedChecks as Check[])
@@ -538,12 +530,16 @@ export function ChecksTab() {
     loadChecks()
   }, [loadChecks])
 
+  // ★ v29.1: ریست صفحه هنگام تغییر فیلتر یا جستجو
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterType, filterStatus, searchQuery])
+
   // ═══════════════════════════════════════════════════════════
   // ★★★ Create Check (با Optimistic UI + SyncQueue)
   // ═══════════════════════════════════════════════════════════
 
   const handleCreateCheck = useCallback(async () => {
-    // Validation
     if (!checkNumber.trim() || !checkBank.trim() || !checkAmount.trim()) {
       toast({ title: 'خطا', description: 'شماره چک، بانک و مبلغ الزامی است', variant: 'destructive' })
       return
@@ -567,14 +563,12 @@ export function ChecksTab() {
         customerId: checkCustomerId || null,
         payee: checkPayee || null,
         status: 'pending',
-        // ★★★ فیلدهای آفلاین
-        _offline: true,
-        _syncStatus: 'pending',
+    _offline: !isOnline,   
+       _syncStatus: isOnline ? 'syncing' : 'pending',
         _createdAt: Date.now(),
       }
 
       if (checkFormMode === 'edit') {
-        // ویرایش چک موجود
         const updated = checks.map(c => 
           c.id === checkFormId 
             ? { ...c, type: checkType, checkNumber: checkNumber.trim(), bankName: checkBank.trim(), amount, dueDate: checkDueDate, customerId: checkCustomerId || null, payee: checkPayee || null }
@@ -582,29 +576,20 @@ export function ChecksTab() {
         )
         setChecks(updated)
         await cacheChecks(updated)
-        
-        // افزودن عملیات update به SyncQueue
         await addCheckToSyncQueue('update', { ...newCheck, id: checkFormId })
-        
         toast({ title: '✓ چک ویرایش شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       } else {
-        // ایجاد چک جدید
         setChecks(prev => [newCheck, ...prev])
         const updated = [newCheck, ...checks]
         await cacheChecks(updated)
-        
-        // افزودن عملیات create به SyncQueue
         await addCheckToSyncQueue('create', newCheck)
-        
         toast({ title: '✓ چک ایجاد شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       }
 
-      // Trigger sync اگر آنلاین هستیم
       if (isOnline) {
         setTimeout(() => syncEngine.sync(), 100)
       }
 
-      // Reset form
       setCheckDialogOpen(false)
       setCheckFormMode('add')
       setCheckFormId('')
@@ -624,94 +609,77 @@ export function ChecksTab() {
   }, [checkFormMode, checkFormId, checkType, checkNumber, checkBank, checkAmount, checkDueDate, checkCustomerId, checkPayee, checks, isOnline, toast])
 
   // ═══════════════════════════════════════════════════════════
-  // ★★★ Change Check Status (سپردن، وصول، برگشت)
+  // ★★★ v10.0: Change Check Status
   // ═══════════════════════════════════════════════════════════
 
-  // ═══════════════════════════════════════════════════════════
-// ★★★ v10.0: Change Check Status (سپردن، وصول، برگشت، پس دادن)
-// ★ اصلاح باگ: ارسال id در body (نه فقط در URL)
-// ★ افزودن "پس دادن" و "پس گرفتن"
-// ═══════════════════════════════════════════════════════════
+  const handleCheckStatus = useCallback(async (
+    checkId: string,
+    newStatus: 'deposited' | 'cleared' | 'bounced' | 'returned'
+  ) => {
+    const check = checks.find(c => c.id === checkId)
+    if (!check) return
 
-const handleCheckStatus = useCallback(async (
-  checkId: string,
-  newStatus: 'deposited' | 'cleared' | 'bounced' | 'returned'
-) => {
-  const check = checks.find(c => c.id === checkId)
-  if (!check) return
+    const previousChecks = [...checks]
 
-  const previousChecks = [...checks] // ذخیره برای رول‌بک در صورت خطا
+    try {
+      const updated = checks.map(c =>
+        c.id === checkId ? { ...c, status: newStatus } : c
+      )
+      setChecks(updated)
+      await cacheChecks(updated)
 
-  try {
-    // 1. Optimistic UI: به‌روزرسانی فوری
-    const updated = checks.map(c =>
-      c.id === checkId ? { ...c, status: newStatus } : c
-    )
-    setChecks(updated)
-    await cacheChecks(updated)
-
-    // 2. منطق آفلاین
-    if (check._offline || !isOnline) {
-      await addCheckToSyncQueue('status_change', { ...check, status: newStatus })
-      toast({ 
-        title: '✓ وضعیت به‌روزرسانی شد', 
-        description: !isOnline ? 'در صف همگام‌سازی قرار گرفت (آفلاین)' : 'در حال ارسال به سرور' 
-      })
-      
-      if (isOnline) {
-        setTimeout(async () => {
-          await syncEngine.sync()
-          await loadChecks()
-        }, 500)
+      if (check._offline || !isOnline) {
+        await addCheckToSyncQueue('status_change', { ...check, status: newStatus })
+        toast({ 
+          title: '✓ وضعیت به‌روزرسانی شد', 
+          description: !isOnline ? 'در صف همگام‌سازی قرار گرفت (آفلاین)' : 'در حال ارسال به سرور' 
+        })
+        
+        if (isOnline) {
+          setTimeout(async () => {
+            await syncEngine.sync()
+            await loadChecks()
+          }, 500)
+        }
+        return
       }
-      return
+
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/checks', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          id: checkId,
+          status: newStatus,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const statusLabels: Record<string, string> = {
+          pending: '⏳ در جریان',
+          cleared: '✅ وصول شد',
+          bounced: '❌ برگشتی',
+          deposited: '🏦 به بانک سپرده شد',
+          returned: '↩️ پس داده شد',
+        }
+        toast({ title: '✓ موفق', description: data.message || statusLabels[newStatus] })
+        await loadChecks()
+      } else {
+        const data = await res.json()
+        throw new Error(data.error || 'خطا در به‌روزرسانی وضعیت چک')
+      }
+    } catch (err: any) {
+      console.error('[Check Status Error]:', err)
+      toast({ title: 'خطا', description: err.message || 'خطا در به‌روزرسانی', variant: 'destructive' })
+      setChecks(previousChecks)
+      await cacheChecks(previousChecks)
     }
+  }, [checks, isOnline, toast, loadChecks])
 
-    // 3. درخواست به سرور (آنلاین) - ★★★ اصلاح مسیر به /api/checks
-    const token = localStorage.getItem('token')
-    const res = await fetch('/api/checks', { // ★★★ حذف checkId از URL
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
-      body: JSON.stringify({
-        id: checkId,       // ★★★ ارسال id در body
-        status: newStatus,
-      }),
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-     const statusLabels: Record<string, string> = {
-  pending: '⏳ در جریان',        // ✅ درست
-  cleared: '✅ وصول شد',
-  bounced: '❌ برگشتی',
-  deposited: '🏦 به بانک سپرده شد',
-  returned: '↩️ پس داده شد',
-}
-
-const statusColors: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700 border-amber-300',
-  cleared: 'bg-emerald-100 text-emerald-700 border-emerald-300',
-  bounced: 'bg-red-100 text-red-700 border-red-300',
-  deposited: 'bg-blue-100 text-blue-700 border-blue-300',
-  returned: 'bg-gray-100 text-gray-700 border-gray-300',
-}
-      toast({ title: '✓ موفق', description: data.message || statusLabels[newStatus] })
-      await loadChecks() // بارگذاری مجدد برای دریافت اطلاعات سند حسابداری
-    } else {
-      const data = await res.json()
-      throw new Error(data.error || 'خطا در به‌روزرسانی وضعیت چک')
-    }
-  } catch (err: any) {
-    console.error('[Check Status Error]:', err)
-    toast({ title: 'خطا', description: err.message || 'خطا در به‌روزرسانی', variant: 'destructive' })
-    // Rollback به حالت قبل
-    setChecks(previousChecks)
-    await cacheChecks(previousChecks)
-  }
-}, [checks, isOnline, toast, loadChecks])
   // ═══════════════════════════════════════════════════════════
   // ★★★ Delete Check
   // ═══════════════════════════════════════════════════════════
@@ -722,13 +690,11 @@ const statusColors: Record<string, string> = {
     setDeleteSaving(true)
     try {
       if (deleteTarget._offline) {
-        // چک آفلاین: فقط از لیست محلی حذف کن
         const updated = checks.filter(c => c.id !== deleteTarget.id)
         setChecks(updated)
         await cacheChecks(updated)
         toast({ title: '✓ حذف شد', description: 'چک آفلاین حذف شد' })
       } else {
-        // چک آنلاین: درخواست به سرور
         if (!isOnline) {
           toast({ title: 'خطا', description: 'حذف چک آنلاین نیاز به اتصال دارد', variant: 'destructive' })
           setDeleteDialogOpen(false)
@@ -760,23 +726,20 @@ const statusColors: Record<string, string> = {
   }, [deleteTarget, checks, isOnline, toast, loadChecks])
 
   // ═══════════════════════════════════════════════════════════
-  // Filter & Stats
+  // Filter & Stats & Pagination
   // ═══════════════════════════════════════════════════════════
 
   const filteredChecks = useMemo(() => {
     let result = checks
     
-    // فیلتر نوع
     if (filterType !== 'all') {
       result = result.filter(c => c.type === filterType)
     }
     
-    // فیلتر وضعیت
     if (filterStatus !== 'all') {
       result = result.filter(c => c.status === filterStatus)
     }
     
-    // فیلتر جستجو
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
       result = result.filter(
@@ -789,6 +752,21 @@ const statusColors: Record<string, string> = {
     
     return result
   }, [checks, filterType, filterStatus, searchQuery])
+
+  // ★ v29.1: محاسبه صفحه‌بندی
+  const totalPages = Math.ceil(filteredChecks.length / pageSize)
+  
+  const paginatedChecks = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredChecks.slice(start, start + pageSize)
+  }, [filteredChecks, currentPage, pageSize])
+
+  // ★ v29.1: ایمن‌سازی شماره صفحه (اگر صفحه فعلی از کل صفحات بیشتر بود)
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [totalPages, currentPage])
 
   const stats = useMemo(() => {
     const total = checks.length
@@ -821,12 +799,94 @@ const statusColors: Record<string, string> = {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // ★ v29.1: Pagination UI Component
+  // ═══════════════════════════════════════════════════════════
+  
+  const PaginationUI = ({ className = '' }: { className?: string }) => {
+    if (totalPages <= 1) return null
+    
+    // تولید شماره صفحات قابل نمایش
+    const getPageNumbers = () => {
+      const pages: (number | string)[] = []
+      const maxVisible = 5
+      
+      if (totalPages <= maxVisible) {
+        for (let i = 1; i <= totalPages; i++) pages.push(i)
+      } else {
+        pages.push(1)
+        if (currentPage > 3) pages.push('...')
+        
+        const start = Math.max(2, currentPage - 1)
+        const end = Math.min(totalPages - 1, currentPage + 1)
+        for (let i = start; i <= end; i++) pages.push(i)
+        
+        if (currentPage < totalPages - 2) pages.push('...')
+        pages.push(totalPages)
+      }
+      return pages
+    }
+
+    return (
+      <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50/50 ${className}`} dir="rtl">
+        <p className="text-xs text-gray-600 order-2 sm:order-1">
+          نمایش {toFaNum((currentPage - 1) * pageSize + 1)} تا {toFaNum(Math.min(currentPage * pageSize, filteredChecks.length))} از {toFaNum(filteredChecks.length)} چک
+        </p>
+        
+        <div className="flex items-center gap-1 order-1 sm:order-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1 px-2"
+            disabled={currentPage <= 1}
+            onClick={() => setCurrentPage(p => p - 1)}
+          >
+            <ArrowRight className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">قبلی</span>
+          </Button>
+
+          <div className="flex items-center gap-0.5">
+            {getPageNumbers().map((page, idx) => (
+              typeof page === 'number' ? (
+                <Button
+                  key={idx}
+                  variant={currentPage === page ? 'default' : 'outline'}
+                  size="sm"
+                  className={`h-8 w-8 p-0 text-xs ${
+                    currentPage === page 
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                      : 'text-gray-700'
+                  }`}
+                  onClick={() => setCurrentPage(page)}
+                >
+                  {toFaNum(page)}
+                </Button>
+              ) : (
+                <span key={idx} className="px-1 text-gray-400 text-xs">…</span>
+              )
+            ))}
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1 px-2"
+            disabled={currentPage >= totalPages}
+            onClick={() => setCurrentPage(p => p + 1)}
+          >
+            <span className="hidden sm:inline">بعدی</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════
 
   return (
     <div className="space-y-4" dir="rtl">
-      {/* ★★★ بنر هشدار آفلاین */}
       {!isOnline && (
         <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
@@ -836,56 +896,48 @@ const statusColors: Record<string, string> = {
         </div>
       )}
 
-  {/* ═══════════════════════════════════════════════════════
-    Stats Cards — خیلی کوچک و رنگی
-═══════════════════════════════════════════════════════ */}
-<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 sm:gap-1.5">
-  {/* کل چک‌ها */}
-  <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">کل چک‌ها</span>
-      <CreditCard className="w-2.5 h-2.5 text-blue-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-blue-700">{stats.total.toLocaleString('fa-IR')}</div>
-  </div>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1 sm:gap-1.5">
+        <div className="relative overflow-hidden rounded-md border border-blue-200 bg-gradient-to-br from-blue-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-blue-600 truncate">کل چک‌ها</span>
+            <CreditCard className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-blue-700">{toFaNum(stats.total)}</div>
+        </div>
 
-  {/* وصول شده */}
-  <div className="relative overflow-hidden rounded-md border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-emerald-600 truncate">وصول شده</span>
-      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-emerald-700">{stats.cleared.toLocaleString('fa-IR')}</div>
-  </div>
+        <div className="relative overflow-hidden rounded-md border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-emerald-600 truncate">وصول شده</span>
+            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-emerald-700">{toFaNum(stats.cleared)}</div>
+        </div>
 
-  {/* در جریان */}
-  <div className="relative overflow-hidden rounded-md border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-    <div className="flex items-center justify-between gap-1 mb-0.5">
-      <span className="text-[8px] sm:text-[9px] font-medium text-amber-600 truncate">در جریان</span>
-      <Clock className="w-2.5 h-2.5 text-amber-400 shrink-0" />
-    </div>
-    <div className="text-xs sm:text-sm font-bold text-amber-700">{stats.pending.toLocaleString('fa-IR')}</div>
-  </div>
+        <div className="relative overflow-hidden rounded-md border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] font-medium text-amber-600 truncate">در جریان</span>
+            <Clock className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+          </div>
+          <div className="text-xs sm:text-sm font-bold text-amber-700">{toFaNum(stats.pending)}</div>
+        </div>
 
-  {/* در انتظار sync */}
-  {stats.offlineCount > 0 && (
-    <div className="relative overflow-hidden rounded-md border border-orange-300 bg-gradient-to-br from-orange-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[8px] sm:text-[9px] font-medium text-orange-600 flex items-center gap-0.5 truncate">
-          <WifiOff className="w-2 h-2 shrink-0" /> در انتظار sync
-        </span>
+        {stats.offlineCount > 0 && (
+          <div className="relative overflow-hidden rounded-md border border-orange-300 bg-gradient-to-br from-orange-50 to-white px-2 py-1.5 sm:px-2.5 sm:py-2">
+            <div className="flex items-center justify-between gap-1 mb-0.5">
+              <span className="text-[8px] sm:text-[9px] font-medium text-orange-600 flex items-center gap-0.5 truncate">
+                <WifiOff className="w-2 h-2 shrink-0" /> در انتظار sync
+              </span>
+            </div>
+            <div className="text-xs sm:text-sm font-bold text-orange-700">{toFaNum(stats.offlineCount)}</div>
+          </div>
+        )}
       </div>
-      <div className="text-xs sm:text-sm font-bold text-orange-700">{stats.offlineCount.toLocaleString('fa-IR')}</div>
-    </div>
-  )}
-</div>
-      {/* ═══════════════════════════════════════════════════════
-          Toolbar — ریسپانسیو (ستونی در موبایل، ردیفی در دسکتاپ)
-      ═══════════════════════════════════════════════════════ */}
+
+      {/* Toolbar */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex flex-col lg:flex-row gap-2 sm:gap-3">
-            {/* جستجو */}
             <div className="relative flex-1">
               <Search className="absolute right-2.5 top-2.5 h-4 w-4 text-gray-400" />
               <Input
@@ -896,7 +948,6 @@ const statusColors: Record<string, string> = {
               />
             </div>
 
-            {/* فیلتر نوع */}
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value as any)}
@@ -907,7 +958,6 @@ const statusColors: Record<string, string> = {
               <option value="payable">پرداختنی</option>
             </select>
 
-            {/* فیلتر وضعیت */}
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as any)}
@@ -918,10 +968,9 @@ const statusColors: Record<string, string> = {
               <option value="deposited">نزد بانک</option>
               <option value="cleared">وصول شده</option>
               <option value="bounced">برگشت خورده</option>
-                <option value="returned">پس داده/باطل</option>
+              <option value="returned">پس داده/باطل</option>
             </select>
 
-            {/* دکمه ثبت چک جدید */}
             <Button
               size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 flex-1 lg:flex-none"
@@ -945,9 +994,7 @@ const statusColors: Record<string, string> = {
         </CardContent>
       </Card>
 
-      {/* ═══════════════════════════════════════════════════════
-          Loading State
-      ═══════════════════════════════════════════════════════ */}
+      {/* Loading State */}
       {loading ? (
         <Card className="border-gray-200">
           <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
@@ -956,9 +1003,6 @@ const statusColors: Record<string, string> = {
           </CardContent>
         </Card>
       ) : filteredChecks.length === 0 ? (
-        /* ═══════════════════════════════════════════════════════
-            Empty State
-        ═══════════════════════════════════════════════════════ */
         <Card className="border-dashed border-gray-300">
           <CardContent className="p-12 flex flex-col items-center justify-center gap-3">
             <CreditCard className="w-12 h-12 text-gray-300" />
@@ -972,9 +1016,7 @@ const statusColors: Record<string, string> = {
         </Card>
       ) : (
         <>
-          {/* ═══════════════════════════════════════════════════════
-              نمای دسکتاپ (جدول) — فقط در lg و بالاتر
-          ═══════════════════════════════════════════════════════ */}
+          {/* نمای دسکتاپ (جدول) */}
           <div className="hidden lg:block">
             <Card className="border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
@@ -991,13 +1033,12 @@ const statusColors: Record<string, string> = {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredChecks.map((chk) => (
+                    {paginatedChecks.map((chk) => (
                       <TableRow key={chk.id} className="hover:bg-gray-50/50">
                         <TableCell className="text-xs">
                           <Badge className={chk.type === 'receivable' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}>
                             {chk.type === 'receivable' ? 'دریافتنی' : 'پرداختنی'}
                           </Badge>
-                          {/* ★★★ نشانگر آفلاین */}
                           {chk._offline && (
                             <Badge className="bg-orange-100 text-orange-700 mr-1 text-[9px]">
                               <Clock className="w-2.5 h-2.5 ml-0.5" />
@@ -1005,233 +1046,225 @@ const statusColors: Record<string, string> = {
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-xs font-mono">{chk.checkNumber}</TableCell>
+                        <TableCell className="text-xs font-mono">{toFaNum(chk.checkNumber)}</TableCell>
                         <TableCell className="text-xs">{chk.bankName}</TableCell>
                         <TableCell className="text-xs font-bold">{formatCurrency(chk.amount)}</TableCell>
                         <TableCell className="text-xs">{formatDate(chk.dueDate)}</TableCell>
                         <TableCell>{getStatusBadge(chk.status)}</TableCell>
-                       <TableCell>
-  <div className="flex items-center gap-1">
-    {/* ─── چک دریافتنی ─── */}
-    {chk.type === 'receivable' && (
-      <>
-        {chk.status === 'pending' && (
-          <>
-            <Button
-              size="sm" variant="outline" className="text-xs h-7"
-              onClick={() => handleCheckStatus(chk.id, 'deposited')}
-              title="سپردن به بانک"
-            >
-              <Landmark className="w-3 h-3 ml-1" /> سپردن
-            </Button>
-            {/* ★ v10.0: پس دادن چک به مشتری */}
-            <Button
-              size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
-              onClick={() => handleCheckStatus(chk.id, 'returned')}
-              title="پس دادن چک به مشتری"
-            >
-              <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
-            </Button>
-          </>
-        )}
-        {chk.status === 'deposited' && (
-          <>
-            <Button
-              size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-              onClick={() => handleCheckStatus(chk.id, 'cleared')}
-              title="وصول چک"
-            >
-              <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
-            </Button>
-            <Button
-              size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
-              onClick={() => handleCheckStatus(chk.id, 'bounced')}
-              title="برگشت چک"
-            >
-              <Ban className="w-3 h-3 ml-1" /> برگشت
-            </Button>
-          </>
-        )}
-      </>
-    )}
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {chk.type === 'receivable' && (
+                              <>
+                                {chk.status === 'pending' && (
+                                  <>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7"
+                                      onClick={() => handleCheckStatus(chk.id, 'deposited')}
+                                      title="سپردن به بانک"
+                                    >
+                                      <Landmark className="w-3 h-3 ml-1" /> سپردن
+                                    </Button>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
+                                      onClick={() => handleCheckStatus(chk.id, 'returned')}
+                                      title="پس دادن چک به مشتری"
+                                    >
+                                      <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
+                                    </Button>
+                                  </>
+                                )}
+                                {chk.status === 'deposited' && (
+                                  <>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                      onClick={() => handleCheckStatus(chk.id, 'cleared')}
+                                      title="وصول چک"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
+                                    </Button>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
+                                      onClick={() => handleCheckStatus(chk.id, 'bounced')}
+                                      title="برگشت چک"
+                                    >
+                                      <Ban className="w-3 h-3 ml-1" /> برگشت
+                                    </Button>
+                                  </>
+                                )}
+                              </>
+                            )}
 
-    {/* ─── چک پرداختنی ─── */}
-    {chk.type === 'payable' && (
-      <>
-       {chk.status === 'pending' && (
-  <>
-    <Button
-      size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-      onClick={() => handleCheckStatus(chk.id, 'cleared')}
-      title="ثبت پرداخت چک"
-    >
-      <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
-    </Button>
-            {/* ★ v10.0: باطل کردن چک (پس گرفتن از تأمین‌کننده) */}
-            <Button
-              size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
-              onClick={() => handleCheckStatus(chk.id, 'returned')}
-              title="باطل کردن / پس گرفتن چک"
-            >
-              <XCircle className="w-3 h-3 ml-1" /> باطل
-            </Button>
-          </>
-        )}
-        {chk.status === 'bounced' && (
-          <Button
-            size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
-            disabled
-            title="چک برگشت خورده — نیاز به صدور چک جدید"
-          >
-            <Ban className="w-3 h-3 ml-1" /> برگشتی
-          </Button>
-        )}
-      </>
-    )}
+                            {chk.type === 'payable' && (
+                              <>
+                                {chk.status === 'pending' && (
+                                  <>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                      onClick={() => handleCheckStatus(chk.id, 'cleared')}
+                                      title="ثبت پرداخت چک"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
+                                    </Button>
+                                    <Button
+                                      size="sm" variant="outline" className="text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50"
+                                      onClick={() => handleCheckStatus(chk.id, 'returned')}
+                                      title="باطل کردن / پس گرفتن چک"
+                                    >
+                                      <XCircle className="w-3 h-3 ml-1" /> باطل
+                                    </Button>
+                                  </>
+                                )}
+                                {chk.status === 'bounced' && (
+                                  <Button
+                                    size="sm" variant="outline" className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
+                                    disabled
+                                    title="چک برگشت خورده — نیاز به صدور چک جدید"
+                                  >
+                                    <Ban className="w-3 h-3 ml-1" /> برگشتی
+                                  </Button>
+                                )}
+                              </>
+                            )}
 
-    {/* ویرایش و حذف (فقط در pending) */}
-    {chk.status === 'pending' && (
-      <>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
-          onClick={() => openEditDialog(chk)}
-          title="ویرایش"
-        >
-          <Pencil className="w-3.5 h-3.5" />
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
-          onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
-          title="حذف"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </Button>
-      </>
-    )}
-  </div>
-</TableCell>
+                            {chk.status === 'pending' && (
+                              <>
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                                  onClick={() => openEditDialog(chk)}
+                                  title="ویرایش"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
+                                  onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
+                                  title="حذف"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
+              
+              {/* ★ v29.1: صفحه‌بندی در پایین جدول دسکتاپ */}
+              <PaginationUI />
             </Card>
           </div>
 
-                  {/* ═══════════════════════════════════════════════════════
-              نمای موبایل (کارت‌ها) — فقط زیر lg
-          ═══════════════════════════════════════════════════════ */}
-          <div className="lg:hidden space-y-3">
-            {filteredChecks.map((chk) => (
-              <Card key={chk.id} className="border-gray-200">
-                <CardContent className="p-3 sm:p-4">
-                  {/* هدر کارت: نوع + وضعیت */}
-                  <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge className={chk.type === 'receivable' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}>
-                        {chk.type === 'receivable' ? 'دریافتنی' : 'پرداختنی'}
-                      </Badge>
-                      {getStatusBadge(chk.status)}
-                      {chk._offline && (
-                        <Badge className="bg-orange-100 text-orange-700 text-[9px]">
-                          <Clock className="w-2.5 h-2.5 ml-0.5" /> آفلاین
+          {/* نمای موبایل (کارت‌ها) */}
+          <div className="lg:hidden">
+            <Card className="border-gray-200 overflow-hidden">
+              <div className="divide-y divide-gray-100">
+                {paginatedChecks.map((chk) => (
+                  <div key={chk.id} className="p-3 sm:p-4">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge className={chk.type === 'receivable' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}>
+                          {chk.type === 'receivable' ? 'دریافتنی' : 'پرداختنی'}
                         </Badge>
-                      )}
-                    </div>
-                    <span className="text-sm font-bold text-gray-800 font-mono">{chk.checkNumber}</span>
-                  </div>
-
-                  {/* اطلاعات بانک */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <Landmark className="w-4 h-4 text-gray-400" />
-                    <span className="text-xs text-gray-600">{chk.bankName}</span>
-                  </div>
-
-                  {/* مبلغ و سررسید */}
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    <div className="bg-gray-50 border border-gray-100 rounded p-2">
-                      <div className="text-[10px] text-gray-500 mb-0.5">مبلغ</div>
-                      <div className="text-xs font-bold text-gray-800">{formatCurrency(chk.amount)}</div>
-                    </div>
-                    <div className="bg-gray-50 border border-gray-100 rounded p-2">
-                      <div className="text-[10px] text-gray-500 mb-0.5">سررسید</div>
-                      <div className="text-xs font-bold text-gray-800">{formatDate(chk.dueDate)}</div>
-                    </div>
-                  </div>
-
-                  {/* دکمه‌های عملیات */}
-                  <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
-                    
-                    {/* ─── وضعیت: در جریان (pending) ─── */}
-                    {chk.status === 'pending' && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {chk.type === 'receivable' ? (
-                          <>
-                            <Button size="sm" variant="outline" className="text-xs h-9"
-                              onClick={() => handleCheckStatus(chk.id, 'deposited')}>
-                              <Landmark className="w-3 h-3 ml-1" /> سپردن
-                            </Button>
-                            <Button size="sm" variant="outline" className="text-xs h-9 text-orange-600 border-orange-200 hover:bg-orange-50"
-                              onClick={() => handleCheckStatus(chk.id, 'returned')}>
-                              <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                           <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-  onClick={() => handleCheckStatus(chk.id, 'cleared')}>
-  <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
-</Button>
-                            <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
-                              onClick={() => handleCheckStatus(chk.id, 'returned')}>
-                              <XCircle className="w-3 h-3 ml-1" /> باطل
-                            </Button>
-                          </>
+                        {getStatusBadge(chk.status)}
+                        {chk._offline && (
+                          <Badge className="bg-orange-100 text-orange-700 text-[9px]">
+                            <Clock className="w-2.5 h-2.5 ml-0.5" /> آفلاین
+                          </Badge>
                         )}
                       </div>
-                    )}
+                      <span className="text-sm font-bold text-gray-800 font-mono">{toFaNum(chk.checkNumber)}</span>
+                    </div>
 
-                    {/* ─── وضعیت: نزد بانک (deposited) ─── */}
-                    {chk.status === 'deposited' && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                          onClick={() => handleCheckStatus(chk.id, 'cleared')}>
-                          <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
-                        </Button>
-                        <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
-                          onClick={() => handleCheckStatus(chk.id, 'bounced')}>
-                          <Ban className="w-3 h-3 ml-1" /> برگشت
-                        </Button>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Landmark className="w-4 h-4 text-gray-400" />
+                      <span className="text-xs text-gray-600">{chk.bankName}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="bg-gray-50 border border-gray-100 rounded p-2">
+                        <div className="text-[10px] text-gray-500 mb-0.5">مبلغ</div>
+                        <div className="text-xs font-bold text-gray-800">{formatCurrency(chk.amount)}</div>
                       </div>
-                    )}
+                      <div className="bg-gray-50 border border-gray-100 rounded p-2">
+                        <div className="text-[10px] text-gray-500 mb-0.5">سررسید</div>
+                        <div className="text-xs font-bold text-gray-800">{formatDate(chk.dueDate)}</div>
+                      </div>
+                    </div>
 
-                    {/* ─── دکمه‌های ویرایش و حذف (فقط برای pending) ─── */}
-                 {chk.status === 'pending' && (
-  <>
-    <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
-      onClick={() => openEditDialog(chk)}
-      title="ویرایش"
-    >
-      <Pencil className="w-3.5 h-3.5" />
-    </Button>
-    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500"
-      onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
-      title="حذف"
-    >
-      <Trash2 className="w-3.5 h-3.5" />
-    </Button>
-  </>
-)}
+                    <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                      {chk.status === 'pending' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {chk.type === 'receivable' ? (
+                            <>
+                              <Button size="sm" variant="outline" className="text-xs h-9"
+                                onClick={() => handleCheckStatus(chk.id, 'deposited')}>
+                                <Landmark className="w-3 h-3 ml-1" /> سپردن
+                              </Button>
+                              <Button size="sm" variant="outline" className="text-xs h-9 text-orange-600 border-orange-200 hover:bg-orange-50"
+                                onClick={() => handleCheckStatus(chk.id, 'returned')}>
+                                <RotateCcw className="w-3 h-3 ml-1" /> پس دادن
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                onClick={() => handleCheckStatus(chk.id, 'cleared')}>
+                                <CheckCircle2 className="w-3 h-3 ml-1" /> ثبت پرداخت
+                              </Button>
+                              <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => handleCheckStatus(chk.id, 'returned')}>
+                                <XCircle className="w-3 h-3 ml-1" /> باطل
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      )}
 
+                      {chk.status === 'deposited' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button size="sm" variant="outline" className="text-xs h-9 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                            onClick={() => handleCheckStatus(chk.id, 'cleared')}>
+                            <CheckCircle2 className="w-3 h-3 ml-1" /> وصول
+                          </Button>
+                          <Button size="sm" variant="outline" className="text-xs h-9 text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => handleCheckStatus(chk.id, 'bounced')}>
+                            <Ban className="w-3 h-3 ml-1" /> برگشت
+                          </Button>
+                        </div>
+                      )}
+
+                      {chk.status === 'pending' && (
+                        <div className="flex items-center justify-center gap-2">
+                          <Button size="sm" variant="ghost" className="h-8 px-3"
+                            onClick={() => openEditDialog(chk)}
+                            title="ویرایش"
+                          >
+                            <Pencil className="w-3.5 h-3.5 ml-1" />
+                            <span className="text-xs">ویرایش</span>
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 px-3 text-red-500"
+                            onClick={() => { setDeleteTarget(chk); setDeleteDialogOpen(true) }}
+                            title="حذف"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 ml-1" />
+                            <span className="text-xs">حذف</span>
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+                ))}
+              </div>
+
+              {/* ★ v29.1: صفحه‌بندی در پایین کارت‌های موبایل */}
+              <PaginationUI />
+            </Card>
           </div>
         </>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════
-          ★★★ Dialog: Check Form (Add/Edit) — ریسپانسیو + fullscreen موبایل
-      ═══════════════════════════════════════════════════════════ */}
+      {/* Dialog: Check Form (Add/Edit) */}
       <Dialog open={checkDialogOpen} onOpenChange={setCheckDialogOpen}>
         <DialogContent className="max-w-md w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1247,98 +1280,83 @@ const statusColors: Record<string, string> = {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-         {/* ═══ نوع چک — نسخه فشرده ═══ */}
-<div>
-  <Label className="text-xs font-medium">نوع چک <span className="text-red-500">*</span></Label>
-  <div className="grid grid-cols-2 gap-1.5 mt-1">
-    
-    {/* ─── چک دریافتنی ─── */}
-    <button
-      type="button"
-      onClick={() => setCheckType('receivable')}
-      className={`
-        relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
-        transition-all duration-200 cursor-pointer
-        ${checkType === 'receivable' 
-          ? 'bg-blue-50 border-blue-500 shadow-sm' 
-          : 'bg-white border-gray-200 hover:border-blue-300'
-        }
-      `}
-    >
-      {/* نشانگر انتخاب */}
-      {checkType === 'receivable' && (
-        <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-      )}
-      
-      {/* آیکون */}
-      <div className={`
-        w-7 h-7 rounded-md flex items-center justify-center shrink-0
-        ${checkType === 'receivable' 
-          ? 'bg-blue-500 text-white' 
-          : 'bg-blue-50 text-blue-500'
-        }
-      `}>
-        <Landmark className="w-3.5 h-3.5" />
-      </div>
-      
-      {/* متن */}
-      <div className="text-right">
-        <span className={`text-[11px] font-bold block leading-tight ${
-          checkType === 'receivable' ? 'text-blue-700' : 'text-gray-700'
-        }`}>
-          دریافتنی
-        </span>
-        <span className="text-[9px] text-gray-400 leading-tight block">
-          از مشتری
-        </span>
-      </div>
-    </button>
+            <div>
+              <Label className="text-xs font-medium">نوع چک <span className="text-red-500">*</span></Label>
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setCheckType('receivable')}
+                  className={`
+                    relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
+                    transition-all duration-200 cursor-pointer
+                    ${checkType === 'receivable' 
+                      ? 'bg-blue-50 border-blue-500 shadow-sm' 
+                      : 'bg-white border-gray-200 hover:border-blue-300'
+                    }
+                  `}
+                >
+                  {checkType === 'receivable' && (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  )}
+                  <div className={`
+                    w-7 h-7 rounded-md flex items-center justify-center shrink-0
+                    ${checkType === 'receivable' 
+                      ? 'bg-blue-500 text-white' 
+                      : 'bg-blue-50 text-blue-500'
+                    }
+                  `}>
+                    <Landmark className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-[11px] font-bold block leading-tight ${
+                      checkType === 'receivable' ? 'text-blue-700' : 'text-gray-700'
+                    }`}>
+                      دریافتنی
+                    </span>
+                    <span className="text-[9px] text-gray-400 leading-tight block">
+                      از مشتری
+                    </span>
+                  </div>
+                </button>
 
-    {/* ─── چک پرداختنی ─── */}
-    <button
-      type="button"
-      onClick={() => setCheckType('payable')}
-      className={`
-        relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
-        transition-all duration-200 cursor-pointer
-        ${checkType === 'payable' 
-          ? 'bg-purple-50 border-purple-500 shadow-sm' 
-          : 'bg-white border-gray-200 hover:border-purple-300'
-        }
-      `}
-    >
-      {/* نشانگر انتخاب */}
-      {checkType === 'payable' && (
-        <CheckCircle2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-      )}
-      
-      {/* آیکون */}
-      <div className={`
-        w-7 h-7 rounded-md flex items-center justify-center shrink-0
-        ${checkType === 'payable' 
-          ? 'bg-purple-500 text-white' 
-          : 'bg-purple-50 text-purple-500'
-        }
-      `}>
-        <CreditCard className="w-3.5 h-3.5" />
-      </div>
-      
-      {/* متن */}
-      <div className="text-right">
-        <span className={`text-[11px] font-bold block leading-tight ${
-          checkType === 'payable' ? 'text-purple-700' : 'text-gray-700'
-        }`}>
-          پرداختنی
-        </span>
-        <span className="text-[9px] text-gray-400 leading-tight block">
-          به تامین‌کننده
-        </span>
-      </div>
-    </button>
+                <button
+                  type="button"
+                  onClick={() => setCheckType('payable')}
+                  className={`
+                    relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 
+                    transition-all duration-200 cursor-pointer
+                    ${checkType === 'payable' 
+                      ? 'bg-purple-50 border-purple-500 shadow-sm' 
+                      : 'bg-white border-gray-200 hover:border-purple-300'
+                    }
+                  `}
+                >
+                  {checkType === 'payable' && (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                  )}
+                  <div className={`
+                    w-7 h-7 rounded-md flex items-center justify-center shrink-0
+                    ${checkType === 'payable' 
+                      ? 'bg-purple-500 text-white' 
+                      : 'bg-purple-50 text-purple-500'
+                    }
+                  `}>
+                    <CreditCard className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-[11px] font-bold block leading-tight ${
+                      checkType === 'payable' ? 'text-purple-700' : 'text-gray-700'
+                    }`}>
+                      پرداختنی
+                    </span>
+                    <span className="text-[9px] text-gray-400 leading-tight block">
+                      به تامین‌کننده
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </div>
 
-  </div>
-</div>
-            {/* شماره چک و بانک */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">شماره چک *</Label>
@@ -1361,7 +1379,6 @@ const statusColors: Record<string, string> = {
               </div>
             </div>
 
-            {/* مبلغ */}
             <div>
               <Label className="text-xs">مبلغ (ریال) *</Label>
               <Input
@@ -1374,7 +1391,6 @@ const statusColors: Record<string, string> = {
               />
             </div>
 
-            {/* تاریخ سررسید */}
             <div>
               <PersianDatePicker
                 value={checkDueDate}
@@ -1384,7 +1400,6 @@ const statusColors: Record<string, string> = {
               />
             </div>
 
-            {/* ذینفع */}
             <div>
               <Label className="text-xs">در وجه / از طرف (اختیاری)</Label>
               <Input
@@ -1412,9 +1427,7 @@ const statusColors: Record<string, string> = {
         </DialogContent>
       </Dialog>
 
-      {/* ═══════════════════════════════════════════════════════════
-          ★★★ Dialog: Delete Confirmation
-      ═══════════════════════════════════════════════════════════ */}
+      {/* Dialog: Delete Confirmation */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="max-w-md w-[95vw] sm:w-full">
           <DialogHeader>
@@ -1435,9 +1448,7 @@ const statusColors: Record<string, string> = {
         </DialogContent>
       </Dialog>
 
-      {/* ═══════════════════════════════════════════════════════════
-          ★★★ Dialog: Detail View
-      ═══════════════════════════════════════════════════════════ */}
+      {/* Dialog: Detail View */}
       <Dialog open={!!detailCheck} onOpenChange={(open) => !open && setDetailCheck(null)}>
         <DialogContent className="max-w-md w-[95vw] sm:w-full">
           {detailCheck && (
