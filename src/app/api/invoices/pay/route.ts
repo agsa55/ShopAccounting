@@ -1,16 +1,22 @@
 // ============================================================================
-// src/app/api/invoices/pay/route.ts — POST / GET (v3.6 — STRICT CREDIT ONLY)
+// src/app/api/invoices/pay/route.ts — POST / GET (v3.7.0 — Account Fix + Check Support)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
-// ★★★ v3.6: قفل امنیتی برای رد کردن فاکتورهای قسطی و هدایت به API صحیح
+// ★★★ v3.7.0 تغییرات:
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای جستجوی دستی
+//   ★ پشتیبانی از فاکتورهای check و installment (علاوه بر credit)
+//   ★ افزودن 'check' به validPaymentTypes
+//
+// ★★★ v3.6 (حفظ شد): قفل امنیتی برای رد کردن فاکتورهای نامعتبر
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/invoices/pay — ثبت پرداخت فاکتور نسیه
+//  POST /api/invoices/pay — ثبت پرداخت فاکتور نسیه/قسطی/چک
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -37,7 +43,8 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    const validPaymentTypes = ['cash', 'card', 'bank', 'pos']
+    // ★ v3.7.0: افزودن 'check' به validPaymentTypes
+    const validPaymentTypes = ['cash', 'card', 'bank', 'pos', 'check']
     const finalPaymentType = (paymentType || 'cash').toLowerCase()
     if (!validPaymentTypes.includes(finalPaymentType)) {
       return NextResponse.json(
@@ -77,11 +84,13 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
 
     // ─── ۴. بررسی نوع فاکتور (قفل امنیتی) ─────────────────────────────────
     const invoicePaymentType = (invoice.paymentType || 'cash').toLowerCase()
-    if (invoicePaymentType !== 'credit') {
+    
+    // ★ v3.7.0: اجازه پرداخت برای credit، check و installment
+    if (invoicePaymentType !== 'credit' && invoicePaymentType !== 'check' && invoicePaymentType !== 'installment') {
       return NextResponse.json(
         {
           success: false,
-          error: 'این فاکتور از نوع قسطی است. برای پرداخت اقساط، لطفاً از بخش "مدیریت اقساط" و دکمه پرداخت همان قسط استفاده کنید.',
+          error: 'این فاکتور نقدی پرداخت شده یا نوع آن قابل تسویه از اینجا نیست',
           code: 'NOT_CREDIT_INVOICE',
         },
         { status: 400 }
@@ -157,35 +166,32 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       }
 
       // ★ ۷.۵ — ایجاد سند حسابداری خودکار
+      // ★ v3.7.0: استفاده از getStandardAccountIds
       let journalCreated = false
       try {
+        const accIds = await getStandardAccountIds(tenantId)
+        
         let cashAccountId: string | null = null
-        let receivablesAccountId: string | null = null
-
-        const accounts = await tx.account.findMany({ where: { tenantId } })
-        for (const acc of accounts) {
-          const code = (acc.code || '').toLowerCase()
-          const type = (acc.type || '').toLowerCase()
-          const name = (acc.name || '').toLowerCase()
-
-          if (!cashAccountId && (finalPaymentType === 'cash' ? (type === 'cash' || name.includes('صندوق')) : (type === 'bank' || name.includes('بانک') || code.startsWith('110')))) {
-            cashAccountId = acc.id
-          }
-          if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('دریافتنی'))) {
-            receivablesAccountId = acc.id
-          }
+        if (finalPaymentType === 'cash') {
+          cashAccountId = accIds.cashAccountId
+        } else if (finalPaymentType === 'card' || finalPaymentType === 'bank' || finalPaymentType === 'pos') {
+          cashAccountId = accIds.bankAccountId || accIds.cashAccountId
+        } else {
+          cashAccountId = accIds.cashAccountId
         }
+        
+        const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
 
         if (cashAccountId && receivablesAccountId) {
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
           const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
-          const methodLabel = finalPaymentType === 'cash' ? 'نقدی' : 'کارتخوان/بانکی'
+          const methodLabel = finalPaymentType === 'cash' ? 'نقدی' : finalPaymentType === 'check' ? 'چک' : 'کارتخوان/بانکی'
 
           await tx.journalEntry.create({
             data: {
               number: jeNumber,
               date: paymentDate,
-              description: `سند خودکار: دریافت نسیه فاکتور ${invoice.number} (${methodLabel})`,
+              description: `سند خودکار: دریافت وجه فاکتور ${invoice.number} (${methodLabel})`,
               status: 'posted',
               sourceType: 'invoice_payment',
               sourceId: payment.id,
@@ -199,7 +205,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
                     accountId: cashAccountId,
                     debit: paidAmount,
                     credit: 0,
-                    description: `بدهکار: واریز نسیه فاکتور ${invoice.number}`,
+                    description: `بدهکار: واریز وجه فاکتور ${invoice.number}`,
                   },
                   {
                     accountId: receivablesAccountId,

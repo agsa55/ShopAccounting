@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/invoices/service
 //  Body: {
@@ -222,48 +222,23 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       }
 
       // ۴. سند حسابداری (درآمد خدماتی + مالیات + صندوق/بدهکاران)
+           // ۴. ★ v8.8: سند حسابداری با getStandardAccountIds
       try {
-        const accounts = await tx.account.findMany({ where: { tenantId } })
-        let cashAccountId: string | null = null
-        let salesAccountId: string | null = null
-        let serviceRevenueAccountId: string | null = null
-        let receivablesAccountId: string | null = null
-        let taxAccountId: string | null = null
+        const accIds = await getStandardAccountIds(tenantId)
+        
+        const cashAccountId = accIds.cashAccountId
+        const serviceRevenueAccountId = accIds.serviceRevenueId || accIds.salesAccountId
+        const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
+        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
 
-        for (const acc of accounts) {
-          const code = (acc.code || '').toLowerCase()
-          const type = (acc.type || '').toLowerCase()
-          const name = (acc.name || '').toLowerCase()
-
-          if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110') || name.includes('صندوق') || name.includes('بانک'))) {
-            cashAccountId = acc.id
-          }
-          // ★ اول حساب درآمد خدماتی (اگه وجود داره)، وگرنه درآمد فروش
-          if (!serviceRevenueAccountId && (type === 'service_revenue' || code.startsWith('420') || name.includes('خدمات') || name.includes('تعمیر'))) {
-            serviceRevenueAccountId = acc.id
-          }
-          if (!salesAccountId && (type === 'revenue' || type === 'sales' || code.startsWith('410') || name.includes('فروش') || name.includes('درآمد'))) {
-            salesAccountId = acc.id
-          }
-          if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('بدهکار'))) {
-            receivablesAccountId = acc.id
-          }
-          if (!taxAccountId && (type === 'tax' || code.startsWith('190') || name.includes('مالیات'))) {
-            taxAccountId = acc.id
-          }
-        }
-
-        // ★ استفاده از درآمد خدماتی اگه هست، وگرنه درآمد فروش
-        const revenueAccountId = serviceRevenueAccountId || salesAccountId
-
-        if (revenueAccountId) {
+        if (serviceRevenueAccountId || cashAccountId) {
           const jeCount = await tx.journalEntry.count({ where: { tenantId } })
           const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
 
           const netRevenue = subTotal - discountAmount
           const lines: any[] = []
 
-          // بدهکار: صندوق (اگه نقدی) یا بدهکاران تجاری (اگه نسیه)
+          // بدهکار: صندوق (نقدی) یا بدهکاران تجاری (نسیه)
           const debitAccountId = isCredit ? (receivablesAccountId || cashAccountId) : cashAccountId
           if (debitAccountId) {
             lines.push({
@@ -275,17 +250,19 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
           }
 
           // بستانکار: درآمد خدماتی
-          lines.push({
-            accountId: revenueAccountId,
-            debit: 0,
-            credit: netRevenue,
-            description: `بستانکار: درآمد ${serviceRevenueAccountId ? 'خدماتی' : 'فروش'} — فاکتور ${invoiceNumber}`,
-          })
+          if (serviceRevenueAccountId) {
+            lines.push({
+              accountId: serviceRevenueAccountId,
+              debit: 0,
+              credit: netRevenue,
+              description: `بستانکار: درآمد ${serviceRevenueAccountId === accIds.serviceRevenueId ? 'خدماتی' : 'فروش'} — فاکتور ${invoiceNumber}`,
+            })
+          }
 
           // بستانکار: مالیات
-          if (taxAmount > 0 && taxAccountId) {
+          if (taxAmount > 0 && vatAccountId) {
             lines.push({
-              accountId: taxAccountId,
+              accountId: vatAccountId,
               debit: 0,
               credit: taxAmount,
               description: `بستانکار: مالیات خدمات — فاکتور ${invoiceNumber}`,
@@ -316,7 +293,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       } catch (jeErr: any) {
         console.warn('[Service Invoice] Auto journal entry failed (non-blocking):', jeErr?.message)
       }
-
       // ۵. در صورت نسیه، افزایش طلب از مشتری
       if (isCredit && customerId) {
         await tx.customer.update({

@@ -234,19 +234,22 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: 'کالا و انبار',
+    label: 'کالاها و فاکتورها',
     items: [
       { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
-      { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
+        { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
+ 
     ],
   },
   {
-    label: 'فروش و خرید',
+    label: 'انبارها و طرف حساب',
     items: [
-      { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
+       
       { label: 'طرف حساب', icon: Users, view: 'contacts' as any, permKey: 'accounting' },
       { label: 'اقساط و نسیه', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
+        { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
+           { label: 'شعب', icon: Building2, view: 'branches' as any, permKey: 'accounting', requiredFeature: 'canMultiBranch' },
       {
         label: 'چک‌ها',
         icon: Landmark,
@@ -261,14 +264,16 @@ const navGroups: NavGroup[] = [
     label: 'مالی و گزارش',
     items: [
       { label: 'حسابداری', icon: BookOpen, view: 'accounting', permKey: 'accounting', requiredFeature: 'canViewAccounts' },
-      { label: 'گزارش‌ها', icon: BarChart3, view: 'reports', permKey: 'reports' },
+        { label: 'گزارش‌ها', icon: BarChart3, view: 'reports', permKey: 'reports' },
+  
     ],
   },
   {
     label: 'سیستم',
     items: [
-      { label: 'شعب', icon: Building2, view: 'branches' as any, permKey: 'accounting', requiredFeature: 'canMultiBranch' },
+    
       { label: 'تنظیمات', icon: Settings, view: 'settings', permKey: 'settings' },
+       
     ],
   },
   {

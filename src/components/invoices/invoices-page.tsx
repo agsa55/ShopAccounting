@@ -1,12 +1,13 @@
 'use client'
 
 // ============================================================================
-// src/components/invoices/invoices-page.tsx — v9.1.0 (Final)
+// src/components/invoices/invoices-page.tsx — v9.2.0
+// ★ v9.2.0: حذف دکمه‌های پرداخت از مودال جزئیات + رفع باگ برگشتی
+// ★ v9.1.0: دکمه پرداخت الکترونیک فقط برای پلن‌های دارای درگاه
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { OnlinePaymentButton } from '@/components/invoices/online-payment-button'
 import {
   FileText, Search, Trash2, Eye, RefreshCw, Loader2, Lock, Crown,
   ChevronLeft, ShoppingCart, CreditCard, Banknote, CalendarDays, Plus, X,
@@ -45,7 +46,7 @@ import {
 } from '@/lib/offline-db'
 
 // ═══════════════════════════════════════════════════════════════
-// KPI Card (الگو از داشبورد)
+// KPI Card
 // ═══════════════════════════════════════════════════════════════
 
 interface KpiCardProps {
@@ -132,10 +133,11 @@ interface Invoice {
   payments: InvoicePayment[]
   installmentPlan?: any | null
   customerPortalToken?: string | null
-    checkStatus?: string | null
+  checkStatus?: string | null
   checkInfo?: { id: string; status: string; checkNumber: string; bankName: string; dueDate: string } | null
   _isOffline?: boolean
   _offlineAction?: 'create' | 'update' | 'delete'
+  invoiceType?: string
 }
 
 interface InstallmentScheduleItem {
@@ -272,7 +274,6 @@ function getCheckStatusBadge(checkStatus: string | null | undefined) {
   const info = map[checkStatus] || { label: checkStatus, className: 'bg-gray-50 text-gray-500' }
   return <Badge className={`${info.className} text-[10px] gap-1`}>{info.label}</Badge>
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 // Filter Constants
@@ -539,13 +540,13 @@ function MobileInvoiceCard({
   const invNumber = inv.invoiceNumber || inv.number || '---'
   const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
   const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
-  const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
+  const isReturn = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
   const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
   const hasCreditRemaining = (inv.paymentType || '').toLowerCase() === 'credit' && !isPaid && !isCancelled && remaining > 0
 
   return (
     <Card
-      className={`border shadow-none cursor-pointer transition-colors active:bg-gray-50 ${isCancelled ? 'opacity-60' : ''} ${(inv as any)._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200 bg-white'}`}
+      className={`border shadow-none cursor-pointer transition-colors active:bg-gray-50 ${isCancelled ? 'opacity-60' : ''} ${inv._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200 bg-white'}`}
       onClick={() => onView(inv)}
     >
       <CardContent className="p-3">
@@ -560,17 +561,17 @@ function MobileInvoiceCard({
               </Badge>
             )}
           </div>
-          {getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}
+          {getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}
         </div>
 
         <div className="flex items-center justify-between gap-2 mb-2">
           <span className="text-xs text-gray-600 truncate flex-1">
             {inv.customerName || <span className="text-gray-400">فروش عمومی</span>}
           </span>
-      <div className="flex items-center gap-1">
-  {getPaymentTypeBadge(inv.paymentType)}
-  {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}
-</div>
+          <div className="flex items-center gap-1">
+            {getPaymentTypeBadge(inv.paymentType)}
+            {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-1.5 mb-2.5">
@@ -605,7 +606,7 @@ function MobileInvoiceCard({
                 <Wallet className="w-3.5 h-3.5" />
               </Button>
             )}
-            {(inv as any).invoiceType !== 'service' && !isReturn && !isCancelled && (
+            {inv.invoiceType !== 'service' && !isReturn && !isCancelled && (
               <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600" onClick={() => onReturn(inv)}>
                 <RotateCcw className="w-3.5 h-3.5" />
               </Button>
@@ -684,9 +685,18 @@ export default function InvoicesPage() {
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnSubmitting, setReturnSubmitting] = useState(false)
   const [invoiceToReturn, setInvoiceToReturn] = useState<Invoice | null>(null)
-  const [returnItems, setReturnItems] = useState<Array<{
-    invoiceItemId: string; productName: string; maxQuantity: number; quantity: number; returnReason: string
-  }>>([])
+const [returnItems, setReturnItems] = useState<Array<{
+  invoiceItemId: string
+  productName: string
+  maxQuantity: number
+  quantity: number
+  returnReason: string
+  // ★ فیلدهای جدید اضافه شوند
+  unitPrice: number
+  lineTotal: number
+  returnAmount: number
+  unitLabel?: string
+}>>([])
   const [returnPaymentType, setReturnPaymentType] = useState<'cash' | 'credit'>('cash')
   const [returnDescription, setReturnDescription] = useState('')
 
@@ -786,7 +796,6 @@ export default function InvoicesPage() {
     return () => clearInterval(interval)
   }, [loadInvoices, isOnline])
 
-  // ★ ریست صفحه هنگام تغییر فیلتر
   useEffect(() => { setPage(1) }, [statusFilter, paymentTypeFilter])
 
   // ═══════════════════════════════════════════════════════════════
@@ -823,7 +832,8 @@ export default function InvoicesPage() {
     const paidAmount = invoices.reduce((sum, i) => sum + (i.paidAmount || 0), 0)
     return { total, paid, pending, partial, totalAmount, paidAmount }
   }, [invoices])
-    // ═══════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════
   // Credit Payment Handler
   // ═══════════════════════════════════════════════════════════════
 
@@ -1048,7 +1058,7 @@ export default function InvoicesPage() {
   }
 
   const handleDeleteClick = (invoice: Invoice) => {
-    const isReturn = (invoice as any).invoiceType === 'sale_return' || (invoice as any).invoiceType === 'purchase_return'
+    const isReturn = invoice.invoiceType === 'sale_return' || invoice.invoiceType === 'purchase_return'
     if (!planFeatures.canDeleteInvoice && !isReturn) return
     setInvoiceToDelete(invoice)
     setDeleteDialogOpen(true)
@@ -1102,57 +1112,93 @@ export default function InvoicesPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Return Invoice Handlers
+  // ★ v9.2.0: Return Invoice Handlers — رفع باگ ذخیره items
   // ═══════════════════════════════════════════════════════════════
 
-  const handleReturnClick = async (invoice: Invoice) => {
-    const invoiceType = (invoice as any).invoiceType?.toLowerCase() || 'sale'
-    if (invoiceType === 'service') {
-      toast({ title: 'خطا', description: 'فاکتور خدماتی قابل برگشت نیست', variant: 'destructive' })
-      return
-    }
-    if (invoiceType === 'sale_return') {
-      toast({ title: 'خطا', description: 'این فاکتور خودش برگشتی است', variant: 'destructive' })
-      return
-    }
-    setInvoiceToReturn(invoice)
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch(`/api/invoices/${invoice.id}`, {
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-      const data = await res.json()
-      if (data.success && data.data?.items && Array.isArray(data.data.items) && data.data.items.length > 0) {
-        const formattedItems = data.data.items.map((item: any) => ({
-          invoiceItemId: item.id || '',
-          productName: item.productName || 'کالا نامشخص',
-          maxQuantity: item.quantity || 0,
-          quantity: 0,
-          returnReason: '',
-        }))
-        setReturnItems(formattedItems)
-      } else {
-        toast({ title: 'هشدار', description: 'این فاکتور آیتمی برای برگشت ندارد', variant: 'destructive' })
-        return
-      }
-    } catch (err: any) {
-      toast({ title: 'خطا', description: `بارگذاری آیتم‌های فاکتور ناموفق بود: ${err.message}`, variant: 'destructive' })
-      return
-    }
-    setReturnDialogOpen(true)
+const handleReturnClick = async (invoice: Invoice) => {
+  const invoiceType = (invoice.invoiceType || 'sale').toLowerCase()
+  if (invoiceType === 'service') {
+    toast({ title: 'خطا', description: 'فاکتور خدماتی قابل برگشت نیست', variant: 'destructive' })
+    return
+  }
+  if (invoiceType === 'sale_return') {
+    toast({ title: 'خطا', description: 'این فاکتور خودش برگشتی است', variant: 'destructive' })
+    return
+  }
+  if (invoice._isOffline) {
+    toast({ title: 'خطا', description: 'فاکتور آفلاین قابل برگشت نیست. ابتدا همگام‌سازی کنید.', variant: 'destructive' })
+    return
+  }
+  const status = (invoice.paymentStatus || invoice.status || '').toUpperCase()
+  if (status === 'CANCELLED') {
+    toast({ title: 'خطا', description: 'فاکتور لغو شده قابل برگشت نیست', variant: 'destructive' })
+    return
   }
 
-  const handleReturnItemChange = (index: number, field: string, value: any) => {
-    const updated = [...returnItems]
-    if (field === 'quantity') {
-      const num = Number(value)
-      updated[index].quantity = Math.min(Math.max(0, num), updated[index].maxQuantity)
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const res = await fetch(`/api/invoices/${invoice.id}`, {
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    const data = await res.json()
+    if (data.success && data.data?.items && Array.isArray(data.data.items) && data.data.items.length > 0) {
+      // ★ v9.3.1: اصلاح fallback برای lineTotal صفر/خراب (فاکتورهای قدیمی)
+      const formattedItems = data.data.items.map((item: any) => {
+        const qty = Number(item.quantity) || 0
+        const unitPrice = Number(item.unitPrice) || 0
+        const discount = Number(item.discountAmount) || 0
+        const tax = Number(item.taxAmount) || 0
+
+        const storedLineTotal = Number(item.lineTotal || item.totalAmount) || 0
+        // ★ اگه lineTotal ذخیره‌شده صفر/نامعتبر بود ولی unitPrice و quantity معتبرن،
+        //   از روی unitPrice محاسبه‌ش می‌کنیم (برای فاکتورهای قدیمی با دیتای خراب)
+        const fallbackLineTotal = qty * unitPrice - discount + tax
+        const lineTotal = storedLineTotal > 0 ? storedLineTotal : fallbackLineTotal
+
+        return {
+          invoiceItemId: item.id || '',
+          productName: item.productName || 'کالا نامشخص',
+          maxQuantity: qty,
+          quantity: 0,
+          returnReason: '',
+          unitPrice,
+          lineTotal,
+          returnAmount: 0,
+          unitLabel: item.unitLabel || 'عدد',
+        }
+      })
+      setReturnItems(formattedItems)
+      setInvoiceToReturn({ ...invoice, items: data.data.items })
+      setReturnDialogOpen(true)
     } else {
-      (updated[index] as any)[field] = value
+      toast({ title: 'هشدار', description: 'این فاکتور آیتمی برای برگشت ندارد', variant: 'destructive' })
+      return
     }
-    setReturnItems(updated)
+  } catch (err: any) {
+    toast({ title: 'خطا', description: `بارگذاری آیتم‌های فاکتور ناموفق بود: ${err.message}`, variant: 'destructive' })
+    return
   }
+}
+
+ const handleReturnItemChange = (index: number, field: string, value: any) => {
+  console.log('🔍 onChange:', { field, typedValue: value, maxQuantity: returnItems[index]?.maxQuantity })
+  const updated = [...returnItems]
+  if (field === 'quantity') {
+    const num = Number(value)
+    const newQty = Math.min(Math.max(0, num), updated[index].maxQuantity)
+    updated[index].quantity = newQty
+    
+    // ★ محاسبه returnAmount بر اساس نسبت
+    const origQty = updated[index].maxQuantity
+    const ratio = origQty > 0 ? newQty / origQty : 0
+    updated[index].returnAmount = updated[index].lineTotal * ratio
+  } else {
+    (updated[index] as any)[field] = value
+  }
+  console.log('🔍 about to setReturnItems:', updated)
+  setReturnItems(updated)
+}
 
   const handleReturnSubmit = async () => {
     if (!isOnline) {
@@ -1197,7 +1243,7 @@ export default function InvoicesPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Render: Detail Dialog (Compact)
+  // ★ v9.2.0: Render: Detail Dialog — حذف دکمه‌های پرداخت
   // ═══════════════════════════════════════════════════════════════
 
   const renderDetailDialog = () => {
@@ -1229,7 +1275,7 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'مشتری', value: <span className="text-xs font-medium truncate block">{inv.customerName || 'فروش عمومی'}</span> },
-             { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}</div> },
+                { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}</div> },
               ].map((item, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
                   <p className="text-[9px] text-gray-400 mb-0.5">{item.label}</p>
@@ -1343,27 +1389,12 @@ export default function InvoicesPage() {
             )}
           </div>
 
+          {/* ★ v9.2.0: دکمه‌های "ثبت پرداخت" و "پرداخت آنلاین" حذف شدند */}
           <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
-            {(() => {
-              const rem = (inv.totalAmount || 0) - (inv.paidAmount || 0)
-              if (rem > 0 && (inv.paymentType === 'credit' || inv.paymentType === 'installment')) {
-                return (
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8 px-3 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => { setDetailOpen(false); handleReceivePaymentClick(inv) }}>
-                    <Wallet className="w-3.5 h-3.5" />ثبت پرداخت
-                  </Button>
-                )
-              }
-              return null
-            })()}
             {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
               <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
             )}
             <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
-                      {/* ★★★ v9.1: دکمه پرداخت الکترونیک فقط برای پلن‌های دارای درگاه پرداخت */}
-            {planFeatures.canOnlinePayment && (() => {
-              const rem = (inv.totalAmount || 0) - (inv.paidAmount || 0)
-              return rem > 0 ? <OnlinePaymentButton invoiceId={inv.id} amount={rem} /> : null
-            })()}
             <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
               بستن
             </Button>
@@ -1702,17 +1733,15 @@ export default function InvoicesPage() {
   )
 
   // ═══════════════════════════════════════════════════════════════
-  // Render: Return Dialog
+  // ★ v9.2.0: Render: Return Dialog — رفع باگ محاسبه مبلغ
   // ═══════════════════════════════════════════════════════════════
 
   const renderReturnDialog = () => {
-    const totalReturn = returnItems.reduce((sum, retItem) => {
-      const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
-      if (!origItem) return sum
-      const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-      return sum + (Number(origItem.lineTotal) || 0) * ratio
-    }, 0)
-    const hasSelectedItems = returnItems.some(item => item.quantity > 0)
+    // ★ v9.2.0: محاسبه بهبود یافته مبلغ برگشتی
+   // ★ v9.3.0: محاسبه ساده‌تر و قابل اعتمادتر
+   console.log('🔍 renderReturnDialog called, returnItems:', returnItems)
+const totalReturn = returnItems.reduce((sum, item) => sum + (item.returnAmount || 0), 0)
+const hasSelectedItems = returnItems.some(item => item.quantity > 0)
 
     return (
       <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
@@ -1734,23 +1763,26 @@ export default function InvoicesPage() {
               </div>
             ) : (
               <>
+                {/* ★ v9.2.0: کارت‌های موبایل با عنوان درست */}
                 <div className="sm:hidden space-y-2">
                   {returnItems.map((retItem, index) => {
-                    const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
+                    const origItem = invoiceToReturn?.items?.find((it: any) => it.id === retItem.invoiceItemId)
                     if (!origItem) return null
-                    const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-                    const itemReturnAmount = (Number(origItem.lineTotal) || 0) * ratio
+                    const origQty = origItem.quantity || 0
+                    const ratio = origQty > 0 ? retItem.quantity / origQty : 0
+                  const itemReturnAmount = retItem.returnAmount || 0
                     return (
                       <Card key={index} className={`border ${retItem.quantity > 0 ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200'}`}>
                         <CardContent className="p-3 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium text-sm text-gray-900">{retItem.productName}</span>
-                            <span className="text-xs text-gray-500">موجودی: {(origItem.quantity || 0).toLocaleString('fa-IR')}</span>
+                            {/* ★ v9.2.0: عنوان "تعداد خرید" به جای "موجودی" */}
+                            <span className="text-xs text-gray-500">تعداد خرید: {origQty.toLocaleString('fa-IR')}</span>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
                               <Label className="text-[10px]">مقدار برگشتی</Label>
-                              <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origItem.quantity || 0} className="h-8 text-xs text-center" />
+                              <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origQty} className="h-8 text-xs text-center" />
                             </div>
                             <div className="space-y-1">
                               <Label className="text-[10px]">دلیل برگشت</Label>
@@ -1764,13 +1796,15 @@ export default function InvoicesPage() {
                   })}
                 </div>
 
+                {/* ★ v9.2.0: جدول دسکتاپ با عنوان درست */}
                 <div className="hidden sm:block border border-gray-200 rounded-lg overflow-hidden bg-white">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-purple-50 border-b border-gray-200">
                         <tr>
                           <th className="text-right p-3 font-medium">نام کالا</th>
-                          <th className="text-center p-3 font-medium">موجودی</th>
+                          {/* ★ v9.2.0: عنوان "تعداد خرید" به جای "موجودی" */}
+                          <th className="text-center p-3 font-medium">تعداد خرید</th>
                           <th className="text-center p-3 font-medium min-w-[100px]">مقدار برگشتی</th>
                           <th className="text-center p-3 font-medium">قیمت واحد</th>
                           <th className="text-center p-3 font-medium">مبلغ برگشتی</th>
@@ -1779,20 +1813,21 @@ export default function InvoicesPage() {
                       </thead>
                       <tbody>
                         {returnItems.map((retItem, index) => {
-                          const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
+                          const origItem = invoiceToReturn?.items?.find((it: any) => it.id === retItem.invoiceItemId)
                           if (!origItem) return (
                             <tr key={index} className="border-t border-gray-100 bg-red-50">
                               <td colSpan={6} className="p-3 text-center text-red-600 text-xs">آیتم یافت نشد</td>
                             </tr>
                           )
-                          const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-                          const itemReturnAmount = (Number(origItem.lineTotal) || 0) * ratio
+                          const origQty = origItem.quantity || 0
+                          const ratio = origQty > 0 ? retItem.quantity / origQty : 0
+                   const itemReturnAmount = retItem.returnAmount || 0
                           return (
                             <tr key={index} className={`border-t border-gray-100 hover:bg-gray-50 ${retItem.quantity > 0 ? 'bg-amber-50/30' : ''}`}>
                               <td className="p-3 font-medium text-gray-900">{retItem.productName}</td>
-                              <td className="p-3 text-center text-gray-600">{(origItem.quantity || 0).toLocaleString('fa-IR')}</td>
+                              <td className="p-3 text-center text-gray-600">{origQty.toLocaleString('fa-IR')}</td>
                               <td className="p-3">
-                                <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origItem.quantity || 0} className="h-8 text-xs w-full text-center" placeholder="0" />
+                                <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origQty} className="h-8 text-xs w-full text-center" placeholder="0" />
                               </td>
                               <td className="p-3 text-center font-mono text-gray-600">{(origItem.unitPrice || 0).toLocaleString('fa-IR')}</td>
                               <td className={`p-3 text-center font-bold font-mono ${itemReturnAmount > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{itemReturnAmount > 0 ? itemReturnAmount.toLocaleString('fa-IR') : '—'}</td>
@@ -2059,7 +2094,7 @@ export default function InvoicesPage() {
                             const invNumber = toFaNum(inv.invoiceNumber || inv.number || '---')
                             const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
                             const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
-                            const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
+                            const isReturn = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
                             const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
 
                             return (
@@ -2089,13 +2124,13 @@ export default function InvoicesPage() {
                                     {formatNumber(inv.paidAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
                                   </span>
                                 </TableCell>
-                          <TableCell className="hidden xl:table-cell">
-  <div className="flex items-center gap-1 flex-wrap">
-    {getPaymentTypeBadge(inv.paymentType)}
-    {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge((inv as any).checkStatus)}
-  </div>
-</TableCell>
-                                <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}</TableCell>
+                                <TableCell className="hidden xl:table-cell">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {getPaymentTypeBadge(inv.paymentType)}
+                                    {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}
+                                  </div>
+                                </TableCell>
+                                <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}</TableCell>
                                 <TableCell className="text-xs hidden lg:table-cell">{formatDateShort(inv.createdAt)}</TableCell>
                                 <TableCell>
                                   <div className="flex items-center justify-center gap-0.5" onClick={e => e.stopPropagation()}>
@@ -2119,7 +2154,7 @@ export default function InvoicesPage() {
                                       </Tooltip>
                                     )}
 
-                                    {(inv as any).invoiceType !== 'service' && !isReturn && !isCancelled && (
+                                    {inv.invoiceType !== 'service' && !isReturn && !isCancelled && (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
                                           <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600" onClick={() => handleReturnClick(inv)}>

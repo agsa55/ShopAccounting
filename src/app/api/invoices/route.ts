@@ -475,6 +475,7 @@ export const POST = withTenantAndPermission('pos')(async (
       })
 
       // ایجاد آیتم‌ها و به‌روزرسانی موجودی
+        // ایجاد آیتم‌ها و به‌روزرسانی موجودی
       for (const item of items) {
         if (!item.productId) continue
 
@@ -487,18 +488,33 @@ export const POST = withTenantAndPermission('pos')(async (
         const itemCogs = unitCost * item.quantity
         totalCogs += itemCogs
 
+        // ★ v8.6: محاسبه صریح lineTotal — قبلاً این فیلد اصلاً ست نمی‌شد و صفر می‌ماند
+        const itemQty = Number(item.quantity) || 0
+        const itemUnitPrice = Number(item.unitPrice) || 0
+        const itemDiscount = Number(item.discountAmount) || 0
+        const itemTax = Number(item.taxAmount) || 0
+        const itemLineTotal = itemQty * itemUnitPrice - itemDiscount + itemTax
+
+        if (itemQty <= 0 || itemUnitPrice < 0) {
+          console.warn('[Invoices POST] ⚠️ آیتم با مقدار/قیمت نامعتبر:', {
+            productName: item.productName,
+            rawQuantity: item.quantity,
+            rawUnitPrice: item.unitPrice,
+          })
+        }
+
         await tx.invoiceItem.create({
           data: {
             invoiceId: inv.id,
             productId: item.productId,
             productName: item.productName || product?.name || 'نامشخص',
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            discountAmount: item.discountAmount || 0,
-            taxAmount: item.taxAmount || 0,
+            quantity: itemQty,
+            unitPrice: itemUnitPrice,
+            discountAmount: itemDiscount,
+            taxAmount: itemTax,
+            lineTotal: itemLineTotal,   // ★ همین خط قبلاً کلاً غایب بود
           },
         })
-
         await tx.product.update({
           where: { id: item.productId },
           data: { currentStock: { decrement: item.quantity } },
