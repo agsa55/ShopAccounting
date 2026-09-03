@@ -7,7 +7,8 @@ import {
   ArrowLeft, Filter, SlidersHorizontal, Crown, Star, Building2,
   CheckCircle2, XCircle, AlertTriangle, TrendingUp, Users,
   Eye, Settings, MoreVertical, Download, ChevronDown, Zap,
-  LayoutDashboard, Activity
+  LayoutDashboard, Activity, ChevronRight, ChevronLeft,
+  Rocket, BadgeCheck
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
@@ -55,29 +56,28 @@ const getDaysRemaining = (expiryDate: string): number => {
   }
 };
 
-// ★ تعیین پلن بر اساس نام
+// ★ تعیین پلن بر اساس نام (★ v11.2: بدون آزمایشی)
 const getPlanInfo = (planName: string): { label: string; color: string; bg: string; border: string; icon: any } => {
   const p = (planName || '').toLowerCase();
   if (p.includes('enterprise') || p.includes('سازمانی')) return {
-    label: 'سازمانی', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200', icon: '🥇'
+    label: 'حرفه‌ای', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200', icon: '🥇'
   };
   if (p.includes('professional') || p.includes('حرفه') || p.includes('پیشرفته')) return {
-    label: 'حرفه‌ای', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200', icon: '🥈'
-  };
-  if (p.includes('trial') || p.includes('تست') || p.includes('دمو')) return {
-    label: 'آزمایشی', color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: '🎁'
+    label: 'پیشرفته', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200', icon: '🥈'
   };
   return {
-    label: 'ساده', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200', icon: '🥉'
+    label: 'پایه', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200', icon: '🥉'
   };
 };
 
-// ★ وضعیت فروشگاه
-const getStatusInfo = (status: string): { label: string; color: string; bg: string } => {
-  if (status === 'active') return { label: 'فعال', color: 'text-emerald-700', bg: 'bg-emerald-100' };
-  if (status === 'suspended' || status === 'expired') return { label: 'منقضی', color: 'text-red-700', bg: 'bg-red-100' };
-  if (status === 'trial') return { label: 'آزمایشی', color: 'text-amber-700', bg: 'bg-amber-100' };
-  return { label: 'نامشخص', color: 'text-gray-700', bg: 'bg-gray-100' };
+// ★ وضعیت فروشگاه (★ v11.2: بر اساس مدت استفاده)
+const getStatusInfo = (tenant: any): { label: string; color: string; bg: string; icon: string } => {
+  const usageDays = tenant.usageDays || 0;
+  
+  if (usageDays <= 90) {
+    return { label: 'سه ماهه شروع', color: 'text-emerald-700', bg: 'bg-emerald-100', icon: '🚀' };
+  }
+  return { label: 'به روز رسانی شده', color: 'text-blue-700', bg: 'bg-blue-100', icon: '✅' };
 };
 
 export default function AdminTenantsPage() {
@@ -90,6 +90,13 @@ export default function AdminTenantsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(getPersianTime());
+  
+  // ★★★ v11.0: state برای مرتب‌سازی ستون مدت استفاده
+  const [sortBy, setSortBy] = useState<'default' | 'usage_asc' | 'usage_desc'>('default');
+  
+  // ★★★ v11.1: state برای صفحه‌بندی
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // ★ آپدیت ساعت هر دقیقه
   useEffect(() => {
@@ -118,10 +125,25 @@ export default function AdminTenantsPage() {
     loadData();
   };
 
-  // ★ فیلتر فروشگاه‌ها
+  // ★★★ v11.0: رنگ‌بندی هوشمند بر اساس مدت استفاده
+  const getUsageInfo = (days: number): { color: string; bg: string; border: string; badge: string; icon: string } => {
+    if (days < 30) return {
+      color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', badge: 'تازه‌کار', icon: '🌱'
+    };
+    if (days < 180) return {
+      color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', badge: 'فعال', icon: '💼'
+    };
+    if (days < 365) return {
+      color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', badge: 'باتجربه', icon: '⭐'
+    };
+    return {
+      color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', badge: 'وفادار', icon: '🏆'
+    };
+  };
+
+  // ★ فیلتر + مرتب‌سازی فروشگاه‌ها (★ v11.2: فیلتر وضعیت جدید)
   const filteredTenants = useMemo(() => {
-    return tenants.filter(t => {
-      // فیلتر جستجو
+    const filtered = tenants.filter(t => {
       const matchSearch = searchTerm === '' ||
         t.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.subDomain?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -129,29 +151,67 @@ export default function AdminTenantsPage() {
         t.ownerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         t.email?.toLowerCase().includes(searchTerm.toLowerCase());
 
-      // فیلتر پلن
+      // فیلتر پلن (★ v11.2: فقط پایه/پیشرفته/حرفه‌ای)
       const matchPlan = planFilter === 'all' || t.planName === planFilter;
 
-      // فیلتر وضعیت
-      const matchStatus = statusFilter === 'all' || t.status === statusFilter;
+      // ★ v11.2: فیلتر وضعیت بر اساس مدت استفاده
+      const usageDays = t.usageDays || 0;
+      let matchStatus = true;
+      
+      if (statusFilter === 'trial') {
+        // سه ماهه شروع: کمتر از ۹۰ روز
+        matchStatus = usageDays <= 90;
+      } else if (statusFilter === 'renewed') {
+        // به روز رسانی شده: بیشتر از ۹۰ روز
+        matchStatus = usageDays > 90;
+      }
 
       return matchSearch && matchPlan && matchStatus;
     });
-  }, [tenants, searchTerm, planFilter, statusFilter]);
 
-  // ★ محاسبه آمار
+    // مرتب‌سازی بر اساس مدت استفاده
+    if (sortBy === 'usage_asc') {
+      return [...filtered].sort((a, b) => (a.usageDays || 0) - (b.usageDays || 0));
+    } else if (sortBy === 'usage_desc') {
+      return [...filtered].sort((a, b) => (b.usageDays || 0) - (a.usageDays || 0));
+    }
+    return filtered;
+  }, [tenants, searchTerm, planFilter, statusFilter, sortBy]);
+
+  // ★★★ v11.1: محاسبه صفحه‌بندی
+  const pagination = useMemo(() => {
+    const totalItems = filteredTenants.length;
+    const totalPages = Math.ceil(totalItems / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalItems);
+    const paginatedItems = filteredTenants.slice(startIndex, endIndex);
+
+    return {
+      totalItems,
+      totalPages,
+      currentPage,
+      pageSize,
+      startIndex,
+      endIndex,
+      paginatedItems,
+    };
+  }, [filteredTenants, currentPage, pageSize]);
+
+  // ★ ریست به صفحه ۱ هنگام تغییر فیلترها
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, planFilter, statusFilter, pageSize, sortBy]);
+
+  // ★ محاسبه آمار (★ v11.2: بدون آزمایشی)
   const stats = useMemo(() => {
-    const trialCount = tenants.filter(t =>
-      t.planName === 'trial' || t.status === 'trial'
-    ).length;
     const basicCount = tenants.filter(t =>
-      t.planName === 'simple' || t.planName === 'basic'
+      t.planName === 'simple' || t.planName === 'basic' || t.planName === 'پایه'
     ).length;
     const proCount = tenants.filter(t =>
-      t.planName === 'professional'
+      t.planName === 'professional' || t.planName === 'پیشرفته'
     ).length;
     const enterpriseCount = tenants.filter(t =>
-      t.planName === 'enterprise'
+      t.planName === 'enterprise' || t.planName === 'حرفه‌ای'
     ).length;
     const activeCount = tenants.filter(t => t.status === 'active').length;
     const expiringCount = tenants.filter(t => {
@@ -159,11 +219,16 @@ export default function AdminTenantsPage() {
       return days <= 7 && days > 0;
     }).length;
 
+    // ★ v11.2: آمار وضعیت جدید
+    const trialCount = tenants.filter(t => (t.usageDays || 0) <= 90).length;
+    const renewedCount = tenants.filter(t => (t.usageDays || 0) > 90).length;
+
     return {
       total: tenants.length,
       active: activeCount,
       expiring: expiringCount,
       trial: trialCount,
+      renewed: renewedCount,
       basic: basicCount,
       professional: proCount,
       enterprise: enterpriseCount,
@@ -194,14 +259,16 @@ export default function AdminTenantsPage() {
 
   // ★ خروجی CSV
   const handleExportCSV = () => {
-    const headers = ['نام فروشگاه', 'ساب‌دامین', 'شماره تماس', 'پلن', 'وضعیت', 'روزهای باقی‌مانده'];
+    const headers = ['نام فروشگاه', 'ساب‌دامین', 'شماره تماس', 'پلن', 'وضعیت', 'روزهای باقی‌مانده', 'مدت استفاده', 'کل روزهای استفاده'];
     const rows = filteredTenants.map(t => [
       t.companyName || '',
       t.subDomain || '',
       t.ownerMobile || '',
       getPlanInfo(t.planName).label,
-      getStatusInfo(t.status).label,
-      t.remainingDays || getDaysRemaining(t.subscriptionEnd || t.expiresAt || t.planEndDate || '')
+      getStatusInfo(t).label,
+      t.remainingDays || getDaysRemaining(t.subscriptionEnd || t.expiresAt || t.planEndDate || ''),
+      t.usageText || '',
+      t.usageDays || 0,
     ]);
 
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
@@ -211,6 +278,38 @@ export default function AdminTenantsPage() {
     a.href = url;
     a.download = `tenants-${Date.now()}.csv`;
     a.click();
+  };
+
+  // ★★★ v11.1: تولید شماره صفحات قابل نمایش
+  const getPageNumbers = () => {
+    const { totalPages, currentPage } = pagination;
+    const pages: (number | string)[] = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible + 2) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      
+      if (currentPage > 3) {
+        pages.push('...');
+      }
+      
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      
+      if (currentPage < totalPages - 2) {
+        pages.push('...');
+      }
+      
+      pages.push(totalPages);
+    }
+    
+    return pages;
   };
 
   if (loading) {
@@ -231,7 +330,6 @@ export default function AdminTenantsPage() {
     );
   }
 
-  // ★ کارت‌های آماری
   const statCards = [
     {
       title: 'کل فروشگاه‌ها',
@@ -241,28 +339,28 @@ export default function AdminTenantsPage() {
       subtitle: 'مجموع کل',
     },
     {
-      title: 'فروشگاه‌های فعال',
-      value: stats.active,
-      icon: CheckCircle2,
+      title: 'سه ماهه شروع',
+      value: stats.trial,
+      icon: Rocket,
       gradient: 'from-emerald-500 to-teal-600',
-      subtitle: `${toFaNum(Math.round((stats.active / Math.max(stats.total, 1)) * 100))}٪ از کل`,
+      subtitle: 'در دوره سه ماهه اول',
     },
     {
-      title: 'انقضای نزدیک',
-      value: stats.expiring,
-      icon: AlertTriangle,
-      gradient: stats.expiring > 0 ? 'from-orange-500 to-red-500' : 'from-gray-400 to-gray-500',
-      subtitle: stats.expiring > 0 ? 'نیاز به پیگیری' : 'همه فعال',
+      title: 'به روز رسانی شده',
+      value: stats.renewed,
+      icon: BadgeCheck,
+      gradient: 'from-blue-500 to-indigo-600',
+      subtitle: 'ادامه‌دهندگان سیستم',
     },
     {
-      title: 'پلن سازمانی',
+      title: 'پلن حرفه‌ای',
       value: stats.enterprise,
       icon: Crown,
       gradient: 'from-purple-500 to-pink-500',
       subtitle: 'برترین پلن',
     },
     {
-      title: 'پلن حرفه‌ای',
+      title: 'پلن پیشرفته',
       value: stats.professional,
       icon: Star,
       gradient: 'from-blue-500 to-indigo-600',
@@ -344,42 +442,34 @@ export default function AdminTenantsPage() {
           })}
         </div>
 
-        {/* ═══════════════════════ کارت‌های پلن ═══════════════════════ */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-lg">🎁</div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-amber-700 font-medium truncate">آزمایشی</p>
-              <p className="text-base font-black text-amber-800" dir="ltr">{formatNumberFa(stats.trial)}</p>
-            </div>
-          </div>
+        {/* ═══════════════════════ کارت‌های پلن (★ v11.2) ═══════════════════════ */}
+        <div className="grid grid-cols-3 gap-2.5">
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-lg">🥉</div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-gray-600 font-medium truncate">ساده</p>
+              <p className="text-[10px] text-gray-600 font-medium truncate">پایه</p>
               <p className="text-base font-black text-gray-800" dir="ltr">{formatNumberFa(stats.basic)}</p>
             </div>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-lg">🥈</div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-blue-700 font-medium truncate">حرفه‌ای</p>
+              <p className="text-[10px] text-blue-700 font-medium truncate">پیشرفته</p>
               <p className="text-base font-black text-blue-800" dir="ltr">{formatNumberFa(stats.professional)}</p>
             </div>
           </div>
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-lg">🥇</div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-purple-700 font-medium truncate">سازمانی</p>
+              <p className="text-[10px] text-purple-700 font-medium truncate">حرفه‌ای</p>
               <p className="text-base font-black text-purple-800" dir="ltr">{formatNumberFa(stats.enterprise)}</p>
             </div>
           </div>
         </div>
 
-        {/* ═══════════════════════ فیلترها ═══════════════════════ */}
+        {/* ═══════════════════════ فیلترها (★ v11.2) ═══════════════════════ */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
           <div className="flex flex-col md:flex-row gap-3">
-            {/* جستجو */}
             <div className="relative flex-1">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -399,7 +489,7 @@ export default function AdminTenantsPage() {
               )}
             </div>
 
-            {/* فیلتر پلن */}
+            {/* فیلتر پلن (★ v11.2) */}
             <div className="relative">
               <SlidersHorizontal className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <select
@@ -408,41 +498,45 @@ export default function AdminTenantsPage() {
                 className="w-full md:w-40 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
               >
                 <option value="all">همه پلن‌ها</option>
-                <option value="trial">آزمایشی</option>
-                <option value="basic">ساده</option>
-                <option value="simple">ساده</option>
-                <option value="professional">حرفه‌ای</option>
-                <option value="enterprise">سازمانی</option>
+                <option value="simple">پایه</option>
+                <option value="professional">پیشرفته</option>
+                <option value="enterprise">حرفه‌ای</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
 
-            {/* فیلتر وضعیت */}
+            {/* فیلتر وضعیت (★ v11.2) */}
             <div className="relative">
               <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full md:w-40 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
+                className="w-full md:w-48 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
               >
                 <option value="all">همه وضعیت‌ها</option>
-                <option value="active">فعال</option>
-                <option value="suspended">منقضی</option>
-                <option value="trial">آزمایشی</option>
+                <option value="trial">🚀 سه ماهه شروع</option>
+                <option value="renewed">✅ به روز رسانی شده</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
 
-          {/* شمارنده نتایج */}
-          {(searchTerm || planFilter !== 'all' || statusFilter !== 'all') && (
-            <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-              <p className="text-[11px] text-gray-600">
-                <span className="font-bold text-[#7C7BEB]">{toFaNum(filteredTenants.length)}</span> فروشگاه از مجموع{' '}
-                <span className="font-bold">{toFaNum(tenants.length)}</span> فروشگاه یافت شد
-              </p>
+          {(searchTerm || planFilter !== 'all' || statusFilter !== 'all' || sortBy !== 'default') && (
+            <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-[11px] text-gray-600">
+                  <span className="font-bold text-[#7C7BEB]">{toFaNum(filteredTenants.length)}</span> فروشگاه از مجموع{' '}
+                  <span className="font-bold">{toFaNum(tenants.length)}</span> فروشگاه یافت شد
+                </p>
+                {sortBy !== 'default' && (
+                  <span className="text-[10px] font-bold text-[#7C7BEB] bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    مرتب‌شده: {sortBy === 'usage_desc' ? 'بیشترین استفاده' : 'کمترین استفاده'}
+                  </span>
+                )}
+              </div>
               <button
-                onClick={() => { setSearchTerm(''); setPlanFilter('all'); setStatusFilter('all'); }}
+                onClick={() => { setSearchTerm(''); setPlanFilter('all'); setStatusFilter('all'); setSortBy('default'); }}
                 className="text-[10px] font-medium text-[#7C7BEB] hover:text-[#5B5AC7] flex items-center gap-1"
               >
                 <XCircle className="w-3 h-3" />
@@ -463,23 +557,51 @@ export default function AdminTenantsPage() {
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden md:table-cell">تماس</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">پلن</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">وضعیت</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700">
+                    <button
+                      onClick={() => {
+                        setSortBy(prev =>
+                          prev === 'default' ? 'usage_desc' :
+                          prev === 'usage_desc' ? 'usage_asc' : 'default'
+                        );
+                      }}
+                      className="inline-flex items-center gap-1 hover:text-[#7C7BEB] transition-colors group"
+                      title="مرتب‌سازی بر اساس مدت استفاده"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>مدت استفاده</span>
+                      <span className="inline-flex flex-col leading-none">
+                        <ChevronDown
+                          className={`w-2.5 h-2.5 -mb-0.5 transition-colors ${
+                            sortBy === 'usage_desc' ? 'text-[#7C7BEB]' : 'text-gray-300 group-hover:text-gray-500'
+                          }`}
+                        />
+                        <ChevronDown
+                          className={`w-2.5 h-2.5 rotate-180 -mt-0.5 transition-colors ${
+                            sortBy === 'usage_asc' ? 'text-[#7C7BEB]' : 'text-gray-300 group-hover:text-gray-500'
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden lg:table-cell">زمان باقی‌مانده</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden xl:table-cell text-center">تیکت‌ها</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 text-center">عملیات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filteredTenants.map((tenant: any) => {
+                {pagination.paginatedItems.map((tenant: any) => {
                   const plan = getPlanInfo(tenant.planName || '');
-                  const status = getStatusInfo(tenant.status || '');
+                  const status = getStatusInfo(tenant);
                   const daysLeft = tenant.remainingDays !== undefined
                     ? tenant.remainingDays
                     : getDaysRemaining(tenant.subscriptionEnd || tenant.expiresAt || tenant.planEndDate || '');
                   const isImpersonating = impersonatingId === tenant.id;
+                  const usageDays = tenant.usageDays || 0;
+                  const usageInfo = getUsageInfo(usageDays);
 
                   return (
                     <tr key={tenant.id} className="hover:bg-gray-50/70 transition-colors group">
-                      {/* نام فروشگاه + صاحب */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#7C7BEB] to-[#5B5AC7] flex items-center justify-center text-white font-bold text-xs shrink-0">
@@ -492,18 +614,15 @@ export default function AdminTenantsPage() {
                             </p>
                           </div>
                         </div>
-                        {/* نمایش ساب‌دامین در موبایل */}
                         <p className="text-[10px] text-gray-400 sm:hidden font-mono mt-1 mr-11.5">{tenant.subDomain}</p>
                       </td>
 
-                      {/* ساب‌دامین */}
                       <td className="px-4 py-3 hidden sm:table-cell">
                         <span className="text-[11px] text-gray-700 font-mono bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
                           {tenant.subDomain}
                         </span>
                       </td>
 
-                      {/* شماره تماس */}
                       <td className="px-4 py-3 hidden md:table-cell">
                         <div className="flex items-center gap-1.5 text-xs text-gray-700 font-mono" dir="ltr">
                           <Phone className="w-3 h-3 text-gray-400" />
@@ -511,7 +630,6 @@ export default function AdminTenantsPage() {
                         </div>
                       </td>
 
-                      {/* پلن */}
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border ${plan.bg} ${plan.color} ${plan.border}`}>
                           <span className="text-xs">{plan.icon}</span>
@@ -519,18 +637,36 @@ export default function AdminTenantsPage() {
                         </span>
                       </td>
 
-                      {/* وضعیت */}
+                      {/* ستون وضعیت (★ v11.2) */}
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded-md ${status.bg} ${status.color}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            tenant.status === 'active' ? 'bg-emerald-500' :
-                            tenant.status === 'suspended' ? 'bg-red-500' : 'bg-amber-500'
-                          }`}></span>
+                          <span className="text-xs">{status.icon}</span>
                           {status.label}
                         </span>
                       </td>
 
-                      {/* زمان باقی‌مانده */}
+                      <td className="px-4 py-3">
+                        <div
+                          className={`inline-flex flex-col gap-0.5 px-2.5 py-1.5 rounded-lg border ${usageInfo.bg} ${usageInfo.border} min-w-[110px]`}
+                          title={`ثبت‌نام: ${tenant.createdAt ? new Date(tenant.createdAt).toLocaleDateString('fa-IR') : '—'} — کل: ${toFaNum(usageDays)} روز`}
+                        >
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs">{usageInfo.icon}</span>
+                            <span className={`text-[11px] font-bold ${usageInfo.color} leading-tight`}>
+                              {tenant.usageText || '۰ روز'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-1.5 pt-0.5 border-t border-dashed border-current/20">
+                            <span className="text-[9px] text-gray-500">
+                              {toFaNum(usageDays)} روز
+                            </span>
+                            <span className={`text-[8px] font-bold ${usageInfo.color} px-1 py-0 rounded bg-white/60`}>
+                              {usageInfo.badge}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {tenant.remainingTimeText ? (
                           <span className={`text-xs font-bold ${
@@ -550,14 +686,12 @@ export default function AdminTenantsPage() {
                         )}
                       </td>
 
-                      {/* تعداد تیکت‌ها */}
                       <td className="px-4 py-3 hidden xl:table-cell text-center">
                         <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-purple-50 text-purple-700 text-xs font-bold">
                           {toFaNum(tenant._count?.Tickets || 0)}
                         </span>
                       </td>
 
-                      {/* دکمه عملیات */}
                       <td className="px-4 py-3 text-center">
                         <button
                           onClick={() => handleImpersonate(tenant.id, tenant.subDomain)}
@@ -588,8 +722,90 @@ export default function AdminTenantsPage() {
             </table>
           </div>
 
+          {/* ═══════════════════════ صفحه‌بندی ═══════════════════════ */}
+          {pagination.totalItems > 0 && (
+            <div className="px-4 py-4 bg-gradient-to-l from-gray-50 to-white border-t border-gray-100">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                
+                {/* راست: اطلاعات صفحه */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-gray-600">
+                    نمایش <span className="font-bold text-[#7C7BEB]">{toFaNum(pagination.startIndex + 1)}</span> تا{' '}
+                    <span className="font-bold text-[#7C7BEB]">{toFaNum(pagination.endIndex)}</span> از{' '}
+                    <span className="font-bold">{toFaNum(pagination.totalItems)}</span> فروشگاه
+                  </span>
+                  
+                  {/* انتخاب تعداد رکورد */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500">تعداد در هر صفحه:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="px-2 py-1 border border-gray-200 rounded-md text-xs font-medium focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition bg-white cursor-pointer"
+                    >
+                      <option value={10}>۱۰</option>
+                      <option value={20}>۲۰</option>
+                      <option value={30}>۳۰</option>
+                      <option value={50}>۵۰</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* چپ: دکمه‌های صفحه */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="صفحه قبل"
+                  >
+                    <ChevronRight className="w-4 h-4 text-gray-600" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {getPageNumbers().map((page, idx) => {
+                      if (page === '...') {
+                        return (
+                          <span key={`ellipsis-${idx}`} className="px-2 text-gray-400 text-xs">
+                            ...
+                          </span>
+                        );
+                      }
+                      const pageNum = page as number;
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`min-w-[32px] h-8 px-2 rounded-lg text-xs font-bold transition-all ${
+                            currentPage === pageNum
+                              ? 'bg-[#7C7BEB] text-white shadow-md shadow-purple-500/20'
+                              : 'border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'
+                          }`}
+                        >
+                          {toFaNum(pageNum)}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(pagination.totalPages, prev + 1))}
+                    disabled={currentPage === pagination.totalPages}
+                    className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="صفحه بعد"
+                  >
+                    <ChevronLeft className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* خالی بودن لیست */}
-          {filteredTenants.length === 0 && (
+          {pagination.totalItems === 0 && (
             <div className="p-12 text-center">
               <div className="w-16 h-16 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
                 <Store className="w-8 h-8 text-[#7C7BEB]" />
@@ -610,7 +826,7 @@ export default function AdminTenantsPage() {
 
         {/* ═══════════════════════ فوتر ═══════════════════════ */}
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('10.0.0')}</p>
+          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('11.2.0')}</p>
         </div>
 
       </div>
