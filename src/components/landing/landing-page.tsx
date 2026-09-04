@@ -1025,7 +1025,7 @@ export default function LandingPage() {
                 title: 'پشتیبانی',
                 links: [
                   { label: 'راهنمای استفاده', href: '#' },
-                  { label: 'تماس با ما', href: '#' },
+                  { label: 'تماس با ما: 09377498180', href: '#' },
                   { label: 'سوالات متداول', href: '#' },
                 ],
               },
@@ -1060,8 +1060,8 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <p>رهگشا v7.0 — سیستم حسابداری فروشگاهی هوشمند</p>
-            <p>© ۱۴۰۴ تمام حقوق محفوظ است.</p>
+            <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
+            <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
           </div>
         </div>
       </footer>

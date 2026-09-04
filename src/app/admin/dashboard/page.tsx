@@ -7,7 +7,7 @@ import {
   Clock, Calendar, RefreshCw,
   ArrowUpRight, ArrowDownRight,
   LayoutDashboard, Building2, Crown, XCircle, PlusCircle,
-  Zap, Activity
+  Zap, Activity, Rocket, BadgeCheck
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
@@ -55,12 +55,26 @@ const getDaysRemaining = (expiryDate: string): number => {
   }
 };
 
-// ★ تعیین پلن بر اساس نام
-const getPlanBadge = (planName: string): { label: string; color: string; bg: string } => {
+// ★ تعیین پلن بر اساس نام (★ v11.2: پایه / پیشرفته / حرفه‌ای)
+const getPlanBadge = (planName: string): { label: string; color: string; bg: string; icon: string } => {
   const p = (planName || '').toLowerCase();
-  if (p.includes('enterprise') || p.includes('سازمانی')) return { label: 'سازمانی', color: 'text-purple-700', bg: 'bg-purple-100' };
-  if (p.includes('professional') || p.includes('حرفه')) return { label: 'حرفه‌ای', color: 'text-blue-700', bg: 'bg-blue-100' };
-  return { label: 'ساده', color: 'text-emerald-700', bg: 'bg-emerald-100' };
+  if (p.includes('enterprise') || p.includes('سازمانی') || p.includes('حرفه')) return {
+    label: 'حرفه‌ای', color: 'text-purple-700', bg: 'bg-purple-100', icon: '🥇'
+  };
+  if (p.includes('professional') || p.includes('پیشرفته')) return {
+    label: 'پیشرفته', color: 'text-blue-700', bg: 'bg-blue-100', icon: '🥈'
+  };
+  return {
+    label: 'پایه', color: 'text-gray-700', bg: 'bg-gray-100', icon: '🥉'
+  };
+};
+
+// ★ تعیین وضعیت بر اساس مدت استفاده (★ v11.2)
+const getUsageStatus = (usageDays: number): { label: string; color: string; bg: string; icon: string } => {
+  if (usageDays <= 90) {
+    return { label: 'سه ماهه شروع', color: 'text-emerald-700', bg: 'bg-emerald-100', icon: '🚀' };
+  }
+  return { label: 'به روز رسانی شده', color: 'text-blue-700', bg: 'bg-blue-100', icon: '✅' };
 };
 
 export default function AdminDashboardPage() {
@@ -70,9 +84,15 @@ export default function AdminDashboardPage() {
     expiring: 0,
     tickets: 0,
     suspended: 0,
-    trialUsers: 0,
+    trialPeriodUsers: 0,  // ★ v11.2: سه ماهه شروع
+    renewedUsers: 0,       // ★ v11.2: به روز رسانی شده
+    needsRenewal: 0,       // ★ v11.2: نیاز به به‌روزرسانی (بالای ۹۰ روز ولی تمدید نکرده)
     monthlyRevenue: 0,
     newThisMonth: 0,
+    // ★ v11.2: آمار پلن‌ها
+    basic: 0,
+    professional: 0,
+    enterprise: 0,
   });
   const [tenants, setTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,11 +124,35 @@ export default function AdminDashboardPage() {
           return days <= 7 && days > 0;
         });
         const suspendedTenants = tenantList.filter((t: any) => t.status === 'suspended' || t.status === 'expired');
-        const trialTenants = tenantList.filter((t: any) => t.status === 'trial' || t.isTrial);
+        
+        // ★ v11.2: وضعیت بر اساس مدت استفاده
+        const trialPeriodTenants = tenantList.filter((t: any) => (t.usageDays || 0) <= 90);
+        const renewedTenants = tenantList.filter((t: any) => (t.usageDays || 0) > 90);
+        
+        // فروشگاه‌هایی که بالای ۹۰ روز هستند ولی هنوز وضعیت به‌روزرسانی ندارند (نیاز به پیگیری)
+        const needsRenewalTenants = tenantList.filter((t: any) => {
+          const days = t.usageDays || 0;
+          return days > 90 && days <= 120; // ۹۰ تا ۱۲۰ روز — دوره بحرانی تمدید
+        });
+        
         const newThisMonth = tenantList.filter((t: any) => {
           const d = new Date(t.createdAt);
           return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
         });
+
+        // ★ v11.2: آمار پلن‌ها
+        const basicCount = tenantList.filter(t => {
+          const p = (t.planName || '').toLowerCase();
+          return p.includes('simple') || p.includes('basic') || p.includes('پایه');
+        }).length;
+        const proCount = tenantList.filter(t => {
+          const p = (t.planName || '').toLowerCase();
+          return p.includes('professional') || p.includes('پیشرفته');
+        }).length;
+        const enterpriseCount = tenantList.filter(t => {
+          const p = (t.planName || '').toLowerCase();
+          return p.includes('enterprise') || p.includes('سازمانی') || p.includes('حرفه');
+        }).length;
 
         setStats({
           total: tenantList.length,
@@ -116,9 +160,14 @@ export default function AdminDashboardPage() {
           expiring: expiringTenants.length,
           tickets: tenantList.reduce((acc: number, t: any) => acc + (t._count?.Tickets || 0), 0),
           suspended: suspendedTenants.length,
-          trialUsers: trialTenants.length,
+          trialPeriodUsers: trialPeriodTenants.length,
+          renewedUsers: renewedTenants.length,
+          needsRenewal: needsRenewalTenants.length,
           monthlyRevenue: tenantList.reduce((acc: number, t: any) => acc + (Number(t.monthlyFee) || 0), 0),
           newThisMonth: newThisMonth.length,
+          basic: basicCount,
+          professional: proCount,
+          enterprise: enterpriseCount,
         });
       }
     } catch (err) {
@@ -158,6 +207,17 @@ export default function AdminDashboardPage() {
       .slice(0, 5);
   }, [tenants]);
 
+  // ★ v11.2: فروشگاه‌هایی که نیاز به به‌روزرسانی دارند (۹۰-۱۲۰ روز)
+  const needsRenewalTenants = useMemo(() => {
+    return tenants
+      .filter((t: any) => {
+        const days = t.usageDays || 0;
+        return days > 90 && days <= 120;
+      })
+      .sort((a, b) => (b.usageDays || 0) - (a.usageDays || 0))
+      .slice(0, 6);
+  }, [tenants]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-purple-50/30">
@@ -176,7 +236,7 @@ export default function AdminDashboardPage() {
     );
   }
 
-  // ★ کارت‌های آماری کوچک‌تر
+  // ★ کارت‌های آماری اصلی
   const mainStatCards = [
     {
       title: 'کل فروشگاه‌ها',
@@ -216,30 +276,65 @@ export default function AdminDashboardPage() {
     },
   ];
 
+  // ★ v11.2: کارت‌های ثانویه (بدون آزمایشی، با وضعیت‌های جدید)
   const secondaryCards = [
     {
-      title: 'فروشگاه‌های آزمایشی',
-      value: stats.trialUsers,
-      icon: Crown,
-      color: 'text-amber-600',
-      bg: 'bg-amber-50',
-      border: 'border-amber-200',
+      title: 'سه ماهه شروع',
+      value: stats.trialPeriodUsers,
+      icon: Rocket,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+      subtitle: 'در دوره رایگان',
     },
     {
-      title: 'فروشگاه‌های غیرفعال',
-      value: stats.suspended,
-      icon: XCircle,
-      color: 'text-red-600',
-      bg: 'bg-red-50',
-      border: 'border-red-200',
+      title: 'به روز رسانی شده',
+      value: stats.renewedUsers,
+      icon: BadgeCheck,
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+      subtitle: 'تمدید کرده‌اند',
     },
     {
       title: 'ثبت‌نام‌های ماه جاری',
       value: stats.newThisMonth,
       icon: PlusCircle,
-      color: 'text-blue-600',
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
+      border: 'border-indigo-200',
+      subtitle: 'کاربران جدید',
+    },
+  ];
+
+  // ★ v11.2: کارت‌های پلن
+  const planCards = [
+    {
+      title: 'پلن پایه',
+      value: stats.basic,
+      icon: '🥉',
+      color: 'text-gray-700',
+      bg: 'bg-gray-50',
+      border: 'border-gray-200',
+      percent: Math.round((stats.basic / Math.max(stats.total, 1)) * 100),
+    },
+    {
+      title: 'پلن پیشرفته',
+      value: stats.professional,
+      icon: '🥈',
+      color: 'text-blue-700',
       bg: 'bg-blue-50',
       border: 'border-blue-200',
+      percent: Math.round((stats.professional / Math.max(stats.total, 1)) * 100),
+    },
+    {
+      title: 'پلن حرفه‌ای',
+      value: stats.enterprise,
+      icon: '🥇',
+      color: 'text-purple-700',
+      bg: 'bg-purple-50',
+      border: 'border-purple-200',
+      percent: Math.round((stats.enterprise / Math.max(stats.total, 1)) * 100),
     },
   ];
 
@@ -286,7 +381,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* ═══════════════════════ کارت‌های اصلی (کوچک‌تر) ═══════════════════════ */}
+        {/* ═══════════════════════ کارت‌های اصلی ═══════════════════════ */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {mainStatCards.map((card, idx) => {
             const Icon = card.icon;
@@ -296,7 +391,6 @@ export default function AdminDashboardPage() {
                 key={idx}
                 className="group relative bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:shadow-purple-500/5 transition-all duration-300 overflow-hidden"
               >
-                {/* نوار گرادیان بالا */}
                 <div className={`h-1 bg-gradient-to-l ${card.gradient}`}></div>
 
                 <div className="p-3.5">
@@ -332,7 +426,7 @@ export default function AdminDashboardPage() {
           })}
         </div>
 
-        {/* ═══════════════════════ کارت‌های ثانویه ═══════════════════════ */}
+        {/* ═══════════════════════ کارت‌های ثانویه (★ v11.2) ═══════════════════════ */}
         <div className="grid grid-cols-3 gap-2.5">
           {secondaryCards.map((card, idx) => {
             const Icon = card.icon;
@@ -344,13 +438,42 @@ export default function AdminDashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] text-gray-600 font-medium truncate leading-tight">{card.title}</p>
                   <p className="text-base sm:text-lg font-black text-gray-900 leading-tight" dir="ltr">{formatNumberFa(card.value)}</p>
+                  <p className="text-[9px] text-gray-500 truncate">{card.subtitle}</p>
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* ═══════════════════════ بخش‌های اصلی (بدون دسترسی سریع) ═══════════════════════ */}
+        {/* ═══════════════════════ کارت‌های پلن (★ v11.2) ═══════════════════════ */}
+        <div className="grid grid-cols-3 gap-2.5">
+          {planCards.map((card, idx) => (
+            <div key={idx} className={`${card.bg} ${card.border} border rounded-lg p-3 hover:shadow-md transition-all`}>
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-8 h-8 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-lg">
+                  {card.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-gray-600 font-medium truncate leading-tight">{card.title}</p>
+                  <p className="text-base sm:text-lg font-black text-gray-900 leading-tight" dir="ltr">{formatNumberFa(card.value)}</p>
+                </div>
+              </div>
+              <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${
+                    card.border.replace('border-', 'bg-')
+                  }`}
+                  style={{ width: `${card.percent}%` }}
+                ></div>
+              </div>
+              <p className="text-[9px] text-gray-500 mt-1.5 text-left" dir="ltr">
+                {toFaNum(card.percent)}٪ از کل
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* ═══════════════════════ بخش‌های اصلی ═══════════════════════ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
           {/* آخرین فروشگاه‌ها */}
@@ -383,8 +506,8 @@ export default function AdminDashboardPage() {
               ) : (
                 recentTenants.map((tenant: any, idx: number) => {
                   const plan = getPlanBadge(tenant.planName || '');
-                  const daysLeft = getDaysRemaining(tenant.subscriptionEnd || tenant.expiresAt || tenant.planEndDate || '');
-                  const statusColor = tenant.status === 'active' ? 'bg-emerald-500' : tenant.status === 'trial' ? 'bg-amber-500' : 'bg-red-500';
+                  const usageDays = tenant.usageDays || 0;
+                  const usageStatus = getUsageStatus(usageDays);
                   return (
                     <div key={tenant.id || idx} className="p-3 hover:bg-gray-50/50 transition-colors">
                       <div className="flex items-center gap-2.5">
@@ -396,23 +519,26 @@ export default function AdminDashboardPage() {
                             <p className="text-xs font-bold text-gray-900 truncate">
                               {tenant.companyName || tenant.name || 'فروشگاه'}
                             </p>
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusColor} shrink-0`}></span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${usageDays <= 90 ? 'bg-emerald-500' : 'bg-blue-500'} shrink-0`}></span>
                           </div>
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className={`text-[8px] px-1.5 py-0.5 rounded ${plan.bg} ${plan.color} font-bold`}>
-                              {plan.label}
+                              {plan.icon} {plan.label}
                             </span>
-                            <span className="text-[10px] text-gray-500 truncate">
-                              {tenant.ownerName || tenant.owner?.name || tenant.email || 'بدون اطلاعات'}
+                            <span className={`text-[8px] px-1.5 py-0.5 rounded ${usageStatus.bg} ${usageStatus.color} font-bold`}>
+                              {usageStatus.icon} {usageStatus.label}
                             </span>
                           </div>
+                          <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                            {tenant.ownerName || tenant.owner?.name || tenant.email || 'بدون اطلاعات'}
+                          </p>
                         </div>
                         <div className="text-left shrink-0">
                           <p className="text-[9px] text-gray-400">
-                            {daysLeft > 0 ? `${toFaNum(daysLeft)} روز` : daysLeft === 0 ? 'امروز' : 'منقضی'}
+                            {toFaNum(usageDays)} روز
                           </p>
-                          <p className={`text-[9px] font-bold ${daysLeft <= 7 && daysLeft > 0 ? 'text-orange-600' : daysLeft <= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                            {daysLeft <= 7 && daysLeft > 0 ? 'انقضای نزدیک' : daysLeft <= 0 ? 'منقضی' : 'فعال'}
+                          <p className={`text-[9px] font-bold ${usageDays <= 90 ? 'text-emerald-600' : 'text-blue-600'}`}>
+                            {usageStatus.label}
                           </p>
                         </div>
                       </div>
@@ -423,7 +549,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* نرخ موفقیت سیستم (بدون دسترسی سریع) */}
+          {/* آمار عملکرد سیستم (★ v11.2) */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
@@ -460,38 +586,47 @@ export default function AdminDashboardPage() {
                 </p>
               </div>
 
-              {/* نرخ رشد ماهانه */}
+              {/* نرخ تمدید (★ v11.2: جایگزین نرخ رشد) */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <div className="flex items-center gap-1.5">
-                    <ArrowUpRight className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-[11px] font-medium text-gray-700">نرخ رشد ماهانه</span>
+                    <BadgeCheck className="w-3.5 h-3.5 text-blue-600" />
+                    <span className="text-[11px] font-medium text-gray-700">نرخ تمدید</span>
                   </div>
                   <span className="text-sm font-black text-blue-700" dir="ltr">
-                    {toFaNum(growthRate)}٪
+                    {toFaNum(Math.round((stats.renewedUsers / Math.max(stats.total, 1)) * 100))}٪
                   </span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-l from-blue-500 to-indigo-500 rounded-full transition-all duration-700 ease-out"
-                    style={{ width: `${Math.min(Math.max(growthRate, 0), 100)}%` }}
+                    style={{ width: `${Math.min(Math.round((stats.renewedUsers / Math.max(stats.total, 1)) * 100), 100)}%` }}
                   ></div>
                 </div>
                 <p className="text-[9px] text-gray-500 mt-1.5">
-                  {toFaNum(stats.newThisMonth)} فروشگاه جدید در این ماه ثبت شده است
+                  {toFaNum(stats.renewedUsers)} فروشگاه تمدید کرده‌اند
                 </p>
               </div>
 
-              {/* خلاصه آمار */}
+              {/* خلاصه آمار (★ v11.2: بدون آزمایشی) */}
               <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-100">
                 <div className="bg-emerald-50/50 rounded-lg p-2.5 border border-emerald-100">
                   <div className="flex items-center gap-1.5 mb-1">
                     <div className="w-5 h-5 rounded bg-emerald-100 flex items-center justify-center">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      <Rocket className="w-3 h-3 text-emerald-600" />
                     </div>
-                    <span className="text-[9px] font-medium text-emerald-700">فعال</span>
+                    <span className="text-[9px] font-medium text-emerald-700">سه ماهه شروع</span>
                   </div>
-                  <p className="text-base font-black text-emerald-700" dir="ltr">{formatNumberFa(stats.active)}</p>
+                  <p className="text-base font-black text-emerald-700" dir="ltr">{formatNumberFa(stats.trialPeriodUsers)}</p>
+                </div>
+                <div className="bg-blue-50/50 rounded-lg p-2.5 border border-blue-100">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <div className="w-5 h-5 rounded bg-blue-100 flex items-center justify-center">
+                      <BadgeCheck className="w-3 h-3 text-blue-600" />
+                    </div>
+                    <span className="text-[9px] font-medium text-blue-700">به‌روز شده</span>
+                  </div>
+                  <p className="text-base font-black text-blue-700" dir="ltr">{formatNumberFa(stats.renewedUsers)}</p>
                 </div>
                 <div className="bg-amber-50/50 rounded-lg p-2.5 border border-amber-100">
                   <div className="flex items-center gap-1.5 mb-1">
@@ -501,15 +636,6 @@ export default function AdminDashboardPage() {
                     <span className="text-[9px] font-medium text-amber-700">انقضا</span>
                   </div>
                   <p className="text-base font-black text-amber-700" dir="ltr">{formatNumberFa(stats.expiring)}</p>
-                </div>
-                <div className="bg-blue-50/50 rounded-lg p-2.5 border border-blue-100">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <div className="w-5 h-5 rounded bg-blue-100 flex items-center justify-center">
-                      <Crown className="w-3 h-3 text-blue-600" />
-                    </div>
-                    <span className="text-[9px] font-medium text-blue-700">آزمایشی</span>
-                  </div>
-                  <p className="text-base font-black text-blue-700" dir="ltr">{formatNumberFa(stats.trialUsers)}</p>
                 </div>
                 <div className="bg-red-50/50 rounded-lg p-2.5 border border-red-100">
                   <div className="flex items-center gap-1.5 mb-1">
@@ -524,6 +650,48 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* ═══════════════════════ نیاز به به‌روزرسانی (★ v11.2) ═══════════════════════ */}
+        {needsRenewalTenants.length > 0 && (
+          <div className="bg-gradient-to-l from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-amber-900">نیاز به پیگیری تمدید</h3>
+                  <p className="text-[9px] text-amber-700">
+                    {toFaNum(needsRenewalTenants.length)} فروشگاه دوره سه ماهه را گذرانده و باید تمدید کنند
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/admin/tenants"
+                className="text-[10px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-amber-200"
+              >
+                پیگیری
+                <ArrowLeft className="w-3 h-3" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {needsRenewalTenants.map((tenant: any, idx: number) => (
+                <div key={idx} className="bg-white/70 backdrop-blur-sm rounded-lg p-2.5 border border-amber-100 flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 font-bold text-[10px] shrink-0">
+                    {(tenant.companyName || tenant.name || 'ف')[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-bold text-gray-800 truncate">{tenant.companyName || tenant.name || 'فروشگاه'}</p>
+                    <p className="text-[9px] text-amber-700 font-medium">
+                      {toFaNum(tenant.usageDays || 0)} روز از ثبت‌نام
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ═══════════════════════ انقضای نزدیک ═══════════════════════ */}
         {expiringTenants.length > 0 && (
@@ -567,7 +735,7 @@ export default function AdminDashboardPage() {
 
         {/* ═══════════════════════ فوتر ═══════════════════════ */}
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>پنل مدیریت سیستم فروشگاهی — نسخه {toFaNum('10.0.0')}</p>
+          <p>پنل مدیریت سیستم فروشگاهی — نسخه {toFaNum('11.2.0')}</p>
           <p className="mt-0.5">تمامی حقوق محفوظ است © {toFaNum(new Date().getFullYear())}</p>
         </div>
 
