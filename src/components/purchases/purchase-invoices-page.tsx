@@ -1983,9 +1983,12 @@ onClick={() => setPage(p => Math.min(totalPages, p + 1))}
 </div>
 )}
 {/* ═══ ★ پایان صفحه‌بندی موبایل ═══ */}
+{/* ═══ ★ پایان صفحه‌بندی موبایل ═══ */}
 <div className="hidden md:block">
 <Card>
 <CardContent className="p-0">
+
+{/* ─── جدول ─── */}
 <div className="overflow-x-auto">
 <Table>
 <TableHeader>
@@ -2029,7 +2032,6 @@ className={`hover:bg-purple-50/50 transition-colors ${inv._isOffline ? 'bg-amber
 {inv.supplier?.name || <span className="text-gray-400">—</span>}
 </span>
 </TableCell>
-{/* ★ v8.9.3: اضافه شدن تاریخ سررسید به اطلاعات چک */}
 <TableCell className="text-xs hidden xl:table-cell">
 {inv.paymentType === 'check' && inv.checkInfo ? (
 <div className="flex flex-col gap-0.5">
@@ -2134,7 +2136,11 @@ title="حذف"
 </TableRow>
 ))}
 </TableBody>
-{/* ★ صفحه‌بندی Desktop */}
+</Table>
+</div>
+{/* ─── پایان جدول ─── */}
+
+{/* ★ v8.9.6: صفحه‌بندی دسکتاپ — کاملاً خارج از جدول */}
 {totalPages > 1 && (
 <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-gray-100 gap-2">
 <p className="text-xs text-gray-500 order-2 sm:order-1">
@@ -2163,14 +2169,14 @@ onClick={() => setPage(p => Math.min(totalPages, p + 1))}
 </div>
 </div>
 )}
-</Table>
-</div>
+
 </CardContent>
 </Card>
 </div>
 </>
 )}
 </div>
+
 {/* ══════════════════════════════════════════════════════════════════════
 مودال فاکتور خرید جدید / ویرایش
 ══════════════════════════════════════════════════════════════════════ */}

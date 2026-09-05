@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
+import { generateJournalNumber } from '@/lib/journal-number-generator' 
 
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -314,8 +315,9 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
 
         if (inventoryAccountId) {
-          const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-          const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+      // ★ v8.9.4: تولید شماره منحصر به فرد سند
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[PUT Purchase] 📝 Generated journal number:', jeNumber)
 
           const pt = (originalInvoice.paymentType || 'cash').toLowerCase()
           const lines: any[] = []

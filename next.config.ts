@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const isDev = process.env.NODE_ENV === "development";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   
@@ -9,26 +11,32 @@ const nextConfig: NextConfig = {
   
   reactStrictMode: false,
   
-  // ★ بهینه‌سازی تصاویر برای کاهش مصرف حافظه
+  // ★ بهینه‌سازی تصاویر
   images: {
     unoptimized: true,
     remotePatterns: [],
   },
   
-  // ★ بسته‌هایی که نباید توسط Next.js bundle شوند
+  // ★ بسته‌های external
   serverExternalPackages: ["mssql", "tedious", "bcryptjs", "bcrypt"],
   
-  // ★ v3.1: رفع هشدار NFT (file tracing) برای Prisma Client
+  // ★ Prisma Client
   outputFileTracingIncludes: {
     "/api/**": ["./src/generated/client/**/*"],
   },
   
-  // ★ فشرده‌سازی
-  compress: true,
+  // ★ فشرده‌سازی (فقط production)
+  compress: !isDev,
   
-  // ★ Headers برای امنیت و SEO
+  // ★ Headers
   async headers() {
+    // ★ v11.4: Cache-Control متفاوت برای dev و prod
+    const staticCacheControl = isDev
+      ? "no-cache, no-store, must-revalidate"  // ← در dev: هر بار چک کن
+      : "public, max-age=31536000, immutable"; // ← در prod: کش طولانی
+
     return [
+      // ── هدرهای امنیتی عمومی ──
       {
         source: "/(.*)",
         headers: [
@@ -46,6 +54,8 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      
+      // ── Service Worker ──
       {
         source: "/sw.js",
         headers: [
@@ -55,7 +65,9 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Cache-Control",
-            value: "public, max-age=0, must-revalidate",
+            value: isDev 
+              ? "no-cache, no-store, must-revalidate" 
+              : "public, max-age=0, must-revalidate",
           },
           {
             key: "Service-Worker-Allowed",
@@ -63,6 +75,8 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      
+      // ── Manifest ──
       {
         source: "/manifest.json",
         headers: [
@@ -72,25 +86,31 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Cache-Control",
-            value: "public, max-age=604800, immutable",
+            value: isDev 
+              ? "no-cache, no-store, must-revalidate" 
+              : "public, max-age=604800",
           },
         ],
       },
+      
+      // ── Icons ──
       {
         source: "/icons/:path*",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
+            value: staticCacheControl,
           },
         ],
       },
+      
+      // ── فایل‌های استاتیک Next.js (★ اصلاح شده v11.4) ──
       {
         source: "/_next/static/:path*",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
+            value: staticCacheControl,  // ★ در dev: no-cache, در prod: immutable
           },
         ],
       },

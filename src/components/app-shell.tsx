@@ -1529,6 +1529,81 @@ export default function AppShell() {
     }
   }, [])
 
+  // ═══════════════════════════════════════════════════════════════
+//  ★ v11.0: نمایش Toast پس از پرداخت موفق
+// ═══════════════════════════════════════════════════════════════
+useEffect(() => {
+  if (typeof window === 'undefined') return
+  
+  const url = new URL(window.location.href)
+  const paymentStatus = url.searchParams.get('payment')
+  const refId = url.searchParams.get('refId')
+  const tierName = url.searchParams.get('tierName')
+  const reason = url.searchParams.get('reason')
+  
+  if (!paymentStatus) return
+  
+  console.log('[AppShell] 💳 Payment status from URL:', paymentStatus)
+  
+  // پاک کردن query params از URL
+  const cleanUrl = window.location.pathname
+  window.history.replaceState({}, '', cleanUrl)
+  
+  // نمایش toast بر اساس وضعیت
+  if (paymentStatus === 'success') {
+    useStore.getState().addNotification({
+      title: '🎉 پرداخت موفق!',
+      message: `اشتراک شما با موفقیت فعال شد. شناسه پرداخت: ${refId || '—'}${tierName ? ` — پلن: ${tierName}` : ''}`,
+      type: 'success',
+    })
+    
+    // رفرش کردن وضعیت اشتراک (برای باز شدن قفل)
+    setTimeout(() => {
+      window.location.reload()
+    }, 1500)
+  }
+  
+  if (paymentStatus === 'already_paid') {
+    useStore.getState().addNotification({
+      title: '✅ پرداخت قبلاً ثبت شده',
+      message: 'این تراکنش قبلاً پردازش شده است.',
+      type: 'success',
+    })
+  }
+  
+  if (paymentStatus === 'cancelled') {
+    useStore.getState().addNotification({
+      title: '❌ پرداخت لغو شد',
+      message: 'شما پرداخت را لغو کردید. در صورت تمایل می‌توانید دوباره تلاش کنید.',
+      type: 'warning',
+    })
+  }
+  
+  if (paymentStatus === 'failed') {
+    useStore.getState().addNotification({
+      title: '❌ پرداخت ناموفق',
+      message: 'پرداخت شما ناموفق بود. در صورت کسر مبلغ، تا ۲۴ ساعت برگردانده می‌شود.',
+      type: 'error',
+    })
+  }
+  
+  if (paymentStatus === 'apply_failed') {
+    useStore.getState().addNotification({
+      title: '⚠️ خطا در فعال‌سازی',
+      message: `پرداخت شما موفق بود اما در فعال‌سازی اشتراک خطایی رخ داد. لطفاً با پشتیبانی تماس بگیرید. دلیل: ${reason || 'نامشخص'}`,
+      type: 'error',
+    })
+  }
+  
+  if (paymentStatus === 'error') {
+    useStore.getState().addNotification({
+      title: '⚠️ خطا در پرداخت',
+      message: `مشکلی در پردازش پرداخت پیش آمد. لطفاً دوباره تلاش کنید. دلیل: ${reason || 'نامشخص'}`,
+      type: 'error',
+    })
+  }
+}, [])
+
   const canViewCurrentPage = checkAccess(
     currentView,
     user?.role,

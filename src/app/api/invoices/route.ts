@@ -11,6 +11,11 @@ import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 import type { PlanTier } from '@/lib/plan-features'
+import { generateJournalNumber } from '@/lib/journal-number-generator' 
+
+
+
+
 
 // ─── ایجاد سند حسابداری خودکار ────────────────────────────
 async function createAutoJournalEntry(
@@ -32,8 +37,9 @@ async function createAutoJournalEntry(
       return
     }
 
-    const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-    const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+   // ★ v8.9.4: استفاده از تابع ایمن برای تولید شماره
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[Invoices] 📝 Generated journal number:', jeNumber)
 
     let cashAccountId: string | null = null
     let salesAccountId: string | null = null

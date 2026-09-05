@@ -305,7 +305,8 @@ export async function createPendingSubscription(
  */
 export async function applySubscriptionPayment(
   authority: string,
-  refId: string | number
+  refId: string | number,
+  discountPercent: number = 0  // ★★★ v9.3: پارامتر جدید
 ): Promise<ApplyPaymentResult> {
   console.log('[SubscriptionUtils] applySubscriptionPayment start — authority:', authority)
 
@@ -412,20 +413,26 @@ export async function applySubscriptionPayment(
       newExpiresAt: newExpiresAt ? newExpiresAt.toISOString() : 'null (lifetime)',
     })
 
-    // ─── ۵. به‌روزرسانی Tenant ─────────────────────────────────────
-    // ★★★ v5.1.11: status='active' (از pending_payment به active)
-    //   این کار Tenant را پس از پرداخت موفق فعال می‌کند
-    // ★★★ v9.0: برای lifetime، expiresAt = null
+      // ─── ۵. به‌روزرسانی Tenant ─────────────────────────────────────
+    // ★★★ v9.3: اضافه شدن isPaid و paidAt برای سازگاری با trial-utils
+    //   قبلاً این فیلدها آپدیت نمی‌شدند و isLifetime همیشه false محاسبه می‌شد
+    //   که باعث قفل ماندن سیستم پس از پرداخت موفق می‌شد
     await db.client.tenant.update({
       where: { id: payment.tenantId },
       data: {
         planTierId: planTier.id,
         planName: tierName,
         billingCycle,
-        expiresAt: newExpiresAt,  // ★★★ v9.0: null برای lifetime
-        status: 'active',  // ★★★ از 'pending_payment' به 'active'
+        expiresAt: newExpiresAt,
+        status: 'active',
+        // ★★★ v9.3: فیلدهای حیاتی برای تشخیص مادام‌العمر
+        isPaid: true,
+        paidAt: now,
+        discountApplied: discountPercent || 0,
       },
     })
+
+    console.log('[SubscriptionUtils] ✅ Tenant updated with isPaid=true')
 
     // ─── ۶. به‌روزرسانی SubscriptionPayments ──────────────────────
     await db.client.subscriptionPayments.update({

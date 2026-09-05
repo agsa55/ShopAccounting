@@ -20,7 +20,8 @@
         "گزارشات متنوع",
         "عملکرد بصورت آفلاین و آنلاین"
       ],
-      "showPrice": false
+      "showPrice": false,
+      "updatePrice": 1750000
     },
     {
       "id": "professional",
@@ -41,7 +42,8 @@
         "درگاه پرداخت",
         "پشتیبانی اولویت‌دار"
       ],
-      "showPrice": false
+      "showPrice": false,
+      "updatePrice": 2500000
     },
     {
       "id": "enterprise",
@@ -62,7 +64,8 @@
         "اتصال سامانه مودیان",
         "پشتیبانی ۲۴/۷ اختصاصی"
       ],
-      "showPrice": false
+      "showPrice": false,
+      "updatePrice": 3400003
     }
   ],
   "features": [
@@ -235,5 +238,5 @@
     "کتاب‌فروشی",
     "لوازم‌التحریر"
   ],
-  "updatedAt": "2026-08-19T18:40:31.323Z"
+  "updatedAt": "2026-09-05T15:23:32.613Z"
 }

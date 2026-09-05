@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
+import { generateJournalNumber } from '@/lib/journal-number-generator'
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/purchase-invoices/service
@@ -225,33 +226,64 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         // ★ fallback: حساب هزینه عمومی
         let expenseAccountId: string | null = null
 
-        for (const acc of accounts) {
+             for (const acc of accounts) {
           const code = (acc.code || '').toLowerCase()
           const type = (acc.type || '').toLowerCase()
           const name = (acc.name || '').toLowerCase()
+          
+          // ★ v8.8: تشخیص نوع حساب (هزینه یا درآمد) برای جلوگیری از باگ
+          // حساب‌های درآمد کدشان با 4 شروع می‌شود (4100, 4200)
+          // حساب‌های هزینه کدشان با 5 یا 6 شروع می‌شود (5160, 5170)
+          const isIncomeAccount = code.startsWith('4') || type === 'درآمد'
+          const isExpenseAccount = code.startsWith('5') || code.startsWith('6') || 
+                                   type === 'هزینه' || type === 'expense' || type === 'cost'
 
-          if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110') || name.includes('صندوق') || name.includes('بانک'))) {
+          if (!cashAccountId && (type === 'cash' || type === 'bank' || code === '1010' || code === '1100' || name.includes('صندوق') || name.includes('بانک'))) {
             cashAccountId = acc.id
           }
-          if (!payableAccountId && (type === 'payable' || type === 'accounts_payable' || code.startsWith('210') || name.includes('بدهکاران') || name.includes('تامین'))) {
+          if (!payableAccountId && (type === 'payable' || type === 'accounts_payable' || code.startsWith('2') || name.includes('پرداختنی') || name.includes('تامین'))) {
             payableAccountId = acc.id
           }
-          if (!taxAccountId && (type === 'tax' || code.startsWith('190') || name.includes('مالیات'))) {
+          // ★ v8.8: استفاده از 2150 (مالیات پرداختنی) و 2160 (مالیات بر ارزش افزوده)
+          if (!taxAccountId && (code === '2150' || code === '2160' || name.includes('مالیات'))) {
             taxAccountId = acc.id
           }
-          // ★ حساب هزینه تعمیرات (کد 610 یا نام شامل "تعمیر")
-          if (!repairExpenseAccountId && (type === 'repair_expense' || code.startsWith('610') || name.includes('تعمیر'))) {
+          
+          // ★ v8.8: حساب هزینه تعمیرات (کد 5160) - فقط حساب‌های هزینه، نه درآمد
+          if (!repairExpenseAccountId && isExpenseAccount && (
+            code === '5160' || 
+            code.startsWith('610') ||  // پشتیبانی از کدهای قدیمی
+            (name.includes('تعمیر') && !name.includes('درآمد'))
+          )) {
             repairExpenseAccountId = acc.id
           }
-          // ★ حساب هزینه خدمات (کد 620 یا نام شامل "خدمات")
-          if (!serviceExpenseAccountId && (type === 'service_expense' || code.startsWith('620') || name.includes('خدمات'))) {
+          
+          // ★ v8.8: حساب هزینه خدمات (کد 5170) - فقط حساب‌های هزینه، نه درآمد
+          // این باگ قبلاً باعث می‌شد حساب 4200 (درآمد خدمات) انتخاب شود
+          if (!serviceExpenseAccountId && isExpenseAccount && (
+            code === '5170' || 
+            code.startsWith('620') ||  // پشتیبانی از کدهای قدیمی
+            (name.includes('خدمات') && !name.includes('درآمد'))
+          )) {
             serviceExpenseAccountId = acc.id
           }
-          // ★ fallback: هر حساب هزینه‌ای
-          if (!expenseAccountId && (type === 'expense' || type === 'cost' || code.startsWith('5') || code.startsWith('6') || name.includes('هزینه'))) {
+          
+          // ★ fallback: هر حساب هزینه‌ای (به‌جز حساب‌های درآمد)
+          if (!expenseAccountId && isExpenseAccount && !isIncomeAccount) {
             expenseAccountId = acc.id
           }
         }
+        
+        // ★ v8.8: لاگ تشخیص حساب‌ها برای دیباگ راحت‌تر
+        console.log('[Service Purchase] 📋 Account IDs resolved:', {
+          cash: cashAccountId ? '✓' : '✗',
+          payable: payableAccountId ? '✓' : '✗',
+          tax: taxAccountId ? '✓' : '✗',
+          repairExpense: repairExpenseAccountId ? '✓' : '✗',
+          serviceExpense: serviceExpenseAccountId ? '✓' : '✗',
+          fallbackExpense: expenseAccountId ? '✓' : '✗',
+          category: serviceCategory,
+        })
 
         // ★ انتخاب حساب هزینه مناسب بر اساس نوع
         const expenseAccount =
@@ -260,8 +292,9 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             : (serviceExpenseAccountId || expenseAccountId)
 
         if (expenseAccount) {
-          const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-          const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+      // ★ v8.9.4: تولید شماره منحصر به فرد سند
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[Service Purchase] 📝 Generated journal number:', jeNumber)
 
           const netAmount = subTotal - discountAmount
           const lines: any[] = []

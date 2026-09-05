@@ -284,7 +284,7 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
 
 // ═══════════════════════════════════════════════════════════════
 //  PUT /api/purchase-invoices/[id] — ویرایش فاکتور
-//  ★ v8.9.2: استفاده کامل از getStandardAccountIds + پشتیبانی چک
+//  ★ v8.9.3: تشخیص نوع فاکتور (کالا vs خدمات) + ابطال ایمن سند
 // ═══════════════════════════════════════════════════════════════
 export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -295,7 +295,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const body = await req.json()
     const { items, supplierId, warehouseId, paymentType, description, invoiceDate, checkData } = body
 
-    console.log(`[PUT] شروع ویرایش فاکتور id=${id}, items=${items?.length || 0}, invoiceDate=${invoiceDate || '(بدون تغییر)'}`)
+    console.log(`[PUT v8.9.3] شروع ویرایش فاکتور id=${id}, items=${items?.length || 0}`)
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
@@ -309,7 +309,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       return NextResponse.json({ success: false, error: 'انتخاب انبار الزامی است' }, { status: 400 })
     }
 
-    const oldInvoice = await tenantDb.purchaseInvoice.findFirst({ where: { id, tenantId } })
+    const oldInvoice: any = await tenantDb.purchaseInvoice.findFirst({ where: { id, tenantId } })
     if (!oldInvoice) {
       return NextResponse.json({ success: false, error: 'فاکتور یافت نشد' }, { status: 404 })
     }
@@ -317,6 +317,11 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     if (oldInvoice.status === 'cancelled') {
       return NextResponse.json({ success: false, error: 'امکان ویرایش فاکتور لغو شده وجود ندارد' }, { status: 400 })
     }
+
+    // ★ v8.9.3: تشخیص نوع فاکتور (کالا vs خدمات)
+    const invoiceType = oldInvoice.invoiceType || 'purchase'
+    const isServiceInvoice = invoiceType === 'service'
+    console.log(`[PUT v8.9.3] نوع فاکتور: ${invoiceType} (isService=${isServiceInvoice})`)
 
     const warehouse = await tenantDb.warehouse.findFirst({ where: { id: warehouseId, tenantId } })
     if (!warehouse) {
@@ -332,7 +337,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       taxAmount += item.taxAmount || 0
       return {
         productId: item.productId || null,
-        productName: item.productName || '',
+        productName: item.productName || item.serviceName || '',
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discountAmount: item.discountAmount || 0,
@@ -343,7 +348,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
 
     const totalAmount = subTotal - discountAmount + taxAmount
     
-    // ★ v8.9.2: پشتیبانی از چک و نسیه (هر دو unpaid)
     const ptLower = (paymentType || 'cash').toLowerCase()
     const isCreditOrCheck = ptLower === 'credit' || ptLower === 'check'
     const paidAmount = isCreditOrCheck ? 0 : totalAmount
@@ -352,21 +356,38 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
     const result = await txClient.$transaction(async (tx: any) => {
       // ═══════════════════════════════════════════════════
-      // ۱. rollback فاکتور قدیمی
+      // ۱. rollback فاکتور قدیمی (با ابطال ایمن سند)
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT] مرحله ۱: rollback فاکتور قدیمی`)
+      console.log(`[PUT v8.9.3] مرحله ۱: rollback فاکتور قدیمی`)
       await rollbackPurchaseInvoice(tx, oldInvoice, tenantId)
+      
+      // ★ v8.9.3: ابطال ایمن سندهای مرتبط (حتی اگر journalEntryId ست نشده)
+      await tx.journalEntry.updateMany({
+        where: {
+          tenantId,
+          sourceId: id,
+          sourceType: { in: ['purchase_invoice', 'service_purchase'] },
+          status: 'posted',
+        },
+        data: {
+          isCancelled: true,
+          cancelledAt: new Date(),
+          status: 'cancelled',
+          description: `ابطال شده — فاکتور ${oldInvoice.number} ویرایش شد`,
+        },
+      })
+      console.log(`[PUT v8.9.3] ✓ سندهای قدیمی ابطال شدند`)
 
       // ═══════════════════════════════════════════════════
       // ۲. حذف آیتم‌های قدیمی
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT] مرحله ۲: حذف آیتم‌های قدیمی`)
+      console.log(`[PUT v8.9.3] مرحله ۲: حذف آیتم‌های قدیمی`)
       await tx.purchaseInvoiceItem.deleteMany({ where: { purchaseInvoiceId: id } })
 
       // ═══════════════════════════════════════════════════
       // ۳. به‌روزرسانی فاکتور
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT] مرحله ۳: به‌روزرسانی فاکتور با اطلاعات جدید`)
+      console.log(`[PUT v8.9.3] مرحله ۳: به‌روزرسانی فاکتور`)
       await tx.purchaseInvoice.update({
         where: { id },
         data: {
@@ -378,21 +399,23 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           discountAmount,
           taxAmount,
           totalAmount,
-          paidAmount,        // ★ v8.9.2: برای چک هم 0
-          remainingAmount,   // ★ v8.9.2: برای چک هم totalAmount
+          paidAmount,
+          remainingAmount,
           description: description || null,
           status: 'confirmed',
-          journalEntryId: null,
+          journalEntryId: null,  // پاک می‌شود، سند جدید ساخته می‌شود
         },
       })
 
       // ═══════════════════════════════════════════════════
-      // ۴. ایجاد آیتم‌های جدید + افزایش موجودی
+      // ۴. ایجاد آیتم‌های جدید + مدیریت موجودی (فقط برای کالا)
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT] مرحله ۴: ایجاد ${invoiceItems.length} آیتم جدید`)
+      console.log(`[PUT v8.9.3] مرحله ۴: ایجاد ${invoiceItems.length} آیتم جدید`)
+      
+      // ★ v8.9.3: فقط برای فاکتور کالا، موجودی تغییر می‌کند
       for (let i = 0; i < invoiceItems.length; i++) {
         const item = invoiceItems[i]
-        console.log(`[PUT] آیتم ${i + 1}/${invoiceItems.length}: productId=${item.productId}, qty=${item.quantity}`)
+        console.log(`[PUT v8.9.3] آیتم ${i + 1}/${invoiceItems.length}: productId=${item.productId}, qty=${item.quantity}`)
 
         await tx.purchaseInvoiceItem.create({
           data: {
@@ -407,7 +430,8 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           },
         })
 
-        if (item.productId) {
+        // ★ v8.9.3: فقط برای فاکتور کالا، موجودی تغییر می‌کند
+        if (item.productId && !isServiceInvoice) {
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
           })
@@ -463,103 +487,131 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       }
 
       // ═══════════════════════════════════════════════════
-      // ★ v8.9.2: ایجاد سند حسابداری جدید با getStandardAccountIds
+      // ★ v8.9.3: ایجاد سند حسابداری جدید (منطق متفاوت برای کالا و خدمات)
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT] مرحله ۵: ایجاد سند حسابداری جدید`)
+      console.log(`[PUT v8.9.3] مرحله ۵: ایجاد سند حسابداری جدید`)
       try {
         const accIds = await getStandardAccountIds(tenantId)
+        const jeCount = await tx.journalEntry.count({ where: { tenantId } })
+        const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+        const lines: any[] = []
+        const netAmount = subTotal - discountAmount
 
-        const inventoryAccountId = accIds.inventoryAccountId
+        // ★ v8.9.3: منطق متفاوت برای فاکتور خدمات و کالا
+      if (isServiceInvoice) {
+  console.log(`[PUT v8.9.3] → فاکتور خدماتی - استفاده از حساب هزینه`)
+  
+  // ★ v8.9.3: تشخیص نوع خدمات از description
+  const serviceCategory = oldInvoice.description?.includes('تعمیرات') ? 'repair' : 'service'
+  
+  // ★ v8.9.3: جستجوی مستقیم حساب هزینه از دیتابیس
+  const accounts = await tx.account.findMany({ 
+    where: { tenantId, isActive: true },
+    select: { id: true, code: true, name: true }
+  })
+  
+  const expenseAccountId = serviceCategory === 'repair' 
+    ? accounts.find((a: any) => a.code === '5160')?.id  // هزینه تعمیرات
+    : accounts.find((a: any) => a.code === '5170')?.id  // هزینه خدمات
+  
+  if (!expenseAccountId) {
+    console.warn(`[PUT v8.9.3] ⚠️ حساب هزینه ${serviceCategory === 'repair' ? '5160' : '5170'} یافت نشد!`)
+  }
+
+          if (expenseAccountId) {
+            lines.push({
+              accountId: expenseAccountId,
+              debit: netAmount,
+              credit: 0,
+              description: `بدهکار: هزینه ${serviceCategory === 'repair' ? 'تعمیرات' : 'خدمات'} - ویرایش فاکتور ${oldInvoice.number}`,
+            })
+          }
+        } else {
+          // ══════ فاکتور خرید کالا ══════
+          console.log(`[PUT v8.9.3] → فاکتور کالایی - استفاده از حساب موجودی کالا`)
+          
+          if (accIds.inventoryAccountId) {
+            lines.push({
+              accountId: accIds.inventoryAccountId,
+              debit: netAmount,
+              credit: 0,
+              description: `بدهکار: خرید کالا - ویرایش فاکتور ${oldInvoice.number}`,
+            })
+          }
+        }
+
+        // بدهکار: مالیات (مشترک)
+        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
+        if (taxAmount > 0 && vatAccountId) {
+          lines.push({
+            accountId: vatAccountId,
+            debit: taxAmount,
+            credit: 0,
+            description: `بدهکار: مالیات ارزش افزوده خرید - ویرایش فاکتور ${oldInvoice.number}`,
+          })
+        }
+
+        // بستانکار — بر اساس روش پرداخت (مشترک)
         const cashAccountId = accIds.cashAccountId
         const payableAccountId = accIds.tradePurchasableId || accIds.payablesAccountId
         const checkPayableAccountId = accIds.checkPayableAccountId || (accIds as any).checkPayableId
-        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
+        
+        let creditAccountId: string | null = null
+        let creditDescription = ''
 
-        if (inventoryAccountId) {
-          const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-          const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
-          const lines: any[] = []
-          const netAmount = subTotal - discountAmount
+        if (ptLower === 'check') {
+          creditAccountId = checkPayableAccountId || payableAccountId || cashAccountId
+          creditDescription = `بستانکار: چک پرداختنی - ویرایش فاکتور ${oldInvoice.number}`
+        } else if (ptLower === 'credit') {
+          creditAccountId = payableAccountId || cashAccountId
+          creditDescription = `بستانکار: بستانکاران تجاری - ویرایش فاکتور ${oldInvoice.number}`
+        } else {
+          creditAccountId = cashAccountId
+          creditDescription = `بستانکار: صندوق - ویرایش فاکتور ${oldInvoice.number}`
+        }
 
-          // بدهکار: موجودی کالا (افزایش دارایی)
+        if (creditAccountId) {
           lines.push({
-            accountId: inventoryAccountId,
-            debit: netAmount,
-            credit: 0,
-            description: `بدهکار: خرید کالا - ویرایش فاکتور ${oldInvoice.number}`,
+            accountId: creditAccountId,
+            debit: 0,
+            credit: totalAmount,
+            description: creditDescription,
+          })
+        }
+
+        if (lines.length >= 2) {
+          const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
+          const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
+
+          const journalEntry = await tx.journalEntry.create({
+            data: {
+              number: jeNumber,
+              date: invoiceDate ? new Date(invoiceDate) : new Date(),
+              description: `سند خودکار بابت ویرایش فاکتور ${isServiceInvoice ? 'خدمات' : 'خرید'} ${oldInvoice.number}`,
+              status: 'posted',
+              sourceType: isServiceInvoice ? 'service_purchase' : 'purchase_invoice',
+              sourceId: id,
+              totalDebit,
+              totalCredit,
+              createdBy: tenant.user?.id || null,
+              tenantId,
+              lines: { create: lines },
+            },
           })
 
-          // بدهکار: مالیات ارزش افزوده (در صورت وجود)
-          if (taxAmount > 0 && vatAccountId) {
-            lines.push({
-              accountId: vatAccountId,
-              debit: taxAmount,
-              credit: 0,
-              description: `بدهکار: مالیات ارزش افزوده خرید - ویرایش فاکتور ${oldInvoice.number}`,
-            })
-          }
+          await tx.purchaseInvoice.update({
+            where: { id },
+            data: { journalEntryId: journalEntry.id },
+          })
 
-          // ★ v8.9.2: بستانکار — بر اساس روش پرداخت (نقدی/نسیه/چک)
-          let creditAccountId: string | null = null
-          let creditDescription = ''
-
-          if (ptLower === 'check') {
-            // چک: حساب ۲۰۵۰ (چک‌های پرداختنی)
-            creditAccountId = checkPayableAccountId || payableAccountId || cashAccountId
-            creditDescription = `بستانکار: چک پرداختنی - ویرایش فاکتور ${oldInvoice.number}`
-          } else if (ptLower === 'credit') {
-            // نسیه: حساب ۲۰۱۰ (بستانکاران تجاری)
-            creditAccountId = payableAccountId || cashAccountId
-            creditDescription = `بستانکار: بستانکاران تجاری - ویرایش فاکتور ${oldInvoice.number}`
-          } else {
-            // نقدی: حساب ۱۰۱۰ (صندوق)
-            creditAccountId = cashAccountId
-            creditDescription = `بستانکار: صندوق - ویرایش فاکتور ${oldInvoice.number}`
-          }
-
-          if (creditAccountId) {
-            lines.push({
-              accountId: creditAccountId,
-              debit: 0,
-              credit: totalAmount,
-              description: creditDescription,
-            })
-          }
-
-          if (lines.length >= 2) {
-            const totalDebit = lines.reduce((s: number, l: any) => s + l.debit, 0)
-            const totalCredit = lines.reduce((s: number, l: any) => s + l.credit, 0)
-
-            const journalEntry = await tx.journalEntry.create({
-              data: {
-                number: jeNumber,
-                date: invoiceDate ? new Date(invoiceDate) : new Date(),
-                description: `سند خودکار بابت ویرایش فاکتور خرید ${oldInvoice.number}`,
-                status: 'posted',
-                sourceType: 'purchase_invoice',
-                sourceId: id,
-                totalDebit,
-                totalCredit,
-                createdBy: tenant.user?.id || null,
-                tenantId,
-                lines: { create: lines },
-              },
-            })
-
-            await tx.purchaseInvoice.update({
-              where: { id },
-              data: { journalEntryId: journalEntry.id },
-            })
-
-            console.log(`[PUT] ✓ سند جدید ایجاد شد: ${jeNumber}`)
-          }
+          console.log(`[PUT v8.9.3] ✓ سند جدید ایجاد شد: ${jeNumber} (${isServiceInvoice ? 'خدماتی' : 'کالایی'})`)
         }
       } catch (jeErr: any) {
-        console.warn(`[PUT] Auto journal entry failed:`, jeErr?.message)
+        console.warn(`[PUT v8.9.3] Auto journal entry failed:`, jeErr?.message)
       }
 
       // ═══════════════════════════════════════════════════
-      // ★ v8.9.2: به‌روزرسانی Supplier (نسیه و چک)
+      // ۶. به‌روزرسانی Supplier و Check (بدون تغییر)
       // ═══════════════════════════════════════════════════
       if (isCreditOrCheck && supplierId) {
         try {
@@ -567,15 +619,12 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
             where: { id: supplierId },
             data: { currentBalance: { increment: totalAmount } },
           })
-          console.log(`[PUT] ✓ Supplier.currentBalance +${totalAmount} (${ptLower})`)
+          console.log(`[PUT v8.9.3] ✓ Supplier.currentBalance +${totalAmount}`)
         } catch (supErr: any) {
-          console.warn(`[PUT] Supplier balance update failed:`, supErr?.message)
+          console.warn(`[PUT v8.9.3] Supplier balance update failed:`, supErr?.message)
         }
       }
 
-      // ═══════════════════════════════════════════════════
-      // ★ v8.9.2: مدیریت چک پرداختنی (ایجاد/به‌روزرسانی/ابطال)
-      // ═══════════════════════════════════════════════════
       try {
         const existingCheck = await tx.check.findFirst({
           where: { purchaseInvoiceId: id, tenantId },
@@ -583,8 +632,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
 
         if (ptLower === 'check' && checkData) {
           if (existingCheck) {
-            // به‌روزرسانی چک موجود
-            console.log(`[PUT] به‌روزرسانی چک موجود: ${existingCheck.id}`)
             await tx.check.update({
               where: { id: existingCheck.id },
               data: {
@@ -599,8 +646,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
               },
             })
           } else {
-            // ساخت چک جدید
-            console.log(`[PUT] ایجاد چک جدید برای فاکتور ویرایش‌شده`)
             await tx.check.create({
               data: {
                 tenantId,
@@ -620,36 +665,32 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
             })
           }
         } else if (ptLower !== 'check' && existingCheck) {
-          // ★ v8.9.2: اگر نوع پرداخت از چک به چیز دیگر تغییر کرده → باطل کردن چک قبلی
           if (existingCheck.status === 'pending') {
             await tx.check.update({
               where: { id: existingCheck.id },
               data: {
                 status: 'cancelled',
                 purchaseInvoiceId: null,
-                description: `${existingCheck.description || ''} [ابطال شده — نوع پرداخت از چک به ${ptLower} تغییر کرد]`,
+                description: `${existingCheck.description || ''} [ابطال شده — نوع پرداخت تغییر کرد]`,
               },
             })
-            console.log(`[PUT] ✓ چک قبلی ${existingCheck.checkNumber} باطل شد (تغییر نوع پرداخت)`)
-          } else {
-            console.warn(`[PUT] ⚠️ چک ${existingCheck.checkNumber} قبلاً ${existingCheck.status} شده — نمی‌توان باطل کرد`)
           }
         }
       } catch (checkErr: any) {
-        console.warn(`[PUT] Check handling failed:`, checkErr?.message)
+        console.warn(`[PUT v8.9.3] Check handling failed:`, checkErr?.message)
       }
 
-      console.log(`[PUT] ✓ ویرایش کامل شد`)
+      console.log(`[PUT v8.9.3] ✓ ویرایش کامل شد`)
       return await tx.purchaseInvoice.findUnique({ where: { id } })
     })
 
     return NextResponse.json({
       success: true,
       data: result,
-      message: `فاکتور خرید ${oldInvoice.number} با موفقیت ویرایش شد`,
+      message: `فاکتور ${oldInvoice.number} با موفقیت ویرایش شد`,
     })
   } catch (error: any) {
-    console.error('[PUT] Error:', error?.message || error)
+    console.error('[PUT v8.9.3] Error:', error?.message || error)
     return NextResponse.json({ success: false, error: error?.message || 'خطا در ویرایش فاکتور' }, { status: 500 })
   }
 })

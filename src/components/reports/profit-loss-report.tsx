@@ -91,12 +91,28 @@ interface PnLData {
 //  Helpers
 // ============================================================================
 
+// ★ v9.5: اصلاح توابع فرمت‌دهی — حذف Math.abs برای نمایش صحیح اعداد منفی
 function formatNumberFa(n: number): string {
-  return Math.abs(n || 0).toLocaleString('fa-IR')
+  const num = n || 0
+  return num.toLocaleString('fa-IR')
 }
 
 function formatCurrency(n: number): string {
-  return `${Math.abs(n || 0).toLocaleString('fa-IR')} ریال`
+  const num = n || 0
+  // اعداد منفی با پرانتز نمایش داده می‌شوند (استاندارد حسابداری)
+  if (num < 0) {
+    return `(${Math.abs(num).toLocaleString('fa-IR')} ریال)`
+  }
+  return `${num.toLocaleString('fa-IR')} ریال`
+}
+
+// ★ v9.5: تابع جدید برای نمایش با رنگ (مثبت سبز، منفی قرمز)
+function formatCurrencySigned(n: number): string {
+  const num = n || 0
+  if (num < 0) {
+    return `(${Math.abs(num).toLocaleString('fa-IR')} ریال)`
+  }
+  return `${num.toLocaleString('fa-IR')} ریال`
 }
 
 function toFaNum(n: number | string): string {
@@ -478,7 +494,12 @@ interface StatCardProps {
   suffix?: string; hint?: string
 }
 
+// ★ v9.5: StatCard با تشخیص خودکار رنگ بر اساس مثبت/منفی بودن
 function StatCard({ label, value, icon, color, suffix, hint }: StatCardProps) {
+  // ★ v9.5: اگر مقدار منفی است، رنگ قرمز استفاده شود
+  const isNegative = value < 0
+  const effectiveColor = isNegative ? 'red' : color
+  
   const colorMap: Record<string, { gradient: string; iconBg: string }> = {
     emerald: { gradient: 'from-emerald-500 to-emerald-600', iconBg: 'bg-white/20' },
     blue: { gradient: 'from-blue-500 to-blue-600', iconBg: 'bg-white/20' },
@@ -490,14 +511,15 @@ function StatCard({ label, value, icon, color, suffix, hint }: StatCardProps) {
     pink: { gradient: 'from-pink-500 to-pink-600', iconBg: 'bg-white/20' },
     indigo: { gradient: 'from-indigo-500 to-indigo-600', iconBg: 'bg-white/20' },
   }
-  const c = colorMap[color]
+  const c = colorMap[effectiveColor]
   return (
     <div className={`bg-gradient-to-br ${c.gradient} rounded-xl p-2.5 sm:p-3 text-white shadow-sm`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">{label}</p>
           <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">
-            {formatNumberFa(value)}
+            {/* ★ v9.5: نمایش علامت منفی برای اعداد منفی */}
+          {isNegative ? '-' : ''}{Math.abs(value).toLocaleString('fa-IR')}
           </p>
           <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">
             {suffix}
@@ -511,7 +533,6 @@ function StatCard({ label, value, icon, color, suffix, hint }: StatCardProps) {
     </div>
   )
 }
-
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-gray-300">
@@ -869,16 +890,21 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
                   </div>
                   <PnLRow label="مالیات بر درآمد" value={data.incomeTax} color="red" negative indent />
 
-                  <div className={`flex justify-between items-center py-3 mt-2 border-2 rounded-lg px-3 ${
-                    isProfit ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'
-                  }`}>
-                    <span className="text-sm sm:text-base font-bold text-gray-900">
-                      {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
-                    </span>
-                    <span className={`text-base sm:text-lg font-bold ${isProfit ? 'text-emerald-700' : 'text-red-700'}`} dir="ltr">
-                      {formatCurrency(Math.abs(data.netProfit))}
-                    </span>
-                  </div>
+                 {/* ★ v9.5: نمایش صحیح زیان/سود خالص */}
+<div className={`flex justify-between items-center py-3 mt-2 border-2 rounded-lg px-3 ${
+  isProfit ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'
+}`}>
+  <span className="text-sm sm:text-base font-bold text-gray-900">
+    {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
+  </span>
+  <span className={`text-base sm:text-lg font-bold ${isProfit ? 'text-emerald-700' : 'text-red-700'}`} dir="ltr">
+    {/* ★ v9.5: نمایش با پرانتز برای زیان */}
+    {isProfit 
+      ? `${data.netProfit.toLocaleString('fa-IR')} ریال` 
+      : `(${Math.abs(data.netProfit).toLocaleString('fa-IR')} ریال)`
+    }
+  </span>
+</div>
                 </div>
               </CardContent>
             </Card>
@@ -992,6 +1018,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
 //  PnLRow
 // ============================================================================
 
+// ★ v9.5: PnLRow — تشخیص خودکار منفی/مثبت بودن
 function PnLRow({
   label, value, color, negative = false, indent = false, bold = false,
   highlight,
@@ -1000,10 +1027,15 @@ function PnLRow({
   negative?: boolean; indent?: boolean; bold?: boolean
   highlight?: 'emerald' | 'blue' | 'amber' | 'gray'
 }) {
-  const textColor = {
-    emerald: 'text-emerald-600', blue: 'text-blue-700',
-    amber: 'text-amber-700', red: 'text-red-500', gray: 'text-gray-700',
-  }[color] || 'text-gray-700'
+  // ★ v9.5: اگر خود عدد منفی است، رنگ قرمز بگیرد
+  const isNegative = negative || value < 0
+  
+  const textColor = isNegative 
+    ? 'text-red-600'  // منفی → قرمز
+    : ({
+        emerald: 'text-emerald-600', blue: 'text-blue-700',
+        amber: 'text-amber-700', red: 'text-red-500', gray: 'text-gray-700',
+      }[color] || 'text-gray-700')
 
   const highlightClass = highlight ? {
     emerald: 'border-b-2 border-emerald-200 bg-emerald-50/30 px-2 -mx-2',
@@ -1012,13 +1044,18 @@ function PnLRow({
     gray: 'border-b-2 border-gray-300 bg-gray-50/50 px-2 -mx-2',
   }[highlight] : ''
 
+  // ★ v9.5: فرمت‌دهی صحیح — منفی با پرانتز
+  const displayValue = value < 0 
+    ? `(${Math.abs(value).toLocaleString('fa-IR')} ریال)`
+    : `${value.toLocaleString('fa-IR')} ریال`
+
   return (
     <div className={`flex justify-between items-center py-1.5 ${highlightClass}`}>
       <span className={`text-xs sm:text-sm ${bold ? 'font-bold text-gray-900' : 'text-gray-700'} ${indent ? 'pr-4' : ''}`}>
         {label}
       </span>
       <span className={`text-xs sm:text-sm ${bold ? 'font-bold' : 'font-medium'} ${textColor}`} dir="ltr">
-        {negative ? `(${formatCurrency(value)})` : formatCurrency(value)}
+        {displayValue}
       </span>
     </div>
   )
