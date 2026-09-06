@@ -804,45 +804,47 @@ function AppSidebar() {
   };
 
   return (
-    <Sidebar
-      side="right"
-      collapsible="icon"
-      className="border-l border-slate-200 bg-slate-50/95 shadow-sm"
+   <Sidebar
+  side="right"
+  collapsible="icon"
+  className="border-l border-emerald-900/50 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl"
+
     >
-      <SidebarHeader className="p-2">
+  <SidebarHeader className="p-2 border-b border-white/5">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="gap-2 sm:gap-3">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-emerald-600 text-white shrink-0">
-                <Store className="size-4" />
-              </div>
-              <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
-                <span className="text-xs sm:text-sm font-semibold truncate text-slate-800">
-                  {storeName || 'فروشگاه'}
-                </span>
-              </div>
-            </SidebarMenuButton>
+        <SidebarMenuButton size="lg" className="gap-2 sm:gap-3 hover:bg-white/5 transition-colors">
+  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shrink-0 shadow-lg shadow-emerald-500/30">
+    <Store className="size-4" />
+  </div>
+  <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
+    <span className="text-xs sm:text-sm font-semibold truncate text-white">
+      {storeName || 'فروشگاه'}
+    </span>
+  </div>
+</SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
 
         <div className="mt-1.5 px-1 group-data-[collapsible=icon]:hidden">
           {isDemoPlan ? (
             // ─── کارت دمو واقعی ───
-            <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs text-amber-700">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="font-medium">نسخه دمو</span>
-                </div>
-                <span className="text-[10px] text-amber-600 font-medium">
-                  {(() => {
-                    const d = demoStatus?.daysRemaining ?? daysRemaining ?? 3;
-                    if (d <= 0) return 'منقضی';
-                    return `${Number(d).toLocaleString('fa-IR')} روز`;
-                  })()}
-                </span>
-              </div>
-            </div>
+       <div className="p-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg backdrop-blur-sm">
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-1 text-[11px] text-amber-300">
+      <Sparkles className="w-3 h-3 shrink-0" />
+      <span className="font-medium">نسخه دمو</span>
+    </div>
+    <span className="text-[9px] text-amber-200 font-medium">
+      {(() => {
+        const d = demoStatus?.daysRemaining ?? daysRemaining ?? 3;
+        if (d <= 0) return 'منقضی';
+        return `${Number(d).toLocaleString('fa-IR')} روز`;
+      })()}
+    </span>
+  </div>
+
+</div>
           ) : (
             // ─── کارت پلن‌های عادی (v10.1 — منطق ۳ روزه) ───
             <div
@@ -855,121 +857,121 @@ function AppSidebar() {
                   setCurrentView('subscription-tab' as AppView)
                 }
               }}
-              className={`cursor-pointer group p-2.5 rounded-xl transition-all duration-200 ${isExpired
-                  ? 'bg-red-50 border-2 border-red-300 hover:shadow-md animate-pulse'
-                  : daysRemaining > 0 && daysRemaining <= 3
-                    ? 'bg-orange-50 border-2 border-orange-400 hover:shadow-md'
-                    : isLifetime
-                      ? 'bg-purple-50 border border-purple-200 hover:shadow-md'
-                      : 'bg-white border border-slate-200 hover:shadow-md hover:border-indigo-200'
-                }`}
+         className={`cursor-pointer group p-2 rounded-lg transition-all duration-200 ${isExpired
+    ? 'bg-red-500/20 border-2 border-red-500/50 hover:shadow-lg hover:shadow-red-500/20 animate-pulse'
+    : daysRemaining > 0 && daysRemaining <= 3
+      ? 'bg-orange-500/20 border-2 border-orange-500/50 hover:shadow-lg hover:shadow-orange-500/20'
+      : isLifetime
+        ? 'bg-purple-500/20 border border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/20'
+        : 'bg-white/5 border border-white/10 hover:shadow-lg hover:shadow-emerald-500/10 hover:border-emerald-500/30'
+  }`}
             >
               {/* ★ حالت ۱: قفل کامل */}
-              {isExpired ? (
-                <>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-6 h-6 rounded-md bg-red-100 flex items-center justify-center shrink-0">
-                        <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                      </div>
-                      <span className="text-[11px] font-bold text-red-800">
-                        سیستم قفل شده
-                      </span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-red-100 text-red-700">
-                      منقضی
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-red-700 font-medium">
-                      برای ادامه کلیک کنید
-                    </span>
-                    <ChevronLeft className="w-3.5 h-3.5 text-red-500" />
-                  </div>
-                </>
-              ) : daysRemaining > 0 && daysRemaining <= 3 ? (
-                /* ★ حالت ۲: هشدار ۳ روزه */
-                <>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-6 h-6 rounded-md bg-orange-100 flex items-center justify-center shrink-0 animate-bounce">
-                        <AlertTriangle className="w-3.5 h-3.5 text-orange-600" />
-                      </div>
-                      <span className="text-[11px] font-bold text-orange-900">
-                        هشدار به‌روزرسانی
-                      </span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-bold bg-orange-600 text-white">
-                      {daysRemaining} روز
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-orange-800 font-medium leading-tight">
-                      {daysRemaining === 1
-                        ? '⚠️ فقط فردا فرصت دارید!'
-                        : `⚠️ ${daysRemaining} روز تا قفل سیستم`}
-                    </span>
-                    <ChevronLeft className="w-3.5 h-3.5 text-orange-500" />
-                  </div>
-                </>
-              ) : isLifetime ? (
-                /* ★ حالت ۳: مادام‌العمر — فقط نام پلن */
-                <>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-6 h-6 rounded-md bg-purple-100 flex items-center justify-center shrink-0">
-                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-800">
-                        {getPlanLabel(effectivePlanName)}
-                      </span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-purple-100 text-purple-700">
-                      مادام‌العمر
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-600 font-medium">
-                      بدون محدودیت زمانی
-                    </span>
-                    <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
-                  </div>
-                </>
-              ) : (
-                /* ★ حالت ۴: فعال با بیش از ۳ روز — فقط نام پلن + فعال */
-                <>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-6 h-6 rounded-md bg-indigo-50 flex items-center justify-center shrink-0">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-800">
-                        {getPlanLabel(effectivePlanName)}
-                      </span>
-                    </div>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-md font-medium bg-emerald-100 text-emerald-700">
-                      فعال
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-600 font-medium">
-                      اشتراک فعال
-                    </span>
-                    <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
-                  </div>
-                </>
-              )}
+        {isExpired ? (
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-red-500/30 flex items-center justify-center shrink-0">
+          <AlertTriangle className="w-3 h-3 text-red-300" />
+        </div>
+        <span className="text-[10px] font-bold text-red-200">
+          سیستم قفل شده
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-red-500/30 text-red-200">
+        منقضی
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-red-200 font-medium">
+        برای ادامه کلیک کنید
+      </span>
+      <ChevronLeft className="w-3 h-3 text-red-300" />
+    </div>
+  </>
+     ) : daysRemaining > 0 && daysRemaining <= 3 ? (
+  /* ★ حالت ۲: هشدار ۳ روزه */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-orange-500/30 flex items-center justify-center shrink-0 animate-bounce">
+          <AlertTriangle className="w-3 h-3 text-orange-300" />
+        </div>
+        <span className="text-[10px] font-bold text-orange-200">
+          هشدار به‌روزرسانی
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-bold bg-orange-500 text-white">
+        {daysRemaining} روز
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-orange-100 font-medium leading-tight">
+        {daysRemaining === 1
+          ? '⚠️ فقط فردا!'
+          : `⚠️ ${daysRemaining} روز تا قفل`}
+      </span>
+      <ChevronLeft className="w-3 h-3 text-orange-300" />
+    </div>
+  </>
+      ) : isLifetime ? (
+  /* ★ حالت ۳: مادام‌العمر — فقط نام پلن */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-purple-500/30 flex items-center justify-center shrink-0">
+          <Sparkles className="w-3 h-3 text-purple-300" />
+        </div>
+        <span className="text-[10px] font-bold text-white">
+          {getPlanLabel(effectivePlanName)}
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-purple-500/30 text-purple-200">
+        مادام‌العمر
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-slate-400 font-medium">
+        بدون محدودیت
+      </span>
+      <ChevronLeft className="w-3 h-3 text-slate-400" />
+    </div>
+  </>
+  ) : (
+  /* ★ حالت ۴: فعال با بیش از ۳ روز — فقط نام پلن + فعال */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-emerald-500/30 flex items-center justify-center shrink-0">
+          <Sparkles className="w-3 h-3 text-emerald-300" />
+        </div>
+        <span className="text-[10px] font-bold text-white">
+          {getPlanLabel(effectivePlanName)}
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-emerald-500/30 text-emerald-200">
+        فعال
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-slate-400 font-medium">
+        اشتراک فعال
+      </span>
+      <ChevronLeft className="w-3 h-3 text-slate-400" />
+    </div>
+  </>
+)}
             </div>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarSeparator className="bg-slate-200" />
+<SidebarSeparator className="bg-white/10" />
 
       <SidebarContent>
         {visibleGroups.map((group) => (
           <SidebarGroup key={group.label} className="py-0 my-0">
-            <SidebarGroupLabel className="text-[10px] font-bold text-slate-400 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel className="text-[10px] font-bold text-emerald-400/70 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
               {group.label}
             </SidebarGroupLabel>
             <SidebarGroupContent className="py-0">
@@ -994,29 +996,33 @@ function AppSidebar() {
                           }
                         }}
                         tooltip={item.label}
-                        className={`gap-2 sm:gap-2.5 h-8 sm:h-9 ${isExpired
-                            ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-400'
-                            : isItemDisabled
-                              ? 'opacity-50 cursor-not-allowed hover:bg-transparent'
-                              : isActive
-                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 font-semibold'
-                                : 'hover:bg-slate-100 text-slate-600'
-                          }`}
+                      className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-lg transition-all ${isExpired
+    ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-500'
+    : isItemDisabled
+      ? 'opacity-50 cursor-not-allowed hover:bg-transparent text-slate-500'
+      : isActive
+        ? 'bg-gradient-to-l from-emerald-600/30 to-emerald-500/20 text-white font-semibold shadow-md shadow-emerald-500/20 border-r-2 border-emerald-400'
+        : 'hover:bg-white/10 text-slate-300 hover:text-white'
+  }`}
                       >
-                        <item.icon className={`size-4 ${isExpired ? 'text-slate-300' : isActive && !isItemDisabled ? 'text-emerald-600' : 'text-slate-400'
-                          }`} />
+                   <item.icon className={`size-4 ${isExpired 
+  ? 'text-slate-500' 
+  : isActive && !isItemDisabled 
+    ? 'text-emerald-400' 
+    : 'text-slate-400'
+}`} />
                         <span className="text-xs sm:text-sm">{item.label}</span>
 
-                        {isExpired && (
-                          <Badge className="ms-auto bg-red-100 text-red-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
-                            قفل
-                          </Badge>
-                        )}
-                        {isItemDisabled && !isExpired && (
-                          <Badge className="ms-auto bg-amber-100 text-amber-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
-                            دمو
-                          </Badge>
-                        )}
+                    {isExpired && (
+  <Badge className="ms-auto bg-red-500/30 text-red-200 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden border border-red-500/50">
+    قفل
+  </Badge>
+)}
+{isItemDisabled && !isExpired && (
+  <Badge className="ms-auto bg-amber-500/30 text-amber-200 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden border border-amber-500/50">
+    دمو
+  </Badge>
+)}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )
@@ -1027,22 +1033,22 @@ function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="p-2">
-        <SidebarSeparator className="bg-slate-200" />
-        <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
-          <Avatar className="size-7 sm:size-8 border border-emerald-200 bg-white">
-            <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[10px] sm:text-xs font-semibold">
-              {userInitials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
-            <span className="text-[11px] sm:text-xs font-medium truncate text-slate-800">{userDisplayName}</span>
-            <span className="text-[9px] sm:text-[10px] text-slate-500">{getRoleLabel(user?.role)}</span>
-          </div>
-        </div>
-      </SidebarFooter>
+  <SidebarFooter className="p-2 border-t border-white/5">
+  <SidebarSeparator className="bg-white/10" />
+  <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
+    <Avatar className="size-7 sm:size-8 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
+      <AvatarFallback className="bg-transparent text-white text-[10px] sm:text-xs font-semibold">
+        {userInitials}
+      </AvatarFallback>
+    </Avatar>
+    <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
+      <span className="text-[11px] sm:text-xs font-medium truncate text-white">{userDisplayName}</span>
+      <span className="text-[9px] sm:text-[10px] text-slate-400">{getRoleLabel(user?.role)}</span>
+    </div>
+  </div>
+</SidebarFooter>
 
-      <SidebarRail />
+  <SidebarRail className="bg-slate-900/50 border-l border-white/5" />
     </Sidebar>
   )
 }
@@ -1079,8 +1085,8 @@ function PWAInstallButton() {
       disabled={installing}
       className={`
         gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3
-        border-emerald-300 text-emerald-700
-        hover:bg-emerald-50 hover:border-emerald-400
+       border-emerald-500/50 text-emerald-300
+hover:bg-emerald-500/20 hover:border-emerald-400/70
         transition-all duration-200 shrink-0
         ${installing ? 'opacity-70 cursor-not-allowed' : ''}
         ${justInstalled ? 'border-green-400 text-green-700 bg-green-50' : ''}
@@ -1115,7 +1121,7 @@ function SyncIndicator() {
     <Button
       variant="outline"
       size="sm"
-      className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-300 text-amber-700 hover:bg-amber-50 transition-all"
+    className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-500/50 text-amber-300 hover:bg-amber-500/20 transition-all"
       onClick={async () => {
         const { syncEngine } = await import('@/lib/sync-engine')
         const result = await syncEngine.sync()
@@ -1241,31 +1247,31 @@ function AppHeader() {
   }
 
   return (
-    <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-slate-200 bg-slate-50/90 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-sm sticky top-0 z-10">
-      <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-600 hover:bg-slate-200" />
-      <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-slate-300" />
+  <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-emerald-900/50 bg-gradient-to-l from-slate-900 via-slate-800 to-slate-900 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-xl sticky top-0 z-10">
+    <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-300 hover:bg-white/10 hover:text-white transition-colors" />
+   <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-white/20" />
 
       <Breadcrumb className="flex-1 min-w-0 overflow-hidden">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="hidden md:inline-block">
-            <BreadcrumbPage className="text-[10px] md:text-xs text-slate-500 truncate">
-              {storeName || 'فروشگاه'}
-            </BreadcrumbPage>
+        <BreadcrumbPage className="text-[10px] md:text-xs text-slate-400 truncate">
+  {storeName || 'فروشگاه'}
+</BreadcrumbPage>
           </BreadcrumbItem>
-          <BreadcrumbSeparator className="hidden md:inline-block text-slate-400" />
+      <BreadcrumbSeparator className="hidden md:inline-block text-white/30" />
           <BreadcrumbItem>
-            <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-slate-800 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
-              {viewLabels[currentView] || currentView}
-            </BreadcrumbPage>
+         <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-white truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
+  {viewLabels[currentView] || currentView}
+</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-        <div className="hidden sm:flex items-center gap-1.5 bg-white/80 px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm" dir="rtl">
-          <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-          <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+      <div className="hidden sm:flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 shadow-sm backdrop-blur-sm" dir="rtl">
+  <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+  <span className="text-[11px] font-semibold text-white whitespace-nowrap">
             {(() => {
               const now = new Date();
               const formatter = new Intl.DateTimeFormat('fa-IR', {
@@ -1291,7 +1297,7 @@ function AppHeader() {
         {/* ── Notifications ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-slate-200 text-slate-600">
+          <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors">
               <Bell className="size-3.5 sm:size-4" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -left-0.5 flex size-3.5 sm:size-4 items-center justify-center rounded-full bg-red-500 text-[7px] sm:text-[9px] font-bold text-white leading-none">
@@ -1344,16 +1350,16 @@ function AppHeader() {
         {/* ── User Menu ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0 hover:bg-slate-200">
-              <Avatar className="size-6 md:size-7 border border-emerald-200 bg-white">
-                <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
-                  {user?.username?.charAt(0) || 'م'}
-                </AvatarFallback>
-              </Avatar>
-              <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-slate-700">
-                {user?.username || 'کاربر'}
-              </span>
-            </Button>
+          <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0 hover:bg-white/10 transition-colors">
+  <Avatar className="size-6 md:size-7 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-md shadow-emerald-500/20">
+    <AvatarFallback className="bg-transparent text-white text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
+      {user?.username?.charAt(0) || 'م'}
+    </AvatarFallback>
+  </Avatar>
+  <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-white">
+    {user?.username || 'کاربر'}
+  </span>
+</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"

@@ -23,6 +23,7 @@ import {
   ShoppingCart, Plus, Search, Loader2, Trash2, Package, Building2,
   ArrowLeft, CheckCircle2, X, Edit2, AlertTriangle, Calendar, Printer,
   RotateCcw, Wrench, WifiOff, RefreshCw, CloudOff, Upload, Eye,
+  ArrowRight,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { PurchaseInvoicePrintModal } from '@/components/purchases/purchase-invoice-print-modal'
@@ -2154,7 +2155,7 @@ className="h-7 text-xs gap-1"
 disabled={page <= 1}
 onClick={() => setPage(p => Math.max(1, p - 1))}
 >
-<ArrowLeft className="w-3 h-3" />قبلی
+<ArrowRight className="w-3 h-3" />قبلی
 </Button>
 <span className="text-xs text-gray-400 px-1">{toFaNum(page)} / {toFaNum(totalPages)}</span>
 <Button
@@ -2164,7 +2165,7 @@ className="h-7 text-xs gap-1"
 disabled={page >= totalPages}
 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
 >
-بعدی<ArrowLeft className="w-3 h-3 rotate-180" />
+<ArrowRight className="w-3 h-3 rotate-180" />بعدی
 </Button>
 </div>
 </div>

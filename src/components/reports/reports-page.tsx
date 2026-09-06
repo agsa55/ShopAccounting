@@ -34,7 +34,7 @@ import {
 import { ProfitLossReport } from '@/components/reports/profit-loss-report'
 import { InventoryAdvancedReport } from '@/components/reports/inventory-advanced-report'
 import { BalanceSheetV8Report } from '@/components/reports/balance-sheet-v8-report'
-
+import { DailySalesReport } from '@/components/reports/daily-sales-report'
 // ============================================================================
 //  Constants & Theme
 // ============================================================================
@@ -578,456 +578,6 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
   )
 }
 
-// ============================================================================
-//  REPORT 2: Daily Sales — v10.0.0 ★ اصلاح کامل ★
-// ============================================================================
-
-function DailySalesReport({ invoices }: { invoices: any[] }) {
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: daysAgoISO(30),
-    to: todayGregorianISO(),
-  })
-  const [listVisible, setListVisible] = useState(false)
-  const [page, setPage] = useState(1)
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
-
-  useEffect(() => { setListVisible(false); setPage(1); setSelectedInvoiceId(null) }, [dateRange.from, dateRange.to])
-
-  const salesByDate = useMemo(() => {
-    const map: Record<string, {
-      date: string; count: number; countReturn: number;
-      total: number; totalSale: number; totalReturn: number;
-      cash: number; credit: number;
-    }> = {}
-
-    invoices.forEach((inv) => {
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
-      if (!d) return
-      if (d < dateRange.from || d > dateRange.to) return
-      if (getInvoiceStatus(inv) === 'CANCELLED') return
-
-      const invType = (inv.invoiceType || '').toLowerCase()
-      const isReturn = invType === 'sale_return' || invType === 'purchase_return'
-      const totalAmount = getInvoiceTotal(inv)
-      const pt = getInvoicePaymentType(inv)
-
-      if (!map[d]) map[d] = { date: d, count: 0, countReturn: 0, total: 0, totalSale: 0, totalReturn: 0, cash: 0, credit: 0 }
-
-      if (isReturn) {
-        map[d].countReturn++; map[d].totalReturn += totalAmount; map[d].total -= totalAmount
-        if (pt === 'Cash' || pt === 'cash') map[d].cash -= totalAmount
-        else map[d].credit -= totalAmount
-      } else {
-        map[d].count++; map[d].totalSale += totalAmount; map[d].total += totalAmount
-        if (pt === 'Cash' || pt === 'cash') map[d].cash += totalAmount
-        else map[d].credit += totalAmount
-      }
-    })
-
-    return Object.values(map).sort((a, b) => b.date.localeCompare(a.date))
-  }, [invoices, dateRange.from, dateRange.to])
-
-  const invoicesByDate = useMemo(() => {
-    const map: Record<string, any[]> = {}
-    invoices.forEach((inv) => {
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
-      if (!d) return
-      if (d < dateRange.from || d > dateRange.to) return
-      if (getInvoiceStatus(inv) === 'CANCELLED') return
-      if (!map[d]) map[d] = []
-      map[d].push(inv)
-    })
-    Object.values(map).forEach(arr => arr.sort((a, b) => new Date(getInvoiceDate(b)).getTime() - new Date(getInvoiceDate(a)).getTime()))
-    return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]))
-  }, [invoices, dateRange.from, dateRange.to])
-
-  const grandTotal = salesByDate.reduce((s, d) => s + d.total, 0)
-  const grandCash = salesByDate.reduce((s, d) => s + d.cash, 0)
-  const grandCredit = salesByDate.reduce((s, d) => s + d.credit, 0)
-  const totalCount = salesByDate.reduce((s, d) => s + d.count, 0)
-  const totalCountReturn = salesByDate.reduce((s, d) => s + d.countReturn, 0)
-  const totalSale = salesByDate.reduce((s, d) => s + d.totalSale, 0)
-  const totalReturn = salesByDate.reduce((s, d) => s + d.totalReturn, 0)
-
-  const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
-  const paginatedData = paginate(salesByDate, page)
-
-  const handleExportExcel = () => {
-    const meta: ReportMeta = {
-      title: 'گزارش فروش روزانه', storeName: getStoreName(), period: periodText,
-      summary: [
-        { label: 'فروش کل (خالص)', value: formatNumberFa(grandTotal), color: 'green' },
-        { label: 'فاکتورهای فروش', value: formatNumberFa(totalCount), color: 'blue' },
-        { label: 'برگشتی‌ها', value: formatNumberFa(totalCountReturn), color: 'amber' },
-        { label: 'نقدی (خالص)', value: formatNumberFa(grandCash), color: 'blue' },
-        { label: 'نسیه (خالص)', value: formatNumberFa(grandCredit), color: 'amber' },
-      ],
-    }
-    const columns: ReportColumn[] = [
-      { key: 'date', label: 'تاریخ', align: 'right' },
-      { key: 'count', label: 'فاکتور فروش', isNumeric: true, align: 'center' },
-      { key: 'countReturn', label: 'برگشتی', isNumeric: true, align: 'center' },
-      { key: 'totalSale', label: 'جمع فروش', isCurrency: true, align: 'left' },
-      { key: 'totalReturn', label: 'جمع برگشتی', isCurrency: true, align: 'left' },
-      { key: 'total', label: 'فروش خالص', isCurrency: true, align: 'left' },
-    ]
-    const rows = salesByDate.map((d) => ({
-      date: formatJalaliLong(d.date), count: d.count, countReturn: d.countReturn,
-      totalSale: d.totalSale, totalReturn: d.totalReturn, total: d.total,
-    }))
-    exportToExcel(meta, columns, rows, 'گزارش-فروش-روزانه')
-  }
-
-  const handlePrint = () => {
-    const meta: ReportMeta = {
-      title: 'گزارش فروش روزانه', storeName: getStoreName(), period: periodText,
-      summary: [
-        { label: 'فروش کل (خالص)', value: formatNumberFa(grandTotal), color: 'green' },
-        { label: 'فاکتورهای فروش', value: formatNumberFa(totalCount), color: 'blue' },
-        { label: 'برگشتی‌ها', value: formatNumberFa(totalCountReturn), color: 'amber' },
-        { label: 'نقدی (خالص)', value: formatNumberFa(grandCash), color: 'blue' },
-      ],
-      note: `این گزارش بر اساس ${toFaNum(salesByDate.length)} روز فعال در بازه مشخص شده تولید شده است.`,
-    }
-    const columns: ReportColumn[] = [
-      { key: 'date', label: 'تاریخ', align: 'right' },
-      { key: 'count', label: 'فاکتور فروش', isNumeric: true, align: 'center' },
-      { key: 'countReturn', label: 'برگشتی', isNumeric: true, align: 'center' },
-      { key: 'totalSale', label: 'جمع فروش', isCurrency: true, align: 'left' },
-      { key: 'totalReturn', label: 'جمع برگشتی', isCurrency: true, align: 'left' },
-      { key: 'total', label: 'فروش خالص', isCurrency: true, align: 'left' },
-    ]
-    const rows = salesByDate.map((d) => ({
-      date: formatJalaliLong(d.date), count: d.count, countReturn: d.countReturn,
-      totalSale: d.totalSale, totalReturn: d.totalReturn, total: d.total,
-    }))
-    printReport(meta, columns, rows)
-  }
-
-  const selectedInvoice = selectedInvoiceId
-    ? invoices.find(inv => inv.id === selectedInvoiceId)
-    : null
-
-  return (
-    <div className="space-y-3 sm:space-y-4">
-      <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
-        <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={salesByDate.length === 0} />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">فروش خالص</p>
-              <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">{formatNumberFa(grandTotal)}</p>
-              <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">{toFaNum(totalCount)} فاکتور</p>
-            </div>
-            <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
-              <Wallet className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">برگشتی</p>
-              <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">{formatNumberFa(totalReturn)}</p>
-              <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">{toFaNum(totalCountReturn)} فاکتور</p>
-            </div>
-            <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
-              <TrendingDown className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">نقدی (خالص)</p>
-              <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">{formatNumberFa(grandCash)}</p>
-              <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">تومان</p>
-            </div>
-            <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
-              <Banknote className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">نسیه (خالص)</p>
-              <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">{formatNumberFa(grandCredit)}</p>
-              <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">تومان</p>
-            </div>
-            <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
-              <CreditCard className="w-3.5 h-3.5 text-white" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <Card className="border-gray-200">
-        <CardHeader className="p-3 pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-xs sm:text-sm flex items-center gap-1.5 text-gray-700">
-              <Receipt className="w-4 h-4 text-emerald-600" />
-              فاکتورهای فروش روزانه
-              <Badge className="text-[9px] bg-emerald-100 text-emerald-700 border-emerald-200">
-                {toFaNum(invoicesByDate.length)} روز
-              </Badge>
-            </CardTitle>
-            {selectedInvoiceId && (
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-gray-500 hover:text-gray-700"
-                onClick={() => setSelectedInvoiceId(null)}>
-                <X className="w-3 h-3 ml-1" />بستن جزئیات
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {invoicesByDate.length === 0 ? (
-            <EmptyState message="در این بازه فاکتوری ثبت نشده است" />
-          ) : (
-            <div className="max-h-[600px] overflow-y-auto">
-              {invoicesByDate.map(([date, dayInvoices]) => {
-                const dayTotal = dayInvoices.reduce((s, inv) => {
-                  const invType = (inv.invoiceType || '').toLowerCase()
-                  const isReturn = invType === 'sale_return' || invType === 'purchase_return'
-                  return s + (isReturn ? -getInvoiceTotal(inv) : getInvoiceTotal(inv))
-                }, 0)
-                const daySalesCount = dayInvoices.filter(inv => {
-                  const invType = (inv.invoiceType || '').toLowerCase()
-                  return invType !== 'sale_return' && invType !== 'purchase_return'
-                }).length
-                const dayReturnCount = dayInvoices.filter(inv => {
-                  const invType = (inv.invoiceType || '').toLowerCase()
-                  return invType === 'sale_return' || invType === 'purchase_return'
-                }).length
-
-                return (
-                  <div key={date} className="border-b border-gray-100 last:border-b-0">
-                    <div className="bg-gradient-to-l from-emerald-50 to-teal-50 px-3 sm:px-4 py-2 border-b border-emerald-100 flex items-center justify-between sticky top-0 z-10 backdrop-blur-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shrink-0">
-                          <Calendar className="w-3.5 h-3.5 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-xs sm:text-sm font-bold text-gray-800">{formatJalaliLong(date)}</p>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <Badge className="text-[8px] bg-white text-emerald-700 border-emerald-200 h-4 px-1">
-                              {toFaNum(daySalesCount)} فروش
-                            </Badge>
-                            {dayReturnCount > 0 && (
-                              <Badge className="text-[8px] bg-white text-amber-700 border-amber-200 h-4 px-1">
-                                {toFaNum(dayReturnCount)} برگشتی
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-left">
-                        <p className="text-[9px] text-gray-500">جمع روز</p>
-                        <p className={`text-xs sm:text-sm font-bold font-mono ${dayTotal >= 0 ? 'text-emerald-700' : 'text-red-600'}`} dir="ltr">
-                          {dayTotal >= 0 ? formatNumberFa(dayTotal) : `(${formatNumberFa(Math.abs(dayTotal))})`}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="divide-y divide-gray-100">
-                      {dayInvoices.map((inv) => {
-                        const isSelected = selectedInvoiceId === inv.id
-                        const invNumber = getInvoiceNumber(inv)
-                        const invTotal = getInvoiceTotal(inv)
-                        const invCustomer = getInvoiceCustomer(inv)
-                        const invType = (inv.invoiceType || '').toLowerCase()
-                        const isReturn = invType === 'sale_return' || invType === 'purchase_return'
-                        const invPaymentType = getInvoicePaymentType(inv)
-                        const paymentLabel = PAYMENT_LABELS_FA[invPaymentType] || invPaymentType
-                        const invoiceTime = (() => {
-                          try {
-                            const d = new Date(getInvoiceDate(inv))
-                            const hh = toFaNum(String(d.getHours()).padStart(2, '0'))
-                            const mm = toFaNum(String(d.getMinutes()).padStart(2, '0'))
-                            return `${hh}:${mm}`
-                          } catch { return '' }
-                        })()
-
-                        return (
-                          <div key={inv.id}>
-                            <div
-                              className={`flex items-center justify-between px-3 sm:px-4 py-2.5 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-50/70' : 'hover:bg-gray-50'}`}
-                              onClick={() => setSelectedInvoiceId(isSelected ? null : inv.id)}
-                            >
-                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isReturn ? 'bg-amber-100' : 'bg-emerald-100'}`}>
-                                  {isReturn
-                                    ? <RotateCcw className="w-4 h-4 text-amber-600" />
-                                    : <Receipt className="w-4 h-4 text-emerald-600" />
-                                  }
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-xs font-mono font-bold text-gray-800 truncate">{invNumber}</span>
-                                    <span className="text-[10px] text-gray-400 font-mono" dir="ltr">{invoiceTime}</span>
-                                    {isReturn && (
-                                      <Badge className="text-[8px] bg-amber-100 text-amber-700 border-amber-200 h-4 px-1">برگشتی</Badge>
-                                    )}
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 truncate mt-0.5">
-                                    {invCustomer} • {paymentLabel}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0 mr-2">
-                                <span className={`text-xs sm:text-sm font-bold font-mono ${isReturn ? 'text-amber-600' : 'text-emerald-600'}`} dir="ltr">
-                                  {isReturn ? `(${formatNumberFa(invTotal)})` : formatNumberFa(invTotal)}
-                                </span>
-                                <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-transform ${isSelected ? 'bg-emerald-600 text-white rotate-180' : 'bg-gray-100 text-gray-500'}`}>
-                                  <ChevronDown className="w-3 h-3" />
-                                </div>
-                              </div>
-                            </div>
-
-                            {isSelected && (
-                              <div className="bg-gradient-to-l from-emerald-50/30 to-teal-50/30 px-3 sm:px-4 py-3 border-t border-emerald-100">
-                                <div className="flex items-center gap-2 mb-2.5 pb-2 border-b border-emerald-200/50">
-                                  <Package className="w-3.5 h-3.5 text-emerald-600" />
-                                  <p className="text-[11px] font-bold text-emerald-800">
-                                    کالاهای فروخته شده ({toFaNum(Array.isArray(inv.items) ? inv.items.length : 0)} آیتم)
-                                  </p>
-                                </div>
-
-                                {!Array.isArray(inv.items) || inv.items.length === 0 ? (
-                                  <p className="text-[10px] text-gray-400 text-center py-3">آیتمی برای این فاکتور ثبت نشده است</p>
-                                ) : (
-                                  <div className="space-y-1.5">
-                                    {inv.items.map((item: any, idx: number) => {
-                                      const qty = Number(item.quantity) || 0
-                                      const unitPrice = Number(item.unitPrice) || 0
-                                      const lineTotal = Number(item.totalAmount || item.lineTotal || 0)
-                                      const productName = item.productName || item.name || 'کالا'
-                                      const unitLabel = item.unitLabel || ''
-                                      return (
-                                        <div key={idx} className="flex items-center justify-between gap-2 text-[10px] sm:text-xs bg-white rounded-lg px-2.5 py-2 border border-gray-100 hover:border-emerald-200 transition-colors">
-                                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                                            <div className="w-5 h-5 rounded bg-emerald-50 flex items-center justify-center shrink-0">
-                                              <span className="text-[9px] font-bold text-emerald-600">{toFaNum(idx + 1)}</span>
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                              <p className="text-gray-800 font-medium truncate">{productName}</p>
-                                              {item.discount > 0 && (
-                                                <p className="text-[9px] text-red-500 mt-0.5">
-                                                  تخفیف: {formatNumberFa(item.discount)} ریال
-                                                </p>
-                                              )}
-                                            </div>
-                                          </div>
-                                          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                                            <div className="text-left hidden sm:block">
-                                              <p className="text-[9px] text-gray-400">تعداد</p>
-                                              <p className="text-gray-600 font-mono" dir="rtl">
-                                                {formatNumberFa(qty)} {unitLabel}
-                                              </p>
-                                            </div>
-                                            <div className="text-left hidden sm:block">
-                                              <p className="text-[9px] text-gray-400">قیمت واحد</p>
-                                              <p className="text-gray-600 font-mono" dir="rtl">{formatNumberFa(unitPrice)}</p>
-                                            </div>
-                                            <div className="text-left">
-                                              <p className="text-[9px] text-gray-400">مبلغ کل</p>
-                                              <p className="font-bold text-emerald-700 font-mono text-xs sm:text-sm" dir="rtl">
-                                                {formatNumberFa(lineTotal)}
-                                              </p>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      )
-                                    })}
-
-                                    <div className="flex items-center justify-between gap-2 text-xs bg-gradient-to-l from-emerald-100 to-teal-100 rounded-lg px-2.5 py-2 mt-2 border border-emerald-200">
-                                      <span className="font-bold text-emerald-800">جمع کل فاکتور</span>
-                                      <span className="font-bold text-emerald-800 font-mono text-sm" dir="rtl">
-                                        {formatNumberFa(invTotal)} ریال
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="border-gray-200">
-        <CardContent className="p-3 sm:p-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <p className="text-xs text-gray-600">لیست تجمیعی فروش روزانه</p>
-            <ShowListButton
-              onClick={() => setListVisible((v) => !v)}
-              visible={listVisible}
-              totalCount={salesByDate.length}
-            />
-          </div>
-
-          {!listVisible ? (
-            <EmptyListPlaceholder message="برای مشاهده رکوردهای روزانه، دکمه «نمایش لیست» را بزنید" />
-          ) : salesByDate.length === 0 ? (
-            <EmptyState message="داده‌ای در این بازه یافت نشد" />
-          ) : (
-            <div className="overflow-x-auto -mx-3 sm:-mx-4">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gray-50">
-                    <TableHead className="text-right text-xs whitespace-nowrap">تاریخ</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">فاکتور فروش</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">برگشتی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">جمع فروش</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">جمع برگشتی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">فروش خالص</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedData.map((day) => (
-                    <TableRow key={day.date} className={day.totalReturn > 0 ? 'bg-amber-50/30 hover:bg-amber-50/50' : 'hover:bg-emerald-50/50'}>
-                      <TableCell className="text-xs sm:text-sm whitespace-nowrap">{formatJalaliLong(day.date)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm whitespace-nowrap text-blue-600 font-medium">{formatNumberFa(day.count)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm whitespace-nowrap text-amber-600 font-medium">{day.countReturn > 0 ? formatNumberFa(day.countReturn) : '—'}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-blue-600 font-medium whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(day.totalSale)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-amber-600 font-medium whitespace-nowrap hidden sm:table-cell" dir="ltr">{day.totalReturn > 0 ? formatNumberFa(day.totalReturn) : '—'}</TableCell>
-                      <TableCell className="text-xs sm:text-sm font-bold whitespace-nowrap" dir="ltr" style={{ color: day.total > 0 ? '#059669' : '#dc2626' }}>
-                        {day.total >= 0 ? formatNumberFa(day.total) : `(${formatNumberFa(Math.abs(day.total))})`}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow className="bg-gray-50 font-bold border-t-2 border-gray-300">
-                    <TableCell className="text-xs sm:text-sm whitespace-nowrap">جمع کل</TableCell>
-                    <TableCell className="text-xs sm:text-sm whitespace-nowrap text-blue-600">{formatNumberFa(totalCount)}</TableCell>
-                    <TableCell className="text-xs sm:text-sm whitespace-nowrap text-amber-600">{totalCountReturn > 0 ? formatNumberFa(totalCountReturn) : '—'}</TableCell>
-                    <TableCell className="text-xs sm:text-sm text-blue-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(totalSale)}</TableCell>
-                    <TableCell className="text-xs sm:text-sm text-amber-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{totalReturn > 0 ? formatNumberFa(totalReturn) : '—'}</TableCell>
-                    <TableCell className="text-xs sm:text-sm whitespace-nowrap" dir="ltr" style={{ color: grandTotal > 0 ? '#059669' : '#dc2626' }}>
-                      {grandTotal >= 0 ? formatNumberFa(grandTotal) : `(${formatNumberFa(Math.abs(grandTotal))})`}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-              <Pagination page={page} total={salesByDate.length} onPageChange={setPage} />
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
 
 // ============================================================================
 //  REPORT 3: Customer Statement
@@ -2276,20 +1826,56 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
 
   useEffect(() => { setListVisible(false); setPage(1) }, [selectedCashier, dateRange.from, dateRange.to])
 
-  const stats = useMemo(() => {
-    const map: Record<string, { name: string; count: number; total: number; cash: number; credit: number }> = {}
+ const stats = useMemo(() => {
+    const map: Record<string, { 
+      name: string
+      count: number
+      total: number
+      cash: number
+      card: number
+      check: number
+      installment: number
+      credit: number
+      profit: number
+    }> = {}
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
       const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
       if (!d || d < dateRange.from || d > dateRange.to) return
       const name = getInvoiceCashier(inv)
-      if (!map[name]) map[name] = { name, count: 0, total: 0, cash: 0, credit: 0 }
+      if (!map[name]) map[name] = { 
+        name, 
+        count: 0, 
+        total: 0, 
+        cash: 0, 
+        card: 0, 
+        check: 0, 
+        installment: 0, 
+        credit: 0, 
+        profit: 0 
+      }
       const total = getInvoiceTotal(inv)
       map[name].count++
       map[name].total += total
-      const pt = getInvoicePaymentType(inv)
-      if (pt === 'Cash' || pt === 'cash') map[name].cash += total
-      else map[name].credit += total
+      
+      // ★ محاسبه سود/زیان فروش: مبلغ فروش - بهای تمام شده
+      const cogsAmount = Number(inv.cogsAmount) || 0
+      const invoiceProfit = total - cogsAmount
+      map[name].profit += invoiceProfit
+      
+      const pt = getInvoicePaymentType(inv).toLowerCase()
+      if (pt === 'cash') {
+        map[name].cash += total
+      } else if (pt === 'card') {
+        map[name].card += total
+      } else if (pt === 'check') {
+        map[name].check += total
+      } else if (pt === 'installment') {
+        map[name].installment += total
+      } else {
+        // نسیه و سایر روش‌ها
+        map[name].credit += total
+      }
     })
     return Object.values(map)
   }, [invoices, dateRange.from, dateRange.to])
@@ -2297,49 +1883,64 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
   const cashiers = stats.map((s) => s.name)
   const filtered = selectedCashier === 'all' ? stats : stats.filter((c) => c.name === selectedCashier)
 
-  const grandTotal = filtered.reduce((s, c) => s + c.total, 0)
-  const grandCash = filtered.reduce((s, c) => s + c.cash, 0)
-  const grandCredit = filtered.reduce((s, c) => s + c.credit, 0)
-  const totalCount = filtered.reduce((s, c) => s + c.count, 0)
+ const grandTotal = filtered.reduce((s, c) => s + c.total, 0)
+const grandCash = filtered.reduce((s, c) => s + c.cash, 0)
+const grandCard = filtered.reduce((s, c) => s + c.card, 0)
+const grandCheck = filtered.reduce((s, c) => s + c.check, 0)
+const grandInstallment = filtered.reduce((s, c) => s + c.installment, 0)
+const grandCredit = filtered.reduce((s, c) => s + c.credit, 0)
+const grandProfit = filtered.reduce((s, c) => s + c.profit, 0)
+const totalCount = filtered.reduce((s, c) => s + c.count, 0)
   const cashierFilterText = selectedCashier === 'all' ? 'همه صندوق‌داران' : selectedCashier
 
   const paginatedStats = paginate(filtered, page)
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
 
-  const chartData = filtered.map((s) => ({
+ const chartData = filtered.map((s) => ({
     name: s.name,
     'فروش نقدی': s.cash,
+    'فروش چکی': s.check,
+    'فروش اقساطی': s.installment,
     'فروش نسیه': s.credit,
   }))
 
-  const columns: ReportColumn[] = [
+ const columns: ReportColumn[] = [
     { key: 'name', label: 'نام صندوق‌دار', align: 'right' },
     { key: 'count', label: 'تعداد فاکتور', isNumeric: true, align: 'center' },
     { key: 'cash', label: 'فروش نقدی', isCurrency: true, align: 'left' },
+    { key: 'card', label: 'فروش کارتخوان', isCurrency: true, align: 'left' },
+    { key: 'check', label: 'فروش چکی', isCurrency: true, align: 'left' },
+    { key: 'installment', label: 'فروش اقساطی', isCurrency: true, align: 'left' },
     { key: 'credit', label: 'فروش نسیه', isCurrency: true, align: 'left' },
     { key: 'total', label: 'جمع فروش', isCurrency: true, align: 'left' },
+    { key: 'profit', label: 'سود/زیان فروش', isCurrency: true, align: 'left' },
     { key: 'avg', label: 'میانگین فاکتور', isCurrency: true, align: 'left' },
   ]
-
-  const rows = filtered.map((s) => ({
+ const rows = filtered.map((s) => ({
     name: s.name,
     count: s.count,
     cash: s.cash,
+    card: s.card,
+    check: s.check,
+    installment: s.installment,
     credit: s.credit,
     total: s.total,
+    profit: s.profit,
     avg: s.count > 0 ? Math.round(s.total / s.count) : 0,
   }))
-
   const meta: ReportMeta = {
     title: 'گزارش عملکرد صندوق‌داران',
     storeName: getStoreName(),
     period: periodText,
     filters: [{ label: 'صندوق‌دار', value: cashierFilterText }],
-    summary: [
+ summary: [
       { label: 'تعداد صندوق‌دار', value: formatNumberFa(filtered.length), color: 'blue' },
       { label: 'تعداد فاکتور', value: formatNumberFa(totalCount), color: 'gray' },
       { label: 'فروش نقدی', value: formatNumberFa(grandCash), color: 'green' },
+      { label: 'فروش چکی', value: formatNumberFa(grandCheck), color: 'amber' },
+  { label: 'فروش اقساطی', value: formatNumberFa(grandInstallment), color: 'blue' },
       { label: 'جمع فروش', value: formatNumberFa(grandTotal), color: 'green' },
+      { label: 'سود/زیان فروش', value: formatNumberFa(grandProfit), color: grandProfit >= 0 ? 'green' : 'red' },
     ],
     note: 'این گزارش بر اساس فاکتورهای صادر شده توسط هر صندوق‌دار تولید شده است.',
   }
@@ -2363,16 +1964,34 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
         <StatCard label="تعداد صندوق‌دار" value={filtered.length} icon={<UserCheck className="w-4 h-4" />} color="blue" dir="rtl" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
         <StatCard label="فروش نقدی" value={grandCash} icon={<Banknote className="w-4 h-4" />} color="emerald" suffix="تومان" />
+        <StatCard label="فروش چکی" value={grandCheck} icon={<CreditCard className="w-4 h-4" />} color="pink" suffix="تومان" />
+        <StatCard label="فروش اقساطی" value={grandInstallment} icon={<CalendarClock className="w-4 h-4" />} color="purple" suffix="تومان" />
         <StatCard label="جمع فروش" value={grandTotal} icon={<Wallet className="w-4 h-4" />} color="teal" suffix="تومان" />
       </div>
 
-      {chartData.length > 0 && (
+      {/* کارت سود/زیان فروش */}
+      <div className="grid grid-cols-1 gap-2">
+        <div className={`rounded-xl p-3 text-white shadow-sm ${grandProfit >= 0 ? 'bg-gradient-to-br from-emerald-600 to-teal-600' : 'bg-gradient-to-br from-red-500 to-red-600'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {grandProfit >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+              <div>
+                <p className="text-xs text-white/80">سود/زیان فروش</p>
+                <p className="text-sm text-white/70 mt-0.5">جمع فروش منهای بهای تمام شده</p>
+              </div>
+            </div>
+            <p className="text-lg font-bold font-mono" dir="ltr">{formatNumberFa(grandProfit)} تومان</p>
+          </div>
+        </div>
+      </div>
+
+  {chartData.length > 0 && (
         <ChartCard title="مقایسه عملکرد صندوق‌داران" icon={<BarChart3 className="w-4 h-4 text-blue-600" />}>
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
@@ -2380,12 +1999,13 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
               <Tooltip content={<PersianChartTooltip formatter={(v: number) => formatNumberFa(v) + ' تومان'} />} />
               <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'Tahoma' }} />
               <Bar dataKey="فروش نقدی" stackId="a" fill="#10b981" />
+              <Bar dataKey="فروش چکی" stackId="a" fill="#ec4899" />
+              <Bar dataKey="فروش اقساطی" stackId="a" fill="#8b5cf6" />
               <Bar dataKey="فروش نسیه" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       )}
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -2404,24 +2024,34 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
           ) : (
             <div className="overflow-x-auto -mx-3 sm:-mx-4">
               <Table>
-                <TableHeader>
+            <TableHeader>
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-right text-xs whitespace-nowrap">نام صندوق‌دار</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap">تعداد فاکتور</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش نقدی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">فروش کارتخوان</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش چکی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">فروش اقساطی</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش نسیه</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap">جمع فروش</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap">سود/زیان</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">میانگین فاکتور</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+             <TableBody>
                   {paginatedStats.map((stat) => (
                     <TableRow key={stat.name} className="hover:bg-emerald-50/50">
                       <TableCell className="text-xs sm:text-sm font-medium whitespace-nowrap">{stat.name}</TableCell>
                       <TableCell className="text-xs sm:text-sm whitespace-nowrap">{formatNumberFa(stat.count)}</TableCell>
                       <TableCell className="text-xs sm:text-sm text-emerald-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(stat.cash)}</TableCell>
+                      <TableCell className="text-xs sm:text-sm text-blue-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.card)}</TableCell>
+                      <TableCell className="text-xs sm:text-sm text-pink-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(stat.check)}</TableCell>
+                      <TableCell className="text-xs sm:text-sm text-purple-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.installment)}</TableCell>
                       <TableCell className="text-xs sm:text-sm text-amber-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(stat.credit)}</TableCell>
                       <TableCell className="text-xs sm:text-sm font-bold whitespace-nowrap" dir="ltr">{formatNumberFa(stat.total)}</TableCell>
+                      <TableCell className="text-xs sm:text-sm font-bold whitespace-nowrap" dir="ltr" style={{ color: stat.profit >= 0 ? '#059669' : '#dc2626' }}>
+                        {formatNumberFa(stat.profit)}
+                      </TableCell>
                       <TableCell className="text-xs sm:text-sm text-gray-600 whitespace-nowrap hidden md:table-cell" dir="ltr">{stat.count > 0 ? formatNumberFa(Math.round(stat.total / stat.count)) : '۰'}</TableCell>
                     </TableRow>
                   ))}
