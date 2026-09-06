@@ -1594,3 +1594,48 @@ model FixedAsset {
   @@index([journalEntryId])
   @@map("FixedAssets")
 }
+
+// اضافه کردن به schema.prisma (فقط مدل‌ها)
+// مدلهای مربوط به شیفتهای صندوق داران و عملکرد صندوق و باز و بسته شدن صندوق
+model CashShift {
+  id              String    @id @default(uuid()) @db.VarChar(450)
+  tenantId        String    @db.VarChar(1000)
+  cashierId       String    @db.VarChar(450)
+  openedAt        DateTime  @default(now())
+  closedAt        DateTime?
+  openingAmount   Decimal   @default(0) @db.Decimal(18, 2)
+  expectedClosing Decimal?  @db.Decimal(18, 2)
+  actualClosing   Decimal?  @db.Decimal(18, 2)
+  difference      Decimal?  @db.Decimal(18, 2)
+  status          String    @default("open") // open | closed | cancelled
+  autoMode        Boolean   @default(true)  // ★ حالت خودکار
+  notes           String?   @db.VarChar(500)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  Tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  movements       CashMovement[]
+  
+  @@index([tenantId])
+  @@index([tenantId, cashierId])
+  @@index([tenantId, status])
+  @@map("CashShifts")
+}
+
+model CashMovement {
+  id          String    @id @default(uuid()) @db.VarChar(450)
+  shiftId     String    @db.VarChar(450)
+  tenantId    String    @db.VarChar(1000)
+  type        String    @db.VarChar(20) // in | out | drop
+  amount      Decimal   @db.Decimal(18, 2)
+  reason      String?   @db.VarChar(500)
+  reference   String?   @db.VarChar(450)
+  createdBy   String?   @db.VarChar(450)
+  createdAt   DateTime  @default(now())
+  
+  CashShift   CashShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([shiftId])
+  @@map("CashMovements")
+}

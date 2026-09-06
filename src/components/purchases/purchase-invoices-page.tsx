@@ -23,7 +23,7 @@ import {
   ShoppingCart, Plus, Search, Loader2, Trash2, Package, Building2,
   ArrowLeft, CheckCircle2, X, Edit2, AlertTriangle, Calendar, Printer,
   RotateCcw, Wrench, WifiOff, RefreshCw, CloudOff, Upload, Eye,
-  ArrowRight,
+  ArrowRight, Filter, ChevronDown, CreditCard,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { PurchaseInvoicePrintModal } from '@/components/purchases/purchase-invoice-print-modal'
@@ -552,9 +552,14 @@ export function PurchaseInvoicesPage() {
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+const [loading, setLoading] = useState(true)
+const [search, setSearch] = useState('')
+// ★ v8.10: فیلترهای جدید
+const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<string>('all')
+const [statusFilter, setStatusFilter] = useState<string>('all')
+const [paymentTypeFilter, setPaymentTypeFilter] = useState<string>('all')
+const [showFilters, setShowFilters] = useState(false)
+const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
   const [totalCount, setTotalCount] = useState(0)
@@ -782,7 +787,7 @@ export function PurchaseInvoicesPage() {
     }
   }, [tenantId, isOnline, page, pageSize, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
   useEffect(() => { loadData() }, [loadData])
-  useEffect(() => { setPage(1) }, [search])
+useEffect(() => { setPage(1) }, [search, invoiceTypeFilter, statusFilter, paymentTypeFilter])
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★ همگام‌سازی خودکار
@@ -1737,15 +1742,49 @@ const handleProductSearchKeyDown = useCallback(
   // ══════════════════════════════════════════════════════════════════════════
   // Computed Values
   // ══════════════════════════════════════════════════════════════════════════
-  const filteredInvoices = useMemo(() => {
-    const searched = invoices.filter(inv =>
-      (inv.number || '').includes(search) || (inv.supplier?.name || '').includes(search)
-    )
-    if (search && searched.length < invoices.length) {
-      return searched
+// ★ v8.10: فیلترهای پیشرفته (نوع فاکتور، وضعیت، روش پرداخت)
+const filteredInvoices = useMemo(() => {
+  return invoices.filter(inv => {
+    // ─── فیلتر جستجو ───
+    if (search) {
+      const q = search.toLowerCase()
+      const number = (inv.number || '').toLowerCase()
+      const supplier = (inv.supplier?.name || '').toLowerCase()
+      if (!number.includes(q) && !supplier.includes(q)) return false
     }
-    return searched
-  }, [invoices, search])
+    
+    // ─── فیلتر نوع فاکتور ───
+    if (invoiceTypeFilter !== 'all') {
+      if (invoiceTypeFilter === 'purchase') {
+        // خرید عادی: invoiceType خالی یا purchase
+        if (inv.invoiceType && ['purchase_return', 'service', 'repair'].includes(inv.invoiceType)) return false
+      } else if (inv.invoiceType !== invoiceTypeFilter) {
+        return false
+      }
+    }
+    
+    // ─── فیلتر وضعیت ───
+    if (statusFilter !== 'all') {
+      if (inv.status !== statusFilter) return false
+    }
+    
+    // ─── فیلتر روش پرداخت ───
+    if (paymentTypeFilter !== 'all') {
+      if (inv.paymentType !== paymentTypeFilter) return false
+    }
+    
+    return true
+  })
+}, [invoices, search, invoiceTypeFilter, statusFilter, paymentTypeFilter])
+
+// ★ v8.10: بررسی آیا هیچ فیلتری فعال است؟
+const hasActiveFilter = invoiceTypeFilter !== 'all' || statusFilter !== 'all' || paymentTypeFilter !== 'all'
+const clearAllFilters = () => {
+  setInvoiceTypeFilter('all')
+  setStatusFilter('all')
+  setPaymentTypeFilter('all')
+  setSearch('')
+}
   const pendingSyncCount = syncQueue.filter(q => q.retryCount < MAX_RETRY).length
   const failedSyncCount = syncQueue.filter(q => q.retryCount >= MAX_RETRY).length
 
@@ -1781,7 +1820,10 @@ return (
 <div className="min-w-0">
 <h1 className="text-sm sm:text-base lg:text-lg font-bold text-gray-900 leading-tight">فاکتورهای خرید</h1>
 <p className="text-[10px] sm:text-xs text-gray-500 leading-tight">
-{formatNumber(filteredInvoices.length)} فاکتور
+  {formatNumber(filteredInvoices.length)} فاکتور
+  {hasActiveFilter && invoices.length !== filteredInvoices.length && (
+    <span className="text-purple-600 mr-1">(از {formatNumber(invoices.length)})</span>
+  )}
 </p>
 </div>
 </div>
@@ -1863,21 +1905,49 @@ className="gap-1 bg-blue-600 hover:bg-blue-700 h-8 sm:h-9 px-2 sm:px-3 text-xs s
 </div>
 </div>
 {mobileSearchOpen && (
-<div className="mt-2 sm:hidden">
-<div className="relative">
-<Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-<Input
-autoFocus type="text" placeholder="جستجو..."
-value={search} onChange={e => setSearch(e.target.value)}
-className="pr-9 pl-9 h-8 bg-gray-50 border-gray-200 text-xs"
-/>
-{search && (
-<button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2">
-<X className="w-3.5 h-3.5 text-gray-400" />
-</button>
-)}
-</div>
-</div>
+  <div className="mt-2 sm:hidden space-y-2">
+    <div className="relative">
+      <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+      <Input
+        autoFocus type="text" placeholder="جستجو..."
+        value={search} onChange={e => setSearch(e.target.value)}
+        className="pr-9 pl-9 h-8 bg-gray-50 border-gray-200 text-xs"
+      />
+      {search && (
+        <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2">
+          <X className="w-3.5 h-3.5 text-gray-400" />
+        </button>
+      )}
+    </div>
+    {/* فیلترهای سریع موبایل */}
+    <div className="grid grid-cols-2 gap-2">
+      <Select value={invoiceTypeFilter} onValueChange={setInvoiceTypeFilter}>
+        <SelectTrigger className="h-8 text-[10px]"><SelectValue placeholder="نوع" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">همه انواع</SelectItem>
+          <SelectItem value="purchase">خرید عادی</SelectItem>
+          <SelectItem value="service">خدمات</SelectItem>
+          <SelectItem value="repair">تعمیرات</SelectItem>
+          <SelectItem value="purchase_return">برگشتی</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <SelectTrigger className="h-8 text-[10px]"><SelectValue placeholder="وضعیت" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">همه وضعیت‌ها</SelectItem>
+          <SelectItem value="draft">پیش‌نویس</SelectItem>
+          <SelectItem value="confirmed">ثبت نهایی</SelectItem>
+          <SelectItem value="paid">پرداخت شده</SelectItem>
+          <SelectItem value="cancelled">لغو شده</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+    {hasActiveFilter && (
+      <Button size="sm" variant="ghost" onClick={clearAllFilters} className="w-full h-7 text-xs text-red-600 hover:bg-red-50">
+        <X className="w-3 h-3 ml-1" /> پاک کردن همه فیلترها
+      </Button>
+    )}
+  </div>
 )}
 </header>
 {!isOnline && (
@@ -1912,21 +1982,161 @@ className="h-7 text-xs text-blue-700 hover:bg-blue-100 shrink-0"
 </Button>
 </div>
 )}
-<div className="px-3 sm:px-5 lg:px-6 pt-3 shrink-0">
-<div className="relative hidden sm:block">
-<Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-<Input
-placeholder="جستجو بر اساس شماره یا تامین‌کننده..."
-value={search}
-onChange={e => setSearch(e.target.value)}
-className="pr-9 pl-9 h-9 text-sm bg-white"
-/>
-{search && (
-<button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-<X className="w-3.5 h-3.5" />
-</button>
-)}
-</div>
+{/* ★ v8.10: نوار جستجو + فیلترها (جمع‌وجورتر و مدرن) */}
+<div className="px-3 sm:px-5 lg:px-6 pt-3 shrink-0 space-y-2">
+  {/* ردیف اصلی: جستجو + دکمه فیلترها + badge فیلتر فعال */}
+  <div className="flex items-center gap-2 hidden sm:flex">
+    {/* جستجو — کوچک‌تر و جمع‌وجور */}
+    <div className="relative flex-1 max-w-sm">
+      <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <Input
+        placeholder="جستجوی شماره یا تامین‌کننده..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="pr-9 pl-9 h-9 text-sm bg-white"
+      />
+      {search && (
+        <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+
+    {/* دکمه باز/بسته کردن فیلترها */}
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setShowFilters(v => !v)}
+      className={`h-9 gap-1.5 text-xs shrink-0 ${
+        showFilters
+          ? 'bg-purple-50 border-purple-300 text-purple-700'
+          : hasActiveFilter
+            ? 'border-purple-300 text-purple-700 bg-purple-50/50'
+            : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+      }`}
+    >
+      <Filter className="w-3.5 h-3.5" />
+      <span>فیلترها</span>
+      {hasActiveFilter && (
+        <span className="bg-purple-600 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center font-bold">
+          {[invoiceTypeFilter, statusFilter, paymentTypeFilter].filter(f => f !== 'all').length}
+        </span>
+      )}
+      <ChevronDown className={`w-3 h-3 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+    </Button>
+
+    {/* دکمه پاک کردن فیلترها */}
+    {hasActiveFilter && (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={clearAllFilters}
+        className="h-9 text-xs text-red-600 hover:bg-red-50 gap-1 shrink-0"
+      >
+        <X className="w-3.5 h-3.5" />
+        پاک کردن فیلترها
+      </Button>
+    )}
+  </div>
+
+  {/* ★ پنل فیلترها (قابل باز/بسته شدن) */}
+  {showFilters && (
+    <Card className="border-purple-200 bg-purple-50/30">
+      <CardContent className="p-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* فیلتر نوع فاکتور */}
+          <div>
+            <Label className="text-[11px] text-gray-700 font-medium mb-1 block flex items-center gap-1">
+              <Package className="w-3 h-3 text-purple-600" />
+              نوع فاکتور
+            </Label>
+            <Select value={invoiceTypeFilter} onValueChange={setInvoiceTypeFilter}>
+              <SelectTrigger className="h-9 text-xs bg-white">
+                <SelectValue placeholder="همه انواع" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">📋 همه انواع</SelectItem>
+                <SelectItem value="purchase">🛒 خرید عادی</SelectItem>
+                <SelectItem value="service">🛠️ خدمات</SelectItem>
+                <SelectItem value="repair">🔧 تعمیرات</SelectItem>
+                <SelectItem value="purchase_return">↩️ برگشتی خرید</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* فیلتر وضعیت */}
+          <div>
+            <Label className="text-[11px] text-gray-700 font-medium mb-1 block flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+              وضعیت فاکتور
+            </Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-9 text-xs bg-white">
+                <SelectValue placeholder="همه وضعیت‌ها" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">📋 همه وضعیت‌ها</SelectItem>
+                <SelectItem value="draft">⏳ پیش‌نویس</SelectItem>
+                <SelectItem value="confirmed">✅ ثبت نهایی</SelectItem>
+                <SelectItem value="paid">💰 پرداخت شده</SelectItem>
+                <SelectItem value="cancelled">❌ لغو شده</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* فیلتر روش پرداخت */}
+          <div>
+            <Label className="text-[11px] text-gray-700 font-medium mb-1 block flex items-center gap-1">
+              <CreditCard className="w-3 h-3 text-blue-600" />
+              روش پرداخت
+            </Label>
+            <Select value={paymentTypeFilter} onValueChange={setPaymentTypeFilter}>
+              <SelectTrigger className="h-9 text-xs bg-white">
+                <SelectValue placeholder="همه روش‌ها" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">📋 همه روش‌ها</SelectItem>
+                <SelectItem value="cash">💵 نقدی</SelectItem>
+                <SelectItem value="credit">⏰ نسیه</SelectItem>
+                <SelectItem value="check">🏛️ چک</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* ★ نشانگر فیلترهای فعال */}
+        {hasActiveFilter && (
+          <div className="mt-3 pt-3 border-t border-purple-200 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-purple-700 font-medium">فیلترهای فعال:</span>
+            {invoiceTypeFilter !== 'all' && (
+              <Badge className="text-[9px] bg-purple-100 text-purple-700 border-purple-300 gap-1">
+                نوع: {invoiceTypeFilter === 'purchase' ? 'خرید عادی' : invoiceTypeFilter === 'service' ? 'خدمات' : invoiceTypeFilter === 'repair' ? 'تعمیرات' : 'برگشتی'}
+                <button onClick={() => setInvoiceTypeFilter('all')} className="hover:text-red-600 ml-0.5">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </Badge>
+            )}
+            {statusFilter !== 'all' && (
+              <Badge className="text-[9px] bg-emerald-100 text-emerald-700 border-emerald-300 gap-1">
+                وضعیت: {statusFilter === 'draft' ? 'پیش‌نویس' : statusFilter === 'confirmed' ? 'ثبت نهایی' : statusFilter === 'paid' ? 'پرداخت شده' : 'لغو شده'}
+                <button onClick={() => setStatusFilter('all')} className="hover:text-red-600 ml-0.5">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </Badge>
+            )}
+            {paymentTypeFilter !== 'all' && (
+              <Badge className="text-[9px] bg-blue-100 text-blue-700 border-blue-300 gap-1">
+                پرداخت: {paymentTypeFilter === 'cash' ? 'نقدی' : paymentTypeFilter === 'credit' ? 'نسیه' : 'چک'}
+                <button onClick={() => setPaymentTypeFilter('all')} className="hover:text-red-600 ml-0.5">
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </Badge>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )}
 </div>
 <div className="flex-1 overflow-auto px-3 sm:px-5 lg:px-6 py-3">
 {loading && (
@@ -1985,9 +2195,23 @@ onClick={() => setPage(p => Math.min(totalPages, p + 1))}
 )}
 {/* ═══ ★ پایان صفحه‌بندی موبایل ═══ */}
 {/* ═══ ★ پایان صفحه‌بندی موبایل ═══ */}
+{/* ★ v8.10: هشدار وقتی فیلتر فعال است ولی pagination سمت سرور است */}
+{hasActiveFilter && totalPages > 1 && (
+  <div className="hidden md:flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3 text-xs text-amber-800">
+    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+    <span className="flex-1">
+      <strong>توجه:</strong> فیلترها فقط روی صفحه جاری اعمال می‌شوند.
+      برای دیدن همه نتایج، صفحات دیگر را بررسی کنید یا فیلترها را پاک کنید.
+    </span>
+    <Button size="sm" variant="ghost" onClick={clearAllFilters} className="h-7 text-xs text-amber-700 hover:bg-amber-100">
+      پاک کردن
+    </Button>
+  </div>
+)}
+
 <div className="hidden md:block">
-<Card>
-<CardContent className="p-0">
+  <Card>
+    <CardContent className="p-0">
 
 {/* ─── جدول ─── */}
 <div className="overflow-x-auto">

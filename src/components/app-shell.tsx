@@ -1377,21 +1377,13 @@ function AppHeader() {
             {canAccessSettings && (
               <DropdownMenuItem
                 onClick={() => useStore.getState().setCurrentView('settings')}
-                className="text-slate-700 hover:bg-slate-50"
+                className="text-slate-700 hover:bg-slate-50 "
               >
-                <Settings className="size-4 ms-2" />
+                <Settings className="size-4 ms-2"  />
                 تنظیمات
               </DropdownMenuItem>
             )}
-            {canAccessSettings && (
-              <DropdownMenuItem
-                onClick={() => useStore.getState().setCurrentView('subscription-tab' as AppView)}
-                className="text-slate-700 hover:bg-slate-50"
-              >
-                <CreditCard className="size-4 ms-2" />
-                اشتراک و پلن
-              </DropdownMenuItem>
-            )}
+        
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleLogout}
