@@ -17,7 +17,7 @@
 // ============================================================================
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { PrismaClient } = require('../src/generated/client')
+const { PrismaClient } = require('../src/@prisma/client')
 
 const prisma = new PrismaClient()
 

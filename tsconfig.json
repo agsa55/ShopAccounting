@@ -36,7 +36,9 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules"
+   "exclude": [
+    "node_modules",
+    "src/generated",
+    "scripts/shopaccounting-v9.2.2-demo-recovery-sql"
   ]
 }
