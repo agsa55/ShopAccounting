@@ -30,7 +30,7 @@
 //   const invoices = await client.invoice.findMany({ where: { tenantId } })
 // ============================================================================
 
-import { PrismaClient } from '@/generated/client'
+import { PrismaClient } from '@prisma/client'
 
 // ─── Singleton PrismaClient ─────────────────────────────────
 
