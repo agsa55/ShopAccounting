@@ -21,9 +21,12 @@ const nextConfig: NextConfig = {
 serverExternalPackages: ["bcryptjs", "bcrypt"],
   
   // ★ Prisma Client
-  outputFileTracingIncludes: {
-    "/api/**": ["./src/generated/client/**/*"],
-  },
+outputFileTracingIncludes: {
+  "/api/**": [
+    "./node_modules/.prisma/client/**/*",
+    "./node_modules/@prisma/client/**/*"
+  ],
+},
   
   // ★ فشرده‌سازی (فقط production)
   compress: !isDev,
