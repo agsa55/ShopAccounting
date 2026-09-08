@@ -938,6 +938,35 @@ exports.Prisma.FixedAssetScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.CashShiftScalarFieldEnum = {
+  id: 'id',
+  tenantId: 'tenantId',
+  cashierId: 'cashierId',
+  openedAt: 'openedAt',
+  closedAt: 'closedAt',
+  openingAmount: 'openingAmount',
+  expectedClosing: 'expectedClosing',
+  actualClosing: 'actualClosing',
+  difference: 'difference',
+  status: 'status',
+  autoMode: 'autoMode',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.CashMovementScalarFieldEnum = {
+  id: 'id',
+  shiftId: 'shiftId',
+  tenantId: 'tenantId',
+  type: 'type',
+  amount: 'amount',
+  reason: 'reason',
+  reference: 'reference',
+  createdBy: 'createdBy',
+  createdAt: 'createdAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -1003,7 +1032,9 @@ exports.Prisma.ModelName = {
   TicketMessage: 'TicketMessage',
   InitialBalance: 'InitialBalance',
   AdminUser: 'AdminUser',
-  FixedAsset: 'FixedAsset'
+  FixedAsset: 'FixedAsset',
+  CashShift: 'CashShift',
+  CashMovement: 'CashMovement'
 };
 
 /**

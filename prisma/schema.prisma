@@ -115,6 +115,8 @@ model Tenant {
   // ★★★ v8.8: راه‌اندازی اولیه فروشگاه
   InitialBalances InitialBalance[]
   FixedAssets     FixedAsset[]
+   cashShifts      CashShift[]
+  cashMovements   CashMovement[]
 
   @@index([createdAt])
   @@index([planName])
@@ -1633,6 +1635,7 @@ model CashMovement {
   createdBy   String?   @db.VarChar(450)
   createdAt   DateTime  @default(now())
   
+    Tenant      Tenant    @relation(fields: [tenantId], references: [id])
   CashShift   CashShift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   
   @@index([tenantId])

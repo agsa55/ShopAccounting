@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
   },
   
   // ★ بسته‌های external
-  serverExternalPackages: ["mssql", "tedious", "bcryptjs", "bcrypt"],
+serverExternalPackages: ["bcryptjs", "bcrypt"],
   
   // ★ Prisma Client
   outputFileTracingIncludes: {
