@@ -365,6 +365,10 @@ model Product {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+   // ★★★ v11.0: قیمت خرید پایه (از مودال کالا)
+  // این قیمت زمانی استفاده می‌شود که هنوز فاکتور خریدی ثبت نشده
+  basePurchasePrice Decimal @default(0) @db.Decimal(18, 2)
+
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   category Category? @relation(fields: [categoryId], references: [id])
   unit     Unit?     @relation(fields: [unitId], references: [id])
@@ -1479,6 +1483,9 @@ model InitialBalance {
   // equity: سرمایه مالک
   type String @db.VarChar(30)
 
+ // ★★★ v11.0: ارتباط با سال مالی برای محدود کردن sync خودکار
+  fiscalYearId String? @db.VarChar(450)
+  
   // ★ عنوان (مثلاً: "صندوق فروشگاه"، "یخچال"، "وام بانک ملی")
   title String @db.VarChar(200)
 

@@ -1,9 +1,9 @@
 'use client'
 
 // ============================================================================
-// src/components/auth/register-form.tsx (v10.2 — Compact + Free Trial)
-// ★ فرم جمع‌وجور، بدون عنوان‌های اضافی
-// ★ ارسال startFreeTrial: true به سرور
+// src/components/auth/register-form.tsx (v10.8 — Subdomain Removed)
+// ★ حذف فیلد زیردامنه (تولید خودکار از username)
+// ★ ساده‌سازی UX برای دامنه تک‌نسخه‌ای (rahgooshasf.ir)
 // ============================================================================
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp'
 import {
-  ShoppingCart, ArrowLeft, Loader2, CheckCircle2, Store, Globe,
+  ShoppingCart, ArrowLeft, Loader2, CheckCircle2, Store,
   Phone, User, Lock, Check, AlertCircle, RefreshCw,
   Zap, Crown, Building2, Sparkles,
 } from 'lucide-react'
@@ -70,6 +70,18 @@ const PLAN_UI: Record<string, {
   },
 }
 
+// ★ v10.8: تبدیل username به subdomain یکتا
+const usernameToSubdomain = (username: string): string => {
+  if (!username) return ''
+  // فقط حروف انگلیسی کوچک، اعداد و -
+  return username
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 30) || 'shop'
+}
+
 export default function RegisterForm() {
   const { selectedPlanId, setSelectedPlanId } = useAppStore()
   const router = useRouter()
@@ -94,12 +106,9 @@ export default function RegisterForm() {
   const effectiveTierName = planInfo.tierName || 'simple'
 
   const [storeName, setStoreName] = useState('')
-  const [subdomain, setSubdomain] = useState('')
   const [username, setUsername] = useState('')
   const [mobile, setMobile] = useState('')
   const [password, setPassword] = useState('')
-  const [subdomainAvailable, setSubdomainAvailable] = useState<boolean | null>(null)
-  const [subdomainChecking, setSubdomainChecking] = useState(false)
 
   const [otpCode, setOtpCode] = useState('')
   const [otpSending, setOtpSending] = useState(false)
@@ -110,7 +119,7 @@ export default function RegisterForm() {
 
   const [activating, setActivating] = useState(false)
 
-    // ★ v10.4: State های بررسی تکراری بودن
+  // ★ v10.4: State های بررسی تکراری بودن (بدون subdomain)
   const [storeNameAvailable, setStoreNameAvailable] = useState<boolean | null>(null)
   const [storeNameChecking, setStoreNameChecking] = useState(false)
   const [storeNameReason, setStoreNameReason] = useState('')
@@ -119,45 +128,8 @@ export default function RegisterForm() {
   const [usernameChecking, setUsernameChecking] = useState(false)
   const [usernameReason, setUsernameReason] = useState('')
 
-  const [subdomainReason, setSubdomainReason] = useState('')
-
   const storeNameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const usernameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const subdomainCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-    // ★ v10.4: بررسی زیردامنه (بهبودیافته)
-  const checkSubdomain = useCallback(async (value: string) => {
-    if (!value || value.length < 3) {
-      setSubdomainAvailable(null)
-      setSubdomainChecking(false)
-      setSubdomainReason('')
-      return
-    }
-    setSubdomainChecking(true)
-    setSubdomainAvailable(null)
-    try {
-  const res = await fetch(`/api/tenants/check-availability?subdomain=${encodeURIComponent(value)}`, {
-  method: 'GET',
-  headers: { 'Content-Type': 'application/json' },
-  cache: 'no-store',
-})
-      if (res.ok) {
-        const data = await res.json()
-        const info = data.data?.subdomain
-        setSubdomainAvailable(info?.available ?? false)
-        setSubdomainReason(info?.reason || '')
-      } else {
-        setSubdomainAvailable(false)
-        setSubdomainReason('خطا در بررسی')
-      }
-    } catch {
-      setSubdomainAvailable(false)
-      setSubdomainReason('خطا در ارتباط با سرور')
-    } finally {
-      setSubdomainChecking(false)
-    }
-  }, [])
 
   // ★ v10.4: بررسی نام فروشگاه
   const checkStoreName = useCallback(async (value: string) => {
@@ -217,13 +189,7 @@ export default function RegisterForm() {
     }
   }, [])
 
-  const handleSubdomainChange = useCallback((value: string) => {
-    setSubdomain(value)
-    if (subdomainCheckRef.current) clearTimeout(subdomainCheckRef.current)
-    subdomainCheckRef.current = setTimeout(() => checkSubdomain(value), 500)
-  }, [checkSubdomain])
-
-    // ★ v10.4: handler های جدید با debounce
+  // ★ v10.4: handler های جدید با debounce
   const handleStoreNameChange = useCallback((value: string) => {
     setStoreName(value)
     if (storeNameCheckRef.current) clearTimeout(storeNameCheckRef.current)
@@ -302,21 +268,24 @@ export default function RegisterForm() {
       setOtpVerifying(false)
       setActivating(true)
 
+      // ★ v10.8: تولید خودکار subdomain از username
+      const autoSubdomain = usernameToSubdomain(username)
+
       // ★ ثبت‌نام با startFreeTrial: true
       const regRes = await fetch('/api/tenants/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyName: storeName,
-          subDomain: subdomain,
+          subDomain: autoSubdomain,  // ★ v10.8: تولید خودکار
           ownerName: storeName,
           ownerMobile: mobile,
           username,
           password,
           planTierName: effectiveTierName,
-          billingCycle: 'annual',    // ★ annual (نه trial)
+          billingCycle: 'annual',
           planName: planName,
-          startFreeTrial: true,      // ★ علامت شروع دوره ۹۰ روزه رایگان
+          startFreeTrial: true,
           mobileVerified: true,
         }),
       })
@@ -343,12 +312,10 @@ export default function RegisterForm() {
 
       // ═══════════════════════════════════════════════════════════════
       // ★ v10.7: پاک‌سازی کامل قبل از تنظیم token جدید
-      // جلوگیری از نشت داده‌های tenant قبلی (مشکل بحرانی)
       // ═══════════════════════════════════════════════════════════════
       if (typeof window !== 'undefined') {
         console.log('[Register] 🧹 Starting complete cache cleanup...')
         
-        // ۱. پاک کردن کلیدهای مشخص
         const keysToRemove = [
           'token', 'refreshToken', 'user', 'tenant',
           'storeName', 'planName', 'shop-accounting-store',
@@ -359,7 +326,6 @@ export default function RegisterForm() {
           try { localStorage.removeItem(key) } catch (e) {}
         })
 
-        // ۲. پاک کردن همه key های wizard و subscription و force
         Object.keys(localStorage).forEach(key => {
           if (key.includes('wizard') || key.includes('force_') || 
               key.includes('renewal_') || key.includes('basic_renewal')) {
@@ -367,10 +333,8 @@ export default function RegisterForm() {
           }
         })
 
-        // ۳. پاک کردن sessionStorage
         try { sessionStorage.clear() } catch (e) {}
 
-        // ۴. پاک کردن cookie های tenant
         document.cookie.split(';').forEach(c => {
           const name = c.split('=')[0].trim()
           if (['tenant-slug', 'tenant-view', 'auth-token'].includes(name)) {
@@ -382,7 +346,6 @@ export default function RegisterForm() {
 
         console.log('[Register] ✅ Cache cleaned successfully')
 
-        // ۵. تنظیم tenant-slug جدید در cookie
         if (tenant?.subDomain) {
           const isLocalhost = window.location.hostname === 'localhost' ||
                              window.location.hostname === '127.0.0.1'
@@ -397,35 +360,28 @@ export default function RegisterForm() {
           }
         }
 
-        // ۶. حالا token های جدید را تنظیم کن
         setAccessToken(accessToken || regData.data.token)
         if (refreshToken) setRefreshToken(refreshToken)
         if (user) setStoredUser(user)
 
-        // ۷. ذخیره tenant جدید در localStorage
         if (tenant) {
           localStorage.setItem('tenant', JSON.stringify(tenant))
           localStorage.setItem('storeName', tenant.companyName || '')
           localStorage.setItem('planName', tenant.planName || '')
         }
 
-        // ۸. علامت‌گذاری wizard برای اولین ورود
         if (tenant?.id) {
           const forceWizardKey = `force_wizard_${tenant.id}`
           localStorage.setItem(forceWizardKey, 'true')
           console.log('[Register] 🎯 Wizard force flag set for tenant:', tenant.id)
         }
 
-        // ۹. بررسی نهایی — تأیید تطابق
         const finalToken = localStorage.getItem('token')
         if (finalToken && tenant?.id) {
           try {
             const payload = JSON.parse(atob(finalToken.split('.')[1]))
             if (payload.tenantId !== tenant.id) {
               console.error('[Register] ❌ CRITICAL: Token mismatch after registration!')
-              console.error('[Register] Expected:', tenant.id)
-              console.error('[Register] Got:', payload.tenantId)
-              // پاک‌سازی فوری و redirect به login
               localStorage.clear()
               sessionStorage.clear()
               window.location.href = '/auth/login?error=registration_mismatch'
@@ -439,8 +395,8 @@ export default function RegisterForm() {
         }
       }
 
-      // ★ Redirect به صفحه موفقیت
-      router.push(`/success?subdomain=${subdomain}&plan=${planName}&tenantId=${tenant?.id || ''}`)
+      // ★ Redirect به صفحه موفقیت (بدون پارامتر subdomain)
+      router.push(`/success?plan=${planName}&tenantId=${tenant?.id || ''}`)
     } catch (err) {
       console.error('[Register] Error:', err)
       setError('خطا در ارتباط با سرور')
@@ -454,15 +410,8 @@ export default function RegisterForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
   
-  // ★ v10.5: انصراف → هدایت به لاندینگ با reload کامل
-  // window.location.replace به جای router.replace استفاده می‌شود چون:
-  // 1. صفحه را کامل reload می‌کند (جلوگیری از صفحه سفید)
-  // 2. همه state های React پاک می‌شوند
-  // 3. تاریخچه مرورگر آلوده نمی‌شود (Back به فرم برنمی‌گردد)
   const handleCancel = () => {
-    // پاک کردن پلن انتخابی از store
     setSelectedPlanId(null)
-    // هدایت به لاندینگ پیج با reload کامل
     window.location.replace('/')
   }
 
@@ -472,9 +421,6 @@ export default function RegisterForm() {
         storeName.trim().length >= 2 &&
         storeNameAvailable === true &&
         !storeNameChecking &&
-        subdomain.trim().length >= 3 &&
-        subdomainAvailable === true && 
-        !subdomainChecking &&
         username.trim().length >= 3 &&
         usernameAvailable === true &&
         !usernameChecking &&
@@ -486,7 +432,6 @@ export default function RegisterForm() {
   }, [
     currentStep, 
     storeName, storeNameAvailable, storeNameChecking,
-    subdomain, subdomainAvailable, subdomainChecking, 
     username, usernameAvailable, usernameChecking,
     mobile, password
   ])
@@ -504,7 +449,7 @@ export default function RegisterForm() {
       <div className="w-full max-w-md">
         
         {/* ═══════════════════════════════════════════════════════════
-            ★ v10.3: Plan Selection Badge — نمایش پلن انتخابی
+            ★ v10.3: Plan Selection Badge
             ═══════════════════════════════════════════════════════════ */}
         {(() => {
           const ui = PLAN_UI[planName] || PLAN_UI.simple
@@ -512,12 +457,10 @@ export default function RegisterForm() {
           return (
             <div className={`mb-4 rounded-2xl border-2 ${ui.borderColor} ${ui.bgColor} p-4 shadow-sm`}>
               <div className="flex items-center gap-3">
-                {/* آیکون پلن با gradient */}
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${ui.gradient} flex items-center justify-center shadow-md shrink-0`}>
                   <PlanIcon className="w-6 h-6 text-white" />
                 </div>
                 
-                {/* اطلاعات پلن */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <Sparkles className={`w-3.5 h-3.5 ${ui.textColor}`} />
@@ -534,7 +477,6 @@ export default function RegisterForm() {
                 </div>
               </div>
               
-              {/* مزایای کلیدی */}
               <div className="mt-3 pt-3 border-t border-gray-200/60 grid grid-cols-3 gap-2">
                 <div className="flex items-center gap-1.5">
                   <CheckCircle2 className={`w-3.5 h-3.5 ${ui.textColor} shrink-0`} />
@@ -584,7 +526,6 @@ export default function RegisterForm() {
         <Card className="border-gray-200 shadow-lg">
           <CardContent className="pt-4 pb-4">
             {/* ═══ Step 1 ═══ */}
-                    {/* ═══ Step 1 ═══ */}
             {currentStep === 1 && (
               <div className="space-y-3">
                 {/* ── نام فروشگاه ── */}
@@ -624,89 +565,46 @@ export default function RegisterForm() {
                   )}
                 </div>
 
-                {/* ── زیردامنه ── */}
-                <div className="space-y-1">
-                  <Label htmlFor="subdomain" className="text-xs font-medium flex items-center gap-1">
-                    <Globe className="w-3 h-3" />
-                    زیردامنه
-                  </Label>
-                  <div className="flex items-center gap-0">
-                    <div className="relative flex-1">
-                      <Input
-                        id="subdomain"
-                        placeholder="myshop"
-                        value={subdomain}
-                        onChange={(e) => handleSubdomainChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                        className={`text-left rounded-l-none h-9 text-sm pl-9 ${
-                          subdomainAvailable === true ? 'border-emerald-400' :
-                          subdomainAvailable === false ? 'border-red-400' : ''
-                        }`}
-                        dir="ltr"
-                      />
-                      {subdomainChecking && (
-                        <Loader2 className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
-                      )}
-                      {subdomainAvailable === true && !subdomainChecking && (
-                        <Check className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
-                      )}
-                      {subdomainAvailable === false && !subdomainChecking && (
-                        <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
-                      )}
-                    </div>
-                    <div className="h-9 px-2 bg-gray-100 border border-r-0 border-input rounded-l-md flex items-center text-xs text-gray-500 whitespace-nowrap">
-                      .shopaccounting.ir
-                    </div>
-                  </div>
-                  {subdomainReason && (
-                    <p className={`text-[10px] flex items-center gap-1 ${
-                      subdomainAvailable ? 'text-emerald-600' : 'text-red-500'
-                    }`}>
-                      {subdomainAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-                      {subdomainReason}
-                    </p>
+              {/* ── نام کاربری ── */}
+              <div className="space-y-1">
+                <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  نام کاربری
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="username"
+                    placeholder="مثال: admin_shop"
+                    value={username}
+                    onChange={(e) => handleUsernameChange(e.target.value)}
+                    className={`h-9 text-sm pr-9 ${
+                      usernameAvailable === true ? 'border-emerald-400' :
+                      usernameAvailable === false ? 'border-red-400' : ''
+                    }`}
+                    dir="ltr"
+                  />
+                  {usernameChecking && (
+                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                  )}
+                  {usernameAvailable === true && !usernameChecking && (
+                    <Check className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                  )}
+                  {usernameAvailable === false && !usernameChecking && (
+                    <AlertCircle className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
                   )}
                 </div>
-
-              {/* ── نام کاربری ── */}
-<div className="space-y-1">
-  <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
-    <User className="w-3 h-3" />
-    نام کاربری
-  </Label>
-  <div className="relative">
-    <Input
-      id="username"
-      placeholder="مثال: admin_shop"
-      value={username}
-      onChange={(e) => handleUsernameChange(e.target.value)}
-      className={`h-9 text-sm pr-9 ${
-        usernameAvailable === true ? 'border-emerald-400' :
-        usernameAvailable === false ? 'border-red-400' : ''
-      }`}
-      dir="ltr"
-    />
-    {usernameChecking && (
-      <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
-    )}
-    {usernameAvailable === true && !usernameChecking && (
-      <Check className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
-    )}
-    {usernameAvailable === false && !usernameChecking && (
-      <AlertCircle className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
-    )}
-  </div>
-  {usernameReason && (
-    <p className={`text-[10px] flex items-center gap-1 ${
-      usernameAvailable ? 'text-emerald-600' : 'text-red-500'
-    }`}>
-      {usernameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-      {usernameReason}
-    </p>
-  )}
-  <p className="text-[9px] text-gray-400">
-    فقط حروف انگلیسی کوچک، اعداد و _ (حداقل ۳ کاراکتر)
-  </p>
-</div>
+                {usernameReason && (
+                  <p className={`text-[10px] flex items-center gap-1 ${
+                    usernameAvailable ? 'text-emerald-600' : 'text-red-500'
+                  }`}>
+                    {usernameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                    {usernameReason}
+                  </p>
+                )}
+                <p className="text-[9px] text-gray-400">
+                  فقط حروف انگلیسی کوچک، اعداد و _ (حداقل ۳ کاراکتر) — برای ورود به سیستم استفاده می‌شود
+                </p>
+              </div>
 
                 {/* ── شماره موبایل ── */}
                 <div className="space-y-1">
@@ -752,7 +650,6 @@ export default function RegisterForm() {
                     <p className="text-[9px] text-gray-500 leading-relaxed">
                       <span className="font-bold">حداقل ۴ کاراکتر</span> — برای امنیت بیشتر، حداقل ۸ کاراکتر شامل حروف و اعداد پیشنهاد می‌شود.
                     </p>
-                    {/* نشانگر قدرت رمز */}
                     {password.length > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
@@ -918,14 +815,10 @@ export default function RegisterForm() {
         </p>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          ★ Loading Overlay — نمایش در حال ساخت حساب
-          ═══════════════════════════════════════════════════════════ */}
+      {/* ═══ Loading Overlay ═══ */}
       {(activating || otpVerifying) && (
         <div className="fixed inset-0 z-50 bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center" dir="rtl">
           <div className="text-center space-y-5 max-w-md px-6 w-full">
-            
-            {/* آیکون انیمیشن‌دار */}
             <div className="relative inline-block">
               <div className="absolute inset-0 bg-emerald-400 rounded-full blur-2xl opacity-30 animate-pulse" />
               <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-2xl">
@@ -933,7 +826,6 @@ export default function RegisterForm() {
               </div>
             </div>
 
-            {/* عنوان و توضیح */}
             <div>
               <h2 className="text-xl font-black text-gray-900 mb-2">
                 {otpVerifying && !activating ? 'در حال تأیید کد...' : 'در حال ساخت فروشگاه شما...'}
@@ -946,7 +838,6 @@ export default function RegisterForm() {
               </p>
             </div>
 
-            {/* Progress Steps */}
             <div className="bg-white rounded-2xl shadow-lg p-4 space-y-2.5 text-right border border-emerald-100">
               <div className="flex items-center gap-2 text-emerald-600">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -964,7 +855,6 @@ export default function RegisterForm() {
               </div>
             </div>
 
-            {/* پیام اطمینان‌بخش */}
             <p className="text-[11px] text-gray-400">
               لطفاً صفحه را نبندید. این فرآیند چند لحظه طول می‌کشد.
             </p>

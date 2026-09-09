@@ -484,6 +484,7 @@ interface AddForm {
   salePrice: string
   taxRate: string
   minStock: string
+    initialStock: string
   isActive: boolean
 }
 
@@ -498,6 +499,7 @@ const INITIAL_ADD_FORM: AddForm = {
   salePrice: '0',
   taxRate: '0',
   minStock: '5',
+   initialStock: '0', 
   isActive: true,
 }
 
@@ -548,6 +550,8 @@ export default function ProductsPage() {
     salePrice: '0',
     taxRate: '0',
     minStock: '5',
+      initialStock: '0',  // ★ v11.0: موجودی اولیه برای ویرایش
+    currentStock: 0,     // ★ v11.0: موجودی فعلی (فقط نمایش)
     isActive: true,
   })
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null)
@@ -1016,7 +1020,7 @@ const [savingPrice, setSavingPrice] = useState(false)
       setSubmitting(true)
       try {
         const { addToSyncQueue } = await import('@/lib/offline-db')
-        const body = {
+             const body = {
           ...addForm,
           tenantId,
           purchasePrice: parsePersianNumber(addForm.purchasePrice),
@@ -1024,6 +1028,7 @@ const [savingPrice, setSavingPrice] = useState(false)
           taxRate: parsePersianNumber(addForm.taxRate),
           currentStock: 0,
           minStock: parsePersianNumber(addForm.minStock),
+          initialStock: parsePersianNumber(addForm.initialStock),  // ★ v11.0
           categoryId: addForm.categoryId === 'none' ? null : addForm.categoryId,
           unitId: addForm.unitId === 'none' ? null : addForm.unitId,
           generateBarcode: addForm.generateBarcode && !addForm.barcode,
@@ -1080,7 +1085,7 @@ const [savingPrice, setSavingPrice] = useState(false)
 
     setSubmitting(true)
     try {
-      const body = {
+          const body = {
         ...addForm,
         tenantId,
         purchasePrice: parsePersianNumber(addForm.purchasePrice),
@@ -1088,6 +1093,7 @@ const [savingPrice, setSavingPrice] = useState(false)
         taxRate: parsePersianNumber(addForm.taxRate),
         currentStock: 0,
         minStock: parsePersianNumber(addForm.minStock),
+        initialStock: parsePersianNumber(addForm.initialStock),  // ★ v11.0
         categoryId: addForm.categoryId === 'none' ? null : addForm.categoryId,
         unitId: addForm.unitId === 'none' ? null : addForm.unitId,
         generateBarcode: addForm.generateBarcode && !addForm.barcode,
@@ -1188,6 +1194,7 @@ const [savingPrice, setSavingPrice] = useState(false)
           salePrice: parsePersianNumber(editForm.salePrice),
           taxRate: parsePersianNumber(editForm.taxRate),
           minStock: parsePersianNumber(editForm.minStock),
+            initialStock: parsePersianNumber(editForm.initialStock),  
           isActive: editForm.isActive,
         }
         await addToSyncQueue('product', { method: 'PUT', url: '/api/products', body })
@@ -1242,6 +1249,7 @@ const [savingPrice, setSavingPrice] = useState(false)
         salePrice: parsePersianNumber(editForm.salePrice),
         taxRate: parsePersianNumber(editForm.taxRate),
         minStock: parsePersianNumber(editForm.minStock),
+          initialStock: parsePersianNumber(editForm.initialStock),  
         isActive: editForm.isActive,
       }
       const res = await fetch('/api/products', {
@@ -1383,7 +1391,7 @@ const handleSavePrice = async (productId: string, newPrice: number) => {
   setEditingPrice('')
 }
 
-  const openEditDialog = (product: Product) => {
+   const openEditDialog = (product: Product) => {
     const unitLabel = product.unit ? getUnitLabel(product.unit) : product.unitLabel || ''
 
     setEditForm({
@@ -1398,13 +1406,14 @@ const handleSavePrice = async (productId: string, newPrice: number) => {
       salePrice: String(product.salePrice),
       taxRate: String(product.taxRate),
       minStock: String(product.minStock),
+      initialStock: '0',  // ★ v11.0
+      currentStock: Number(product.currentStock) || 0,  // ★ v11.0
       isActive: product.isActive,
     })
     setEditBarcodeError('')
     setEditBarcodeIsDuplicate(false)
     setEditDialogOpen(true)
   }
-
   // ══════════════════════════
   // Computed Values
   // ══════════════════════════
@@ -2202,7 +2211,7 @@ const totalInventoryProfit = useMemo(() => {
               />
             </div>
 
-            <div>
+                     <div>
               <Label className="text-xs">حداقل موجودی هشدار</Label>
               <Input
                 type="text"
@@ -2216,6 +2225,78 @@ const totalInventoryProfit = useMemo(() => {
                 placeholder="۵"
               />
             </div>
+
+            {/* ══════════════════════════════════════════════════════════ */}
+            {/* ★ v11.0: فیلد موجودی اولیه - برای فروشگاه‌دارانی که       */}
+            {/* قبلاً کالا در مغازه دارند و نمی‌خواهند فاکتور خرید بزنند  */}
+            {/* ══════════════════════════════════════════════════════════ */}
+         {/* ══════════════════════════════════════════════════════════ */}
+{/* ★ v11.0: فیلد موجودی اولیه - فقط اگر سند افتتاحیه صادر نشده */}
+{/* ══════════════════════════════════════════════════════════ */}
+{(() => {
+  // چک کردن وضعیت سند افتتاحیه
+  // اگر سند افتتاحیه posted است، این فیلد را نشان نده
+  // چون بعد از سند افتتاحیه، باید از فاکتور خرید استفاده شود
+  return (
+    <div className="col-span-1 sm:col-span-2 p-3 bg-amber-50/50 border border-amber-200 rounded-lg">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Package className="w-3.5 h-3.5 text-amber-600" />
+        <Label className="text-xs font-bold text-amber-800">
+          موجودی اولیه در فروشگاه
+        </Label>
+        <Badge className="text-[9px] bg-amber-100 text-amber-700">اختیاری</Badge>
+      </div>
+      
+    <div className="p-2 mb-2 bg-blue-50 border border-blue-200 rounded text-[10px] text-blue-800">
+  <p className="font-medium mb-1">💡 چه زمانی استفاده کنم؟</p>
+  <ul className="list-disc list-inside space-y-0.5 text-[9px] leading-relaxed">
+    <li>برای کالاهایی که <b>از قبل در مغازه</b> دارید</li>
+    <li>هنگام <b>راه‌اندازی اولیه</b> فروشگاه</li>
+    <li>قبل از زدن دکمه "ثبت نهایی" در تنظیمات ← راه‌اندازی</li>
+  </ul>
+  <p className="mt-1 text-[9px] text-blue-600 font-medium">
+    ⚠️ بعد از ثبت نهایی سند افتتاحیه، برای کالاهای جدید از <b>فاکتور خرید</b> استفاده کنید.
+  </p>
+</div>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div>
+          <Label className="text-[10px] text-gray-600">تعداد موجود</Label>
+          <Input
+            type="text"
+            inputMode="numeric"
+            value={formatToPersianWithCommas(addForm.initialStock)}
+            onChange={(e) =>
+              setAddForm({ ...addForm, initialStock: formatToPersianWithCommas(e.target.value) })
+            }
+            placeholder="۰"
+            className="mt-0.5"
+            dir="ltr"
+          />
+        </div>
+        <div className="flex items-end">
+          <div className="text-[10px] text-amber-700 bg-amber-100 p-2 rounded border border-amber-200 w-full">
+            <p className="font-medium mb-0.5">💡 نکته</p>
+            <p className="text-[9px] leading-relaxed">
+              اگر الان این کالا را در مغازه دارید و هنوز سند افتتاحیه صادر نکرده‌اید، تعداد را وارد کنید.
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {parsePersianNumber(addForm.initialStock) > 0 && parsePersianNumber(addForm.purchasePrice) > 0 && (
+        <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-[10px] text-emerald-800">
+          <div className="flex justify-between">
+            <span>ارزش موجودی اولیه:</span>
+            <span className="font-bold font-mono">
+              {formatPrice(parsePersianNumber(addForm.initialStock) * parsePersianNumber(addForm.purchasePrice))}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})()}
 
             <div className="flex items-center justify-between col-span-1 sm:col-span-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
               <div className="flex flex-col">
@@ -2424,7 +2505,7 @@ const totalInventoryProfit = useMemo(() => {
               />
             </div>
 
-            <div>
+                    <div>
               <Label className="text-xs">حداقل موجودی هشدار</Label>
               <Input
                 type="text"
@@ -2436,6 +2517,60 @@ const totalInventoryProfit = useMemo(() => {
                 className="mt-1"
                 dir="ltr"
               />
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════ */}
+            {/* ★ v11.0: نمایش موجودی فعلی + امکان تنظیم موجودی اولیه    */}
+            {/* ══════════════════════════════════════════════════════════ */}
+            <div className="col-span-1 sm:col-span-2 p-3 bg-blue-50/50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-blue-600" />
+                  <Label className="text-xs font-bold text-blue-800">موجودی کالا</Label>
+                </div>
+                <Badge className="text-[9px] bg-blue-100 text-blue-700">
+                  فعلی: {toFaNum(editForm.currentStock)} عدد
+                </Badge>
+              </div>
+              
+              {editForm.currentStock === 0 ? (
+                <div>
+                  <Label className="text-[10px] text-gray-600">
+                    تنظیم موجودی اولیه (اگر قبلاً فاکتور خرید نزده‌اید)
+                  </Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={formatToPersianWithCommas(editForm.initialStock)}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, initialStock: formatToPersianWithCommas(e.target.value) })
+                    }
+                    placeholder="۰"
+                    className="mt-0.5"
+                    dir="ltr"
+                  />
+                  <p className="text-[9px] text-blue-600 mt-1">
+                    💡 اگر کالا الان در مغازه هست ولی فاکتور خرید ثبت نکرده‌اید، تعداد را وارد کنید.
+                  </p>
+                  
+                  {parsePersianNumber(editForm.initialStock) > 0 && parsePersianNumber(editForm.purchasePrice) > 0 && (
+                    <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-[10px] text-emerald-800">
+                      <div className="flex justify-between">
+                        <span>ارزش موجودی:</span>
+                        <span className="font-bold font-mono">
+                          {formatPrice(parsePersianNumber(editForm.initialStock) * parsePersianNumber(editForm.purchasePrice))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[10px] text-blue-700 bg-blue-100 p-2 rounded border border-blue-200">
+                  ✓ موجودی از طریق فاکتورهای خرید/فروش مدیریت می‌شود.
+                  <br />
+                  برای تغییر دستی موجودی، از بخش "انبارگردانی" استفاده کنید.
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between col-span-1 sm:col-span-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">

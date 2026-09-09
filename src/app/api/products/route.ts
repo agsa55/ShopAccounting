@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-
+import { syncOpeningBalanceWithInventory } from '@/lib/sync-opening-balance'
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/products — صفحه‌بندی + جستجو
 // ═══════════════════════════════════════════════════════════════
@@ -176,9 +176,11 @@ export const POST = withTenantAndPermission('products')(
         } while (barcodeAttempts < 10)
       }
 
-      const initialStock = 0
+       // ★ v11.0: دریافت initialStock از body
+      const requestedInitialStock = parseFloat(body.initialStock) || 0
       const purchasePrice = parseFloat(body.purchasePrice) || 0
 
+      // ★ v11.0: محصول را با basePurchasePrice بساز
       const product = await tenantDb.product.create({
         data: {
           tenantId,
@@ -194,11 +196,106 @@ export const POST = withTenantAndPermission('products')(
           purchasePrice,
           salePrice: parseFloat(body.salePrice) || 0,
           taxRate: parseFloat(body.taxRate) || 0,
-          currentStock: initialStock,
+          currentStock: 0,  // ★ موقتاً صفر، بعداً آپدیت می‌شود
           minStock: parseFloat(body.minStock) || 0,
           isActive: body.isActive !== false,
+          basePurchasePrice: purchasePrice,  // ★ v11.0: قیمت خرید پایه
         },
       })
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v11.0: ثبت موجودی اولیه (اگر initialStock > 0)
+      // ═══════════════════════════════════════════════════════════════
+      if (requestedInitialStock > 0 && purchasePrice > 0) {
+        try {
+          console.log('[Products POST] 📦 Processing initial stock:', {
+            productId: product.id,
+            initialStock: requestedInitialStock,
+            purchasePrice,
+          })
+
+          // ۱. پیدا کردن انبار پیش‌فرض
+          let defaultWarehouse = await db.client.warehouse.findFirst({
+            where: { tenantId, isDefault: true, isActive: true },
+          })
+
+          if (!defaultWarehouse) {
+            // اگر انبار پیش‌فرض نبود، اولین انبار فعال را بگیر
+            defaultWarehouse = await db.client.warehouse.findFirst({
+              where: { tenantId, isActive: true },
+              orderBy: { createdAt: 'asc' },
+            })
+          }
+
+          if (defaultWarehouse) {
+            // ۲. ایجاد یا آپدیت StockLevel
+            await db.client.stockLevel.upsert({
+              where: {
+                warehouseId_productId: {
+                  warehouseId: defaultWarehouse.id,
+                  productId: product.id,
+                },
+              },
+              update: {
+                quantity: requestedInitialStock,
+                averageCost: purchasePrice,
+              },
+              create: {
+                tenantId,
+                warehouseId: defaultWarehouse.id,
+                productId: product.id,
+                quantity: requestedInitialStock,
+                averageCost: purchasePrice,
+                unitLabel: body.unitLabel || 'عدد',
+              },
+            })
+
+            console.log('[Products POST] ✅ StockLevel created/updated')
+
+            // ۳. ثبت StockMovement از نوع 'initial'
+            await db.client.stockMovement.create({
+              data: {
+                tenantId,
+                productId: product.id,
+                toWarehouseId: defaultWarehouse.id,
+                quantity: requestedInitialStock,
+                unitCost: purchasePrice,
+                unitLabel: body.unitLabel || 'عدد',
+                movementType: 'initial',  // ★ نوع جدید
+                referenceType: 'product',
+                referenceId: product.id,
+                description: `موجودی اولیه هنگام ثبت کالا (${product.name})`,
+              },
+            })
+
+            console.log('[Products POST] ✅ StockMovement (initial) created')
+
+            // ۴. آپدیت currentStock در Product
+            await db.client.product.update({
+              where: { id: product.id },
+              data: { currentStock: requestedInitialStock },
+            })
+
+            // محصول را با currentStock جدید برگردان
+            product.currentStock = requestedInitialStock
+
+            console.log('[Products POST] ✅ Product.currentStock updated to:', requestedInitialStock)
+
+            // ۵. همگام‌سازی سند افتتاحیه (non-blocking)
+            syncOpeningBalanceWithInventory(tenantId, db.client).then((result) => {
+              console.log('[Products POST] 🔄 Opening balance sync result:', result.message)
+            }).catch((err) => {
+              console.warn('[Products POST] ⚠️ Opening balance sync failed (non-blocking):', err?.message)
+            })
+          } else {
+            console.warn('[Products POST] ⚠️ No warehouse found for initial stock')
+          }
+        } catch (stockErr: any) {
+          // خطاهای مربوط به موجودی را non-blocking کنیم
+          console.warn('[Products POST] ⚠️ Initial stock processing failed (non-blocking):', stockErr?.message)
+          console.warn('[Products POST] ⚠️ Product created successfully but without initial stock')
+        }
+      }
 
       return NextResponse.json({ success: true, data: product }, { status: 201 })
     } catch (error: any) {
@@ -258,6 +355,63 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive)
     // ★★★ v6.2: currentStock در ویرایش قابل تغییر نیست (فقط از طریق فاکتور)
     // اگر فرانت‌اند آن را فرستاد، نادیده می‌گیریم
+    // ★ v11.0: پشتیبانی از initialStock در ویرایش (فقط اگر currentStock === 0)
+    if (body.initialStock !== undefined && Number(existing.currentStock) === 0) {
+      const newInitialStock = parseFloat(body.initialStock) || 0
+      if (newInitialStock > 0 && existing.purchasePrice > 0) {
+        // پیدا کردن انبار پیش‌فرض
+        const defaultWarehouse = await db.client.warehouse.findFirst({
+          where: { tenantId, isDefault: true, isActive: true },
+        })
+        
+        if (defaultWarehouse) {
+          await db.client.stockLevel.upsert({
+            where: {
+              warehouseId_productId: {
+                warehouseId: defaultWarehouse.id,
+                productId: body.id,
+              },
+            },
+            update: {
+              quantity: newInitialStock,
+              averageCost: Number(existing.purchasePrice),
+            },
+            create: {
+              tenantId,
+              warehouseId: defaultWarehouse.id,
+              productId: body.id,
+              quantity: newInitialStock,
+              averageCost: Number(existing.purchasePrice),
+            },
+          })
+          
+          await db.client.stockMovement.create({
+            data: {
+              tenantId,
+              productId: body.id,
+              toWarehouseId: defaultWarehouse.id,
+              quantity: newInitialStock,
+              unitCost: Number(existing.purchasePrice),
+              movementType: 'initial',
+              referenceType: 'product',
+              referenceId: body.id,
+              description: 'موجودی اولیه از ویرایش کالا',
+            },
+          })
+          
+          data.currentStock = newInitialStock
+          
+          // sync سند افتتاحیه
+          syncOpeningBalanceWithInventory(tenantId, db.client)
+            .then((result) => {
+              console.log('[Products PUT] 🔄 Opening balance sync result:', result.message)
+            })
+            .catch((err) => {
+              console.warn('[Products PUT] ⚠️ Sync failed:', err?.message)
+            })
+        }
+      }
+    }
 
     const product = await tenantDb.product.update({ where: { id: body.id }, data })
 
@@ -267,6 +421,7 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
     return NextResponse.json({ success: false, error: error?.message || 'خطا در ویرایش محصول' }, { status: 500 })
   }
 })
+
 
 // ═══════════════════════════════════════════════════════════════
 //  DELETE /api/products — حذف محصول (soft delete: isActive = false)
@@ -314,6 +469,15 @@ export const DELETE = withTenantAndPermission('products')(async (req: NextReques
     await tenantDb.stockMovement.deleteMany({ where: { productId: id, tenantId } }).catch(() => {})
 
     await tenantDb.product.delete({ where: { id } })
+
+    // ★ v11.0: همگام‌سازی سند افتتاحیه بعد از حذف محصول
+    syncOpeningBalanceWithInventory(tenantId, db.client)
+      .then((result) => {
+        console.log('[Products DELETE] 🔄 Opening balance sync result:', result.message)
+      })
+      .catch((err) => {
+        console.warn('[Products DELETE] ⚠️ Opening balance sync failed (non-blocking):', err?.message)
+      })
 
     return NextResponse.json({
       success: true,

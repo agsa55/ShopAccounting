@@ -1,8 +1,9 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/store-tab.tsx
+// src/components/settings/store-tab.tsx (v4.0 — Subdomain Section Removed)
 // ShopAccounting — تب تنظیمات فروشگاه
+// ★ حذف بخش آدرس اختصاصی (subdomain) چون دامنه تک‌نسخه‌ای است
 // ============================================================================
 
 import { useState, useEffect } from 'react'
@@ -16,8 +17,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import {
-  Store, Globe, Copy, ExternalLink, Save, Loader2, CheckCircle2,
-  Upload, Printer,
+  Store, Save, Loader2, Upload, Printer,
 } from 'lucide-react'
 
 export function StoreSettingsTab() {
@@ -30,51 +30,11 @@ export function StoreSettingsTab() {
   const [registrationNumber, setRegistrationNumber] = useState('12345')
   const [defaultTaxRate, setDefaultTaxRate] = useState('9')
   const [saving, setSaving] = useState(false)
-  const [copied, setCopied] = useState(false)
   // ★★★ v3.20: تنظیمات چاپ خودکار
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false)
   // ★★★ v3.36.7: اضافه شدن گزینه 58mm برای چاپ خودکار
   const [autoPrintTemplate, setAutoPrintTemplate] = useState<'58mm' | '8cm' | 'a4'>('8cm')
   const [autoPrintPaymentTypes, setAutoPrintPaymentTypes] = useState<string[]>(['cash', 'card', 'credit', 'installment'])
-  // ★★★ v3.17.1: state برای tenant data از API
-  const [tenantData, setTenantData] = useState<any>(null)
-
-  // ★★★ v3.17.1: دریافت subDomain از چند منبع
-  const getSubDomain = (): string => {
-    if (currentTenant?.subDomain) return currentTenant.subDomain
-    if (typeof window !== 'undefined') {
-      const path = window.location.pathname
-      const match = path.match(/^\/([^\/]+)/)
-      if (match && match[1]) {
-        const candidate = match[1]
-        if (!['api', 'login', 'register', '_next', 'favicon.ico'].includes(candidate)) {
-          return candidate
-        }
-      }
-    }
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('tenant')
-      if (stored) {
-        try {
-          const t = JSON.parse(stored)
-          if (t?.subDomain) return t.subDomain
-        } catch {}
-      }
-    }
-    if (tenantData?.subDomain) return tenantData.subDomain
-    return ''
-  }
-
-  const subDomain = getSubDomain()
-  const isLocalDev = typeof window !== 'undefined' && (
-    window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  )
-  const fullDomain = subDomain
-    ? (isLocalDev ? `${window.location.host}/${subDomain}` : `${subDomain}.shopaccounting.ir`)
-    : ''
-  const fullUrl = subDomain
-    ? (isLocalDev ? `${window.location.origin}/${subDomain}` : `https://${subDomain}.shopaccounting.ir`)
-    : ''
 
   useEffect(() => {
     const tid = tenantId || getTenantIdFromStore()
@@ -89,13 +49,6 @@ export function StoreSettingsTab() {
         setAutoPrintPaymentTypes(ps.paymentTypes || ['cash', 'card', 'credit', 'installment'])
       } catch {}
     }
-
-    fetch(`/api/tenants/trial-check`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && data.data) setTenantData(data.data)
-      })
-      .catch(() => {})
 
     fetch(`/api/store-settings?tenantId=${tid}`)
       .then((r) => r.json())
@@ -178,28 +131,6 @@ export function StoreSettingsTab() {
     setSaving(false)
   }
 
-  const handleCopyDomain = () => {
-    if (!fullUrl) return
-    navigator.clipboard.writeText(fullUrl).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {
-      const textArea = document.createElement('textarea')
-      textArea.value = fullUrl
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textArea)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  const handleOpenDomain = () => {
-    if (!fullUrl) return
-    window.open(fullUrl, '_blank')
-  }
-
   return (
     <Card className="border-gray-200">
       <CardHeader className="p-2.5 sm:p-3 pb-1">
@@ -209,36 +140,6 @@ export function StoreSettingsTab() {
         </CardTitle>
       </CardHeader>
       <CardContent className="p-2.5 sm:p-3 pt-2 space-y-2">
-        {subDomain && (
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
-            <Globe className="w-4 h-4 text-emerald-600 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] text-gray-500">آدرس اختصاصی فروشگاه</p>
-              <p className="text-xs font-bold text-emerald-700 truncate" dir="ltr">{fullDomain}</p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 text-gray-500 hover:text-emerald-600 shrink-0"
-              onClick={handleCopyDomain}
-              title="کپی آدرس"
-            >
-              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 text-gray-500 hover:text-emerald-600 shrink-0"
-              onClick={handleOpenDomain}
-              title="باز کردن در تب جدید"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           <div>
             <Label htmlFor="storeName" className="text-[11px] text-gray-600 mb-0.5 block">نام فروشگاه</Label>

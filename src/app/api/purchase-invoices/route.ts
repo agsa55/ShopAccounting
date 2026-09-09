@@ -12,6 +12,7 @@ import {
   ensureDefaultAccounts,
   getStandardAccountIds,
 } from '@/lib/accounts-auto-seed'
+import { syncOpeningBalanceWithInventory } from '@/lib/sync-opening-balance'
 
 // ★ v8.9.3: جلوگیری از کش Next.js (علت اصلی عدم نمایش بعد از رفرش)
 export const dynamic = 'force-dynamic'
@@ -485,6 +486,17 @@ export const POST = withTenantAndPermission('accounting')(
       } catch (jeErr: any) {
         console.warn('[PurchaseInvoice POST] Auto journal failed (non-blocking):', jeErr?.message)
       }
+
+            // ═══════════════════════════════════════════════════════════════
+      // ★ v11.0: همگام‌سازی سند افتتاحیه با موجودی جدید
+      // ═══════════════════════════════════════════════════════════════
+      syncOpeningBalanceWithInventory(tenantId, tenantDb)
+        .then((result) => {
+          console.log('[PurchaseInvoice POST] 🔄 Opening balance sync result:', result.message)
+        })
+        .catch((err) => {
+          console.warn('[PurchaseInvoice POST] ⚠️ Opening balance sync failed (non-blocking):', err?.message)
+        })
 
       let createdCheck: any = null
       if (pt === 'check' && checkData) {

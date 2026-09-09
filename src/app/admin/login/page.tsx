@@ -212,7 +212,7 @@ function LoginFormContent() {
           </h1>
           <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
             <Sparkles className="w-3 h-3 text-amber-500" />
-            ShopAccounting نسخه {toFaNum('8.8.5')}
+           سیستم حسابداری رهگشا نسخه {toFaNum('8.8.5')}
           </p>
 
           {redirectTo && redirectTo !== '/admin/dashboard' && (
@@ -330,7 +330,7 @@ function LoginFormContent() {
         {/* فوتر */}
         <div className="text-center mt-6 space-y-1">
           <p className="text-[11px] text-gray-500">
-            © {toFaNum(new Date().getFullYear())} ShopAccounting — تمامی حقوق محفوظ است
+            © {toFaNum(new Date().getFullYear())} سیسستم حسابداری رهگشا — تمامی حقوق محفوظ است
           </p>
           <p className="text-[10px] text-gray-400 flex items-center justify-center gap-1">
             <CheckCircle2 className="w-3 h-3 text-emerald-500" />

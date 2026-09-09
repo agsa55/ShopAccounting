@@ -435,14 +435,42 @@ export const POST = withTenantAndPermission('accounting')(async (
           console.log('[InitialBalance POST] Added balancing line, new totals:', { totalDebit, totalCredit })
         }
 
-        // تولید شماره سند
+             // ═══════════════════════════════════════════════════════════
+        // ★ v11.0: تولید شماره سند با روش مطمئن‌تر
+        // پیدا کردن بیشترین شماره موجود (نه تعداد)
+        // ═══════════════════════════════════════════════════════════
         let journalNumber = 'JE-000001'
         try {
-          const count = await tenantDb.journalEntry.count({ where: { tenantId } })
-          journalNumber = `JE-${(count + 1).toString().padStart(6, '0')}`
-        } catch {
+          // پیدا کردن آخرین سند با بیشترین شماره
+          const lastEntry = await tenantDb.journalEntry.findFirst({
+            where: { tenantId },
+            orderBy: { number: 'desc' },
+            select: { number: true }
+          })
+          
+          if (lastEntry?.number) {
+            // استخراج عدد از شماره (مثلاً JE-000024 → 24)
+            const match = lastEntry.number.match(/JE-(\d+)/)
+            if (match) {
+              const lastNumber = parseInt(match[1])
+              journalNumber = `JE-${(lastNumber + 1).toString().padStart(6, '0')}`
+              console.log('[InitialBalance POST] 📝 Generated journal number from last entry:', journalNumber)
+            } else {
+              // فرمت شماره ناشناخته است، از timestamp استفاده کن
+              journalNumber = `JE-${Date.now().toString().slice(-6)}`
+            }
+          } else {
+            // هیچ سندی وجود ندارد، از count استفاده کن
+            const count = await tenantDb.journalEntry.count({ where: { tenantId } })
+            journalNumber = `JE-${(count + 1).toString().padStart(6, '0')}`
+          }
+        } catch (err) {
+          console.warn('[InitialBalance POST] Failed to generate journal number:', err)
+          // Fallback: استفاده از timestamp برای تضمین یکتایی
           journalNumber = `JE-${Date.now().toString().slice(-6)}`
         }
+        
+        console.log('[InitialBalance POST] 📝 Final journal number:', journalNumber)
 
            // ═══════════════════════════════════════════════════════
         // ★ v10.9.10: همیشه از تاریخ امروز استفاده کن
