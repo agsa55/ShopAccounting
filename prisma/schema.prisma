@@ -118,6 +118,19 @@ model Tenant {
    cashShifts      CashShift[]
   cashMovements   CashMovement[]
 
+    // ★★★ v11.1: احراز هویت شاهکار
+  // کد ملی مالک (برای جلوگیری از ثبت‌نام تکراری)
+  ownerNationalCode   String?  @db.VarChar(10)
+  
+  // آیا احراز هویت انجام شده؟
+  identityVerified    Boolean  @default(false)
+  
+  // تاریخ احراز هویت
+  identityVerifiedAt  DateTime?
+  
+  // تعداد تلاش‌های ناموفق احراز هویت (برای جلوگیری از حملات بروت‌فورس)
+  identityAttempts    Int      @default(0)
+
   @@index([createdAt])
   @@index([planName])
   @@index([status])
@@ -125,6 +138,8 @@ model Tenant {
   @@map("Tenants")
     @@index([trialEndAt])
   @@index([isPaid])
+   @@index([ownerNationalCode])
+  @@index([ownerMobile])
 }
 
 model OtpCode {
@@ -1648,4 +1663,20 @@ model CashMovement {
   @@index([tenantId])
   @@index([shiftId])
   @@map("CashMovements")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.2: Identity Registry - مرجع اصلی کد ملی‌های ثبت‌شده
+// ═══════════════════════════════════════════════════════════════
+model IdentityRegistry {
+  id               String   @id @db.VarChar(50)
+  nationalCode     String   @unique @db.VarChar(10)
+  mobile           String   @db.VarChar(11)
+  tenantId         String   @db.VarChar(50)
+  registeredAt     DateTime @default(now())
+  shahkarVerified  Boolean  @default(true)
+  
+  @@index([nationalCode])
+  @@index([tenantId])
+  @@map("IdentityRegistry")
 }

@@ -1,7 +1,10 @@
 'use client'
 
 // ============================================================================
-// src/components/auth/register-form.tsx (v10.8 — Subdomain Removed)
+// src/components/auth/register-form.tsx (v11.1 — Shahkar Identity Verification)
+// ★ اضافه شدن فیلد کد ملی
+// ★ اعتبارسنجی هویت قبل از ارسال OTP
+// ★ جلوگیری از ثبت‌نام تکراری با کد ملی یا موبایل
 // ★ حذف فیلد زیردامنه (تولید خودکار از username)
 // ★ ساده‌سازی UX برای دامنه تک‌نسخه‌ای (rahgooshasf.ir)
 // ============================================================================
@@ -18,7 +21,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import {
   ShoppingCart, ArrowLeft, Loader2, CheckCircle2, Store,
   Phone, User, Lock, Check, AlertCircle, RefreshCw,
-  Zap, Crown, Building2, Sparkles,
+  Zap, Crown, Building2, Sparkles, CreditCard, ShieldCheck,
 } from 'lucide-react'
 
 const steps = [
@@ -73,13 +76,43 @@ const PLAN_UI: Record<string, {
 // ★ v10.8: تبدیل username به subdomain یکتا
 const usernameToSubdomain = (username: string): string => {
   if (!username) return ''
-  // فقط حروف انگلیسی کوچک، اعداد و -
   return username
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 30) || 'shop'
+}
+
+// ★ v11.1: اعتبارسنجی فرمت کد ملی ایرانی (الگوریتم)
+const validateNationalCodeFormat = (code: string): { valid: boolean; message: string } => {
+  const cleaned = String(code || '').replace(/[\s-]/g, '')
+  
+  if (!cleaned || cleaned.length !== 10) {
+    return { valid: false, message: 'کد ملی باید ۱۰ رقم باشد' }
+  }
+  
+  if (!/^\d{10}$/.test(cleaned)) {
+    return { valid: false, message: 'کد ملی فقط باید شامل اعداد باشد' }
+  }
+  
+  if (/^(\d)\1{9}$/.test(cleaned)) {
+    return { valid: false, message: 'کد ملی نامعتبر است' }
+  }
+  
+  const check = parseInt(cleaned[9], 10)
+  const sum = cleaned
+    .slice(0, 9)
+    .split('')
+    .reduce((acc, digit, index) => acc + parseInt(digit, 10) * (10 - index), 0) % 11
+  
+  const isValid = sum < 2 ? check === sum : check + sum === 11
+  
+  if (!isValid) {
+    return { valid: false, message: 'کد ملی نامعتبر است' }
+  }
+  
+  return { valid: true, message: 'کد ملی معتبر است' }
 }
 
 export default function RegisterForm() {
@@ -105,11 +138,14 @@ export default function RegisterForm() {
   const planInfo = PLAN_INFO[planName] || PLAN_INFO.simple
   const effectiveTierName = planInfo.tierName || 'simple'
 
+  // ─── State های فرم ───────────────────────────────────────────────────
   const [storeName, setStoreName] = useState('')
   const [username, setUsername] = useState('')
+  const [nationalCode, setNationalCode] = useState('') // ★ v11.1: فیلد جدید
   const [mobile, setMobile] = useState('')
   const [password, setPassword] = useState('')
 
+  // ─── State های OTP ──────────────────────────────────────────────────
   const [otpCode, setOtpCode] = useState('')
   const [otpSending, setOtpSending] = useState(false)
   const [otpVerifying, setOtpVerifying] = useState(false)
@@ -119,7 +155,7 @@ export default function RegisterForm() {
 
   const [activating, setActivating] = useState(false)
 
-  // ★ v10.4: State های بررسی تکراری بودن (بدون subdomain)
+  // ─── State های اعتبارسنجی ─────────────────────────────────────────
   const [storeNameAvailable, setStoreNameAvailable] = useState<boolean | null>(null)
   const [storeNameChecking, setStoreNameChecking] = useState(false)
   const [storeNameReason, setStoreNameReason] = useState('')
@@ -128,10 +164,30 @@ export default function RegisterForm() {
   const [usernameChecking, setUsernameChecking] = useState(false)
   const [usernameReason, setUsernameReason] = useState('')
 
+  // ★ v11.1: State های کد ملی
+  const [nationalCodeValid, setNationalCodeValid] = useState<boolean | null>(null)
+  const [nationalCodeMessage, setNationalCodeMessage] = useState('')
+
   const storeNameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const usernameCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const nationalCodeCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ★ v10.4: بررسی نام فروشگاه
+  // ★ v11.1: بررسی فرمت کد ملی (در client-side، بدون فراخوانی API)
+  const checkNationalCode = useCallback((value: string) => {
+    const cleaned = value.replace(/[\s-]/g, '')
+    
+    if (!cleaned || cleaned.length < 10) {
+      setNationalCodeValid(null)
+      setNationalCodeMessage('')
+      return
+    }
+    
+    const result = validateNationalCodeFormat(cleaned)
+    setNationalCodeValid(result.valid)
+    setNationalCodeMessage(result.valid ? '' : result.message)
+  }, [])
+
+  // بررسی نام فروشگاه
   const checkStoreName = useCallback(async (value: string) => {
     if (!value || value.length < 2) {
       setStoreNameAvailable(null)
@@ -160,7 +216,7 @@ export default function RegisterForm() {
     }
   }, [])
 
-  // ★ v10.4: بررسی نام کاربری
+  // بررسی نام کاربری
   const checkUsername = useCallback(async (value: string) => {
     if (!value || value.length < 3) {
       setUsernameAvailable(null)
@@ -189,7 +245,7 @@ export default function RegisterForm() {
     }
   }, [])
 
-  // ★ v10.4: handler های جدید با debounce
+  // handler های جدید با debounce
   const handleStoreNameChange = useCallback((value: string) => {
     setStoreName(value)
     if (storeNameCheckRef.current) clearTimeout(storeNameCheckRef.current)
@@ -203,20 +259,72 @@ export default function RegisterForm() {
     usernameCheckRef.current = setTimeout(() => checkUsername(cleaned), 500)
   }, [checkUsername])
 
+  // ★ v11.1: handler کد ملی با debounce
+  const handleNationalCodeChange = useCallback((value: string) => {
+    const cleaned = value.replace(/\D/g, '').slice(0, 10)
+    setNationalCode(cleaned)
+    if (nationalCodeCheckRef.current) clearTimeout(nationalCodeCheckRef.current)
+    nationalCodeCheckRef.current = setTimeout(() => checkNationalCode(cleaned), 300)
+  }, [checkNationalCode])
+
+  // ★ v11.1: تابع اصلی اعتبارسنجی هویت (قبل از ارسال OTP)
   const handleSendOtp = async () => {
     setError('')
-    if (!mobile || mobile.length < 11) {
+    
+    // بررسی‌های اولیه
+    if (!mobile || mobile.length !== 11) {
       setError('شماره موبایل نامعتبر است')
       return
     }
+    
+    if (!nationalCode || nationalCode.length !== 10) {
+      setError('کد ملی باید ۱۰ رقم باشد')
+      return
+    }
+    
+    // بررسی فرمت کد ملی
+    const codeValidation = validateNationalCodeFormat(nationalCode)
+    if (!codeValidation.valid) {
+      setError(codeValidation.message)
+      return
+    }
+    
     setOtpSending(true)
+    
     try {
+      // ★ v11.1: ابتدا اعتبارسنجی کامل (بدون ارسال OTP)
+      console.log('[Register] 🔍 Starting identity validation...')
+      const validationRes = await fetch('/api/tenants/validate-identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          mobile, 
+          nationalCode,
+          storeName,
+          username 
+        }),
+      })
+      
+      const validationData = await validationRes.json()
+      
+      if (!validationData.success) {
+        console.log('[Register] ❌ Validation failed:', validationData.error)
+        setError(validationData.error || 'خطا در اعتبارسنجی اطلاعات')
+        setOtpSending(false)
+        return
+      }
+      
+      console.log('[Register] ✅ Identity validated successfully')
+      
+      // ★ حالا که تأیید شد، OTP ارسال می‌شود
       const res = await fetch('/api/tenants/register-otp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile }),
       })
+      
       const data = await res.json()
+      
       if (data.success) {
         setOtpCooldown(60)
         if (data.data?.mockMode && data.data?.devCode) {
@@ -227,8 +335,9 @@ export default function RegisterForm() {
       } else {
         setError(data.error || 'خطا در ارسال کد')
       }
-    } catch {
-      setError('خطا در ارتباط با سرور')
+    } catch (err) {
+      console.error('[Register] Error:', err)
+      setError('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.')
     } finally {
       setOtpSending(false)
     }
@@ -242,7 +351,7 @@ export default function RegisterForm() {
     return () => clearInterval(timer)
   }, [otpCooldown])
 
-   const handleVerifyOtpAndRegister = async () => {
+  const handleVerifyOtpAndRegister = async () => {
     setError('')
     if (otpCode.length !== 6) {
       setError('کد باید ۶ رقم باشد')
@@ -271,15 +380,16 @@ export default function RegisterForm() {
       // ★ v10.8: تولید خودکار subdomain از username
       const autoSubdomain = usernameToSubdomain(username)
 
-      // ★ ثبت‌نام با startFreeTrial: true
+      // ★ v11.1: ثبت‌نام با کد ملی و startFreeTrial: true
       const regRes = await fetch('/api/tenants/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           companyName: storeName,
-          subDomain: autoSubdomain,  // ★ v10.8: تولید خودکار
+          subDomain: autoSubdomain,
           ownerName: storeName,
           ownerMobile: mobile,
+          ownerNationalCode: nationalCode, // ★ v11.1: کد ملی
           username,
           password,
           planTierName: effectiveTierName,
@@ -287,6 +397,7 @@ export default function RegisterForm() {
           planName: planName,
           startFreeTrial: true,
           mobileVerified: true,
+          identityVerified: true, // ★ v11.1: هویت تأیید شده
         }),
       })
 
@@ -376,26 +487,40 @@ export default function RegisterForm() {
           console.log('[Register] 🎯 Wizard force flag set for tenant:', tenant.id)
         }
 
-        const finalToken = localStorage.getItem('token')
-        if (finalToken && tenant?.id) {
-          try {
-            const payload = JSON.parse(atob(finalToken.split('.')[1]))
-            if (payload.tenantId !== tenant.id) {
-              console.error('[Register] ❌ CRITICAL: Token mismatch after registration!')
-              localStorage.clear()
-              sessionStorage.clear()
-              window.location.href = '/auth/login?error=registration_mismatch'
-              return
-            } else {
-              console.log('[Register] ✅ Token verified:', tenant.id)
-            }
-          } catch (e) {
-            console.warn('[Register] Token verification error:', e)
-          }
-        }
+       const finalToken = localStorage.getItem('token') || localStorage.getItem('accessToken')
+if (finalToken && tenant?.id) {
+  try {
+    // ★ v11.1-fix: تابع کمکی برای decode JWT با پشتیبانی از Base64URL
+    const base64UrlToBase64 = (base64url: string): string => {
+      let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+      const pad = base64.length % 4
+      if (pad) {
+        base64 += '='.repeat(4 - pad)
+      }
+      return base64
+    }
+    
+    const parts = finalToken.split('.')
+    if (parts.length === 3) {
+      const payloadBase64 = base64UrlToBase64(parts[1])
+      const payload = JSON.parse(atob(payloadBase64))
+      
+      if (payload.tenantId !== tenant.id) {
+        console.error('[Register] ❌ CRITICAL: Token mismatch after registration!')
+        localStorage.clear()
+        sessionStorage.clear()
+        window.location.href = '/auth/login?error=registration_mismatch'
+        return
+      } else {
+        console.log('[Register] ✅ Token verified:', tenant.id)
+      }
+    }
+  } catch (e) {
+    console.warn('[Register] Token verification skipped:', e)
+  }
+}
       }
 
-      // ★ Redirect به صفحه موفقیت (بدون پارامتر subdomain)
       router.push(`/success?plan=${planName}&tenantId=${tenant?.id || ''}`)
     } catch (err) {
       console.error('[Register] Error:', err)
@@ -415,8 +540,10 @@ export default function RegisterForm() {
     window.location.replace('/')
   }
 
-   const canGoNext = useCallback(() => {
+  // ★ v11.1: اصلاح canGoNext با اضافه شدن nationalCode
+  const canGoNext = useCallback(() => {
     if (currentStep === 1) {
+      const codeValidation = validateNationalCodeFormat(nationalCode)
       return !!(
         storeName.trim().length >= 2 &&
         storeNameAvailable === true &&
@@ -424,6 +551,8 @@ export default function RegisterForm() {
         username.trim().length >= 3 &&
         usernameAvailable === true &&
         !usernameChecking &&
+        nationalCode.length === 10 &&
+        codeValidation.valid &&
         mobile.trim().length === 11 &&
         password.length >= 4
       )
@@ -433,6 +562,7 @@ export default function RegisterForm() {
     currentStep, 
     storeName, storeNameAvailable, storeNameChecking,
     username, usernameAvailable, usernameChecking,
+    nationalCode,
     mobile, password
   ])
 
@@ -444,13 +574,11 @@ export default function RegisterForm() {
     }
   }
 
-    return (
+  return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-bl from-emerald-50 via-white to-teal-50 px-4 py-4" dir="rtl">
       <div className="w-full max-w-md">
         
-        {/* ═══════════════════════════════════════════════════════════
-            ★ v10.3: Plan Selection Badge
-            ═══════════════════════════════════════════════════════════ */}
+        {/* ═══ Plan Selection Badge ═══ */}
         {(() => {
           const ui = PLAN_UI[planName] || PLAN_UI.simple
           const PlanIcon = ui.icon
@@ -495,7 +623,7 @@ export default function RegisterForm() {
           )
         })()}
 
-        {/* ─── Header فشرده ─── */}
+        {/* ─── Header ─── */}
         <div className="text-center mb-4">
           <div className="inline-flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow">
@@ -505,7 +633,7 @@ export default function RegisterForm() {
           </div>
         </div>
 
-        {/* ─── Steps ساده ─── */}
+        {/* ─── Steps ─── */}
         <div className="mb-4 flex justify-center gap-6">
           {steps.map((step) => (
             <div key={step.id} className={`flex items-center gap-1.5 text-xs ${step.id <= currentStep ? 'text-emerald-600 font-semibold' : 'text-gray-400'}`}>
@@ -565,46 +693,85 @@ export default function RegisterForm() {
                   )}
                 </div>
 
-              {/* ── نام کاربری ── */}
-              <div className="space-y-1">
-                <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
-                  <User className="w-3 h-3" />
-                  نام کاربری
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="username"
-                    placeholder="مثال: admin_shop"
-                    value={username}
-                    onChange={(e) => handleUsernameChange(e.target.value)}
-                    className={`h-9 text-sm pr-9 ${
-                      usernameAvailable === true ? 'border-emerald-400' :
-                      usernameAvailable === false ? 'border-red-400' : ''
-                    }`}
-                    dir="ltr"
-                  />
-                  {usernameChecking && (
-                    <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                {/* ── نام کاربری ── */}
+                <div className="space-y-1">
+                  <Label htmlFor="username" className="text-xs font-medium flex items-center gap-1">
+                    <User className="w-3 h-3" />
+                    نام کاربری
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="username"
+                      placeholder="مثال: admin_shop"
+                      value={username}
+                      onChange={(e) => handleUsernameChange(e.target.value)}
+                      className={`h-9 text-sm pr-9 ${
+                        usernameAvailable === true ? 'border-emerald-400' :
+                        usernameAvailable === false ? 'border-red-400' : ''
+                      }`}
+                      dir="ltr"
+                    />
+                    {usernameChecking && (
+                      <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-gray-400" />
+                    )}
+                    {usernameAvailable === true && !usernameChecking && (
+                      <Check className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    {usernameAvailable === false && !usernameChecking && (
+                      <AlertCircle className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
+                    )}
+                  </div>
+                  {usernameReason && (
+                    <p className={`text-[10px] flex items-center gap-1 ${
+                      usernameAvailable ? 'text-emerald-600' : 'text-red-500'
+                    }`}>
+                      {usernameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                      {usernameReason}
+                    </p>
                   )}
-                  {usernameAvailable === true && !usernameChecking && (
-                    <Check className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
-                  )}
-                  {usernameAvailable === false && !usernameChecking && (
-                    <AlertCircle className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
-                  )}
-                </div>
-                {usernameReason && (
-                  <p className={`text-[10px] flex items-center gap-1 ${
-                    usernameAvailable ? 'text-emerald-600' : 'text-red-500'
-                  }`}>
-                    {usernameAvailable ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-                    {usernameReason}
+                  <p className="text-[9px] text-gray-400">
+                    فقط حروف انگلیسی کوچک، اعداد و _ (حداقل ۳ کاراکتر) — برای ورود به سیستم استفاده می‌شود
                   </p>
-                )}
-                <p className="text-[9px] text-gray-400">
-                  فقط حروف انگلیسی کوچک، اعداد و _ (حداقل ۳ کاراکتر) — برای ورود به سیستم استفاده می‌شود
-                </p>
-              </div>
+                </div>
+
+                {/* ── کد ملی (جدید v11.1) ── */}
+                <div className="space-y-1">
+                  <Label htmlFor="nationalCode" className="text-xs font-medium flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" />
+                    کد ملی
+                    <span className="text-[8px] text-red-500 font-bold">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="nationalCode"
+                      placeholder="کد ملی ۱۰ رقمی"
+                      value={nationalCode}
+                      onChange={(e) => handleNationalCodeChange(e.target.value)}
+                      className={`h-9 text-sm pr-9 font-mono tracking-wider ${
+                        nationalCodeValid === true ? 'border-emerald-400' :
+                        nationalCodeValid === false ? 'border-red-400' : ''
+                      }`}
+                      dir="ltr"
+                      maxLength={10}
+                    />
+                    <ShieldCheck className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    {nationalCodeValid === true && (
+                      <Check className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-500" />
+                    )}
+                    {nationalCodeValid === false && (
+                      <AlertCircle className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />
+                    )}
+                  </div>
+                  {nationalCodeMessage && (
+                    <p className="text-[10px] flex items-center gap-1 text-red-500">
+                      <AlertCircle className="w-3 h-3" />
+                      {nationalCodeMessage}
+                    </p>
+                  )}
+                  <p className="text-[9px] text-gray-500 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <span className="font-bold">⚠️ هر کد ملی فقط یک بار می‌تواند ثبت‌نام کند.</span> این کد با شماره موبایل تطبیق داده می‌شود.
+                  </p>
+                </div>
 
                 {/* ── شماره موبایل ── */}
                 <div className="space-y-1">
@@ -623,7 +790,7 @@ export default function RegisterForm() {
                     maxLength={11}
                   />
                   <p className="text-[9px] text-gray-400">
-                    شماره ۱۱ رقمی شروع شده با ۰۹
+                    شماره ۱۱ رقمی شروع شده با ۰۹ — باید به نام کد ملی وارد شده باشد
                   </p>
                 </div>
 
@@ -694,8 +861,17 @@ export default function RegisterForm() {
                     disabled={!canGoNext()}
                     className="flex-1 h-9 gap-1 bg-emerald-600 hover:bg-emerald-700 text-xs"
                   >
-                    ادامه
-                    <ArrowLeft className="w-3.5 h-3.5" />
+                    {otpSending ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        در حال بررسی...
+                      </>
+                    ) : (
+                      <>
+                        ادامه
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
@@ -816,7 +992,7 @@ export default function RegisterForm() {
       </div>
 
       {/* ═══ Loading Overlay ═══ */}
-      {(activating || otpVerifying) && (
+      {(activating || otpVerifying || otpSending) && (
         <div className="fixed inset-0 z-50 bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center" dir="rtl">
           <div className="text-center space-y-5 max-w-md px-6 w-full">
             <div className="relative inline-block">
@@ -828,12 +1004,18 @@ export default function RegisterForm() {
 
             <div>
               <h2 className="text-xl font-black text-gray-900 mb-2">
-                {otpVerifying && !activating ? 'در حال تأیید کد...' : 'در حال ساخت فروشگاه شما...'}
+                {otpSending && !otpVerifying && !activating
+                  ? 'در حال بررسی اطلاعات و احراز هویت...'
+                  : otpVerifying && !activating 
+                    ? 'در حال تأیید کد...' 
+                    : 'در حال ساخت فروشگاه شما...'}
               </h2>
               <p className="text-sm text-gray-500 leading-relaxed">
-                {otpVerifying && !activating 
-                  ? 'لطفاً چند لحظه صبر کنید.'
-                  : <>فروشگاه <b className="text-gray-700">{storeName}</b> با پلن <b className="text-gray-700">{planInfo.title}</b> در حال ایجاد است.</>
+                {otpSending && !otpVerifying && !activating
+                  ? 'لطفاً چند لحظه صبر کنید. کد ملی و شماره موبایل شما در حال بررسی است.'
+                  : otpVerifying && !activating 
+                    ? 'لطفاً چند لحظه صبر کنید.'
+                    : <>فروشگاه <b className="text-gray-700">{storeName}</b> با پلن <b className="text-gray-700">{planInfo.title}</b> در حال ایجاد است.</>
                 }
               </p>
             </div>
@@ -843,16 +1025,29 @@ export default function RegisterForm() {
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span className="text-xs">اطلاعات فروشگاه ثبت شد</span>
               </div>
-              <div className="flex items-center gap-2 text-emerald-600">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span className="text-xs">شماره موبایل تأیید شد</span>
-              </div>
-              <div className="flex items-center gap-2 text-violet-600">
-                <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin shrink-0" />
-                <span className="text-xs font-semibold">
-                  {otpVerifying && !activating ? 'در حال تأیید کد...' : `فعال‌سازی پلن ${planInfo.title}...`}
-                </span>
-              </div>
+              {otpSending && !otpVerifying && !activating ? (
+                <div className="flex items-center gap-2 text-violet-600">
+                  <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span className="text-xs font-semibold">در حال احراز هویت...</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 text-emerald-600">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span className="text-xs">احراز هویت انجام شد</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-emerald-600">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span className="text-xs">شماره موبایل تأیید شد</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-violet-600">
+                    <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                    <span className="text-xs font-semibold">
+                      {otpVerifying && !activating ? 'در حال تأیید کد...' : `فعال‌سازی پلن ${planInfo.title}...`}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
             <p className="text-[11px] text-gray-400">

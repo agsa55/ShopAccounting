@@ -1,5 +1,6 @@
 // ============================================================================
-// src/app/success/page.tsx — Success Page (v10.9.5 - Fixed Redirect)
+// src/app/success/page.tsx — Success Page (v11.1 - Fixed JWT Decode)
+// ★ v11.1: اصلاح atob با پشتیبانی از Base64URL (رفع خطای InvalidCharacterError)
 // ★ v10.9.5: اصلاح redirect با window.location.replace (حل مشکل React)
 // ★ v10.8: Suspense boundary برای Next.js 14+
 // ============================================================================
@@ -9,6 +10,28 @@
 import { Suspense, useEffect, useState, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CheckCircle2, Loader2, ArrowLeft } from 'lucide-react'
+
+// ★ v11.1: تابع کمکی برای decode JWT با پشتیبانی از Base64URL
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    
+    // تبدیل Base64URL به Base64 استاندارد
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    
+    // اضافه کردن padding اگر لازم باشد
+    const pad = base64.length % 4
+    if (pad) {
+      base64 += '='.repeat(4 - pad)
+    }
+    
+    return JSON.parse(atob(base64))
+  } catch (err) {
+    console.warn('[Success] JWT decode failed:', err)
+    return null
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // کامپوننت داخلی — استفاده از useSearchParams داخل Suspense
@@ -29,37 +52,41 @@ function SuccessContent() {
 
     if (typeof window !== 'undefined') {
       try {
-        const token = localStorage.getItem('token')
+        // ★ v11.1: تلاش برای خواندن token از چند کلید مختلف
+        const token = localStorage.getItem('token') || localStorage.getItem('accessToken')
+        
         if (token && tenantIdFromUrl) {
-          try {
-            const payload = JSON.parse(atob(token.split('.')[1]))
+          const payload = decodeJwtPayload(token)
 
-            if (payload.tenantId !== tenantIdFromUrl) {
-              console.error('[Success] ❌ Token mismatch! Clearing...')
-              const keysToRemove = [
-                'token', 'refreshToken', 'user', 'tenant',
-                'storeName', 'planName', 'shop-accounting-store',
-                'portal_token',
-              ]
-              keysToRemove.forEach(key => {
+          if (payload && payload.tenantId && payload.tenantId !== tenantIdFromUrl) {
+            console.error('[Success] ❌ Token mismatch! Clearing...', {
+              tokenTenant: payload.tenantId,
+              urlTenant: tenantIdFromUrl
+            })
+            const keysToRemove = [
+              'token', 'refreshToken', 'user', 'tenant',
+              'storeName', 'planName', 'shop-accounting-store',
+              'portal_token',
+            ]
+            keysToRemove.forEach(key => {
+              try { localStorage.removeItem(key) } catch {}
+            })
+            Object.keys(localStorage).forEach(key => {
+              if (key.includes('wizard') || key.includes('force_')) {
                 try { localStorage.removeItem(key) } catch {}
-              })
-              Object.keys(localStorage).forEach(key => {
-                if (key.includes('wizard') || key.includes('force_')) {
-                  try { localStorage.removeItem(key) } catch {}
-                }
-              })
-              try { sessionStorage.clear() } catch {}
-              setTimeout(() => {
-                window.location.href = '/auth/login?error=token_mismatch'
-              }, 1000)
-              return
-            } else {
-              console.log('[Success] ✅ Token matches tenantId:', tenantIdFromUrl)
-              setVerified(true)
-            }
-          } catch (err) {
-            console.warn('[Success] Token parse error:', err)
+              }
+            })
+            try { sessionStorage.clear() } catch {}
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=token_mismatch'
+            }, 1000)
+            return
+          } else if (payload && payload.tenantId) {
+            console.log('[Success] ✅ Token matches tenantId:', tenantIdFromUrl)
+            setVerified(true)
+          } else {
+            // اگر payload نداشتیم ولی token هست، فرض می‌کنیم درست است
+            console.log('[Success] ⚠️ Token present but could not decode payload, assuming valid')
             setVerified(true)
           }
         } else {
@@ -80,7 +107,6 @@ function SuccessContent() {
         redirectTriggered.current = true
         console.log('[Success] 🚀 Redirecting to dashboard...')
         // ★ استفاده از window.location.replace به جای router.replace
-        // این روش هیچ مشکل React state update ندارد
         window.location.replace('/dashboard')
       }
       return
