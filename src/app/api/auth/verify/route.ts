@@ -1,7 +1,10 @@
 // ============================================================================
-// src/app/api/auth/verify/route.ts — GET /api/auth/verify (v3.0)
+// src/app/api/auth/verify/route.ts — GET /api/auth/verify (v3.1)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
+// ★★★ v3.1:
+//   ★ اضافه شدن چک قفل بودن فروشگاه (isLocked)
+//   ★ جلوگیری از دسترسی کاربران فروشگاه‌های قفل شده
 // ★★★ v3.0: حذف isIsolated — دیگه این فیلد در Tenant وجود نداره
 // ★ حفظ fallback های قبلی برای ستون‌های مفقود در StoreUser
 // ============================================================================
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     const { userId, tenantId, userType } = decoded;
 
-    // ★★★ v3.0: بدون isIsolated
+    // ★★★ v3.1: دریافت tenant + فیلدهای قفل
     const tenant = await db.client.tenant.findUnique({
       where: { id: tenantId },
       select: {
@@ -74,6 +77,11 @@ export async function GET(request: NextRequest) {
         planTierId: true,
         billingCycle: true,
         expiresAt: true,
+        // ★ v3.1: فیلدهای قفل
+        isLocked: true,
+        lockedAt: true,
+        lockReason: true,
+        lockedByAdmin: true,
       },
     });
 
@@ -82,6 +90,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'فروشگاه یافت نشد' },
         { status: 401 }
+      );
+    }
+
+    // ═★★ v3.1: چک قفل بودن فروشگاه ═★★
+    if (tenant.isLocked) {
+      console.log(`[Auth/Verify] ❌ Tenant is locked: ${tenantId} (${tenant.companyName})`);
+      console.log(`[Auth/Verify]    Lock reason: ${tenant.lockReason || 'نامشخص'}`);
+      console.log(`[Auth/Verify]    Locked by: ${tenant.lockedByAdmin || 'ادمین'}`);
+      console.log(`[Auth/Verify]    Locked at: ${tenant.lockedAt}`);
+      
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'این فروشگاه قفل شده است. لطفاً با پشتیبانی تماس بگیرید.',
+          errorCode: 'TENANT_LOCKED',
+          lockReason: tenant.lockReason || 'نامشخص',
+          lockedAt: tenant.lockedAt,
+          companyName: tenant.companyName,
+        }, 
+        { status: 403 }
       );
     }
 
@@ -219,6 +247,7 @@ export async function GET(request: NextRequest) {
         planTierNameFa: planTierNameFa,
         billingCycle: tenant.billingCycle,
         status: tenant.status,
+        isLocked: tenant.isLocked || false,  // ★ v3.1: اضافه شد
         isIsolated: false,  // ★ v3.0: همیشه false
         expiresAt: tenant.expiresAt,
       },

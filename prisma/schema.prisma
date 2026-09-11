@@ -131,6 +131,16 @@ model Tenant {
   // تعداد تلاش‌های ناموفق احراز هویت (برای جلوگیری از حملات بروت‌فورس)
   identityAttempts    Int      @default(0)
 
+
+ // ★ v11.4: فیلدهای قفل شدن
+  isLocked                  Boolean   @default(false)
+  lockedAt                  DateTime?
+  lockReason                String?   @db.VarChar(200)
+  lockedByAdmin             String?   @db.VarChar(100)
+requiresIdentityCompletion Boolean @default(false)
+  lastActivityAt            DateTime  @default(now())
+
+@@index([isLocked])  
   @@index([createdAt])
   @@index([planName])
   @@index([status])
@@ -140,6 +150,7 @@ model Tenant {
   @@index([isPaid])
    @@index([ownerNationalCode])
   @@index([ownerMobile])
+    @@index([lastActivityAt])  
 }
 
 model OtpCode {

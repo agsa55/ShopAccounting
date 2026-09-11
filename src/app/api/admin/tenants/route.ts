@@ -1,27 +1,21 @@
+// ============================================================================
+// src/app/api/admin/tenants/route.ts — v11.3.1 (Safe Version)
+// ★ فقط فیلدهای قطعی موجود را select می‌کند
+// ★ لاگ‌گیری دقیق برای عیب‌یابی
+// ============================================================================
+
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-// ★ تابع کمکی برای تبدیل اعداد به فارسی
 const toFaNum = (n: number | string): string => {
   return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)]);
 };
 
-// ★★★ محاسبه دقیق مدت استفاده (سال/ماه/روز) از تاریخ ثبت‌نام تا امروز
-function calculateUsageDuration(createdAt: Date): {
-  years: number;
-  months: number;
-  days: number;
-  totalDays: number;
-  text: string;
-  shortText: string;
-} {
+function calculateUsageDuration(createdAt: Date) {
   const start = new Date(createdAt);
   const now = new Date();
-
-  // محاسبه کل روزها
   const totalDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
-  // محاسبه دقیق سال/ماه/روز
   let years = now.getFullYear() - start.getFullYear();
   let months = now.getMonth() - start.getMonth();
   let days = now.getDate() - start.getDate();
@@ -37,53 +31,64 @@ function calculateUsageDuration(createdAt: Date): {
     months += 12;
   }
 
-  // ساخت متن فارسی
   const parts: string[] = [];
   if (years > 0) parts.push(`${toFaNum(years)} سال`);
   if (months > 0) parts.push(`${toFaNum(months)} ماه`);
   if (days > 0 || parts.length === 0) parts.push(`${toFaNum(days)} روز`);
 
-  const text = parts.join(' و ');
-
-  // متن کوتاه‌تر برای نمایش فشرده
-  let shortText = '';
-  if (years > 0) {
-    shortText = `${toFaNum(years)}س ${toFaNum(months)}م`;
-  } else if (months > 0) {
-    shortText = `${toFaNum(months)}م ${toFaNum(days)}ر`;
-  } else {
-    shortText = `${toFaNum(days)} روز`;
-  }
-
-  return { years, months, days, totalDays, text, shortText };
+  return {
+    totalDays,
+    text: parts.join(' و '),
+    shortText: years > 0 ? `${toFaNum(years)}س ${toFaNum(months)}م` : 
+               months > 0 ? `${toFaNum(months)}م ${toFaNum(days)}ر` : 
+               `${toFaNum(days)} روز`,
+  };
 }
 
 export async function GET(request: NextRequest) {
+  console.log('[Admin Tenants] 📥 GET request received');
+  
   try {
+    // ★ فقط فیلدهای قطعی موجود را select می‌کنیم
     const tenants = await db.client.tenant.findMany({
-      select: {
-        id: true,
-        companyName: true,
-        subDomain: true,
-        ownerMobile: true,
-        status: true,
-        planName: true,
-        billingCycle: true,
-        expiresAt: true,
-        createdAt: true, // ★ برای محاسبه مدت استفاده
-        _count: {
-          select: {
-            StoreUsers: true,
-            Tickets: true,
-          }
-        }
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
+  select: {
+  id: true,
+  companyName: true,
+  subDomain: true,
+  ownerMobile: true,
+  ownerNationalCode: true,
+  ownerEmail: true,
+  ownerName: true,
+  status: true,
+  planName: true,
+  planTierId: true,
+  billingCycle: true,
+  isPaid: true,
+  expiresAt: true,
+  trialStartAt: true,
+  trialEndAt: true,
+  identityVerified: true,
+  identityVerifiedAt: true,
+  createdAt: true,
+  // ★ v11.4: فیلدهای قفل (مهم!)
+  isLocked: true,
+  lockedAt: true,
+  lockReason: true,
+  lockedByAdmin: true,
+  _count: {
+    select: {
+      StoreUsers: true,
+      Tickets: true,
+    }
+  }
+},
+      orderBy: { createdAt: 'desc' }
     });
 
+    console.log(`[Admin Tenants] ✅ Found ${tenants.length} tenants`);
+
     const formattedTenants = tenants.map(t => {
+      // محاسبه زمان باقی‌مانده
       let remainingTimeText = '';
       let remainingDays = 0;
 
@@ -93,8 +98,7 @@ export async function GET(request: NextRequest) {
       } else {
         const now = new Date();
         const expires = new Date(t.expiresAt);
-        const diffTime = expires.getTime() - now.getTime();
-        remainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        remainingDays = Math.ceil((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
         if (remainingDays <= 0) {
           remainingTimeText = 'منقضی شده';
@@ -102,43 +106,77 @@ export async function GET(request: NextRequest) {
         } else {
           const months = Math.floor(remainingDays / 30);
           const days = remainingDays % 30;
-          const faMonths = toFaNum(months);
-          const faDays = toFaNum(days);
-
-          if (months > 0 && days > 0) {
-            remainingTimeText = `${faMonths} ماه و ${faDays} روز`;
-          } else if (months > 0) {
-            remainingTimeText = `${faMonths} ماه`;
-          } else {
-            remainingTimeText = `${faDays} روز`;
-          }
+          remainingTimeText = months > 0 && days > 0 
+            ? `${toFaNum(months)} ماه و ${toFaNum(days)} روز`
+            : months > 0 ? `${toFaNum(months)} ماه` : `${toFaNum(days)} روز`;
         }
       }
 
-      // ★ محاسبه مدت استفاده از سیستم
       const usage = calculateUsageDuration(t.createdAt);
-
       const faMobile = t.ownerMobile ? toFaNum(t.ownerMobile) : '—';
+      const faNationalCode = t.ownerNationalCode ? toFaNum(t.ownerNationalCode) : '—';
+
+      // تشخیص وضعیت کلی
+      let overallStatus: 'active' | 'trial' | 'expired' | 'locked' | 'pending' = 'active';
+      if (t.status === 'deleted') overallStatus = 'locked';
+      else if (t.status === 'pending_payment') overallStatus = 'pending';
+      else if (t.trialEndAt && !t.isPaid) {
+        const daysLeft = Math.ceil((new Date(t.trialEndAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (daysLeft > 0) overallStatus = 'trial';
+        else overallStatus = 'expired';
+      }
 
       return {
         ...t,
         ownerMobile: faMobile,
+        ownerNationalCode: faNationalCode,
         remainingDays,
         remainingTimeText,
-        isExpired: remainingDays <= 0 && t.billingCycle !== 'lifetime',
-        // ★ فیلدهای جدید مدت استفاده
         usageDays: usage.totalDays,
-        usageYears: usage.years,
-        usageMonths: usage.months,
-        usageDurationDays: usage.days,
-        usageText: usage.text,       // "۲ سال و ۳ ماه و ۱۵ روز"
-        usageShortText: usage.shortText, // "۲س ۳م"
+        usageText: usage.text,
+        usageShortText: usage.shortText,
+        overallStatus,
+        identityVerified: t.identityVerified || false,
+        isPaid: t.isPaid || false,
+         isLocked: t.isLocked || false,
+  lockedAt: t.lockedAt?.toISOString() || null,
+  lockReason: t.lockReason || null,
+  lockedByAdmin: t.lockedByAdmin || null,
       };
     });
 
-    return NextResponse.json({ success: true, data: formattedTenants });
-  } catch (error) {
-    console.error('[Admin Tenants GET] Error:', error);
-    return NextResponse.json({ success: false, error: 'خطای داخلی سرور' }, { status: 500 });
+    // آمار کلی
+    const stats = {
+      total: formattedTenants.length,
+      active: formattedTenants.filter(t => t.overallStatus === 'active').length,
+      trial: formattedTenants.filter(t => t.overallStatus === 'trial').length,
+      expired: formattedTenants.filter(t => t.overallStatus === 'expired').length,
+      plans: {
+        simple: formattedTenants.filter(t => t.planName?.toLowerCase().includes('simple')).length,
+        professional: formattedTenants.filter(t => t.planName?.toLowerCase().includes('professional')).length,
+        enterprise: formattedTenants.filter(t => t.planName?.toLowerCase().includes('enterprise')).length,
+      },
+      identity: {
+        verified: formattedTenants.filter(t => t.identityVerified).length,
+        unverified: formattedTenants.filter(t => !t.identityVerified && t.ownerNationalCode && t.ownerNationalCode !== '—').length,
+        noNationalCode: formattedTenants.filter(t => !t.ownerNationalCode || t.ownerNationalCode === '—').length,
+      },
+    };
+
+    console.log('[Admin Tenants] 📊 Stats:', JSON.stringify(stats, null, 2));
+
+    return NextResponse.json({ 
+      success: true, 
+      data: formattedTenants,
+      stats 
+    });
+  } catch (error: any) {
+    console.error('[Admin Tenants] ❌ ERROR:', error.message);
+    console.error('[Admin Tenants] Stack:', error.stack);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined 
+    }, { status: 500 });
   }
 }

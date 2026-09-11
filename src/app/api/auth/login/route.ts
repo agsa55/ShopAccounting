@@ -1,7 +1,10 @@
 // ============================================================================
-// src/app/api/auth/login/route.ts — POST /api/auth/login (v3.0)
+// src/app/api/auth/login/route.ts — POST /api/auth/login (v3.1)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
+// ★★★ v3.1:
+//   ★ اضافه شدن چک قفل بودن فروشگاه (isLocked)
+//   ★ جلوگیری از ورود کاربران فروشگاه‌های قفل شده
 // ★★★ v3.0:
 //   ★ حذف isIsolated — دیگه این فیلد در Tenant وجود نداره
 //   ★ db.forTenant همیشه db.client رو برمی‌گردانه
@@ -142,7 +145,7 @@ export async function POST(request: NextRequest) {
     let userType: 'storeUser' | 'portalUser' = 'storeUser';
     let hasLockoutColumns = false;
 
-    // ═★★ v3.0: دریافت tenant ها بدون isIsolated ═★★
+    // ═★★ v3.1: دریافت tenant ها + فیلدهای قفل ═★★
     const tenants = await db.client.tenant.findMany({
       where: { status: { not: 'sold' } },
       select: {
@@ -157,6 +160,11 @@ export async function POST(request: NextRequest) {
         billingCycle: true,
         expiresAt: true,
         soldAt: true,
+        // ★ v3.1: فیلدهای قفل
+        isLocked: true,
+        lockedAt: true,
+        lockReason: true,
+        lockedByAdmin: true,
       },
     });
 
@@ -220,6 +228,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'نام کاربری یا رمز عبور اشتباه است', errorCode: 'INVALID_CREDENTIALS' },
         { status: 401 }
+      );
+    }
+
+    // ═★★ v3.1: چک قفل بودن فروشگاه ═★★
+    if (tenant.isLocked) {
+      console.log(`[Auth/Login] ❌ Tenant is locked: ${tenant.id} (${tenant.companyName})`);
+      console.log(`[Auth/Login]    Lock reason: ${tenant.lockReason || 'نامشخص'}`);
+      console.log(`[Auth/Login]    Locked by: ${tenant.lockedByAdmin || 'ادمین'}`);
+      console.log(`[Auth/Login]    Locked at: ${tenant.lockedAt}`);
+      
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'این فروشگاه قفل شده است. لطفاً با پشتیبانی تماس بگیرید.',
+          errorCode: 'TENANT_LOCKED',
+          lockReason: tenant.lockReason || 'نامشخص',
+          lockedAt: tenant.lockedAt,
+          companyName: tenant.companyName,
+        }, 
+        { status: 403 }
       );
     }
 
@@ -358,6 +386,7 @@ export async function POST(request: NextRequest) {
           planTierNameFa: planTierNameFa,
           billingCycle: tenant.billingCycle || 'monthly',
           status: tenant.status,
+          isLocked: tenant.isLocked || false,  // ★ v3.1: اضافه شد
           isIsolated: false,  // ★ v3.0: همیشه false
         },
       },
