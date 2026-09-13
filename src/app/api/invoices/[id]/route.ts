@@ -632,6 +632,194 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
   }
 })
 
+// ═══════════════════════════════════════════════════════════════
+//  Helper: rollback کامل یک فاکتور فروش
+//  ★ v11.6.9: پشتیبانی از فروش نقدی، نسیه، قسطی، چک و خدمات
+// ═══════════════════════════════════════════════════════════════
+async function rollbackSaleInvoice(
+  tx: any,
+  invoice: any,
+  tenantId: string,
+  options: { hardDeleteJournal?: boolean } = {}
+) {
+  const invoiceId = invoice.id
+  const warehouseId = invoice.warehouseId
+  const pt = (invoice.paymentType || 'cash').toLowerCase()
+  const invoiceType = invoice.invoiceType || 'sale'
+  const isReturn = invoiceType === 'sale_return'
+  const isService = invoiceType === 'service'
+  const hardDeleteJournal = options.hardDeleteJournal ?? false
+
+  console.log(`[Rollback Sale] 🔄 شروع rollback فاکتور ${invoice.number} (type=${invoiceType}, paymentType=${pt}, hardDelete=${hardDeleteJournal})`)
+
+  // ── ۱. حذف تراکنش‌های صندوق ─────────────────────────────
+  try {
+    const deletedCashMovements = await tx.cashMovement.deleteMany({
+      where: {
+        OR: [
+          { invoiceId: invoiceId },
+          { description: { contains: invoice.number } },
+        ],
+        tenantId,
+      },
+    })
+    console.log(`[Rollback Sale] ✅ CashMovements حذف شد: ${deletedCashMovements.count} رکورد`)
+  } catch (cashErr: any) {
+    console.warn(`[Rollback Sale] ⚠️ CashMovement cleanup failed:`, cashErr?.message)
+  }
+
+  // ── ۲. حذف پرداخت‌های فاکتور ─────────────────────────────
+  await tx.invoicePayment.deleteMany({
+    where: { invoiceId },
+  }).catch(() => {})
+
+  // ── ۳. حذف پرداخت‌های آنلاین ─────────────────────────────
+  await tx.onlinePayment.deleteMany({
+    where: { invoiceId },
+  }).catch(() => {})
+
+  // ── ۴. حذف برنامه اقساط (اگر فاکتور قسطی است) ──────────────
+  if (pt === 'installment') {
+    try {
+      const plan = await tx.installmentPlan.findUnique({
+        where: { invoiceId },
+        select: { id: true },
+      })
+      if (plan) {
+        await tx.installmentSchedule.deleteMany({
+          where: { planId: plan.id },
+        }).catch(() => {})
+        await tx.installmentPlan.delete({
+          where: { id: plan.id },
+        }).catch(() => {})
+        console.log(`[Rollback Sale] ✅ InstallmentPlan حذف شد`)
+      }
+    } catch (err: any) {
+      console.warn(`[Rollback Sale] ⚠️ InstallmentPlan cleanup failed:`, err?.message)
+    }
+  }
+
+  // ── ۵. مدیریت چک دریافتنی (اگر فاکتور چکی است) ─────────────
+  if (pt === 'check') {
+    try {
+      const relatedChecks = await tx.check.findMany({
+        where: { invoiceId, tenantId },
+      })
+      for (const check of relatedChecks) {
+        if (hardDeleteJournal) {
+          await tx.check.delete({ where: { id: check.id } })
+          console.log(`[Rollback Sale] ✓ چک ${check.checkNumber} فیزیکی حذف شد`)
+        } else if (check.status === 'pending') {
+          await tx.check.update({
+            where: { id: check.id },
+            data: {
+              status: 'cancelled',
+              description: `${check.description || ''} [باطل شده — فاکتور ${invoice.number} لغو شد]`,
+            },
+          })
+          console.log(`[Rollback Sale] ✓ چک ${check.checkNumber} باطل شد`)
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Rollback Sale] Check rollback failed:`, err?.message)
+    }
+  }
+
+  // ── ۶. بازگشت موجودی (فقط برای فاکتور کالایی، نه خدمات) ──────
+  if (!isService && warehouseId && invoice.items?.length > 0) {
+    for (const item of invoice.items) {
+      if (!item.productId) continue
+      const qty = Number(item.quantity) || 0
+      if (qty <= 0) continue
+
+      if (isReturn) {
+        // فاکتور برگشتی: موجودی کاهش می‌یابد
+        await tx.stockLevel.update({
+          where: { warehouseId_productId: { warehouseId, productId: item.productId } },
+          data: { quantity: { decrement: qty } },
+        }).catch(() => {})
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { decrement: qty } },
+        }).catch(() => {})
+      } else {
+        // فاکتور فروش عادی: موجودی افزایش می‌یابد (برگشت)
+        await tx.stockLevel.update({
+          where: { warehouseId_productId: { warehouseId, productId: item.productId } },
+          data: { quantity: { increment: qty } },
+        }).catch(() => {})
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { currentStock: { increment: qty } },
+        }).catch(() => {})
+      }
+    }
+    console.log(`[Rollback Sale] ✅ موجودی کالا بازگشت`)
+  }
+
+  // ── ۷. به‌روزرسانی مانده مشتری (برای نسیه/قسطی/چک) ─────────────
+  if ((pt === 'credit' || pt === 'installment' || pt === 'check') && invoice.customerId && !isReturn) {
+    const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
+    if (remainingAmount > 0) {
+      await tx.customer.update({
+        where: { id: invoice.customerId },
+        data: { currentBalance: { decrement: remainingAmount } },
+      }).catch(() => {})
+      console.log(`[Rollback Sale] ✓ Customer.currentBalance -${remainingAmount}`)
+    }
+  }
+
+  // ── ۸. مدیریت سند حسابداری ─────────────────────────────
+  if (hardDeleteJournal) {
+    // حذف فیزیکی سند (برای فاکتور پرداخت‌نشده)
+    const journalEntries = await tx.journalEntry.findMany({
+      where: { tenantId, sourceId: invoiceId },
+      select: { id: true },
+    })
+
+    for (const je of journalEntries) {
+      await tx.journalEntryLine.deleteMany({
+        where: { journalEntryId: je.id },
+      }).catch(() => {})
+      await tx.journalEntry.delete({
+        where: { id: je.id },
+      }).catch(() => {})
+    }
+    console.log(`[Rollback Sale] ✅ Journal Entries فیزیکی حذف شد: ${journalEntries.length} سند`)
+  } else {
+    // فقط cancelled (برای فاکتور پرداخت‌شده)
+    await tx.journalEntry.updateMany({
+      where: {
+        tenantId,
+        sourceId: invoiceId,
+        status: 'posted',
+      },
+      data: {
+        isCancelled: true,
+        cancelledAt: new Date(),
+        status: 'cancelled',
+        description: `ابطال شده — فاکتور ${invoice.number} لغو شد`,
+      },
+    }).catch(() => {})
+    console.log(`[Rollback Sale] 📋 Journal Entries cancelled شدند`)
+  }
+
+  // ── ۹. حذف حرکات کالا ─────────────────────────────
+  await tx.stockMovement.deleteMany({
+    where: { tenantId, referenceId: invoiceId },
+  }).catch(() => {})
+
+  console.log(`[Rollback Sale] ✅ تکمیل rollback فاکتور ${invoice.number}`)
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DELETE /api/invoices?id=xxx (v11.6.9 - Smart Delete)
+//  ★ منطق هوشمند:
+//    - فاکتور پرداخت‌نشده → حذف فیزیکی کامل
+//    - فاکتور پرداخت‌شده → فقط لغو (حفظ حسابرسی)
+//    - فاکتور برگشتی → همیشه حذف فیزیکی (چون اصلاحی است)
+//    - force=true → حذف فیزیکی اجباری (برای ادمین)
+// ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant?.tenantDb
@@ -643,6 +831,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
 
     const { searchParams } = new URL(req.url)
     const invoiceId = searchParams.get('id')
+    const force = searchParams.get('force') === 'true'
 
     if (!invoiceId) {
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
@@ -658,87 +847,93 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
     }
 
     const isReturn = invoice.invoiceType === 'sale_return' || invoice.invoiceType === 'purchase_return'
-    const isPaid = (invoice.status || '').toUpperCase() === 'PAID' || (Number(invoice.paidAmount) || 0) > 0
+    const isService = invoice.invoiceType === 'service'
+    const paidAmount = Number(invoice.paidAmount || 0)
+    const isPaid = paidAmount > 0
+    const isCancelled = (invoice.status || '').toLowerCase() === 'cancelled'
 
-    if (isPaid && !isReturn) {
-      return NextResponse.json({ success: false, error: 'فاکتور پرداخت‌شده قابل حذف نیست' }, { status: 400 })
+    // ═══════════════════════════════════════════════════════════════
+    // بررسی: آیا فاکتور قبلاً لغو شده؟
+    // ═══════════════════════════════════════════════════════════════
+    if (isCancelled && !force) {
+      return NextResponse.json({
+        success: false,
+        error: 'این فاکتور قبلاً لغو شده است',
+      }, { status: 400 })
     }
 
-    await tenantDb.$transaction(async (tx: any) => {
-      const journalEntries = await tx.journalEntry.findMany({
-        where: { tenantId, sourceId: invoiceId },
-        select: { id: true },
+   // ═══════════════════════════════════════════════════════════════
+// ★ v11.7.0: منطق استاندارد حسابداری
+// حذف فیزیکی فقط برای ادمین با پارامتر force
+// همه فاکتورهای ثبت‌شده فقط لغو می‌شوند
+// ═══════════════════════════════════════════════════════════════
+const isAdmin = tenant.user?.role === 'Admin' || tenant.user?.role === 'admin'
+const canHardDelete = force && isAdmin  // فقط ادمین با تأیید ویژه
+
+if (force && !isAdmin) {
+  return NextResponse.json({
+    success: false,
+    error: 'حذف فیزیکی فقط توسط ادمین امکان‌پذیر است',
+  }, { status: 403 })
+}
+
+    console.log(`[DELETE Sale] 🎯 Invoice ${invoice.number}: paidAmount=${paidAmount}, isPaid=${isPaid}, isReturn=${isReturn}, force=${force}, canHardDelete=${canHardDelete}`)
+
+    if (canHardDelete) {
+      // ═══ حذف فیزیکی کامل ═══
+      console.log(`[DELETE Sale] 🗑️ HARD DELETE: فاکتور ${invoice.number}`)
+
+      await tenantDb.$transaction(async (tx: any) => {
+        // ۱. rollback کامل با حذف فیزیکی سند
+        await rollbackSaleInvoice(tx, invoice, tenantId, { hardDeleteJournal: true })
+
+        // ۲. حذف آیتم‌های فاکتور
+        await tx.invoiceItem.deleteMany({
+          where: { invoiceId },
+        })
+
+        // ۳. حذف خود فاکتور
+        await tx.invoice.delete({
+          where: { id: invoiceId },
+        })
       })
 
-      for (const je of journalEntries) {
-        await tx.journalEntryLine.deleteMany({ where: { journalEntryId: je.id } })
-        await tx.journalEntry.delete({ where: { id: je.id } })
-      }
+      console.log(`[DELETE Sale] ✅ Invoice ${invoice.number} HARD DELETED`)
 
-      await tx.invoicePayment.deleteMany({ where: { invoiceId } }).catch(() => {})
+      return NextResponse.json({
+        success: true,
+        action: 'hard_deleted',
+        message: `فاکتور ${invoice.number} به طور کامل حذف شد (فاکتور + سند حسابداری + تراکنش صندوق${isReturn ? ' + چک' : ''})`,
+      })
 
-      const warehouseId = invoice.warehouseId
+    } else {
+      // ═══ فقط لغو (فاکتور پرداخت‌شده) ═══
+      console.log(`[DELETE Sale] ⚠️ CANCEL ONLY: فاکتور ${invoice.number} (پرداخت‌شده)`)
 
-      if (warehouseId && invoice.items?.length > 0) {
-        for (const item of invoice.items) {
-          if (!item.productId) continue
+      await tenantDb.$transaction(async (tx: any) => {
+        // ۱. rollback با cancelled کردن سند
+        await rollbackSaleInvoice(tx, invoice, tenantId, { hardDeleteJournal: false })
 
-          const qty = Number(item.quantity) || 0
-          if (qty <= 0) continue
+        // ۲. تغییر وضعیت فاکتور به cancelled
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            status: 'cancelled',
+            description: `${invoice.description || ''}\n[لغو شده در ${new Date().toLocaleString('fa-IR')}]`,
+          },
+        })
+      })
 
-          if (isReturn) {
-            try {
-              await tx.stockLevel.update({
-                where: { warehouseId_productId: { warehouseId, productId: item.productId } },
-                data: { quantity: { decrement: qty } },
-              })
-            } catch (err: any) {
-              console.warn('[DELETE] StockLevel decrement failed:', err?.message)
-            }
+      console.log(`[DELETE Sale] ✅ Invoice ${invoice.number} CANCELLED (paid invoice)`)
 
-            try {
-              await tx.product.update({
-                where: { id: item.productId },
-                data: { currentStock: { decrement: qty } },
-              })
-            } catch (err: any) {
-              console.warn('[DELETE] Product.currentStock decrement failed:', err?.message)
-            }
-          } else {
-            try {
-              await tx.stockLevel.update({
-                where: { warehouseId_productId: { warehouseId, productId: item.productId } },
-                data: { quantity: { increment: qty } },
-              })
-            } catch (err: any) {
-              console.warn('[DELETE] StockLevel increment failed:', err?.message)
-            }
-
-            try {
-              await tx.product.update({
-                where: { id: item.productId },
-                data: { currentStock: { increment: qty } },
-              })
-            } catch (err: any) {
-              console.warn('[DELETE] Product.currentStock increment failed:', err?.message)
-            }
-          }
-        }
-      }
-
-      await tx.stockMovement.deleteMany({ where: { tenantId, referenceId: invoiceId } }).catch(() => {})
-      await tx.invoiceItem.deleteMany({ where: { invoiceId } })
-      await tx.invoice.delete({ where: { id: invoiceId } })
-    })
-
-    console.log(`[Invoices DELETE] ✓ Invoice ${invoice.number} deleted`)
-
-    return NextResponse.json({
-      success: true,
-      message: `فاکتور ${invoice.number} با موفقیت حذف شد`,
-    })
+      return NextResponse.json({
+        success: true,
+        action: 'cancelled',
+        message: `فاکتور ${invoice.number} لغو شد. (چون پرداخت شده بود، برای حفظ حسابرسی حذف فیزیکی نشد ولی موجودی، چک و تراکنش صندوق برگشت خوردند)`,
+      })
+    }
   } catch (error: any) {
-    console.error('[Invoices DELETE] Error:', error?.message)
+    console.error('[Invoices DELETE] Error:', error?.message || error)
     return NextResponse.json(
       { success: false, error: 'خطا در حذف فاکتور: ' + (error?.message || '') },
       { status: 500 }

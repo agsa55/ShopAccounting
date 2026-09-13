@@ -1,37 +1,56 @@
 // ============================================================================
-// src/app/api/purchase-invoices/[id]/route.ts — v8.9.2 (Complete Fix)
-// فاکتور خرید: مشاهده، ویرایش، حذف (با rollback کامل موجودی و سند)
-// ============================================================================
-// ★★★ v8.9.2 تغییرات:
-//   ★ rollbackPurchaseInvoice: پشتیبانی کامل از چک (ابطال + کاهش بدهی)
-//   ★ PUT: استفاده از getStandardAccountIds برای سند حسابداری
-//   ★ PUT: پشتیبانی از چک در paidAmount (مثل نسیه = 0)
-//   ★ PUT: به‌روزرسانی بدهی تامین‌کننده برای چک هم
-//   ★ PUT: باطل کردن کامل چک قبلی (نه فقط unlink)
-//   ★ PUT: سازگاری کامل با types فارسی جدید (accounts-auto-seed)
-//
-// ★★★ v6.1.4 (حفظ شد): console.log برای ایجاد آیتم‌های جدید
-// ★★★ v6.1.3 (حفظ شد): GET بدون include (کوئری‌های جداگانه)
-// ★★★ Next.js 16: params یک Promise است و باید await شود
-// ============================================================================
+// src/app/api/purchase-invoices/[id]/route.ts — v11.6.8 (Smart Delete)
+// ★ فاکتور خرید: مشاهده، ویرایش، حذف هوشمند
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v11.6.8 تغییرات مهم:
+//   ★ منطق هوشمند DELETE:
+//     - فاکتور پرداخت‌نشده: حذف فیزیکی کامل (فاکتور + سند + صندوق)
+//     - فاکتور پرداخت‌شده: فقط لغو (حفظ حسابرسی)
+//   ★ rollback کامل تراکنش‌های صندوق (CashMovement)
+//   ★ حذف فیزیکی سند حسابداری (برای فاکتور پرداخت‌نشده)
+//   ★ پشتیبانی از force=true برای حذف اجباری توسط ادمین
+// ════════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
+import { generateJournalNumber } from '@/lib/journal-number-generator'
 
 // ═══════════════════════════════════════════════════════════════
-//  Helper: rollback کامل یک فاکتور خرید
-//  ★ v8.9.2: پشتیبانی کامل از نقدی، نسیه و چک
+//  Helper: rollback کامل یک فاکتور خرید (با پاکسازی صندوق و سند)
+//  ★ v11.6.8: پشتیبانی از hardDelete (حذف فیزیکی سند)
 // ═══════════════════════════════════════════════════════════════
-async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) {
+async function rollbackPurchaseInvoice(
+  tx: any, 
+  invoice: any, 
+  tenantId: string,
+  options: { hardDeleteJournal?: boolean } = {}
+) {
   const invoiceId = invoice.id
   const warehouseId = invoice.warehouseId
   const pt = (invoice.paymentType || 'cash').toLowerCase()
+  const hardDeleteJournal = options.hardDeleteJournal ?? false
   
-  console.log(`[Rollback] شروع rollback فاکتور ${invoice.number} (id=${invoiceId}, paymentType=${pt})`)
+  console.log(`[Rollback] 🔄 شروع rollback فاکتور ${invoice.number} (paymentType=${pt}, hardDeleteJournal=${hardDeleteJournal})`)
 
-  // ── ۱. بازگشت موجودی کالا ───────────────────────────────
+  // ── ۱. حذف تراکنش‌های صندوق (بسیار مهم!) ─────────────
+  try {
+    const deletedCashMovements = await tx.cashMovement.deleteMany({
+      where: { 
+        OR: [
+          { invoiceId: invoiceId },  // برای فاکتور فروش
+          { description: { contains: invoice.number } },  // برای فاکتور خرید
+        ],
+        tenantId,
+      },
+    })
+    console.log(`[Rollback] ✅ CashMovements حذف شد: ${deletedCashMovements.count} رکورد`)
+  } catch (cashErr: any) {
+    console.warn(`[Rollback] ⚠️ CashMovement cleanup failed:`, cashErr?.message)
+  }
+
+  // ── ۲. بازگشت موجودی کالا ───────────────────────────────
   const items = await tx.purchaseInvoiceItem.findMany({
     where: { purchaseInvoiceId: invoiceId },
   })
@@ -47,7 +66,6 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     const qty = Number(item.quantity)
 
     // کاهش Product.currentStock
-    console.log(`[Rollback] کاهش Product.currentStock: productId=${item.productId}, qty=${qty}`)
     await tx.product.update({
       where: { id: item.productId },
       data: { currentStock: { decrement: qty } },
@@ -61,7 +79,6 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     if (stockLevel) {
       const remainingQty = Number(stockLevel.quantity) - qty
       const newAvgCost = remainingQty > 0 ? stockLevel.averageCost : 0
-      console.log(`[Rollback] کاهش StockLevel: productId=${item.productId}, qty=${qty} → ${remainingQty}`)
       await tx.stockLevel.update({
         where: { warehouseId_productId: { warehouseId, productId: item.productId } },
         data: { quantity: { decrement: qty }, averageCost: newAvgCost },
@@ -74,30 +91,73 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     }).catch(err => console.warn(`[Rollback] خطا در StockMovement.deleteMany:`, err?.message))
   }
 
-  // ── ۲. ابطال سند حسابداری ─────────────────────────────
-  if (invoice.journalEntryId) {
-    console.log(`[Rollback] ابطال JournalEntry: ${invoice.journalEntryId}`)
-    await tx.journalEntry.update({
-      where: { id: invoice.journalEntryId },
+  // ── ۳. مدیریت سند حسابداری ─────────────────────────────
+  // ★ v11.6.8: بر اساس حالت، سند را حذف فیزیکی یا فقط cancelled کنیم
+  if (hardDeleteJournal) {
+    // حذف فیزیکی سند (برای فاکتور پرداخت‌نشده)
+    try {
+      const journalEntries = await tx.journalEntry.findMany({
+        where: { tenantId, sourceId: invoiceId },
+        select: { id: true },
+      })
+
+      for (const je of journalEntries) {
+        // ابتدا خطوط سند را حذف می‌کنیم (به خاطر foreign key)
+        await tx.journalEntryLine.deleteMany({ 
+          where: { journalEntryId: je.id } 
+        }).catch(() => {})
+        
+        await tx.journalEntry.delete({ 
+          where: { id: je.id } 
+        }).catch(() => {})
+      }
+
+      console.log(`[Rollback] ✅ Journal Entries فیزیکی حذف شد: ${journalEntries.length} سند`)
+    } catch (jeErr: any) {
+      console.warn(`[Rollback] ⚠️ Hard delete journal failed:`, jeErr?.message)
+    }
+  } else {
+    // فقط cancelled (برای فاکتور پرداخت‌شده - حفظ حسابرسی)
+    if (invoice.journalEntryId) {
+      await tx.journalEntry.update({
+        where: { id: invoice.journalEntryId },
+        data: {
+          isCancelled: true,
+          cancelledAt: new Date(),
+          status: 'cancelled',
+          description: `ابطال شده — فاکتور خرید ${invoice.number} لغو شد`,
+        },
+      }).catch(err => console.warn(`[Rollback] خطا در JournalEntry.update:`, err?.message))
+      console.log(`[Rollback] 📋 JournalEntry ${invoice.journalEntryId} cancelled شد`)
+    }
+
+    // ابطال سندهای مرتبط (بدون journalEntryId مستقیم)
+    await tx.journalEntry.updateMany({
+      where: {
+        tenantId,
+        sourceId: invoiceId,
+        sourceType: { in: ['purchase_invoice', 'service_purchase'] },
+        status: 'posted',
+      },
       data: {
         isCancelled: true,
         cancelledAt: new Date(),
         status: 'cancelled',
-        description: `ابطال شده — فاکتور خرید ${invoice.number} حذف/ویرایش شد`,
+        description: `ابطال شده — فاکتور خرید ${invoice.number} لغو شد`,
       },
-    }).catch(err => console.warn(`[Rollback] خطا در JournalEntry.update:`, err?.message))
+    }).catch(() => {})
   }
 
-  // ── ۳. کاهش بدهی تامین‌کننده (نسیه و چک) ──────────────────
+  // ── ۴. کاهش بدهی تامین‌کننده (نسیه و چک) ──────────────────
   if ((pt === 'credit' || pt === 'check') && invoice.supplierId) {
-    console.log(`[Rollback] کاهش Supplier.currentBalance: supplierId=${invoice.supplierId}, amount=${invoice.totalAmount}`)
     await tx.supplier.update({
       where: { id: invoice.supplierId },
       data: { currentBalance: { decrement: Number(invoice.totalAmount) } },
     }).catch(err => console.warn(`[Rollback] خطا در Supplier.update:`, err?.message))
+    console.log(`[Rollback] ✓ Supplier.currentBalance -${invoice.totalAmount}`)
   }
 
-  // ── ۴. باطل کردن چک مرتبط (فقط برای چک) ──────────────────
+  // ── ۵. باطل کردن چک مرتبط (فقط برای چک) ──────────────────
   if (pt === 'check') {
     try {
       const relatedCheck = await tx.check.findFirst({
@@ -105,17 +165,22 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
       })
       if (relatedCheck) {
         if (relatedCheck.status === 'pending') {
-          // چک هنوز پاس نشده → باطل کن
-          await tx.check.update({
-            where: { id: relatedCheck.id },
-            data: {
-              status: 'cancelled',
-              description: `${relatedCheck.description || ''} [باطل شده — فاکتور ${invoice.number} حذف/ویرایش شد]`,
-            },
-          })
-          console.log(`[Rollback] ✓ چک ${relatedCheck.checkNumber} باطل شد`)
+          if (hardDeleteJournal) {
+            // حذف فیزیکی چک (برای فاکتور پرداخت‌نشده)
+            await tx.check.delete({ where: { id: relatedCheck.id } })
+            console.log(`[Rollback] ✓ چک ${relatedCheck.checkNumber} فیزیکی حذف شد`)
+          } else {
+            await tx.check.update({
+              where: { id: relatedCheck.id },
+              data: {
+                status: 'cancelled',
+                description: `${relatedCheck.description || ''} [باطل شده — فاکتور ${invoice.number} لغو شد]`,
+              },
+            })
+            console.log(`[Rollback] ✓ چک ${relatedCheck.checkNumber} باطل شد`)
+          }
         } else {
-          console.warn(`[Rollback] ⚠️ چک ${relatedCheck.checkNumber} قبلاً ${relatedCheck.status} شده — نمی‌توان باطل کرد`)
+          console.warn(`[Rollback] ⚠️ چک ${relatedCheck.checkNumber} قبلاً ${relatedCheck.status} شده`)
         }
       }
     } catch (err: any) {
@@ -123,7 +188,7 @@ async function rollbackPurchaseInvoice(tx: any, invoice: any, tenantId: string) 
     }
   }
 
-  console.log(`[Rollback] تکمیل rollback فاکتور ${invoice.number}`)
+  console.log(`[Rollback] ✅ تکمیل rollback فاکتور ${invoice.number}`)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -154,7 +219,6 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
         where: { purchaseInvoiceId: id },
         orderBy: { id: 'asc' },
       })
-      console.log(`[GET] پیدا شد ${items.length} آیتم برای فاکتور ${invoice.number}`)
     } catch (err: any) {
       console.warn(`[GET] خطا در گرفتن items:`, err?.message)
     }
@@ -228,7 +292,11 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/purchase-invoices/[id]
+//  DELETE /api/purchase-invoices/[id] (v11.6.8 - Smart Delete)
+//  ★ منطق هوشمند:
+//    - فاکتور پرداخت‌نشده → حذف فیزیکی کامل
+//    - فاکتور پرداخت‌شده → فقط لغو (حفظ حسابرسی)
+//    - force=true → حذف فیزیکی اجباری (برای ادمین)
 // ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -237,48 +305,114 @@ export const DELETE = withTenantAndPermission('accounting')(async (req: NextRequ
     const paramsObj: any = ctx.params && typeof ctx.params?.then === 'function' ? await ctx.params : ctx.params
     const id = paramsObj?.id
     const { searchParams } = new URL(req.url)
-    const hardDelete = searchParams.get('hardDelete') === 'true'
+    const force = searchParams.get('force') === 'true'
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
     }
 
-    const invoice = await tenantDb.purchaseInvoice.findFirst({ where: { id, tenantId } })
+    const invoice: any = await tenantDb.purchaseInvoice.findFirst({ 
+      where: { id, tenantId },
+      include: { items: true },
+    })
+    
     if (!invoice) {
       return NextResponse.json({ success: false, error: 'فاکتور یافت نشد' }, { status: 404 })
     }
 
-    if (invoice.status === 'cancelled') {
+    if (invoice.status === 'cancelled' && !force) {
       return NextResponse.json({ success: false, error: 'این فاکتور قبلاً لغو شده است' }, { status: 400 })
     }
 
-    const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
-    await txClient.$transaction(async (tx: any) => {
-      await rollbackPurchaseInvoice(tx, invoice, tenantId)
+    // ═══════════════════════════════════════════════════════════════
+    // منطق هوشمند: حذف کامل یا لغو؟
+    // ═══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
+// ★ v11.7.0: منطق استاندارد حسابداری
+// ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // منطق هوشمند: حذف کامل یا لغو؟
+    // ═══════════════════════════════════════════════════════════════
+    const paidAmount = Number(invoice.paidAmount || 0)
+    const isPaid = paidAmount > 0
+    
+    // ★ v11.7.0: منطق استاندارد حسابداری
+    // حذف فیزیکی فقط برای ادمین با پارامتر force
+    // همه فاکتورهای ثبت‌شده فقط لغو می‌شوند
+    const isAdmin = tenant.user?.role === 'Admin' || tenant.user?.role === 'admin'
+    const canHardDelete = force && isAdmin  // فقط ادمین با تأیید ویژه
 
-      if (hardDelete) {
-        await tx.purchaseInvoiceItem.deleteMany({ where: { purchaseInvoiceId: id } })
-        await tx.purchaseInvoice.delete({ where: { id } })
-        console.log(`[DELETE] فاکتور ${invoice.number} فیزیکی حذف شد`)
-      } else {
+    if (force && !isAdmin) {
+      return NextResponse.json({
+        success: false,
+        error: 'حذف فیزیکی فقط توسط ادمین امکان‌پذیر است',
+      }, { status: 403 })
+    }
+
+    console.log(`[DELETE] 🎯 Invoice ${invoice.number}: paidAmount=${paidAmount}, isPaid=${isPaid}, force=${force}, isAdmin=${isAdmin}, canHardDelete=${canHardDelete}`)
+
+    const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
+
+    if (canHardDelete) {
+      // ═══ حذف فیزیکی کامل ═══
+      console.log(`[DELETE] 🗑️ HARD DELETE: فاکتور ${invoice.number}`)
+
+      await txClient.$transaction(async (tx: any) => {
+        // ۱. rollback کامل با حذف فیزیکی سند
+        await rollbackPurchaseInvoice(tx, invoice, tenantId, { hardDeleteJournal: true })
+
+        // ۲. حذف آیتم‌های فاکتور
+        await tx.purchaseInvoiceItem.deleteMany({ 
+          where: { purchaseInvoiceId: id } 
+        })
+
+        // ۳. حذف خود فاکتور
+        await tx.purchaseInvoice.delete({ 
+          where: { id } 
+        })
+      })
+
+      console.log(`[DELETE] ✅ Invoice ${invoice.number} HARD DELETED`)
+
+      return NextResponse.json({
+        success: true,
+        action: 'hard_deleted',
+        message: `فاکتور ${invoice.number} به طور کامل حذف شد (فاکتور + سند حسابداری + تراکنش صندوق)`,
+      })
+
+    } else {
+      // ═══ فقط لغو (فاکتور پرداخت‌شده) ═══
+      console.log(`[DELETE] ⚠️ CANCEL ONLY: فاکتور ${invoice.number} (پرداخت‌شده)`)
+
+      await txClient.$transaction(async (tx: any) => {
+        // ۱. rollback با cancelled کردن سند (نه حذف فیزیکی)
+        await rollbackPurchaseInvoice(tx, invoice, tenantId, { hardDeleteJournal: false })
+
+        // ۲. تغییر وضعیت فاکتور به cancelled
         await tx.purchaseInvoice.update({
           where: { id },
           data: {
             status: 'cancelled',
-            description: `${invoice.description || ''}\n[لغو شده در ${new Date().toISOString()}]`,
+            description: `${invoice.description || ''}\n[لغو شده در ${new Date().toLocaleString('fa-IR')}]`,
           },
         })
-        console.log(`[DELETE] فاکتور ${invoice.number} لغو شد (soft delete)`)
-      }
-    })
+      })
 
-    return NextResponse.json({
-      success: true,
-      message: `فاکتور خرید ${invoice.number} با موفقیت لغو شد. موجودی انبار، سند حسابداری و چک مرتبط برگشت خوردند.`,
-    })
+      console.log(`[DELETE] ✅ Invoice ${invoice.number} CANCELLED (paid invoice)`)
+
+      return NextResponse.json({
+        success: true,
+        action: 'cancelled',
+        message: `فاکتور ${invoice.number} لغو شد. (چون پرداخت شده بود، برای حفظ حسابرسی حذف فیزیکی نشد ولی موجودی و چک و سند حسابداری برگشت خوردند)`,
+      })
+    }
+
   } catch (error: any) {
     console.error('[DELETE] Error:', error?.message || error)
-    return NextResponse.json({ success: false, error: error?.message || 'خطا در حذف فاکتور' }, { status: 500 })
+    return NextResponse.json({ 
+      success: false, 
+      error: error?.message || 'خطا در حذف فاکتور' 
+    }, { status: 500 })
   }
 })
 
@@ -295,7 +429,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const body = await req.json()
     const { items, supplierId, warehouseId, paymentType, description, invoiceDate, checkData } = body
 
-    console.log(`[PUT v8.9.3] شروع ویرایش فاکتور id=${id}, items=${items?.length || 0}`)
+    console.log(`[PUT v11.6.8] شروع ویرایش فاکتور id=${id}, items=${items?.length || 0}`)
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
@@ -318,10 +452,9 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       return NextResponse.json({ success: false, error: 'امکان ویرایش فاکتور لغو شده وجود ندارد' }, { status: 400 })
     }
 
-    // ★ v8.9.3: تشخیص نوع فاکتور (کالا vs خدمات)
     const invoiceType = oldInvoice.invoiceType || 'purchase'
     const isServiceInvoice = invoiceType === 'service'
-    console.log(`[PUT v8.9.3] نوع فاکتور: ${invoiceType} (isService=${isServiceInvoice})`)
+    console.log(`[PUT v11.6.8] نوع فاکتور: ${invoiceType} (isService=${isServiceInvoice})`)
 
     const warehouse = await tenantDb.warehouse.findFirst({ where: { id: warehouseId, tenantId } })
     if (!warehouse) {
@@ -356,38 +489,22 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
     const result = await txClient.$transaction(async (tx: any) => {
       // ═══════════════════════════════════════════════════
-      // ۱. rollback فاکتور قدیمی (با ابطال ایمن سند)
+      // ۱. rollback فاکتور قدیمی
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT v8.9.3] مرحله ۱: rollback فاکتور قدیمی`)
-      await rollbackPurchaseInvoice(tx, oldInvoice, tenantId)
-      
-      // ★ v8.9.3: ابطال ایمن سندهای مرتبط (حتی اگر journalEntryId ست نشده)
-      await tx.journalEntry.updateMany({
-        where: {
-          tenantId,
-          sourceId: id,
-          sourceType: { in: ['purchase_invoice', 'service_purchase'] },
-          status: 'posted',
-        },
-        data: {
-          isCancelled: true,
-          cancelledAt: new Date(),
-          status: 'cancelled',
-          description: `ابطال شده — فاکتور ${oldInvoice.number} ویرایش شد`,
-        },
-      })
-      console.log(`[PUT v8.9.3] ✓ سندهای قدیمی ابطال شدند`)
+      console.log(`[PUT v11.6.8] مرحله ۱: rollback فاکتور قدیمی`)
+      // برای ویرایش، سند را cancelled می‌کنیم (نه حذف فیزیکی) چون فاکتور قبلاً وجود دارد
+      await rollbackPurchaseInvoice(tx, oldInvoice, tenantId, { hardDeleteJournal: false })
 
       // ═══════════════════════════════════════════════════
       // ۲. حذف آیتم‌های قدیمی
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT v8.9.3] مرحله ۲: حذف آیتم‌های قدیمی`)
+      console.log(`[PUT v11.6.8] مرحله ۲: حذف آیتم‌های قدیمی`)
       await tx.purchaseInvoiceItem.deleteMany({ where: { purchaseInvoiceId: id } })
 
       // ═══════════════════════════════════════════════════
       // ۳. به‌روزرسانی فاکتور
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT v8.9.3] مرحله ۳: به‌روزرسانی فاکتور`)
+      console.log(`[PUT v11.6.8] مرحله ۳: به‌روزرسانی فاکتور`)
       await tx.purchaseInvoice.update({
         where: { id },
         data: {
@@ -403,19 +520,17 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           remainingAmount,
           description: description || null,
           status: 'confirmed',
-          journalEntryId: null,  // پاک می‌شود، سند جدید ساخته می‌شود
+          journalEntryId: null,
         },
       })
 
       // ═══════════════════════════════════════════════════
       // ۴. ایجاد آیتم‌های جدید + مدیریت موجودی (فقط برای کالا)
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT v8.9.3] مرحله ۴: ایجاد ${invoiceItems.length} آیتم جدید`)
+      console.log(`[PUT v11.6.8] مرحله ۴: ایجاد ${invoiceItems.length} آیتم جدید`)
       
-      // ★ v8.9.3: فقط برای فاکتور کالا، موجودی تغییر می‌کند
       for (let i = 0; i < invoiceItems.length; i++) {
         const item = invoiceItems[i]
-        console.log(`[PUT v8.9.3] آیتم ${i + 1}/${invoiceItems.length}: productId=${item.productId}, qty=${item.quantity}`)
 
         await tx.purchaseInvoiceItem.create({
           data: {
@@ -430,7 +545,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           },
         })
 
-        // ★ v8.9.3: فقط برای فاکتور کالا، موجودی تغییر می‌کند
         if (item.productId && !isServiceInvoice) {
           const stockLevel = await tx.stockLevel.findUnique({
             where: { warehouseId_productId: { warehouseId, productId: item.productId } },
@@ -487,37 +601,29 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       }
 
       // ═══════════════════════════════════════════════════
-      // ★ v8.9.3: ایجاد سند حسابداری جدید (منطق متفاوت برای کالا و خدمات)
+      // ۵. ایجاد سند حسابداری جدید
       // ═══════════════════════════════════════════════════
-      console.log(`[PUT v8.9.3] مرحله ۵: ایجاد سند حسابداری جدید`)
+      console.log(`[PUT v11.6.8] مرحله ۵: ایجاد سند حسابداری جدید`)
       try {
-        const accIds = await getStandardAccountIds(tenantId)
-        const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-        const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+     const accIds = await getStandardAccountIds(tenantId)
+// ★ v11.7.1: تولید شماره منحصر به فرد سند (جلوگیری از تکرار)
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log(`[PUT v11.7.1] 📝 Generated journal number: ${jeNumber}`)
         const lines: any[] = []
         const netAmount = subTotal - discountAmount
 
-        // ★ v8.9.3: منطق متفاوت برای فاکتور خدمات و کالا
-      if (isServiceInvoice) {
-  console.log(`[PUT v8.9.3] → فاکتور خدماتی - استفاده از حساب هزینه`)
-  
-  // ★ v8.9.3: تشخیص نوع خدمات از description
-  const serviceCategory = oldInvoice.description?.includes('تعمیرات') ? 'repair' : 'service'
-  
-  // ★ v8.9.3: جستجوی مستقیم حساب هزینه از دیتابیس
-  const accounts = await tx.account.findMany({ 
-    where: { tenantId, isActive: true },
-    select: { id: true, code: true, name: true }
-  })
-  
-  const expenseAccountId = serviceCategory === 'repair' 
-    ? accounts.find((a: any) => a.code === '5160')?.id  // هزینه تعمیرات
-    : accounts.find((a: any) => a.code === '5170')?.id  // هزینه خدمات
-  
-  if (!expenseAccountId) {
-    console.warn(`[PUT v8.9.3] ⚠️ حساب هزینه ${serviceCategory === 'repair' ? '5160' : '5170'} یافت نشد!`)
-  }
-
+        if (isServiceInvoice) {
+          const serviceCategory = oldInvoice.description?.includes('تعمیرات') ? 'repair' : 'service'
+          
+          const accounts = await tx.account.findMany({ 
+            where: { tenantId, isActive: true },
+            select: { id: true, code: true, name: true }
+          })
+          
+          const expenseAccountId = serviceCategory === 'repair' 
+            ? accounts.find((a: any) => a.code === '5160')?.id
+            : accounts.find((a: any) => a.code === '5170')?.id
+          
           if (expenseAccountId) {
             lines.push({
               accountId: expenseAccountId,
@@ -527,9 +633,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
             })
           }
         } else {
-          // ══════ فاکتور خرید کالا ══════
-          console.log(`[PUT v8.9.3] → فاکتور کالایی - استفاده از حساب موجودی کالا`)
-          
           if (accIds.inventoryAccountId) {
             lines.push({
               accountId: accIds.inventoryAccountId,
@@ -540,7 +643,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           }
         }
 
-        // بدهکار: مالیات (مشترک)
         const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
         if (taxAmount > 0 && vatAccountId) {
           lines.push({
@@ -551,7 +653,6 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           })
         }
 
-        // بستانکار — بر اساس روش پرداخت (مشترک)
         const cashAccountId = accIds.cashAccountId
         const payableAccountId = accIds.tradePurchasableId || accIds.payablesAccountId
         const checkPayableAccountId = accIds.checkPayableAccountId || (accIds as any).checkPayableId
@@ -604,14 +705,14 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
             data: { journalEntryId: journalEntry.id },
           })
 
-          console.log(`[PUT v8.9.3] ✓ سند جدید ایجاد شد: ${jeNumber} (${isServiceInvoice ? 'خدماتی' : 'کالایی'})`)
+          console.log(`[PUT v11.6.8] ✓ سند جدید ایجاد شد: ${jeNumber}`)
         }
       } catch (jeErr: any) {
-        console.warn(`[PUT v8.9.3] Auto journal entry failed:`, jeErr?.message)
+        console.warn(`[PUT v11.6.8] Auto journal entry failed:`, jeErr?.message)
       }
 
       // ═══════════════════════════════════════════════════
-      // ۶. به‌روزرسانی Supplier و Check (بدون تغییر)
+      // ۶. به‌روزرسانی Supplier و Check
       // ═══════════════════════════════════════════════════
       if (isCreditOrCheck && supplierId) {
         try {
@@ -619,9 +720,8 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
             where: { id: supplierId },
             data: { currentBalance: { increment: totalAmount } },
           })
-          console.log(`[PUT v8.9.3] ✓ Supplier.currentBalance +${totalAmount}`)
         } catch (supErr: any) {
-          console.warn(`[PUT v8.9.3] Supplier balance update failed:`, supErr?.message)
+          console.warn(`[PUT v11.6.8] Supplier balance update failed:`, supErr?.message)
         }
       }
 
@@ -677,10 +777,10 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
           }
         }
       } catch (checkErr: any) {
-        console.warn(`[PUT v8.9.3] Check handling failed:`, checkErr?.message)
+        console.warn(`[PUT v11.6.8] Check handling failed:`, checkErr?.message)
       }
 
-      console.log(`[PUT v8.9.3] ✓ ویرایش کامل شد`)
+      console.log(`[PUT v11.6.8] ✓ ویرایش کامل شد`)
       return await tx.purchaseInvoice.findUnique({ where: { id } })
     })
 
@@ -690,7 +790,7 @@ export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest
       message: `فاکتور ${oldInvoice.number} با موفقیت ویرایش شد`,
     })
   } catch (error: any) {
-    console.error('[PUT v8.9.3] Error:', error?.message || error)
+    console.error('[PUT v11.6.8] Error:', error?.message || error)
     return NextResponse.json({ success: false, error: error?.message || 'خطا در ویرایش فاکتور' }, { status: 500 })
   }
 })

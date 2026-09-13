@@ -12,6 +12,8 @@ import {
   ensureDefaultAccounts,
   getStandardAccountIds,
 } from '@/lib/accounts-auto-seed'
+
+import { generateJournalNumber } from '@/lib/journal-number-generator'
 import { syncOpeningBalanceWithInventory } from '@/lib/sync-opening-balance'
 
 // ★ v8.9.3: جلوگیری از کش Next.js (علت اصلی عدم نمایش بعد از رفرش)
@@ -223,8 +225,9 @@ async function createPurchaseAutoJournalEntry(
       console.log('[PurchaseJE] ⏭️ Skipped: totalAmount <= 0')
       return
     }
-    const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-    const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+  // ★ v11.7.1: تولید شماره منحصر به فرد سند (جلوگیری از تکرار)
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[PurchaseJE] 📝 Generated journal number:', jeNumber)
     const lines: any[] = []
     const pt = (paymentType || 'cash').toLowerCase()
     const isCreditOrCheck = pt === 'credit' || pt === 'check'
@@ -331,6 +334,7 @@ export const POST = withTenantAndPermission('accounting')(
           { status: 400 }
         )
       }
+
       if (!warehouseId) {
         return NextResponse.json(
           { success: false, error: 'انتخاب انبار الزامی است' },
@@ -487,7 +491,7 @@ export const POST = withTenantAndPermission('accounting')(
         console.warn('[PurchaseInvoice POST] Auto journal failed (non-blocking):', jeErr?.message)
       }
 
-            // ═══════════════════════════════════════════════════════════════
+      // ═══════════════════════════════════════════════════════════════
       // ★ v11.0: همگام‌سازی سند افتتاحیه با موجودی جدید
       // ═══════════════════════════════════════════════════════════════
       syncOpeningBalanceWithInventory(tenantId, tenantDb)
@@ -543,6 +547,44 @@ export const POST = withTenantAndPermission('accounting')(
           createdCheck = { error: true, errorMessage: checkErr?.message, errorCode: checkErr?.code, errorMeta: checkErr?.meta }
         }
       }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v11.6.3: ثبت خودکار تراکنش خروجی صندوق (فاکتور خرید نقدی)
+      // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش خروجی صندوق (بدون shiftId)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش خروجی صندوق
+// ═══════════════════════════════════════════════════════════════
+try {
+  const cashierId = tenant.user?.id || null
+  
+  if (paidAmount > 0 && pt === 'cash' && cashierId) {
+    await (tenantDb as any).cashMovement.create({
+      data: {
+        shiftId: null,  // ★ موقتاً null
+        tenantId,
+        cashierId,
+        transactionType: 'purchase',
+        paymentMethod: 'cash',
+        amount: paidAmount,
+        type: 'out',
+        description: `خرید فاکتور ${invoiceNumber}`,
+      },
+    })
+    
+    console.log('[PurchaseInvoice POST] ✅ CashMovement created:', {
+      type: 'purchase',
+      amount: paidAmount,
+      cashierId,
+      invoiceNumber,
+    })
+  }
+} catch (cashErr: any) {
+  console.warn('[PurchaseInvoice POST] ⚠️ CashMovement creation failed:', cashErr?.message)
+}
+      // ═══════════════════════════════════════════════════════════════
 
       return NextResponse.json({
         success: true,

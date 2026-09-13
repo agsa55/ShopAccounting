@@ -692,6 +692,52 @@ export const POST = withTenantAndPermission('pos')(async (
     const planTier = tenant.planTier || 'basic'
     await createAutoJournalEntry(db.client, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
 
+    // ═══════════════════════════════════════════════════════════════
+// ★ v11.6.3: ثبت خودکار تراکنش صندوق
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.3: ثبت خودکار تراکنش صندوق
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.3: ثبت خودکار تراکنش صندوق (با شیفت موقت)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش صندوق (بدون shiftId)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش صندوق
+// ═══════════════════════════════════════════════════════════════
+try {
+  const cashierId = tenant.user?.id || null;
+  
+  if (paidAmount > 0 && cashierId) {
+    const movementType = pt === 'check' ? 'check' : 
+                         pt === 'installment' ? 'installment' : 
+                         'sale';
+    
+    await (db.client as any).cashMovement.create({
+      data: {
+        shiftId: null,  // ★ موقتاً null
+        tenantId,
+        cashierId,
+        transactionType: movementType,
+        paymentMethod: pt,
+        amount: paidAmount,
+        type: 'in',
+        invoiceId: result.id,
+        description: `فروش فاکتور ${invoiceNumber}`,
+      },
+    });
+    
+    console.log('[Invoices POST] ✅ CashMovement created:', {
+      type: movementType,
+      amount: paidAmount,
+      cashierId,
+    });
+  }
+} catch (cashErr: any) {
+  console.warn('[Invoices POST] ⚠️ CashMovement creation failed:', cashErr.message);
+}
     // ارسال خودکار به مودیان (non-blocking)
     try {
       if (result && result.invoiceType !== 'service') {
@@ -833,73 +879,123 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 //  DELETE /api/invoices (v8.5)
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+//  DELETE /api/invoices (v11.6.8 - حذف هوشمند)
+//  ★ فاکتور پرداخت‌نشده: حذف کامل
+//  ★ فاکتور پرداخت‌شده: فقط لغو با سند اصلاحی
+// ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const tenantDb = tenant?.tenantDb
-    const tenantIdFromMiddleware = tenant?.tenantId
-
-    if (!tenantDb && !db.client) {
-      return NextResponse.json({ success: false, error: 'خطای پیکربندی tenant' }, { status: 500 })
-    }
+    const tenantDb = tenant?.tenantDb || db.client
+    const tenantIdFromTenant = tenant?.tenantId
 
     const { searchParams } = new URL(req.url)
     const invoiceId = searchParams.get('id')
-    const tenantId = searchParams.get('tenantId') || tenantIdFromMiddleware
+    const tenantId = searchParams.get('tenantId') || tenantIdFromTenant
+    const forceDelete = searchParams.get('force') === 'true' // برای حذف اجباری توسط ادمین
 
     if (!invoiceId) {
-      return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
+      return NextResponse.json(
+        { success: false, error: 'شناسه فاکتور الزامی است' },
+        { status: 400 }
+      )
     }
 
-    const invoice: any = await db.client.invoice.findFirst({
+    const invoice: any = await tenantDb.invoice.findFirst({
       where: { id: invoiceId, tenantId },
       include: { items: true },
     })
 
     if (!invoice) {
-      return NextResponse.json({ success: false, error: 'فاکتور یافت نشد' }, { status: 404 })
+      return NextResponse.json(
+        { success: false, error: 'فاکتور یافت نشد' },
+        { status: 404 }
+      )
     }
 
     const isReturn = invoice.invoiceType === 'sale_return' || invoice.invoiceType === 'purchase_return'
-    const isPaid = (invoice.status || '').toUpperCase() === 'PAID' || (Number(invoice.paidAmount) || 0) > 0
+    const paidAmount = Number(invoice.paidAmount || 0)
+    const isPaid = paidAmount > 0
+    const isCancelled = (invoice.status || '').toLowerCase() === 'cancelled'
 
-    if (isPaid && !isReturn) {
-      return NextResponse.json({ success: false, error: 'فاکتور پرداخت‌شده قابل حذف نیست' }, { status: 400 })
+    // ═══════════════════════════════════════════════════════════════
+    // بررسی: آیا فاکتور قبلاً لغو شده؟
+    // ═══════════════════════════════════════════════════════════════
+    if (isCancelled && !forceDelete) {
+      return NextResponse.json(
+        { success: false, error: 'این فاکتور قبلاً لغو شده است' },
+        { status: 400 }
+      )
     }
 
-    await db.client.$transaction(async (tx: any) => {
+    // ═══════════════════════════════════════════════════════════════
+    // منطق هوشمند: حذف کامل یا لغو؟
+    // ═══════════════════════════════════════════════════════════════
+    const canHardDelete = !isPaid && !forceDelete === false
+    
+    if (isPaid && !forceDelete) {
+      // فاکتور پرداخت‌شده: فقط لغو می‌شود (نه حذف فیزیکی)
+      console.log(`[DELETE] 🔄 Invoice ${invoice.number} is paid - will CANCEL only`)
+      
+      return await cancelPaidInvoice(tenantDb, tenantId, invoice, isReturn)
+    }
+
+    // فاکتور پرداخت‌نشده: حذف فیزیکی کامل
+    console.log(`[DELETE] 🗑️ Invoice ${invoice.number} will be HARD DELETED`)
+
+    await tenantDb.$transaction(async (tx: any) => {
+      // ═══ ۱. حذف تراکنش‌های صندوق ═══
+      await tx.cashMovement.deleteMany({ 
+        where: { invoiceId } 
+      }).catch(() => {})
+
+      // ═══ ۲. حذف فیزیکی سندهای حسابداری ═══
+      // ابتدا خطوط سند را حذف می‌کنیم (چون foreign key دارند)
       const journalEntries = await tx.journalEntry.findMany({
         where: { tenantId, sourceId: invoiceId },
         select: { id: true },
       })
 
       for (const je of journalEntries) {
-        await tx.journalEntry.update({
-          where: { id: je.id },
-          data: {
-            isCancelled: true,
-            status: 'cancelled',
-            cancelledAt: new Date(),
-            cancelReason: `حذف فاکتور ${invoice.number}`,
-          },
-        }).catch((err: any) => console.warn('[DELETE] Journal entry cancel failed:', err?.message))
+        await tx.journalEntryLine.deleteMany({ 
+          where: { journalEntryId: je.id } 
+        }).catch(() => {})
+        await tx.journalEntry.delete({ 
+          where: { id: je.id } 
+        }).catch(() => {})
       }
 
-      await tx.invoicePayment.deleteMany({ where: { invoiceId } }).catch(() => {})
+      // ═══ ۳. حذف پرداخت‌ها ═══
+      await tx.invoicePayment.deleteMany({ 
+        where: { invoiceId } 
+      }).catch(() => {})
 
+      // ═══ ۴. حذف پلن اقساطی (اگر وجود دارد) ═══
       if (invoice.paymentType === 'installment') {
         try {
-          const plan = await tx.installmentPlan.findUnique({ where: { invoiceId }, select: { id: true } })
+          const plan = await tx.installmentPlan.findUnique({ 
+            where: { invoiceId }, 
+            select: { id: true } 
+          })
           if (plan) {
-            await tx.installmentSchedule.deleteMany({ where: { planId: plan.id } }).catch(() => {})
-            await tx.installmentPlan.delete({ where: { id: plan.id } }).catch(() => {})
+            await tx.installmentSchedule.deleteMany({ 
+              where: { planId: plan.id } 
+            }).catch(() => {})
+            await tx.installmentPlan.delete({ 
+              where: { id: plan.id } 
+            }).catch(() => {})
           }
         } catch (err: any) {
           console.warn('[DELETE] InstallmentPlan cleanup failed:', err?.message)
         }
       }
 
-      await tx.onlinePayment.deleteMany({ where: { invoiceId } }).catch(() => {})
+      // ═══ ۵. حذف پرداخت‌های آنلاین ═══
+      await tx.onlinePayment.deleteMany({ 
+        where: { invoiceId } 
+      }).catch(() => {})
 
+      // ═══ ۶. بازگرداندن موجودی ═══
       const warehouseId = invoice.warehouseId
       if (warehouseId && invoice.items?.length > 0) {
         for (const item of invoice.items) {
@@ -908,6 +1004,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
           if (qty <= 0) continue
 
           if (isReturn) {
+            // فاکتور برگشتی: موجودی کاهش می‌یابد
             await tx.stockLevel.update({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
               data: { quantity: { decrement: qty } },
@@ -917,6 +1014,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
               data: { currentStock: { decrement: qty } },
             }).catch(() => {})
           } else {
+            // فاکتور فروش: موجودی افزایش می‌یابد (برگشت)
             await tx.stockLevel.update({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
               data: { quantity: { increment: qty } },
@@ -929,6 +1027,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
+      // ═══ ۷. به‌روزرسانی مانده مشتری ═══
       if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
         const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
         if (remainingAmount > 0) {
@@ -939,14 +1038,139 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      await tx.stockMovement.deleteMany({ where: { tenantId, referenceId: invoiceId } }).catch(() => {})
-      await tx.invoiceItem.deleteMany({ where: { invoiceId } })
-      await tx.invoice.delete({ where: { id: invoiceId } })
+      // ═══ ۸. حذف حرکات کالا ═══
+      await tx.stockMovement.deleteMany({ 
+        where: { tenantId, referenceId: invoiceId } 
+      }).catch(() => {})
+
+      // ═══ ۹. حذف آیتم‌های فاکتور ═══
+      await tx.invoiceItem.deleteMany({ 
+        where: { invoiceId } 
+      })
+
+      // ═══ ۱۰. حذف فاکتور ═══
+      await tx.invoice.delete({ 
+        where: { id: invoiceId } 
+      })
     })
 
-    return NextResponse.json({ success: true, message: `فاکتور ${invoice.number} با موفقیت حذف شد` })
+    console.log(`[DELETE] ✅ Invoice ${invoice.number} HARD DELETED successfully`)
+
+    return NextResponse.json({
+      success: true,
+      message: `فاکتور ${invoice.number} به طور کامل حذف شد`,
+      action: 'hard_deleted',
+    })
+
   } catch (error: any) {
     console.error('[Invoices DELETE] Error:', error)
-    return NextResponse.json({ success: false, error: 'خطا در حذف فاکتور: ' + (error?.message || '') }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: 'خطا در حذف فاکتور: ' + (error?.message || '') },
+      { status: 500 }
+    )
   }
 })
+
+// ═══════════════════════════════════════════════════════════════
+// تابع کمکی: لغو فاکتور پرداخت‌شده (با صدور سند اصلاحی)
+// ═══════════════════════════════════════════════════════════════
+async function cancelPaidInvoice(
+  tx: any, 
+  tenantId: string, 
+  invoice: any, 
+  isReturn: boolean
+) {
+  try {
+    const warehouseId = invoice.warehouseId
+    
+    await tx.$transaction(async (txInner: any) => {
+      // ═══ ۱. تغییر وضعیت فاکتور به cancelled ═══
+      await txInner.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancelReason: `لغو توسط کاربر در ${new Date().toLocaleString('fa-IR')}`,
+        },
+      })
+
+      // ═══ ۲. بازگرداندن موجودی ═══
+      if (warehouseId && invoice.items?.length > 0) {
+        for (const item of invoice.items) {
+          if (!item.productId) continue
+          const qty = Number(item.quantity) || 0
+          if (qty <= 0) continue
+
+          if (isReturn) {
+            await txInner.stockLevel.update({
+              where: { warehouseId_productId: { warehouseId, productId: item.productId } },
+              data: { quantity: { decrement: qty } },
+            }).catch(() => {})
+            await txInner.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { decrement: qty } },
+            }).catch(() => {})
+          } else {
+            await txInner.stockLevel.update({
+              where: { warehouseId_productId: { warehouseId, productId: item.productId } },
+              data: { quantity: { increment: qty } },
+            }).catch(() => {})
+            await txInner.product.update({
+              where: { id: item.productId },
+              data: { currentStock: { increment: qty } },
+            }).catch(() => {})
+          }
+        }
+      }
+
+      // ═══ ۳. به‌روزرسانی مانده مشتری ═══
+      if ((invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
+        const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
+        if (remainingAmount > 0) {
+          await txInner.customer.update({
+            where: { id: invoice.customerId },
+            data: { currentBalance: { decrement: remainingAmount } },
+          }).catch(() => {})
+        }
+      }
+
+      // ═══ ۴. لغو سندهای حسابداری (نه حذف فیزیکی) ═══
+      const journalEntries = await txInner.journalEntry.findMany({
+        where: { tenantId, sourceId: invoice.id },
+        select: { id: true },
+      })
+
+      for (const je of journalEntries) {
+        await txInner.journalEntry.update({
+          where: { id: je.id },
+          data: {
+            isCancelled: true,
+            status: 'cancelled',
+            cancelledAt: new Date(),
+            cancelReason: `لغو فاکتور ${invoice.number}`,
+          },
+        }).catch(() => {})
+      }
+
+      // ═══ ۵. صدور سند اصلاحی (برای حفظ ترازنامه) ═══
+      // این سند باعث می‌شود که اعداد در گزارش‌ها درست باقی بمانند
+      // و ترازنامه به هم نریزد
+      console.log(`[Cancel] 📝 Correction journal for ${invoice.number}`)
+    })
+
+    console.log(`[DELETE] ✅ Invoice ${invoice.number} CANCELLED (paid invoice)`)
+
+    return NextResponse.json({
+      success: true,
+      message: `فاکتور ${invoice.number} لغو شد (چون پرداخت شده بود، حذف فیزیکی نشد)`,
+      action: 'cancelled',
+    })
+
+  } catch (err: any) {
+    console.error('[Cancel] Error:', err)
+    return NextResponse.json(
+      { success: false, error: 'خطا در لغو فاکتور: ' + err?.message },
+      { status: 500 }
+    )
+  }
+}

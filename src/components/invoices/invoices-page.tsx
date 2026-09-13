@@ -1686,52 +1686,121 @@ const handleReturnClick = async (invoice: Invoice) => {
     )
   }
 
+   // ═══════════════════════════════════════════════════════════════
+  // ★ v11.7.0: مودال لغو/حذف فاکتور
+  // - عنوان و متن بر اساس وضعیت فاکتور تغییر می‌کند
+  // - لیست عملیات انجام‌شده نمایش داده می‌شود
   // ═══════════════════════════════════════════════════════════════
-  // Render: Delete Dialog
-  // ═══════════════════════════════════════════════════════════════
+  const renderDeleteDialog = () => {
+    const inv = invoiceToDelete
+    if (!inv) return null
 
-  const renderDeleteDialog = () => (
-    <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-      <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl" dir="rtl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm sm:text-base text-red-600">
-            <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />تایید حذف فاکتور
-          </DialogTitle>
-          <DialogDescription className="text-xs sm:text-sm">
-            {invoiceToDelete?._isOffline
-              ? 'این فاکتور آفلاین است. با تأیید، از حافظه محلی حذف و از صف همگام‌سازی خارج می‌شود.'
-              : !isOnline
-                ? 'شما آفلاین هستید. این فاکتور برای حذف در صف قرار می‌گیرد و پس از اتصال به اینترنت حذف واقعی انجام می‌شود.'
-                : 'آیا از حذف این فاکتور اطمینان دارید؟ این عمل قابل بازگشت نیست.'}
-          </DialogDescription>
-        </DialogHeader>
+    const isPaidInvoice = Number(inv.paidAmount || 0) > 0
+    const isReturnInvoice = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
+    const willHardDelete = isReturnInvoice || !isPaidInvoice
 
-        {invoiceToDelete && (
+    return (
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base text-red-600">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
+              {inv._isOffline
+                ? 'حذف فاکتور آفلاین'
+                : willHardDelete
+                  ? 'تایید لغو/حذف فاکتور'
+                  : 'تایید لغو فاکتور'}
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {inv._isOffline
+                ? 'این فاکتور آفلاین است. با تأیید، از حافظه محلی حذف و از صف همگام‌سازی خارج می‌شود.'
+                : !isOnline
+                  ? 'شما آفلاین هستید. این فاکتور برای لغو/حذف در صف قرار می‌گیرد و پس از اتصال به اینترنت عملیات واقعی انجام می‌شود.'
+                  : willHardDelete
+                    ? 'با تأیید، فاکتور لغو و از لیست حذف می‌شود. موجودی، تراکنش صندوق و اسناد حسابداری به‌صورت خودکار برگشت می‌خورند.'
+                    : 'این فاکتور پرداخت‌شده است و برای حفظ حسابرسی، حذف فیزیکی نمی‌شود. با تأیید، فاکتور لغو شده و موجودی، تراکنش صندوق و چک‌ها برگشت می‌خورند.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* ═══ جزئیات فاکتور ═══ */}
           <div className="space-y-3 mt-2">
             <Card>
               <CardContent className="p-3 space-y-2">
                 {[
-                  { label: 'شماره فاکتور', value: <span className="font-mono font-bold">{invoiceToDelete.invoiceNumber || invoiceToDelete.number}</span> },
-                  { label: 'مشتری', value: invoiceToDelete.customerName || 'فروش عمومی' },
-                  { label: 'مبلغ', value: <span className="font-bold text-red-600">{formatCurrency(invoiceToDelete.totalAmount)}</span> },
+                  { label: 'شماره فاکتور', value: <span className="font-mono font-bold">{inv.invoiceNumber || inv.number}</span> },
+                  { label: 'مشتری', value: inv.customerName || 'فروش عمومی' },
+                  { label: 'مبلغ', value: <span className="font-bold text-red-600">{formatCurrency(inv.totalAmount)}</span> },
+                  { label: 'پرداخت شده', value: <span className={isPaidInvoice ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(inv.paidAmount || 0)}</span> },
                 ].map((item, i) => (
-                  <div key={i} className="flex justify-between text-xs sm:text-sm"><span className="text-gray-500">{item.label}</span><span>{item.value}</span></div>
+                  <div key={i} className="flex justify-between text-xs sm:text-sm">
+                    <span className="text-gray-500">{item.label}</span>
+                    <span>{item.value}</span>
+                  </div>
                 ))}
               </CardContent>
             </Card>
+
+            {/* ═══ لیست عملیات انجام‌شده ═══ */}
+            {!inv._isOffline && isOnline && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 space-y-1">
+                <p className="font-bold">عملیات انجام‌شده:</p>
+                <ul className="list-disc list-inside space-y-0.5 mr-2">
+                  {willHardDelete ? (
+                    <>
+                      <li>فاکتور به طور کامل حذف می‌شود</li>
+                      <li>سند حسابداری حذف می‌شود</li>
+                      <li>تراکنش صندوق حذف می‌شود</li>
+                      {isReturnInvoice && <li>چک‌های مرتبط حذف می‌شوند</li>}
+                      {(inv.paymentType === 'credit' || inv.paymentType === 'installment' || inv.paymentType === 'check') && (
+                        <li>مانده مشتری به‌روزرسانی می‌شود</li>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <li>فاکتور لغو می‌شود (در لیست باقی می‌ماند)</li>
+                      <li>موجودی کالا برگشت می‌خورد</li>
+                      <li>تراکنش صندوق حذف می‌شود</li>
+                      <li>سند حسابداری باطل می‌شود</li>
+                      {inv.paymentType === 'check' && <li>چک‌های دریافتنی باطل می‌شوند</li>}
+                    </>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
-        )}
 
-        <DialogFooter className="flex-row gap-2">
-          <Button variant="outline" className="flex-1" onClick={() => { setDeleteDialogOpen(false); setInvoiceToDelete(null) }} disabled={deleting}>انصراف</Button>
-          <Button className="flex-1 bg-red-600 hover:bg-red-700 gap-1.5" onClick={handleDeleteConfirm} disabled={deleting}>
-            {deleting ? <><Loader2 className="w-4 h-4 animate-spin" />در حال پردازش...</> : <><Trash2 className="w-4 h-4" />{!isOnline && !invoiceToDelete?._isOffline ? 'ثبت در صف حذف' : 'حذف فاکتور'}</>}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-
+          <DialogFooter className="flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => { setDeleteDialogOpen(false); setInvoiceToDelete(null) }}
+              disabled={deleting}
+            >
+              انصراف
+            </Button>
+            <Button
+              className="flex-1 bg-red-600 hover:bg-red-700 gap-1.5"
+              onClick={handleDeleteConfirm}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />در حال پردازش...</>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  {!isOnline && !inv._isOffline
+                    ? 'ثبت در صف حذف'
+                    : willHardDelete
+                      ? 'حذف فاکتور'
+                      : 'بله، لغو کن'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
   // ═══════════════════════════════════════════════════════════════
   // ★ v9.2.0: Render: Return Dialog — رفع باگ محاسبه مبلغ
   // ═══════════════════════════════════════════════════════════════
@@ -2072,7 +2141,7 @@ const hasSelectedItems = returnItems.some(item => item.quantity > 0)
                 ))}
               </div>
 
-              <div className="hidden md:block">
+                       <div className="hidden md:block">
                 <Card>
                   <CardContent className="p-0">
                     <div className="overflow-x-auto" dir="rtl">
@@ -2134,6 +2203,7 @@ const hasSelectedItems = returnItems.some(item => item.quantity > 0)
                                 <TableCell className="text-xs hidden lg:table-cell">{formatDateShort(inv.createdAt)}</TableCell>
                                 <TableCell>
                                   <div className="flex items-center justify-center gap-0.5" onClick={e => e.stopPropagation()}>
+                                    {/* ═══ دکمه مشاهده ═══ */}
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-sky-50 hover:text-sky-600" onClick={() => handleViewDetail(inv)}>
@@ -2143,6 +2213,7 @@ const hasSelectedItems = returnItems.some(item => item.quantity > 0)
                                       <TooltipContent side="top">مشاهده جزئیات</TooltipContent>
                                     </Tooltip>
 
+                                    {/* ═══ دکمه پرداخت نسیه ═══ */}
                                     {(inv.paymentType || '').toLowerCase() === 'credit' && !isPaid && !isCancelled && remaining > 0 && (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
@@ -2154,6 +2225,7 @@ const hasSelectedItems = returnItems.some(item => item.quantity > 0)
                                       </Tooltip>
                                     )}
 
+                                    {/* ═══ دکمه برگشتی ═══ */}
                                     {inv.invoiceType !== 'service' && !isReturn && !isCancelled && (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
@@ -2165,29 +2237,31 @@ const hasSelectedItems = returnItems.some(item => item.quantity > 0)
                                       </Tooltip>
                                     )}
 
-                                    {(planFeatures.canDeleteInvoice || isReturn) ? (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
-                                            onClick={() => handleDeleteClick(inv)}
-                                            disabled={(isPaid && !isReturn) || isCancelled || inv._offlineAction === 'delete'}
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top">حذف فاکتور</TooltipContent>
-                                      </Tooltip>
-                                    ) : (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <button className="flex items-center justify-center h-7 w-7 rounded-md text-gray-300"
-                                            onClick={() => toast({ title: 'دسترسی محدود', description: 'حذف فاکتور فقط در پلن حرفه‌ای در دسترس است' })}>
-                                            <Lock className="w-3.5 h-3.5" />
-                                          </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top">ارتقا پلن</TooltipContent>
-                                      </Tooltip>
-                                    )}
+                                    {/* ═══════════════════════════════════════════════════════════════
+                                        ★ v11.7.0: دکمه لغو/حذف فاکتور
+                                        - برای همه فاکتورها فعال است
+                                        - حذف فیزیکی فقط توسط ادمین با پارامتر force
+                                        ═══════════════════════════════════════════════════════════════ */}
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
+                                          onClick={() => handleDeleteClick(inv)}
+                                          disabled={isCancelled || inv._offlineAction === 'delete'}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top">
+                                        {isCancelled
+                                          ? 'فاکتور لغو شده'
+                                          : isPaid && !isReturn
+                                            ? 'لغو فاکتور (پرداخت‌شده)'
+                                            : 'لغو/حذف فاکتور'}
+                                      </TooltipContent>
+                                    </Tooltip>
                                   </div>
                                 </TableCell>
                               </TableRow>

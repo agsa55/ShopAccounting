@@ -369,6 +369,38 @@ console.log('[Service Purchase] 📝 Generated journal number:', jeNumber)
       return inv
     })
 
+        // ═══════════════════════════════════════════════════════════════
+    // ★ v11.6.5: ثبت خودکار تراکنش خروجی صندوق (خرید خدمات/تعمیرات)
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      const cashierId = userId || null
+      
+      // فقط اگر فاکتور نقدی باشد (نه نسیه)
+      if (paidAmount > 0 && !isCredit && cashierId) {
+        await (txClient as any).cashMovement.create({
+          data: {
+            shiftId: null,
+            tenantId,
+            cashierId,
+            transactionType: serviceCategory === 'repair' ? 'repair' : 'service',
+            paymentMethod: 'cash',
+            amount: paidAmount,
+            type: 'out',  // ← خروج از صندوق
+            description: `${categoryLabel} فاکتور ${invoiceNumber}${serviceDevice ? ' — ' + serviceDevice : ''}`,
+          },
+        })
+        
+        console.log('[Service Purchase] ✅ CashMovement created:', {
+          type: serviceCategory,
+          amount: paidAmount,
+          cashierId,
+          invoiceNumber,
+        })
+      }
+    } catch (cashErr: any) {
+      console.warn('[Service Purchase] ⚠️ CashMovement creation failed:', cashErr?.message)
+    }
+
     return NextResponse.json({
       success: true,
       data: {

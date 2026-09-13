@@ -305,6 +305,38 @@ console.log('[Service Invoice] 📝 Generated journal number:', jeNumber)
 
       return inv
     })
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v11.6.5: ثبت خودکار تراکنش صندوق (فاکتور خدماتی)
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      const cashierId = userId || null
+      
+      // فقط اگر فاکتور پرداخت نقدی/کارتی شده باشد (نه نسیه)
+      if (paidAmount > 0 && !isCredit && cashierId) {
+        await (txClient as any).cashMovement.create({
+          data: {
+            shiftId: null,
+            tenantId,
+            cashierId,
+            transactionType: 'service',
+            paymentMethod: paymentType.toLowerCase(),
+            amount: paidAmount,
+            type: 'in', // ← ورود به صندوق
+            invoiceId: invoice.id,
+            description: `خدمات فاکتور ${invoiceNumber}${serviceDevice ? ' — دستگاه: ' + serviceDevice : ''}`,
+          },
+        })
+        
+        console.log('[Service Invoice] ✅ CashMovement created:', {
+          type: 'service',
+          amount: paidAmount,
+          cashierId,
+          invoiceNumber,
+        })
+      }
+    } catch (cashErr: any) {
+      console.warn('[Service Invoice] ⚠️ CashMovement creation failed:', cashErr?.message)
+    }
 
     return NextResponse.json({
       success: true,

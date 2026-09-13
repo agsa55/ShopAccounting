@@ -79,6 +79,8 @@ import {
   REFERENCE_CODE_TYPES,
 } from '@/lib/pos-adapters'
 
+import CashierPanel from './cashier-panel';
+
 // ═══════════════════════════════════════════════════════════════
 //  ★★★ Print Receipt Types
 // ═══════════════════════════════════════════════════════════════
@@ -813,11 +815,17 @@ export default function PosPage() {
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
 
+
   const [posIntegrationEnabled, setPosIntegrationEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true
     const cached = localStorage.getItem('pos_integration_enabled')
     return cached !== null ? cached === 'true' : true
   })
+
+  // ★ v11.6.3: استیت‌های صندوق‌دار
+const [showManualTransactionModal, setShowManualTransactionModal] = useState(false);
+const [showReportModal, setShowReportModal] = useState(false);
+const [cashierStatsRefreshKey, setCashierStatsRefreshKey] = useState(0);
 
   useEffect(() => {
     const handleIntegrationChange = (e: Event) => {
@@ -951,6 +959,10 @@ export default function PosPage() {
   const [printSubmitting, setPrintSubmitting] = useState(false)
   const [invoiceDiscountPercent, setInvoiceDiscountPercent] = useState<string>('')
   const [branches, setBranches] = useState<any[]>([])
+
+  // ★ v11.6.3: اطلاعات صندوق‌دار فعلی
+
+const tenantId = useStore((s) => s.tenantId) ?? '';
 
   // ============ Effects ============
 
@@ -2797,6 +2809,8 @@ export default function PosPage() {
             })
           }
           window.dispatchEvent(new Event('checks-updated'))
+          // ★ v11.6.5: اطلاع‌رسانی به نوار وضعیت برای رفرش
+
         }
 
         setInstallmentPlan(null)
@@ -3001,6 +3015,8 @@ export default function PosPage() {
     setAutoPrintMode(false)
     setThermalPrintOpen(true)
   }, [cart.length, toast])
+
+
 
   const receiptData: PrintReceiptData = useMemo(() => {
     const settings: any = (() => {
@@ -3219,6 +3235,9 @@ export default function PosPage() {
           {/* ★ v11.6: نشانگر میانبرهای F2|F4|Esc حذف شد — میانبرها همچنان فعال هستند */}
         </div>
       </header>
+{/* ★ v11.6.3: پنل صندوق‌دار */}
+<CashierPanel />
+      
 
       {/* ==================== SEARCH BAR ==================== */}
       <div className="bg-white border-b border-slate-200 px-2 sm:px-3 py-2 sm:py-2.5 shrink-0 relative z-30">
@@ -4932,6 +4951,7 @@ function CompactCartItemRow({
       <span className="shrink-0 text-[10px] sm:text-[10px] font-bold text-slate-900 min-w-[75px] sm:min-w-[65px] text-left bg-white/60 px-1.5 py-0.5 rounded border border-slate-200">
         {formatPrice(item.lineTotal)}
       </span>
+
     </div>
   )
 }

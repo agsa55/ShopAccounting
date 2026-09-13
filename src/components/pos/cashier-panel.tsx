@@ -1,0 +1,637 @@
+'use client';
+
+// ============================================================================
+// src/components/pos/cashier-panel.tsx — v11.7.2
+// ★ پنل یکپارچه صندوق‌دار (نوار وضعیت + تراکنش دستی + گزارش)
+// ★ v11.7.2: نمایش موجودی اولیه و ابتدای روز
+// ★ فقط یک خط در pos-page.tsx اضافه می‌شود: <CashierPanel />
+// ============================================================================
+
+import { useEffect, useState, useCallback } from 'react';
+import { 
+  Wallet, TrendingUp, TrendingDown, PlusCircle, 
+  BarChart3, Loader2, RefreshCw, X, CheckCircle2,
+  AlertTriangle, ArrowDownCircle, ArrowUpCircle,
+  Receipt, Calendar
+} from 'lucide-react';
+
+// ═══════════════════════════════════════════════════════════════
+// توابع کمکی
+// ═══════════════════════════════════════════════════════════════
+const toFaNum = (n: number | string | null | undefined): string => {
+  if (n === null || n === undefined) return '۰';
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)]);
+};
+
+const formatPrice = (num: number): string => {
+  return toFaNum(Math.round(num).toLocaleString('en-US'));
+};
+
+// ═══════════════════════════════════════════════════════════════
+// انواع تراکنش دستی
+// ═══════════════════════════════════════════════════════════════
+const TRANSACTION_TYPES = [
+  { value: 'deposit', label: 'واریز پول', icon: '💰', direction: 'in', description: 'ورود پول به صندوق', color: 'emerald' },
+  { value: 'withdrawal', label: 'برداشت پول', icon: '💸', direction: 'out', description: 'خروج پول از صندوق', color: 'red' },
+  { value: 'expense', label: 'هزینه متفرقه', icon: '🧾', direction: 'out', description: 'هزینه‌های جاری فروشگاه', color: 'orange' },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// کامپوننت اصلی
+// ═══════════════════════════════════════════════════════════════
+export default function CashierPanel() {
+  // ─── استیت‌های کاربر ───
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentTenantId, setCurrentTenantId] = useState<string>('');
+
+  // ─── استیت‌های نوار وضعیت ───
+  const [summary, setSummary] = useState<any>(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ─── استیت‌های مودال تراکنش دستی ───
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [transactionType, setTransactionType] = useState('deposit');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // ─── استیت‌های مودال گزارش ───
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState('today');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [cashiers, setCashiers] = useState<any[]>([]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // بارگذاری اطلاعات کاربر
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const parsedUser = JSON.parse(userStr);
+        setCurrentUser(parsedUser);
+        setCurrentTenantId(parsedUser.tenantId || '');
+      }
+    } catch (e) {
+      console.warn('[CashierPanel] Failed to load user:', e);
+    }
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════════
+  // بارگذاری خلاصه تراکنش‌های امروز
+  // ═══════════════════════════════════════════════════════════════
+  const loadSummary = useCallback(async (isRefresh = false) => {
+    if (!currentUser?.id || !currentTenantId) return;
+
+    if (isRefresh) setRefreshing(true);
+    else setLoadingSummary(true);
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const res = await fetch(
+        `/api/cash-movements?cashierId=${currentUser.id}&date=${today}`
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        setSummary(data.summary);
+      }
+    } catch (err) {
+      console.error('[CashierPanel] Load summary error:', err);
+    } finally {
+      setLoadingSummary(false);
+      setRefreshing(false);
+    }
+  }, [currentUser?.id, currentTenantId]);
+
+  useEffect(() => {
+    loadSummary();
+    // ★ v11.6.5: رفرش هر ۵ ثانیه (به جای ۶۰ ثانیه)
+    const interval = setInterval(() => loadSummary(true), 5000);
+    return () => clearInterval(interval);
+  }, [loadSummary]);
+
+  // ★ v11.6.5: رفرش خودکار هنگام focus شدن صفحه
+  useEffect(() => {
+    const handleFocus = () => {
+      loadSummary(true);
+    };
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadSummary(true);
+      }
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadSummary]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // بارگذاری گزارش عملکرد
+  // ═══════════════════════════════════════════════════════════════
+  const loadReport = useCallback(async () => {
+    if (!currentTenantId) return;
+    setReportLoading(true);
+
+    try {
+      const res = await fetch(
+        `/api/cashier-performance?tenantId=${currentTenantId}&period=${reportPeriod}`
+      );
+      const data = await res.json();
+
+      if (data.success) {
+        setCashiers(data.data || []);
+      }
+    } catch (err) {
+      console.error('[CashierPanel] Load report error:', err);
+    } finally {
+      setReportLoading(false);
+    }
+  }, [currentTenantId, reportPeriod]);
+
+  useEffect(() => {
+    if (showReportModal) {
+      loadReport();
+    }
+  }, [showReportModal, loadReport]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // ثبت تراکنش دستی
+  // ═══════════════════════════════════════════════════════════════
+  const handleSubmitManualTransaction = async () => {
+    setError('');
+
+    if (!amount || Number(amount) <= 0) {
+      setError('مبلغ باید بیشتر از صفر باشد');
+      return;
+    }
+
+    if (!description.trim()) {
+      setError('توضیحات تراکنش الزامی است');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/cash-movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: currentTenantId,
+          cashierId: currentUser.id,
+          transactionType,
+          amount: Number(amount),
+          description: description.trim(),
+          paymentMethod: 'cash',
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setShowManualModal(false);
+        setTransactionType('deposit');
+        setAmount('');
+        setDescription('');
+        setError('');
+        loadSummary(true);
+        alert('✅ تراکنش با موفقیت ثبت شد');
+      } else {
+        setError(data.error || 'خطا در ثبت تراکنش');
+      }
+    } catch (err) {
+      setError('خطای شبکه. لطفاً دوباره تلاش کنید.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // محاسبات
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.7.2: موجودی فعلی = موجودی ابتدای امروز + ورودی‌های امروز - خروجی‌های امروز
+  const currentBalance = summary 
+    ? (summary.startOfDayBalance || 0) + summary.totalCashIn - summary.totalCashOut 
+    : 0;
+
+  const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
+
+  const periodLabels: Record<string, string> = {
+    today: 'امروز',
+    week: '۷ روز اخیر',
+    month: '۳۰ روز اخیر',
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // رندر
+  // ═══════════════════════════════════════════════════════════════
+  if (!currentUser || !currentTenantId) {
+    return null;
+  }
+
+  return (
+    <>
+      {/* ═══════════════════════ نوار وضعیت ═══════════════════════ */}
+      <div className="bg-gradient-to-l from-emerald-50 via-teal-50 to-cyan-50 border-b border-emerald-100 px-2 sm:px-3 py-1.5 sm:py-2">
+        {loadingSummary ? (
+          <div className="flex items-center justify-center gap-2 py-1">
+            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+            <span className="text-xs text-emerald-700">در حال بارگذاری وضعیت صندوق...</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            
+            {/* بخش راست: اطلاعات صندوق‌دار */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                {(currentUser.username || currentUser.storeName || 'ص')[0]}
+              </div>
+              
+              <div className="hidden sm:block">
+                <p className="text-[10px] text-emerald-700 font-medium">صندوق‌دار فعال</p>
+                <p className="text-xs font-bold text-slate-800">{currentUser.username || currentUser.storeName || 'صندوق‌دار'}</p>
+              </div>
+
+              <div className="w-px h-6 bg-emerald-200"></div>
+
+              {/* ═══ موجودی اولیه (از سند افتتاحیه) ═══ */}
+              <div className="flex items-center gap-1">
+                <Receipt className="w-3.5 h-3.5 text-blue-500" />
+                <div>
+                  <p className="text-[9px] text-slate-500">موجودی اولیه</p>
+                  <p className="text-[11px] font-bold text-blue-600" dir="ltr">
+                    {formatPrice(summary?.openingBalance || 0)}
+                  </p>
+                </div>
+              </div>
+
+              {/* ═══ موجودی ابتدای امروز ═══ */}
+              <div className="hidden sm:flex items-center gap-1">
+                <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+                <div>
+                  <p className="text-[9px] text-slate-500">ابتدای امروز</p>
+                  <p className="text-[11px] font-bold text-indigo-600" dir="ltr">
+                    {formatPrice(summary?.startOfDayBalance || 0)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="w-px h-6 bg-emerald-200"></div>
+
+              {/* ═══ موجودی فعلی ═══ */}
+              <div className="flex items-center gap-1.5">
+                <Wallet className="w-4 h-4 text-emerald-600" />
+                <div>
+                  <p className="text-[9px] text-emerald-700 font-medium">موجودی فعلی</p>
+                  <p className={`text-xs sm:text-sm font-black ${currentBalance >= 0 ? 'text-emerald-700' : 'text-red-600'}`} dir="ltr">
+                    {formatPrice(currentBalance)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* بخش وسط: آمار سریع */}
+            <div className="hidden md:flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+                <div>
+                  <p className="text-[9px] text-slate-500">فروش</p>
+                  <p className="text-[11px] font-bold text-emerald-700" dir="ltr">
+                    {formatPrice(summary?.totalSales || 0)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <TrendingDown className="w-3.5 h-3.5 text-red-500" />
+                <div>
+                  <p className="text-[9px] text-slate-500">خرید</p>
+                  <p className="text-[11px] font-bold text-red-600" dir="ltr">
+                    {formatPrice(summary?.totalPurchases || 0)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <PlusCircle className="w-3.5 h-3.5 text-blue-500" />
+                <div>
+                  <p className="text-[9px] text-slate-500">خدمات</p>
+                  <p className="text-[11px] font-bold text-blue-600" dir="ltr">
+                    {formatPrice(summary?.totalServices || 0)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* بخش چپ: دکمه‌ها */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowManualModal(true)}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 hover:border-emerald-300 transition-all text-[10px] sm:text-xs font-bold shadow-sm"
+                title="ثبت تراکنش دستی"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تراکنش دستی</span>
+              </button>
+
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 bg-white border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-all text-[10px] sm:text-xs font-bold shadow-sm"
+                title="گزارش عملکرد"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">گزارش</span>
+              </button>
+
+              <button
+                onClick={() => loadSummary(true)}
+                disabled={refreshing}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 transition-all disabled:opacity-50"
+                title="به‌روزرسانی"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════════════════ مودال تراکنش دستی ═══════════════════════ */}
+      {showManualModal && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setShowManualModal(false)}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-l from-emerald-500 to-teal-600 px-4 py-3 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  <h3 className="text-sm font-black">ثبت تراکنش دستی</h3>
+                </div>
+                <button
+                  onClick={() => setShowManualModal(false)}
+                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-2 block">
+                  نوع تراکنش:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {TRANSACTION_TYPES.map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() => setTransactionType(type.value)}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${
+                        transactionType === type.value
+                          ? type.color === 'emerald'
+                            ? 'border-emerald-500 bg-emerald-50'
+                            : type.color === 'red'
+                            ? 'border-red-500 bg-red-50'
+                            : 'border-orange-500 bg-orange-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="text-xl">{type.icon}</span>
+                      <span className={`text-[10px] font-bold ${
+                        transactionType === type.value
+                          ? type.color === 'emerald'
+                            ? 'text-emerald-700'
+                            : type.color === 'red'
+                            ? 'text-red-700'
+                            : 'text-orange-700'
+                          : 'text-gray-600'
+                      }`}>
+                        {type.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {selectedType && (
+                  <p className="text-[9px] text-gray-500 mt-1.5 flex items-center gap-1">
+                    {selectedType.direction === 'in' ? (
+                      <ArrowDownCircle className="w-3 h-3 text-emerald-500" />
+                    ) : (
+                      <ArrowUpCircle className="w-3 h-3 text-red-500" />
+                    )}
+                    {selectedType.description}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+                  مبلغ (ریال): <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="مثلاً: 500000"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-sm"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+                  توضیحات: <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={
+                    transactionType === 'deposit' 
+                      ? 'مثلاً: دریافت پول از مدیر'
+                      : transactionType === 'withdrawal'
+                      ? 'مثلاً: خرید ملزومات فروشگاه'
+                      : 'مثلاً: هزینه برق'
+                  }
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-sm"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <p className="text-[11px] text-red-700">{error}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 pb-4 flex items-center gap-2">
+              <button
+                onClick={() => setShowManualModal(false)}
+                disabled={submitting}
+                className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold disabled:opacity-50"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={handleSubmitManualTransaction}
+                disabled={submitting}
+                className="flex-1 px-3 py-2.5 bg-gradient-to-l from-emerald-500 to-teal-600 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>در حال ثبت...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>ثبت تراکنش</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════ مودال گزارش عملکرد ═══════════════════════ */}
+      {showReportModal && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setShowReportModal(false)}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-l from-blue-500 to-indigo-600 px-4 py-3 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5" />
+                  <h3 className="text-sm font-black">گزارش عملکرد صندوق‌داران</h3>
+                </div>
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-gray-500" />
+              <div className="flex items-center gap-1.5">
+                {Object.entries(periodLabels).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setReportPeriod(key)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                      reportPeriod === key
+                        ? 'bg-blue-500 text-white shadow-sm'
+                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {reportLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                </div>
+              ) : cashiers.length === 0 ? (
+                <div className="text-center py-12">
+                  <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 text-sm">هیچ تراکنشی در این دوره ثبت نشده است</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cashiers.map((cashier, index) => (
+                    <div
+                      key={cashier.cashierId}
+                      className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden"
+                    >
+                      <div className="px-4 py-3 bg-white border-b border-gray-100 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm">
+                            {index + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-gray-900">
+                              {cashier.cashierName}
+                            </p>
+                            <p className="text-[10px] text-gray-500" dir="ltr">
+                              {cashier.cashierMobile || '—'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-left">
+                          <p className="text-[9px] text-gray-500">تعداد تراکنش‌ها</p>
+                          <p className="text-lg font-black text-blue-600">
+                            {toFaNum(cashier.transactionCount)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3">
+                        <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                          <TrendingUp className="w-4 h-4 text-emerald-600 mx-auto mb-1" />
+                          <p className="text-[9px] text-emerald-700">فروش</p>
+                          <p className="text-xs font-bold text-emerald-800" dir="ltr">
+                            {formatPrice(cashier.totalSales)}
+                          </p>
+                        </div>
+
+                        <div className="bg-red-50 rounded-lg p-2 text-center">
+                          <TrendingDown className="w-4 h-4 text-red-600 mx-auto mb-1" />
+                          <p className="text-[9px] text-red-700">برداشت</p>
+                          <p className="text-xs font-bold text-red-800" dir="ltr">
+                            {formatPrice(cashier.totalWithdrawals)}
+                          </p>
+                        </div>
+
+                        <div className="bg-blue-50 rounded-lg p-2 text-center">
+                          <Receipt className="w-4 h-4 text-blue-600 mx-auto mb-1" />
+                          <p className="text-[9px] text-blue-700">خدمات</p>
+                          <p className="text-xs font-bold text-blue-800" dir="ltr">
+                            {formatPrice(cashier.totalServices)}
+                          </p>
+                        </div>
+
+                        <div className="bg-purple-50 rounded-lg p-2 text-center">
+                          <Wallet className="w-4 h-4 text-purple-600 mx-auto mb-1" />
+                          <p className="text-[9px] text-purple-700">ورودی کل</p>
+                          <p className="text-xs font-bold text-purple-800" dir="ltr">
+                            {formatPrice(cashier.totalCashIn)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

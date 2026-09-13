@@ -146,22 +146,44 @@ export default function AdminTenantsPage() {
   const [lockReason, setLockReason] = useState('');
   const [lockNote, setLockNote] = useState('');
   const [isProcessingLock, setIsProcessingLock] = useState(false);
+  
+  // ★ state‌های منوی بیشتر
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  // ★ v11.4: state‌های حذف
-const [deleteTargetTenant, setDeleteTargetTenant] = useState<any>(null);
-const [deleteConfirmText, setDeleteConfirmText] = useState('');
-const [isDeleting, setIsDeleting] = useState(false);
+  const [menuCoords, setMenuCoords] = useState<{
+    id: string;
+    top: number;
+    left: number;
+    position: 'up' | 'down';
+  } | null>(null);
 
+  // ★ state‌های حذف
+  const [deleteTargetTenant, setDeleteTargetTenant] = useState<any>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // ★ تایمر ساعت
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
     return () => clearInterval(timer);
   }, []);
 
+  // ★ بستن منو با کلیک بیرون + اسکرول + resize
   useEffect(() => {
-    const handleClickOutside = () => setOpenMenuId(null);
+    const handleOutside = () => {
+      setOpenMenuId(null);
+      setMenuCoords(null);
+    };
+    
     if (openMenuId) {
-      document.addEventListener('click', handleClickOutside);
-      return () => document.removeEventListener('click', handleClickOutside);
+      document.addEventListener('click', handleOutside);
+      window.addEventListener('scroll', handleOutside, true);
+      window.addEventListener('resize', handleOutside);
+      
+      return () => {
+        document.removeEventListener('click', handleOutside);
+        window.removeEventListener('scroll', handleOutside, true);
+        window.removeEventListener('resize', handleOutside);
+      };
     }
   }, [openMenuId]);
 
@@ -349,6 +371,7 @@ const [isDeleting, setIsDeleting] = useState(false);
     setLockNote('');
     setShowLockModal(true);
     setOpenMenuId(null);
+    setMenuCoords(null);
   };
 
   const closeLockModal = () => {
@@ -397,11 +420,13 @@ const [isDeleting, setIsDeleting] = useState(false);
       `آیا از باز کردن قفل مطمئن هستید؟`
     )) {
       setOpenMenuId(null);
+      setMenuCoords(null);
       return;
     }
     
     setLockingId(tenant.id);
     setOpenMenuId(null);
+    setMenuCoords(null);
     try {
       const res = await fetch(`/api/admin/tenants/${tenant.id}/lock`, {
         method: 'DELETE',
@@ -421,48 +446,81 @@ const [isDeleting, setIsDeleting] = useState(false);
     }
   };
 
-  // ★ v11.4: باز کردن مودال حذف
-const openDeleteModal = (tenant: any) => {
-  setDeleteTargetTenant(tenant);
-  setDeleteConfirmText('');
-  setOpenMenuId(null);
-};
+  const openDeleteModal = (tenant: any) => {
+    setDeleteTargetTenant(tenant);
+    setDeleteConfirmText('');
+    setOpenMenuId(null);
+    setMenuCoords(null);
+  };
 
-const closeDeleteModal = () => {
-  setDeleteTargetTenant(null);
-  setDeleteConfirmText('');
-};
+  const closeDeleteModal = () => {
+    setDeleteTargetTenant(null);
+    setDeleteConfirmText('');
+  };
 
-// ★ v11.4: تأیید و حذف کامل
-const confirmDelete = async () => {
-  if (!deleteTargetTenant) return;
+  const confirmDelete = async () => {
+    if (!deleteTargetTenant) return;
+    
+    if (deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim()) {
+      alert('نام فروشگاه به درستی وارد نشده است');
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/tenants/${deleteTargetTenant.id}/delete`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        alert(`✅ فروشگاه "${deleteTargetTenant.companyName}" با موفقیت حذف شد.\nتعداد رکوردهای حذف شده: ${data.data.totalDeleted}`);
+        closeDeleteModal();
+        loadData();
+      } else {
+        alert('خطا: ' + (data.error || 'خطای نامشخص'));
+      }
+    } catch (error) {
+      console.error('[Delete] Error:', error);
+      alert('خطای شبکه. لطفاً دوباره تلاش کنید.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+ // ★ v11.6.1: موقعیت دقیق منو کنار دکمه سه‌نقطه
+// ★ v11.6.2: موقعیت دقیق منوی افقی کنار دکمه
+const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
+  e.stopPropagation();
   
-  // چک تطبیق نام برای تأیید
-  if (deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim()) {
-    alert('نام فروشگاه به درستی وارد نشده است');
+  if (openMenuId === tenantId) {
+    setOpenMenuId(null);
+    setMenuCoords(null);
     return;
   }
   
-  setIsDeleting(true);
-  try {
-    const res = await fetch(`/api/admin/tenants/${deleteTargetTenant.id}/delete`, {
-      method: 'DELETE',
-    });
-    const data = await res.json();
-    
-    if (data.success) {
-      alert(`✅ فروشگاه "${deleteTargetTenant.companyName}" با موفقیت حذف شد.\nتعداد رکوردهای حذف شده: ${data.data.totalDeleted}`);
-      closeDeleteModal();
-      loadData();
-    } else {
-      alert('خطا: ' + (data.error || 'خطای نامشخص'));
-    }
-  } catch (error) {
-    console.error('[Delete] Error:', error);
-    alert('خطای شبکه. لطفاً دوباره تلاش کنید.');
-  } finally {
-    setIsDeleting(false);
+  const button = e.currentTarget;
+  const rect = button.getBoundingClientRect();
+  const windowWidth = window.innerWidth;
+  
+  // ═══ موقعیت دقیق: کنار دکمه (سمت راست در RTL) ═══
+  const left = rect.right + 4; // 4 پیکسل فاصله از دکمه
+  const top = rect.top - 2; // هم‌تراز با دکمه
+  
+  // بررسی بیرون‌زدگی از سمت راست
+  const menuWidth = 200; // عرض تقریبی منوی افقی
+  let finalLeft = left;
+  if (left + menuWidth > windowWidth - 8) {
+    finalLeft = rect.left - menuWidth - 4; // باز شدن از سمت چپ
   }
+  
+  setOpenMenuId(tenantId);
+  setMenuCoords({ 
+    id: tenantId, 
+    top, 
+    left: finalLeft, 
+    position: 'down' 
+  });
 };
 
   const handleExportCSV = () => {
@@ -852,7 +910,7 @@ const confirmDelete = async () => {
                         isLocked ? 'bg-red-50/40 hover:bg-red-50/70' : ''
                       }`}
                     >
-                      {/* ستون فروشگاه با نوار قرمز در سمت راست */}
+                      {/* ستون فروشگاه */}
                       <td className={`px-3 py-3 ${isLocked ? 'border-r-4 border-red-500' : ''}`}>
                         <div className="flex items-center gap-2.5">
                           <div className={`relative w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-xs shrink-0 ${
@@ -982,7 +1040,7 @@ const confirmDelete = async () => {
                         )}
                       </td>
 
-                      {/* ستون عملیات */}
+                      {/* ═══════════════════════ ستون عملیات ═══════════════════════ */}
                       <td className="px-3 py-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           {/* دکمه ورود به داشبورد */}
@@ -1027,97 +1085,18 @@ const confirmDelete = async () => {
                             </button>
                           )}
 
-                          {/* دکمه منوی بیشتر */}
-                          <div className="relative">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenMenuId(openMenuId === tenant.id ? null : tenant.id);
-                              }}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all"
-                              title="گزینه‌های بیشتر"
-                            >
-                              <MoreVertical className="w-4 h-4" />
-                            </button>
-
-                            {openMenuId === tenant.id && (
-                              <div 
-                                className="absolute left-0 top-full mt-1 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-                                  <p className="text-[10px] font-bold text-gray-600 truncate">{tenant.companyName}</p>
-                                </div>
-                                
-                                <div className="py-1">
-                                  <button
-                                    onClick={() => {
-                                      handleImpersonate(tenant.id, tenant.subDomain);
-                                      setOpenMenuId(null);
-                                    }}
-                                    disabled={isLocked}
-                                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 transition-colors text-right ${
-                                      isLocked ? 'opacity-50 cursor-not-allowed' : 'text-gray-700'
-                                    }`}
-                                  >
-                                    <Eye className="w-4 h-4 text-[#7C7BEB]" />
-                                    <span>ورود به داشبورد</span>
-                                  </button>
-
-                                  {isLocked ? (
-                                    <button
-                                      onClick={() => handleUnlock(tenant)}
-                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-emerald-50 transition-colors text-right text-emerald-700"
-                                    >
-                                      <Unlock className="w-4 h-4" />
-                                      <div className="flex-1 text-right">
-                                        <div>باز کردن قفل</div>
-                                        <div className="text-[9px] text-emerald-600 mt-0.5">
-                                          علت: {tenant.lockReason || 'نامشخص'}
-                                        </div>
-                                      </div>
-                                    </button>
-                                  ) : (
-                                    <button
-                                      onClick={() => openLockModal(tenant)}
-                                      className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-red-50 transition-colors text-right text-red-700"
-                                    >
-                                      <Lock className="w-4 h-4" />
-                                      <span>قفل کردن فروشگاه</span>
-                                    </button>
-                                  )}
-
-                                  <div className="border-t border-gray-100 my-1"></div>
-
-                                  <button
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 transition-colors text-right text-gray-700 opacity-50 cursor-not-allowed"
-                                    disabled
-                                  >
-                                    <Edit className="w-4 h-4 text-gray-400" />
-                                    <span>ویرایش اطلاعات</span>
-                                  </button>
-
-                                  <button
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 transition-colors text-right text-gray-700 opacity-50 cursor-not-allowed"
-                                    disabled
-                                  >
-                                    <Info className="w-4 h-4 text-gray-400" />
-                                    <span>مشاهده جزئیات</span>
-                                  </button>
-
-                                  <div className="border-t border-gray-100 my-1"></div>
-
-                               <button
-  onClick={() => openDeleteModal(tenant)}
-  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-red-50 transition-colors text-right text-red-700"
->
-  <Trash2 className="w-4 h-4 text-red-600" />
-  <span>حذف کامل فروشگاه</span>
-</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                          {/* ═══════════════════════ دکمه منوی بیشتر (برگشت!) ═══════════════════════ */}
+                          <button
+                            onClick={(e) => handleMenuClick(e, tenant.id)}
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
+                              openMenuId === tenant.id
+                                ? 'text-white bg-[#7C7BEB] shadow-md'
+                                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                            }`}
+                            title="گزینه‌های بیشتر"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1223,12 +1202,12 @@ const confirmDelete = async () => {
         </div>
 
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('11.4.0')}</p>
+          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('11.6.0')}</p>
         </div>
 
       </div>
 
-      {/* ═══════════════════════ مودال قفل فروشگاه (فشرده) ═══════════════════════ */}
+      {/* ═══════════════════════ مودال قفل فروشگاه ═══════════════════════ */}
       {showLockModal && lockTargetTenant && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
@@ -1238,7 +1217,6 @@ const confirmDelete = async () => {
             className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* هدر فشرده */}
             <div className="bg-gradient-to-l from-red-500 to-rose-600 px-4 py-3 text-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1254,9 +1232,7 @@ const confirmDelete = async () => {
               </div>
             </div>
 
-            {/* محتوا فشرده */}
             <div className="p-4 space-y-3">
-              {/* اطلاعات فروشگاه (کوتاه) */}
               <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
                 <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#7C7BEB] to-[#5B5AC7] flex items-center justify-center text-white font-bold text-sm shrink-0">
                   {(lockTargetTenant.companyName || 'ف')[0]}
@@ -1271,7 +1247,6 @@ const confirmDelete = async () => {
                 </div>
               </div>
 
-              {/* انتخاب دلیل */}
               <div>
                 <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
                   دلیل قفل:
@@ -1290,7 +1265,6 @@ const confirmDelete = async () => {
                 </select>
               </div>
 
-              {/* توضیحات (اختیاری) */}
               <div>
                 <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
                   توضیحات (اختیاری):
@@ -1304,7 +1278,6 @@ const confirmDelete = async () => {
                 />
               </div>
 
-              {/* هشدار کوچک */}
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 flex gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <p className="text-[10px] text-amber-800 leading-relaxed">
@@ -1313,7 +1286,6 @@ const confirmDelete = async () => {
               </div>
             </div>
 
-            {/* دکمه‌ها */}
             <div className="px-4 pb-4 flex items-center gap-2">
               <button
                 onClick={closeLockModal}
@@ -1345,128 +1317,264 @@ const confirmDelete = async () => {
       )}
 
       {/* ═══════════════════════ مودال حذف فروشگاه ═══════════════════════ */}
-{deleteTargetTenant && (
-  <div 
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-    onClick={isDeleting ? undefined : closeDeleteModal}
-  >
+      {deleteTargetTenant && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={isDeleting ? undefined : closeDeleteModal}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-l from-red-700 to-red-900 px-4 py-3 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trash2 className="w-5 h-5" />
+                  <h3 className="text-sm font-black">حذف کامل فروشگاه</h3>
+                </div>
+                <button
+                  onClick={closeDeleteModal}
+                  disabled={isDeleting}
+                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors disabled:opacity-50"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
+                <div className="flex gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-red-800 leading-relaxed">
+                    <strong className="font-black block mb-1">⚠️ هشدار جدی!</strong>
+                    این عمل <strong>غیرقابل بازگشت</strong> است. تمام اطلاعات فروشگاه شامل:
+                    <ul className="mt-2 space-y-0.5 text-[10px]">
+                      <li>• محصولات، مشتریان، فاکتورها</li>
+                      <li>• حساب‌ها، چک‌ها، پرداخت‌ها</li>
+                      <li>• کاربران و تنظیمات</li>
+                      <li>• تمام رکوردهای مرتبط</li>
+                    </ul>
+                    به طور <strong>دائمی</strong> حذف خواهند شد.
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 mb-1">فروشگاهی که حذف می‌شود:</p>
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                    {(deleteTargetTenant.companyName || 'ف')[0]}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 truncate">
+                      {deleteTargetTenant.companyName}
+                    </p>
+                    <p className="text-[10px] text-gray-500 truncate">
+                      {deleteTargetTenant.ownerMobile} • {deleteTargetTenant.subDomain}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+                  برای تأیید، <span className="text-red-600">نام فروشگاه</span> را دقیقاً تایپ کنید:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={deleteTargetTenant.companyName}
+                  disabled={isDeleting}
+                  className="w-full px-3 py-2 border-2 border-red-200 rounded-lg focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none transition text-xs disabled:opacity-50"
+                  dir="rtl"
+                />
+                {deleteConfirmText && deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim() && (
+                  <p className="text-[9px] text-red-600 mt-1 flex items-center gap-1">
+                    <XCircle className="w-3 h-3" />
+                    نام وارد شده با نام فروشگاه مطابقت ندارد
+                  </p>
+                )}
+                {deleteConfirmText && deleteConfirmText.trim() === deleteTargetTenant.companyName.trim() && (
+                  <p className="text-[9px] text-emerald-600 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    نام تأیید شد - می‌توانید حذف کنید
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="px-4 pb-4 flex items-center gap-2">
+              <button
+                onClick={closeDeleteModal}
+                disabled={isDeleting}
+                className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold disabled:opacity-50"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting || deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim()}
+                className="flex-1 px-3 py-2.5 bg-gradient-to-l from-red-700 to-red-900 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>در حال حذف...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>حذف دائمی</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    {/* ═══════════════════════ منوی بیشتر افقی (Horizontal Menu) ═══════════════════════ */}
+{openMenuId && menuCoords && menuCoords.id === openMenuId && (() => {
+  const currentTenant = tenants.find(t => t.id === openMenuId);
+  if (!currentTenant) return null;
+  
+  const isTenantLocked = currentTenant.isLocked === true;
+  
+  return (
     <div 
-      className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+      className="fixed z-[9999]"
+      style={{
+        top: `${menuCoords.top}px`,
+        left: `${menuCoords.left}px`,
+      }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* هدر قرمز تیره (هشدار جدی) */}
-      <div className="bg-gradient-to-l from-red-700 to-red-900 px-4 py-3 text-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Trash2 className="w-5 h-5" />
-            <h3 className="text-sm font-black">حذف کامل فروشگاه</h3>
-          </div>
-          <button
-            onClick={closeDeleteModal}
-            disabled={isDeleting}
-            className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors disabled:opacity-50"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-4 space-y-3">
-        {/* هشدار جدی */}
-        <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
-          <div className="flex gap-2">
-            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-            <div className="text-[11px] text-red-800 leading-relaxed">
-              <strong className="font-black block mb-1">⚠️ هشدار جدی!</strong>
-              این عمل <strong>غیرقابل بازگشت</strong> است. تمام اطلاعات فروشگاه شامل:
-              <ul className="mt-2 space-y-0.5 text-[10px]">
-                <li>• محصولات، مشتریان، فاکتورها</li>
-                <li>• حساب‌ها، چک‌ها، پرداخت‌ها</li>
-                <li>• کاربران و تنظیمات</li>
-                <li>• تمام رکوردهای مرتبط</li>
-              </ul>
-              به طور <strong>دائمی</strong> حذف خواهند شد.
-            </div>
-          </div>
-        </div>
-
-        {/* اطلاعات فروشگاه */}
-        <div className="bg-gray-50 rounded-lg p-3">
-          <p className="text-[10px] text-gray-500 mb-1">فروشگاهی که حذف می‌شود:</p>
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white font-bold text-sm shrink-0">
-              {(deleteTargetTenant.companyName || 'ف')[0]}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-gray-900 truncate">
-                {deleteTargetTenant.companyName}
-              </p>
-              <p className="text-[10px] text-gray-500 truncate">
-                {deleteTargetTenant.ownerMobile} • {deleteTargetTenant.subDomain}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* تأیید با تایپ نام فروشگاه */}
-        <div>
-          <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
-            برای تأیید، <span className="text-red-600">نام فروشگاه</span> را دقیقاً تایپ کنید:
-          </label>
-          <input
-            type="text"
-            value={deleteConfirmText}
-            onChange={(e) => setDeleteConfirmText(e.target.value)}
-            placeholder={deleteTargetTenant.companyName}
-            disabled={isDeleting}
-            className="w-full px-3 py-2 border-2 border-red-200 rounded-lg focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none transition text-xs disabled:opacity-50"
-            dir="rtl"
-          />
-          {deleteConfirmText && deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim() && (
-            <p className="text-[9px] text-red-600 mt-1 flex items-center gap-1">
-              <XCircle className="w-3 h-3" />
-              نام وارد شده با نام فروشگاه مطابقت ندارد
-            </p>
-          )}
-          {deleteConfirmText && deleteConfirmText.trim() === deleteTargetTenant.companyName.trim() && (
-            <p className="text-[9px] text-emerald-600 mt-1 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" />
-              نام تأیید شد - می‌توانید حذف کنید
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* دکمه‌ها */}
-      <div className="px-4 pb-4 flex items-center gap-2">
+      {/* ═══ کانتینر منو با انیمیشن ═══ */}
+      <div 
+        className="flex items-center gap-1 bg-white rounded-xl shadow-2xl border border-gray-200 p-1.5 overflow-hidden"
+        style={{
+          animation: 'slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
+        }}
+      >
+        {/* ═══ دکمه ورود به داشبورد ═══ */}
         <button
-          onClick={closeDeleteModal}
-          disabled={isDeleting}
-          className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold disabled:opacity-50"
+          onClick={() => {
+            handleImpersonate(currentTenant.id, currentTenant.subDomain);
+            setOpenMenuId(null);
+            setMenuCoords(null);
+          }}
+          disabled={isTenantLocked}
+          title="ورود به داشبورد"
+          className={`group relative w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 ${
+            isTenantLocked
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'bg-[#EEEDFD] text-[#7C7BEB] hover:bg-[#7C7BEB] hover:text-white hover:scale-110'
+          }`}
         >
-          انصراف
+          <Eye className="w-4 h-4" />
+          {/* Tooltip سفارشی */}
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            ورود به داشبورد
+          </span>
         </button>
+
+        {/* ═══ دکمه قفل/باز کردن ═══ */}
+        {isTenantLocked ? (
+          <button
+            onClick={() => {
+              handleUnlock(currentTenant);
+              setOpenMenuId(null);
+              setMenuCoords(null);
+            }}
+            title="باز کردن قفل"
+            className="group relative w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white transition-all duration-200 hover:scale-110"
+          >
+            <Unlock className="w-4 h-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              باز کردن قفل
+            </span>
+          </button>
+        ) : (
+          <button
+            onClick={() => {
+              openLockModal(currentTenant);
+              setOpenMenuId(null);
+              setMenuCoords(null);
+            }}
+            title="قفل کردن"
+            className="group relative w-9 h-9 rounded-lg flex items-center justify-center bg-red-50 text-red-700 hover:bg-red-600 hover:text-white transition-all duration-200 hover:scale-110"
+          >
+            <Lock className="w-4 h-4" />
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              قفل کردن
+            </span>
+          </button>
+        )}
+
+        {/* ═══ دکمه ویرایش ═══ */}
         <button
-          onClick={confirmDelete}
-          disabled={isDeleting || deleteConfirmText.trim() !== deleteTargetTenant.companyName.trim()}
-          className="flex-1 px-3 py-2.5 bg-gradient-to-l from-red-700 to-red-900 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          title="ویرایش اطلاعات"
+          disabled
+          className="group relative w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 text-gray-400 cursor-not-allowed"
         >
-          {isDeleting ? (
-            <>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>در حال حذف...</span>
-            </>
-          ) : (
-            <>
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>حذف دائمی</span>
-            </>
-          )}
+          <Edit className="w-4 h-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            ویرایش (به زودی)
+          </span>
+        </button>
+
+        {/* ═══ دکمه جزئیات ═══ */}
+        <button
+          title="مشاهده جزئیات"
+          disabled
+          className="group relative w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 text-gray-400 cursor-not-allowed"
+        >
+          <Info className="w-4 h-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            جزئیات (به زودی)
+          </span>
+        </button>
+
+        {/* ═══ جداکننده ═══ */}
+        <div className="w-px h-6 bg-gray-200 mx-0.5"></div>
+
+        {/* ═══ دکمه حذف ═══ */}
+        <button
+          onClick={() => {
+            openDeleteModal(currentTenant);
+            setOpenMenuId(null);
+            setMenuCoords(null);
+          }}
+          title="حذف کامل"
+          className="group relative w-9 h-9 rounded-lg flex items-center justify-center bg-red-50 text-red-700 hover:bg-red-600 hover:text-white transition-all duration-200 hover:scale-110"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            حذف کامل
+          </span>
         </button>
       </div>
     </div>
-  </div>
-)}
+  );
+})()}
+
+{/* ═══════════════════════ استایل انیمیشن ═══════════════════════ */}
+<style jsx global>{`
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(-20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+  }
+`}</style>
+
     </div>
   );
 }
