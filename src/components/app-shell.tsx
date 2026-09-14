@@ -72,6 +72,12 @@ import { useSidebar } from '@/components/ui/sidebar'
 import { ChecksTab } from '@/components/accounting/checks-tab'
 import { BasicYearEndPage } from '@/components/settings/basic-year-end-page'
 import UpgradePlanPage from '@/components/upgrade/upgrade-plan-page'
+// بعد از سایر import ها:
+import { SystemLogModal } from '@/components/SystemLogModal'
+// بعد از سایر import ها:
+import { installApiLogger } from '@/lib/api-logger'
+import { installGlobalErrorHandler } from '@/lib/global-error-handler'
+import { useAutoCleanup } from '@/hooks/useAutoCleanup'
 
 /* ══════════════════════════════════════════════════════════════════
    ★ InvoicesHub
@@ -1162,6 +1168,9 @@ function AppHeader() {
   const notifications = useStore((s) => s.notifications) ?? []
   const markNotificationRead = useStore((s) => s.markNotificationRead)
   const markAllNotificationsRead = useStore((s) => s.markAllNotificationsRead)
+  
+  // ★ v11.9.0: مودال لاگ‌ها
+  const [showLogModal, setShowLogModal] = useState(false)
 
   const unreadCount = notifications.filter(n => !n.isRead).length
   const canAccessSettings = isFullAccessRole(user?.role)
@@ -1289,13 +1298,23 @@ function AppHeader() {
             })()}
           </span>
         </div>
+<PWAInstallButton />
+<SyncIndicator />
+<OfflineModal />
 
-        <PWAInstallButton />
-        <SyncIndicator />
-        <OfflineModal />
+{/* ── ★ v11.9.0: دکمه مشاهده لاگ‌های سیستم ── */}
+<Button
+  variant="ghost"
+  size="icon"
+  className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+  onClick={() => setShowLogModal(true)}
+  title="مشاهده لاگ‌های سیستم"
+>
+  <FileText className="size-3.5 sm:size-4" />
+</Button>
 
-        {/* ── Notifications ── */}
-        <DropdownMenu>
+{/* ── Notifications ── */}
+<DropdownMenu>
           <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors">
               <Bell className="size-3.5 sm:size-4" />
@@ -1393,8 +1412,11 @@ function AppHeader() {
               خروج از حساب
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+     </DropdownMenu>
+
+      {/* ★ v11.9.0: مودال لاگ‌های سیستم */}
+      <SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
+    </div>
     </header>
   )
 }
@@ -1410,10 +1432,28 @@ export default function AppShell() {
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
+  // ★ v11.9.0: پاکسازی خودکار لاگ‌های قدیمی
+  useAutoCleanup()
+
   // ★ v10.1: وضعیت اشتراک
   const [isSystemLocked, setIsSystemLocked] = useState(false)
   const [daysRemaining, setDaysRemaining] = useState<number>(-1)
   const [isLifetime, setIsLifetime] = useState(false)
+
+  // ★ v11.9.0: نصب خودکار API Logger و Global Error Handler
+  useEffect(() => {
+    installApiLogger()
+    installGlobalErrorHandler()
+    
+    // ثبت اولین لاگ برای تست
+    import('@/lib/system-logger').then(({ logger }) => {
+      logger.info('System started', {
+        userAgent: navigator.userAgent,
+        url: window.location.href,
+        timestamp: new Date().toISOString(),
+      })
+    })
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -1526,6 +1566,31 @@ export default function AppShell() {
       if (preloadTimer) clearTimeout(preloadTimer)
     }
   }, [])
+
+  // ★ v11.9.0: گوش دادن به خطاهای محدودیت پلن
+useEffect(() => {
+  if (typeof window === 'undefined') return
+  
+  const handlePlanLimitError = (event: CustomEvent) => {
+    const { url, message, endpoint } = event.detail
+    
+    // نمایش مودال ارتقا با پیام مناسب
+    useStore.getState().addNotification({
+      title: '🔒 ارتقای پلن لازم است',
+      message: message || 'این قابلیت در پلن فعلی شما در دسترس نیست. برای دسترسی، پلن خود را ارتقا دهید.',
+      type: 'warning',
+    })
+    
+    // لاگ برای دیباگ
+    console.log('[AppShell] 🔒 Plan limit error detected:', { url, message })
+  }
+  
+  window.addEventListener('plan-limit-error', handlePlanLimitError as EventListener)
+  
+  return () => {
+    window.removeEventListener('plan-limit-error', handlePlanLimitError as EventListener)
+  }
+}, [])
 
   // ═══════════════════════════════════════════════════════════════
 //  ★ v11.0: نمایش Toast پس از پرداخت موفق

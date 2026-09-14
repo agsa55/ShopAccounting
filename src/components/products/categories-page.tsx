@@ -47,7 +47,9 @@ import {
   Upload,
   RefreshCw,
 } from 'lucide-react'
+
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ============ Helpers ============
 function toFaNum(n: number | string | null | undefined): string {
@@ -431,13 +433,20 @@ export default function CategoriesPage() {
         body: JSON.stringify(body),
       })
       const json = await res.json()
-      if (json.success) {
-        toast({ title: '✓ دسته‌بندی اضافه شد', description: json.message || 'عملیات موفق' })
-        setAddDialogOpen(false)
-        setFormName('')
-        setFormParentId('none')
-        setFormIsActive(true)
-        await loadCategories()
+    if (json.success) {
+  // ★ v11.9.0: لاگ ثبت دسته‌بندی جدید
+  logger.info('دسته‌بندی جدید ثبت شد', {
+    categoryName: formName.trim(),
+    parentId: formParentId === 'none' ? null : formParentId,
+    isActive: formIsActive,
+  })
+  
+  toast({ title: '✓ دسته‌بندی اضافه شد', description: json.message || 'عملیات موفق' })
+  setAddDialogOpen(false)
+  setFormName('')
+  setFormParentId('none')
+  setFormIsActive(true)
+  await loadCategories()
       } else {
         toast({ title: 'خطا', description: json.error || 'خطا در ذخیره دسته‌بندی', variant: 'destructive' })
       }
@@ -555,11 +564,20 @@ export default function CategoriesPage() {
         body: JSON.stringify(body),
       })
       const json = await res.json()
-      if (json.success) {
-        toast({ title: '✓ دسته‌بندی بروزرسانی شد', description: json.message || 'عملیات موفق' })
-        setEditDialogOpen(false)
-        setEditingCategory(null)
-        await loadCategories()
+   if (json.success) {
+  // ★ v11.9.0: لاگ ویرایش دسته‌بندی
+  logger.info('دسته‌بندی ویرایش شد', {
+    categoryId: editingCategory?.id,
+    categoryName: editFormName.trim(),
+    oldName: editingCategory?.name,
+    parentId: editFormParentId === 'none' ? null : editFormParentId,
+    isActive: editFormIsActive,
+  })
+  
+  toast({ title: '✓ دسته‌بندی بروزرسانی شد', description: json.message || 'عملیات موفق' })
+  setEditDialogOpen(false)
+  setEditingCategory(null)
+  await loadCategories()
       } else {
         toast({ title: 'خطا', description: json.error || 'خطا در بروزرسانی دسته‌بندی', variant: 'destructive' })
       }
@@ -668,12 +686,20 @@ export default function CategoriesPage() {
         headers: getAuthHeaders(),
       })
       const json = await res.json()
-      if (json.success) {
-        toast({ title: '✓ دسته‌بندی حذف شد', description: json.message || 'عملیات موفق' })
-        setCategories((prev) => prev.filter((c) => c.id !== deletingCategory.id))
-        setDeleteDialogOpen(false)
-        setDeletingCategory(null)
-        await loadCategories()
+    if (json.success) {
+  // ★ v11.9.0: لاگ حذف دسته‌بندی (قبل از null شدن deletingCategory)
+  logger.info('دسته‌بندی حذف شد', {
+    categoryId: deletingCategory.id,
+    categoryName: deletingCategory.name,
+    parentId: deletingCategory.parentId,
+    productCount: deletingCategory.productCount,
+  })
+  
+  toast({ title: '✓ دسته‌بندی حذف شد', description: json.message || 'عملیات موفق' })
+  setCategories((prev) => prev.filter((c) => c.id !== deletingCategory.id))
+  setDeleteDialogOpen(false)
+  setDeletingCategory(null)
+  await loadCategories()
       } else {
         toast({ title: 'خطا', description: json.error || 'خطا در حذف دسته‌بندی', variant: 'destructive' })
       }

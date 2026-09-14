@@ -26,6 +26,7 @@ import {
   ArrowRight, Filter, ChevronDown, CreditCard,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { PurchaseInvoicePrintModal } from '@/components/purchases/purchase-invoice-print-modal'
 
 // ============================================================================
@@ -1314,11 +1315,24 @@ const handleProductSearchKeyDown = useCallback(
       console.log('[Purchase Submit] Server response:', {
         success: data.success, message: data.message, error: data.error, data: data.data, full: data,
       })
-      if (data.success) {
-        console.log('[handleSubmit] ✅ Invoice created successfully:', data.data)
-        if (paymentType === 'check' && data.data?.check) {
-          toast({
-            title: '✓ فاکتور و چک ثبت شد',
+   if (data.success) {
+  // ★ v11.9.0: لاغ ثبت/ویرایش فاکتور خرید
+  const isEdit = !!editingInvoiceId
+ logger.info(isEdit ? 'فاکتور خرید ویرایش شد' : 'فاکتور خرید ثبت شد', {
+  invoiceId: data.data?.id,
+  invoiceNumber: data.data?.number,
+  supplierId: supplierId === 'none' ? null : supplierId,
+  supplierName: suppliers.find(s => s.id === supplierId)?.name || null,
+  warehouseId: warehouseId === 'none' ? null : warehouseId,
+  paymentType: paymentType,
+  itemsCount: cart?.length,
+  totalAmount: totals?.total || data.data?.totalAmount,
+  isEdit: isEdit,
+})
+  console.log('[handleSubmit] ✅ Invoice created successfully:', data.data)
+  if (paymentType === 'check' && data.data?.check) {
+    toast({
+      title: '✓ فاکتور و چک ثبت شد',
             description: `فاکتور ${data.data.number} + چک شماره ${checkNumber} (${checkBank})`
           })
         } else {
@@ -1419,14 +1433,26 @@ const handleProductSearchKeyDown = useCallback(
         method: 'DELETE',
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message })
-        const offlineInvs = loadOfflineInvoices()
-        saveOfflineInvoices(offlineInvs.filter(i => i.id !== deletingInvoice.id))
-        setDeletingInvoice(null)
-        await loadData(false)
-      } else {
+   const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاغ حذف فاکتور خرید (قبل از null شدن deletingInvoice)
+  logger.info('فاکتور خرید حذف شد', {
+    invoiceId: deletingInvoice.id,
+    invoiceNumber: deletingInvoice.number,
+    supplierName: deletingInvoice.supplier?.name || 'نامشخص',
+    totalAmount: deletingInvoice.totalAmount,
+    invoiceType: deletingInvoice.invoiceType,
+  })
+  
+
+  
+  toast({ title: 'موفق', description: data.message })
+  const offlineInvs = loadOfflineInvoices()
+  saveOfflineInvoices(offlineInvs.filter(i => i.id !== deletingInvoice.id))
+  setDeletingInvoice(null)
+  await loadData(false)
+}
+      else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {
@@ -1652,14 +1678,23 @@ const handleProductSearchKeyDown = useCallback(
           items: selectedItems.map(i => ({ purchaseInvoiceItemId: i.purchaseInvoiceItemId, quantity: i.quantity, returnReason: i.returnReason || undefined })),
         }),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'برگشتی ثبت شد ✓', description: data.message })
-        setReturnDialogOpen(false)
-        setReturnItems([])
-        setReturnInvoice(null)
-        await loadData(false)
-      } else {
+   const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاغ برگشت فاکتور خرید
+logger.info('برگشت فاکتور خرید ثبت شد', {
+  originalInvoiceId: returnInvoice.id,
+  originalInvoiceNumber: returnInvoice.number,
+  supplierName: returnInvoice.supplier?.name || 'نامشخص',
+  itemsCount: selectedItems.length,
+  returnInvoiceNumber: data.data?.number,
+})
+  
+  toast({ title: 'برگشتی ثبت شد ✓', description: data.message })
+  setReturnDialogOpen(false)
+  setReturnItems([])
+  setReturnInvoice(null)
+  await loadData(false)
+} else {
         toast({ title: 'خطا', description: data.error || 'ثبت برگشتی ناموفق بود', variant: 'destructive' })
       }
     } catch {

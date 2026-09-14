@@ -36,6 +36,7 @@ import {
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { InvoicePDFButton } from '@/components/invoices/invoice-pdf-button'
 import { PortalLinkButton } from '@/components/invoices/portal-link-button'
 import { Label } from '@/components/ui/label'
@@ -1031,11 +1032,21 @@ const [returnItems, setReturnItems] = useState<Array<{
           installmentId: receivePayInstallment?.id || undefined,
         }),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'دریافت وجه ثبت شد', description: `${amount.toLocaleString('fa-IR')} تومان دریافت شد` })
-        setReceivePayDialogOpen(false)
-        setReceivePayInvoice(null)
+  
+   const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاغ دریافت پرداخت
+  logger.info('دریافت پرداخت ثبت شد', {
+    invoiceId: receivePayInvoice.id,
+    invoiceNumber: receivePayInvoice.invoiceNumber || receivePayInvoice.number,
+    amount: amount,
+    paymentMethod: receivePayMethod,
+    paymentRef: receivePayRef || null,
+    installmentId: receivePayInstallment?.id || null,
+  })
+  
+  toast({ title: 'دریافت وجه ثبت شد', description: `${amount.toLocaleString('fa-IR')} تومان دریافت شد` })
+  setReceivePayDialogOpen(false)
         setReceivePayInstallment(null)
         loadInvoices()
       } else {
@@ -1095,11 +1106,20 @@ const [returnItems, setReturnItems] = useState<Array<{
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       })
-      const result = await res.json()
-      if (result.success) {
-        toast({ title: 'حذف موفق', description: `فاکتور ${invoiceToDelete.invoiceNumber || invoiceToDelete.number} حذف شد` })
-        await loadInvoices()
-      } else {
+   
+   const result = await res.json()
+if (result.success) {
+  // ★ v11.9.0: لاگ حذف فاکتور (قبل از null شدن invoiceToDelete)
+  logger.info('فاکتور حذف شد', {
+    invoiceId: invoiceToDelete.id,
+    invoiceNumber: invoiceToDelete.invoiceNumber || invoiceToDelete.number,
+    invoiceType: invoiceToDelete.invoiceType,
+    totalAmount: invoiceToDelete.totalAmount,
+  })
+  
+  toast({ title: 'حذف موفق', description: `فاکتور ${invoiceToDelete.invoiceNumber || invoiceToDelete.number} حذف شد` })
+  await loadInvoices()
+} else {
         toast({ title: 'خطا در حذف', description: result.error || 'خطای ناشناخته' })
       }
     } catch (err: any) {
@@ -1224,10 +1244,20 @@ const handleReturnClick = async (invoice: Invoice) => {
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(requestBody),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'برگشتی ثبت شد ✓', description: data.message || `فاکتور برگشتی ${data.data?.number} ثبت شد` })
-        setReturnDialogOpen(false)
+const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاگ برگشت فاکتور
+  logger.info('برگشت فاکتور ثبت شد', {
+    originalInvoiceId: invoiceToReturn.id,
+    originalInvoiceNumber: invoiceToReturn.invoiceNumber || invoiceToReturn.number,
+    returnInvoiceNumber: data.data?.number,
+    itemsCount: selectedItems.length,
+    paymentType: returnPaymentType,
+    description: returnDescription || null,
+  })
+  
+  toast({ title: 'برگشتی ثبت شد ✓', description: data.message || `فاکتور برگشتی ${data.data?.number} ثبت شد` })
+  setReturnDialogOpen(false)
         setReturnDescription('')
         setReturnItems([])
         setInvoiceToReturn(null)

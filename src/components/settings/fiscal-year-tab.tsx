@@ -1,17 +1,19 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/fiscal-year-tab.tsx — v4.0 ★★★
+// src/components/settings/fiscal-year-tab.tsx — v4.1 ★★★
 // ★ v4.0: حذف ساخت سال جدید و سند افتتاحیه
 //   - فقط بستن سال + سند اختتامیه
 //   - سال جدید توسط SetupWizard ساخته می‌شود
 //   - ۳ مرحله: prerequisites → closing-preview → confirm
+// ★ v4.1: اضافه شدن لاگ‌های سیستم برای دیباگ بهتر
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import {
   todayISO,
   gregorianISOToJalali,
@@ -202,6 +204,19 @@ export function FiscalYearTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v4.1: لاگ ثبت سال مالی جدید
+        logger.info('سال مالی جدید ثبت شد', {
+          yearId: data.data?.id,
+          yearName: formName.trim(),
+          startDate: formStartISO,
+          endDate: formEndISO,
+          activate: formActivate,
+          jalaliName: (() => {
+            const j = gregorianISOToJalali(formStartISO)
+            return j ? `${toFaNum(j[0])}` : null
+          })(),
+        })
+
         toast({ title: data.message })
         setFormOpen(false)
         setFormName('')
@@ -210,9 +225,20 @@ export function FiscalYearTab() {
         setFormActivate(true)
         setRefreshKey((k) => k + 1)
       } else {
+        // ★ v4.1: لاگ خطای ثبت سال مالی
+        logger.error('خطا در ثبت سال مالی', undefined, {
+          error: data.error,
+          formName: formName.trim(),
+          startDate: formStartISO,
+          endDate: formEndISO,
+        })
+
         toast({ title: data.error || 'خطا در ایجاد سال مالی', variant: 'destructive' })
       }
-    } catch {
+    } catch (err: any) {
+      logger.error('خطای شبکه در ثبت سال مالی', err, {
+        formName: formName.trim(),
+      })
       toast({ title: 'خطا در ارتباط با سرور', variant: 'destructive' })
     }
     setFormSaving(false)
@@ -234,12 +260,28 @@ export function FiscalYearTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v4.1: لاگ فعال‌سازی سال مالی
+        logger.info('سال مالی فعال شد', {
+          yearId: yearId,
+          yearName: yearName,
+          previousActiveYear: activeYear?.name || null,
+        })
+
         toast({ title: data.message })
         setRefreshKey((k) => k + 1)
       } else {
+        logger.error('خطا در فعال‌سازی سال مالی', undefined, {
+          yearId,
+          yearName,
+          error: data.error,
+        })
         toast({ title: data.error || 'خطا در فعال‌سازی', variant: 'destructive' })
       }
-    } catch {
+    } catch (err: any) {
+      logger.error('خطای شبکه در فعال‌سازی سال مالی', err, {
+        yearId,
+        yearName,
+      })
       toast({ title: 'خطا در ارتباط با سرور', variant: 'destructive' })
     }
   }
@@ -264,14 +306,28 @@ export function FiscalYearTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v4.1: لاگ ویرایش سال مالی
+        logger.info('سال مالی ویرایش شد', {
+          yearId: editingYear.id,
+          oldName: editingYear.name,
+          newName: editName.trim(),
+        })
+
         toast({ title: data.message })
         setEditingYear(null)
         setEditName('')
         setRefreshKey((k) => k + 1)
       } else {
+        logger.error('خطا در ویرایش سال مالی', undefined, {
+          yearId: editingYear.id,
+          error: data.error,
+        })
         toast({ title: data.error || 'خطا در به‌روزرسانی', variant: 'destructive' })
       }
-    } catch {
+    } catch (err: any) {
+      logger.error('خطای شبکه در ویرایش سال مالی', err, {
+        yearId: editingYear.id,
+      })
       toast({ title: 'خطا در ارتباط با سرور', variant: 'destructive' })
     }
     setEditSaving(false)
@@ -289,12 +345,27 @@ export function FiscalYearTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v4.1: لاگ حذف سال مالی
+        logger.info('سال مالی حذف شد', {
+          yearId: yearId,
+          yearName: yearName,
+        })
+
         toast({ title: data.message })
         setRefreshKey((k) => k + 1)
       } else {
+        logger.error('خطا در حذف سال مالی', undefined, {
+          yearId,
+          yearName,
+          error: data.error,
+        })
         toast({ title: data.error || 'خطا در حذف', variant: 'destructive' })
       }
-    } catch {
+    } catch (err: any) {
+      logger.error('خطای شبکه در حذف سال مالی', err, {
+        yearId,
+        yearName,
+      })
       toast({ title: 'خطا در ارتباط با سرور', variant: 'destructive' })
     }
   }
@@ -310,6 +381,12 @@ export function FiscalYearTab() {
     setEarlyCloseReason('')
     setEarlyCloseConfirmed(false)
 
+    // ★ v4.1: لاگ شروع فرآیند بستن سال
+    logger.info('شروع فرآیند بستن سال مالی', {
+      activeYearName: activeYear?.name || null,
+      activeYearId: activeYear?.id || null,
+    })
+
     try {
       const token =
         typeof window !== 'undefined' ? localStorage.getItem('token') : null
@@ -319,12 +396,25 @@ export function FiscalYearTab() {
       const data = await res.json()
 
       if (data.success) {
+        // ★ v4.1: لاگ موفقیت بررسی پیش‌نیازها
+        logger.info('پیش‌نیازهای بستن سال بررسی شد', {
+          closeMode: data.data?.closeMode,
+          canProceed: data.data?.canProceed,
+          blockersCount: data.data?.blockers?.length || 0,
+          warningsCount: data.data?.warnings?.length || 0,
+          daysUntilEnd: data.data?.activeYear?.daysUntilEnd,
+        })
+
         setPreCheckData(data.data)
       } else {
+        logger.error('خطا در بررسی پیش‌نیازهای بستن سال', undefined, {
+          error: data.error,
+        })
         toast({ title: data.error || 'خطا در بررسی', variant: 'destructive' })
         setWizardOpen(false)
       }
     } catch (err: any) {
+      logger.error('خطای شبکه در بررسی پیش‌نیازها', err)
       toast({ title: 'خطا در ارتباط با سرور', variant: 'destructive' })
       setWizardOpen(false)
     } finally {
@@ -339,6 +429,17 @@ export function FiscalYearTab() {
 
     setExecuting(true)
     setWizardStep('executing')
+
+    // ★ v4.1: لاگ اجرای بستن سال
+    logger.info('اجرای بستن سال مالی', {
+      yearName: preCheckData.activeYear?.name,
+      yearId: preCheckData.activeYear?.id,
+      closeMode: preCheckData.closeMode,
+      earlyCloseReason: preCheckData.closeMode === 'early' ? earlyCloseReason : null,
+      netProfit: preCheckData.closingPreview?.netProfit,
+      totalRevenue: preCheckData.closingPreview?.totalRevenue,
+      totalExpense: preCheckData.closingPreview?.totalExpense,
+    })
 
     try {
       const token =
@@ -365,6 +466,16 @@ export function FiscalYearTab() {
       const data = await res.json()
 
       if (data.success) {
+        // ★ v4.1: لاگ موفقیت بستن سال
+        logger.info('سال مالی با موفقیت بسته شد', {
+          closedYearId: data.data?.closedYear?.id,
+          closedYearName: data.data?.closedYear?.name,
+          closingEntryNumber: data.data?.closingEntry?.number,
+          netProfit: data.data?.closingEntry?.netProfit,
+          totalRevenue: data.data?.closingEntry?.totalRevenue,
+          totalExpense: data.data?.closingEntry?.totalExpense,
+        })
+
         setWizardResult(data.data)
         setWizardStep('completed')
         setRefreshKey((k) => k + 1)
@@ -373,22 +484,29 @@ export function FiscalYearTab() {
           description: 'در حال آماده‌سازی ویزارد راه‌اندازی سال جدید...',
         })
         
-        // ★ بعد از ۲ ثانیه، Wizard بستن را ببند
-      // ★ بعد از ۲ ثانیه، Wizard بستن را ببند و صفحه را reload کن
-setTimeout(() => {
-  setWizardOpen(false)
-  
-  // ★ بعد از ۵۰۰ms، صفحه را reload کن تا SetupWizard به صورت خودکار باز شود
-  setTimeout(() => {
-    console.log('[FiscalYearTab] 🔄 Reloading page to trigger setup wizard...')
-    window.location.reload()
-  }, 500)
-}, 2000)
+        // ★ بعد از ۲ ثانیه، Wizard بستن را ببند و صفحه را reload کن
+        setTimeout(() => {
+          setWizardOpen(false)
+          
+          // ★ بعد از ۵۰۰ms، صفحه را reload کن تا SetupWizard به صورت خودکار باز شود
+          setTimeout(() => {
+            console.log('[FiscalYearTab] 🔄 Reloading page to trigger setup wizard...')
+            window.location.reload()
+          }, 500)
+        }, 2000)
       } else {
+        logger.error('خطا در بستن سال مالی', undefined, {
+          yearName: preCheckData.activeYear?.name,
+          error: data.error,
+          closeMode: preCheckData.closeMode,
+        })
         toast({ title: data.error || 'خطا در بستن سال مالی', variant: 'destructive' })
         setWizardStep('confirm')
       }
     } catch (err: any) {
+      logger.error('خطای شبکه در بستن سال مالی', err, {
+        yearName: preCheckData.activeYear?.name,
+      })
       toast({ title: err?.message || 'خطا در ارتباط', variant: 'destructive' })
       setWizardStep('confirm')
     } finally {
@@ -881,7 +999,7 @@ setTimeout(() => {
       </Dialog>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
-      {/*  ★★★ Wizard بستن سال مالی (نسخه v4.0 — ۳ مرحله)             */}
+      {/*  ★★★ Wizard بستن سال مالی (نسخه v4.1 — ۳ مرحله)             */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       <Dialog open={wizardOpen} onOpenChange={setWizardOpen}>
         <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto" dir="rtl">

@@ -1738,3 +1738,29 @@ model IdentityRegistry {
   @@index([tenantId])
   @@map("IdentityRegistry")
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.9.0: SystemLogs — جدول لاگ‌های سیستم
+// ═══════════════════════════════════════════════════════════════
+
+model SystemLogs {
+  id         String   @id @default(uuid()) @db.VarChar(450)
+  tenantId   String   @db.VarChar(1000)
+  userId     String?  @db.VarChar(450)
+  userName   String?  @db.VarChar(200)
+  level      String   @db.VarChar(20)   // info, warn, error, debug
+  source     String   @db.VarChar(100)  // frontend, backend, api, user
+  category   String?  @db.VarChar(100)  // invoice, product, auth, etc.
+  message    String   @db.Text
+  metadata   Json?
+  stackTrace String?  @db.Text
+  userAgent  String?  @db.Text
+  url        String?  @db.Text
+  ipAddress  String?  @db.VarChar(45)
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, level, createdAt])
+  @@index([createdAt])
+  @@map("SystemLogs")
+}

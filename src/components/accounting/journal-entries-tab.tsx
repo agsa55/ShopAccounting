@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -772,6 +773,28 @@ await cacheJournalEntries(finalList as any)
   await addJournalToSyncQueue('create', newEntry as any)
 
       if (isOnline) setTimeout(() => syncEngine.sync(), 100)
+        // ★ v11.9.0: لاگ ثبت سند حسابداری دستی
+logger.info('سند حسابداری دستی ثبت شد', {
+  entryId: newEntry.id,
+  entryNumber: newEntry.entryNumber,
+  description: manualDescription || 'سند دستی',
+  date: manualDate,
+  totalDebit: totalDebit,
+  totalCredit: totalCredit,
+  linesCount: validLines.length,
+  accounts: validLines.map(l => {
+    const acc = accounts.find(a => a.id === l.accountId)
+    return {
+      accountId: l.accountId,
+      accountName: acc?.name || 'نامشخص',
+      accountCode: acc?.code || '',
+      debit: parseFloat(l.debit) || 0,
+      credit: parseFloat(l.credit) || 0,
+    }
+  }),
+  isOnline: isOnline,
+})
+
 
       toast({ title: '✓ سند ایجاد شد', description: isOnline ? 'سند در حال ارسال به سرور است' : 'سند در صف همگام‌سازی قرار گرفت' })
 
@@ -796,11 +819,23 @@ await cacheJournalEntries(finalList as any)
 
     setCancelSaving(true)
     try {
-    if (cancelEntry._offline) {
+  if (cancelEntry._offline) {
   const updated = entries.filter(e => e.id !== cancelEntry.id)
   setEntries(updated)
-  await cacheJournalEntries(updated as any) // ← اصلاح شد: به جای updatedEntries از updated استفاده شد
+  await cacheJournalEntries(updated as any)
+  
+  // ★ v11.9.0: لاگ لغو سند آفلاین
+  logger.info('سند حسابداری آفلاین لغو شد', {
+    entryId: cancelEntry.id,
+    entryNumber: cancelEntry.entryNumber || cancelEntry.number,
+    description: cancelEntry.description,
+    date: cancelEntry.date,
+    totalDebit: cancelEntry.totalDebit,
+    cancelReason: cancelReason,
+  })
+  
   toast({ title: '✓ لغو شد', description: 'سند آفلاین حذف شد' })
+
 
       } else {
         if (!isOnline) {
@@ -814,14 +849,34 @@ await cacheJournalEntries(finalList as any)
           headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: JSON.stringify({ reason: cancelReason }),
         })
-
-        if (res.ok) {
-          toast({ title: '✓ لغو شد', description: 'سند با موفقیت لغو شد' })
-          await loadEntries()
-        } else {
-          const data = await res.json()
-          throw new Error(data.error || 'خطا در لغو سند')
-        }
+if (res.ok) {
+  // ★ v11.9.0: لاگ لغو سند حسابداری (قبل از بارگذاری مجدد)
+  logger.info('سند حسابداری لغو شد', {
+    entryId: cancelEntry.id,
+    entryNumber: cancelEntry.entryNumber || cancelEntry.number,
+    description: cancelEntry.description,
+    date: cancelEntry.date,
+    totalDebit: cancelEntry.totalDebit,
+    totalCredit: cancelEntry.totalCredit,
+    cancelReason: cancelReason,
+    sourceType: cancelEntry.sourceType || 'manual',
+    previousStatus: cancelEntry.status,
+  })
+  
+  toast({ title: '✓ لغو شد', description: 'سند با موفقیت لغو شد' })
+  await loadEntries()
+} else {
+  const data = await res.json()
+  
+  // ★ v11.9.0: لاگ خطای لغو سند
+  logger.error('خطا در لغو سند حسابداری', undefined, {
+    entryId: cancelEntry.id,
+    entryNumber: cancelEntry.entryNumber || cancelEntry.number,
+    error: data.error || 'خطای نامشخص',
+  })
+  
+  throw new Error(data.error || 'خطا در لغو سند')
+}
       }
 
       setCancelDialogOpen(false)

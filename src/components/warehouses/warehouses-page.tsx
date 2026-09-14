@@ -16,6 +16,7 @@ import {
   AlertTriangle, WifiOff, Upload, RefreshCw, CloudOff, CheckCircle2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ══════════════════════════
 // Types
@@ -471,12 +472,37 @@ export function WarehousesPage() {
       console.log('[Warehouses] Submitting body:', JSON.stringify(body)) // ★★★ لاگ
       
       const res = await fetch('/api/warehouses', { method, headers: getAuthHeaders(), body: JSON.stringify(body) })
-      const data = await res.json()
-      if (data.success) { 
-        toast({ title: '✓ موفق', description: editingWarehouse ? 'انبار به‌روزرسانی شد' : 'انبار ایجاد شد' })
-        setDialogOpen(false)
-        await loadData(false)
-      } else { 
+    const data = await res.json()
+if (data.success) { 
+  // ★ v11.9.0: لاگ ثبت یا ویرایش انبار
+  const branchName = branches.find(b => b.id === form.branchId)?.name || null
+  if (editingWarehouse) {
+    logger.info('انبار ویرایش شد', {
+      warehouseId: editingWarehouse.id,
+      warehouseName: form.name.trim(),
+      oldName: editingWarehouse.name,
+      code: form.code || null,
+      branchId: form.branchId || null,
+      branchName: branchName,
+      isDefault: form.isDefault,
+      isActive: form.isActive,
+    })
+  } else {
+    logger.info('انبار جدید ثبت شد', {
+      warehouseId: data.data?.id,
+      warehouseName: form.name.trim(),
+      code: form.code || null,
+      branchId: form.branchId || null,
+      branchName: branchName,
+      isDefault: form.isDefault,
+      isActive: form.isActive,
+    })
+  }
+  
+  toast({ title: '✓ موفق', description: editingWarehouse ? 'انبار به‌روزرسانی شد' : 'انبار ایجاد شد' })
+  setDialogOpen(false)
+  await loadData(false)
+} else { 
         toast({ title: 'خطا', description: data.error, variant: 'destructive' }) 
       }
     } catch (err: any) { 
@@ -520,11 +546,21 @@ export function WarehousesPage() {
       const res = await fetch(`/api/warehouses?id=${wh.id}&tenantId=${tid}`, { 
         method: 'DELETE', headers: getAuthHeaders() 
       })
-      const data = await res.json()
-      if (data.success) { 
-        toast({ title: '✓ موفق', description: data.message })
-        await loadData(false)
-      } else { 
+  const data = await res.json()
+if (data.success) { 
+  // ★ v11.9.0: لاغ حذف انبار (قبل از بارگذاری مجدد)
+  logger.info('انبار حذف شد', {
+    warehouseId: wh.id,
+    warehouseName: wh.name,
+    code: wh.code,
+    branchName: wh.branchName || null,
+    isDefault: wh.isDefault,
+    totalItems: wh.totalItems || 0,
+  })
+  
+  toast({ title: '✓ موفق', description: data.message })
+  await loadData(false)
+} else { 
         toast({ title: 'خطا', description: data.error, variant: 'destructive' }) 
       }
     } catch (err: any) { 

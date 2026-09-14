@@ -38,6 +38,10 @@ import {
   onConnectivityChange,
   startConnectivityMonitor,
 } from '@/lib/connectivity'
+// بعد از سایر import ها:
+import { SystemLogModal } from '@/components/SystemLogModal'
+import { FileText, ClipboardCopy } from 'lucide-react'
+import { getLogs, formatLogsForCopy } from '@/lib/system-logger'
 
 // ─── تایپ‌ها ────────────────────────────────────────────────────
 interface Ticket {
@@ -226,16 +230,45 @@ export function TicketsPage() {
   const [total, setTotal] = useState(0)
 
   // دیالوگ ایجاد
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState({
-    subject: '',
-    description: '',
-    category: 'general',
-    priority: 'normal',
-  })
+ // دیالوگ ایجاد
+const [createDialogOpen, setCreateDialogOpen] = useState(false)
+const [submitting, setSubmitting] = useState(false)
+const [form, setForm] = useState({
+  subject: '',
+  description: '',
+  category: 'general',
+  priority: 'normal',
+})
 
-  const { toast } = useToast()
+// ★ v11.9.0: مودال لاگ‌ها
+const [showLogModal, setShowLogModal] = useState(false)
+
+const { toast } = useToast()
+
+// ─── ★ v11.9.0: اضافه کردن لاگ‌ها به توضیحات تیکت ─────────
+const handleAddLogsToDescription = () => {
+  const logs = getLogs()
+  if (logs.length === 0) {
+    toast({
+      title: 'توجه',
+      description: 'لاگی برای افزودن وجود ندارد',
+    })
+    return
+  }
+
+  const formattedLogs = formatLogsForCopy(logs)
+  const logSection = `\n\n═══════════════════════════════════════\n📋 لاگ‌های سیستم (۲۴ ساعت اخیر):\n═══════════════════════════════════════\n${formattedLogs}`
+  
+  setForm(prev => ({
+    ...prev,
+    description: prev.description + logSection,
+  }))
+
+  toast({
+    title: '✅ لاگ‌ها اضافه شدند',
+    description: `${logs.length} لاگ به توضیحات تیکت اضافه شد`,
+  })
+}
 
   // ─── ★ v9.7.0: تشخیص وضعیت آنلاین/آفلاین (هوشمند) ──────────
   useEffect(() => {
@@ -923,40 +956,62 @@ export function TicketsPage() {
             </div>
 
             {/* راهنما */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-[11px] text-blue-700">
-              <p className="font-medium mb-1">💡 راهنمایی برای پاسخ سریع‌تر:</p>
-              <ul className="space-y-0.5 list-disc pr-4">
-                <li>مشکل را دقیق و مرحله‌به‌مرحله توضیح دهید</li>
-                <li>اگر پیام خطایی دیدید، متن آن را کپی کنید</li>
-                <li>برای باگ‌ها، اولویت «فوری» را فقط برای موارد بحرانی استفاده کنید</li>
-              </ul>
-            </div>
+        {/* ★ v11.9.0: دکمه اضافه کردن لاگ‌ها */}
+<div>
+  <Button
+    type="button"
+    variant="outline"
+    size="sm"
+    onClick={() => setShowLogModal(true)}
+    className="w-full justify-center gap-2 h-9"
+  >
+    <FileText className="w-4 h-4" />
+    مشاهده و کپی لاگ‌های سیستم
+  </Button>
+  <p className="text-[10px] text-gray-400 mt-1 text-center">
+    برای کمک به تیم پشتیبانی، لاگ‌های سیستم را بررسی و در صورت نیاز کپی کنید
+  </p>
+</div>
+
+{/* راهنما */}
+<div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-[11px] text-blue-700">
+  <p className="font-medium mb-1">💡 راهنمایی برای پاسخ سریع‌تر:</p>
+  <ul className="space-y-0.5 list-disc pr-4">
+    <li>مشکل را دقیق و مرحله‌به‌مرحله توضیح دهید</li>
+    <li>اگر پیام خطایی دیدید، متن آن را کپی کنید</li>
+    <li>برای باگ‌ها، اولویت «فوری» را فقط برای موارد بحرانی استفاده کنید</li>
+    <li>لاگ‌های سیستم را از دکمه بالا بررسی و کپی کنید</li>
+  </ul>
+</div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
-              انصراف
-            </Button>
-            <Button
-              onClick={handleSubmitTicket}
-              disabled={submitting || form.subject.trim().length < 5 || form.description.trim().length < 10}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin ml-1" />
-                  در حال ارسال...
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 ml-1" />
-                  {isOnline ? 'ارسال تیکت' : 'ذخیره آفلاین'}
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+       <DialogFooter>
+  <Button variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
+    انصراف
+  </Button>
+  <Button
+    onClick={handleSubmitTicket}
+    disabled={submitting || form.subject.trim().length < 5 || form.description.trim().length < 10}
+    className="bg-emerald-600 hover:bg-emerald-700"
+  >
+    {submitting ? (
+      <>
+        <Loader2 className="w-4 h-4 animate-spin ml-1" />
+        در حال ارسال...
+      </>
+    ) : (
+      <>
+        <Send className="w-4 h-4 ml-1" />
+        {isOnline ? 'ارسال تیکت' : 'ذخیره آفلاین'}
+      </>
+    )}
+  </Button>
+</DialogFooter>
+
+{/* ★ v11.9.0: مودال لاگ‌های سیستم */}
+<SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
+</DialogContent>
+</Dialog>
     </div>
   )
 }

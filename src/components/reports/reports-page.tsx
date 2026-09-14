@@ -14,7 +14,7 @@ import {
   Loader2, AlertCircle, Printer, BookOpen, CheckCircle2, XCircle, Clock, AlertTriangle,
   Package, Percent, PieChart as PieIcon, Activity, Crown, ArrowLeft, Store,
   Receipt, CreditCard, Banknote, LayoutDashboard,
-  ChevronDown, RotateCcw, X, Lock, Shield,
+  ChevronDown, RotateCcw, X,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
@@ -395,32 +395,6 @@ function PersianChartTooltip({ active, payload, label, formatter }: any) {
   )
 }
 
-
-async function fetchWarehousesApi(tenantId: string): Promise<any[]> {
-  try {
-    const res = await fetch(`/api/warehouses?tenantId=${tenantId}`, {
-      headers: getAuthHeaders(),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.data || data || []
-  } catch {
-    return []
-  }
-}
-
-async function fetchCashMovementsApi(tenantId: string): Promise<any[]> {
-  try {
-    const res = await fetch(`/api/cash-movements?tenantId=${tenantId}`, {
-      headers: getAuthHeaders(),
-    })
-    if (!res.ok) return []
-    const data = await res.json()
-    return data.data || data || []
-  } catch {
-    return []
-  }
-}
 // ============================================================================
 //  API Hooks
 // ============================================================================
@@ -1286,12 +1260,11 @@ function InventoryReport() {
   const [summary, setSummary] = useState<any>(null)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [showOnlyLowStock, setShowOnlyLowStock] = useState(false)
-    const [warehouses, setWarehouses] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
-
+  const [warehouses, setWarehouses] = useState<any[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all')
 
   const calculateProductValue = useCallback((p: any): number => {
@@ -1846,236 +1819,104 @@ function VATReport() {
 //  REPORT 8: Cashier Performance — عملکرد صندوق‌دار (پلن حرفه‌ای+)
 // ============================================================================
 
-// ============================================================================
-//  REPORT 8: Cashier Performance — عملکرد صندوق‌دار (پلن حرفه‌ای+)
-//  ★ v11.8.0: فقط مدیر دسترسی دارد + فیلتر انبار + آمار کامل
-// ============================================================================
+function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; dateRange: DateRange }) {
+  const [selectedCashier, setSelectedCashier] = useState<string>('all')
+  const [listVisible, setListVisible] = useState(false)
+  const [page, setPage] = useState(1)
 
+  useEffect(() => { setListVisible(false); setPage(1) }, [selectedCashier, dateRange.from, dateRange.to])
 
-
-// ============================================================================
-//  REPORT 8: Cashier Performance — عملکرد صندوق‌دار (پلن حرفه‌ای+)
-//  ★ v11.8.0: فقط مدیر دسترسی دارد + فیلتر انبار + آمار کامل
-//  ★ توجه: این کامپوننت imports خود را از ابتدای فایل می‌گیرد
-// ============================================================================
-
-function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMovements = [] }: { 
-  invoices: any[]; 
-  dateRange: DateRange;
-  warehouses?: any[];
-  cashMovements?: any[];
-}) {
-  // ─── بررسی دسترسی: فقط مدیر ───
-  const currentUser = useAppStore((s: any) => s.user);
-  const isManager = currentUser?.role === 'Admin' || 
-                    currentUser?.role === 'admin' || 
-                    currentUser?.role === 'Manager' ||
-                    currentUser?.role === 'مدیر' ||
-                    currentUser?.permissions?.includes('view_cashier_report');
-
-  // ─── فیلترها ───
-  const [selectedCashier, setSelectedCashier] = useState<string>('all');
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all');
-  const [selectedType, setSelectedType] = useState<string>('all');
-  const [listVisible, setListVisible] = useState(false);
-  const [page, setPage] = useState(1);
-
-  useEffect(() => { 
-    setListVisible(false); 
-    setPage(1);
-  }, [selectedCashier, selectedWarehouse, selectedType, dateRange.from, dateRange.to]);
-
-  // ─── فیلتر invoices ───
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
-      if (getInvoiceStatus(inv) === 'CANCELLED') return false;
-      
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0];
-      if (!d || d < dateRange.from || d > dateRange.to) return false;
-
-      if (selectedWarehouse !== 'all' && inv.warehouseId !== selectedWarehouse) return false;
-
-      if (selectedType !== 'all') {
-        const invType = inv.invoiceType || 'sale';
-        if (selectedType === 'sale' && invType !== 'sale') return false;
-        if (selectedType === 'service' && invType !== 'service') return false;
-        if (selectedType === 'return' && invType !== 'sale_return') return false;
-        if (selectedType === 'purchase' && invType !== 'purchase') return false;
-      }
-
-      return true;
-    });
-  }, [invoices, dateRange.from, dateRange.to, selectedWarehouse, selectedType]);
-
-  // ─── محاسبه آمار صندوق‌داران ───
-  const stats = useMemo(() => {
+ const stats = useMemo(() => {
     const map: Record<string, { 
-      name: string;
-      cashierId: string;
-      count: number;
-      total: number;
-      cash: number;
-      card: number;
-      check: number;
-      installment: number;
-      credit: number;
-      profit: number;
-      services: number;
-      returns: number;
-      returnCount: number;
-      manualDeposits: number;
-      manualWithdrawals: number;
-      manualExpenses: number;
-      manualCount: number;
-    }> = {};
-
-    filteredInvoices.forEach((inv) => {
-      const cashierId = inv.cashierId || 'unknown';
-      const name = getInvoiceCashier(inv);
-      const invType = inv.invoiceType || 'sale';
+      name: string
+      count: number
+      total: number
+      cash: number
+      card: number
+      check: number
+      installment: number
+      credit: number
+      profit: number
+    }> = {}
+    invoices.forEach((inv) => {
+      if (getInvoiceStatus(inv) === 'CANCELLED') return
+      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
+      if (!d || d < dateRange.from || d > dateRange.to) return
+      const name = getInvoiceCashier(inv)
+      if (!map[name]) map[name] = { 
+        name, 
+        count: 0, 
+        total: 0, 
+        cash: 0, 
+        card: 0, 
+        check: 0, 
+        installment: 0, 
+        credit: 0, 
+        profit: 0 
+      }
+      const total = getInvoiceTotal(inv)
+      map[name].count++
+      map[name].total += total
       
-      if (!map[name]) {
-        map[name] = { 
-          name, 
-          cashierId,
-          count: 0, 
-          total: 0, 
-          cash: 0, card: 0, check: 0, installment: 0, credit: 0,
-          profit: 0,
-          services: 0,
-          returns: 0,
-          returnCount: 0,
-          manualDeposits: 0,
-          manualWithdrawals: 0,
-          manualExpenses: 0,
-          manualCount: 0,
-        };
-      }
-
-      const total = getInvoiceTotal(inv);
-
-      if (invType === 'sale_return') {
-        map[name].returnCount++;
-        map[name].returns += total;
-        map[name].profit -= total;
-        return;
-      }
-
-      map[name].count++;
-      map[name].total += total;
-
-      const cogsAmount = Number(inv.cogsAmount) || 0;
-      const invoiceProfit = total - cogsAmount;
-      map[name].profit += invoiceProfit;
-
-      if (invType === 'service') {
-        map[name].services += total;
-      }
-
-      const pt = getInvoicePaymentType(inv).toLowerCase();
-      if (pt === 'cash') map[name].cash += total;
-      else if (pt === 'card') map[name].card += total;
-      else if (pt === 'check') map[name].check += total;
-      else if (pt === 'installment') map[name].installment += total;
-      else map[name].credit += total;
-    });
-
-    cashMovements.forEach((m: any) => {
-      const cashierName = m.cashierName || 'نامشخص';
-      const d = new Date(m.createdAt).toISOString().split('T')[0];
-      if (!d || d < dateRange.from || d > dateRange.to) return;
+      // ★ محاسبه سود/زیان فروش: مبلغ فروش - بهای تمام شده
+      const cogsAmount = Number(inv.cogsAmount) || 0
+      const invoiceProfit = total - cogsAmount
+      map[name].profit += invoiceProfit
       
-      if (selectedType !== 'all' && selectedType !== 'manual') return;
-
-      if (!map[cashierName]) {
-        map[cashierName] = { 
-          name: cashierName, 
-          cashierId: m.cashierId || 'unknown',
-          count: 0, total: 0,
-          cash: 0, card: 0, check: 0, installment: 0, credit: 0,
-          profit: 0,
-          services: 0, returns: 0, returnCount: 0,
-          manualDeposits: 0, manualWithdrawals: 0, manualExpenses: 0, manualCount: 0,
-        };
+      const pt = getInvoicePaymentType(inv).toLowerCase()
+      if (pt === 'cash') {
+        map[name].cash += total
+      } else if (pt === 'card') {
+        map[name].card += total
+      } else if (pt === 'check') {
+        map[name].check += total
+      } else if (pt === 'installment') {
+        map[name].installment += total
+      } else {
+        // نسیه و سایر روش‌ها
+        map[name].credit += total
       }
+    })
+    return Object.values(map)
+  }, [invoices, dateRange.from, dateRange.to])
 
-      const amount = Number(m.amount) || 0;
-      map[cashierName].manualCount++;
+  const cashiers = stats.map((s) => s.name)
+  const filtered = selectedCashier === 'all' ? stats : stats.filter((c) => c.name === selectedCashier)
 
-      if (m.transactionType === 'deposit') {
-        map[cashierName].manualDeposits += amount;
-      } else if (m.transactionType === 'withdrawal') {
-        map[cashierName].manualWithdrawals += amount;
-      } else if (m.transactionType === 'expense') {
-        map[cashierName].manualExpenses += amount;
-      }
-    });
+ const grandTotal = filtered.reduce((s, c) => s + c.total, 0)
+const grandCash = filtered.reduce((s, c) => s + c.cash, 0)
+const grandCard = filtered.reduce((s, c) => s + c.card, 0)
+const grandCheck = filtered.reduce((s, c) => s + c.check, 0)
+const grandInstallment = filtered.reduce((s, c) => s + c.installment, 0)
+const grandCredit = filtered.reduce((s, c) => s + c.credit, 0)
+const grandProfit = filtered.reduce((s, c) => s + c.profit, 0)
+const totalCount = filtered.reduce((s, c) => s + c.count, 0)
+  const cashierFilterText = selectedCashier === 'all' ? 'همه صندوق‌داران' : selectedCashier
 
-    return Object.values(map);
-  }, [filteredInvoices, cashMovements, dateRange.from, dateRange.to, selectedType]);
+  const paginatedStats = paginate(filtered, page)
+  const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
 
-  const cashiers = stats.map((s) => s.name);
-  const filtered = selectedCashier === 'all' ? stats : stats.filter((c) => c.name === selectedCashier);
-
-  const grandTotal = filtered.reduce((s, c) => s + c.total, 0);
-  const grandCash = filtered.reduce((s, c) => s + c.cash, 0);
-  const grandCard = filtered.reduce((s, c) => s + c.card, 0);
-  const grandCheck = filtered.reduce((s, c) => s + c.check, 0);
-  const grandInstallment = filtered.reduce((s, c) => s + c.installment, 0);
-  const grandCredit = filtered.reduce((s, c) => s + c.credit, 0);
-  const grandProfit = filtered.reduce((s, c) => s + c.profit, 0);
-  const grandServices = filtered.reduce((s, c) => s + c.services, 0);
-  const grandReturns = filtered.reduce((s, c) => s + c.returns, 0);
-  const grandReturnCount = filtered.reduce((s, c) => s + c.returnCount, 0);
-  const grandManualDeposits = filtered.reduce((s, c) => s + c.manualDeposits, 0);
-  const grandManualWithdrawals = filtered.reduce((s, c) => s + c.manualWithdrawals, 0);
-  const grandManualExpenses = filtered.reduce((s, c) => s + c.manualExpenses, 0);
-  const totalCount = filtered.reduce((s, c) => s + c.count, 0);
-
-  const cashierFilterText = selectedCashier === 'all' ? 'همه صندوق‌داران' : selectedCashier;
-  const warehouseFilterText = selectedWarehouse === 'all' 
-    ? 'همه انبارها' 
-    : warehouses.find(w => w.id === selectedWarehouse)?.name || '—';
-  const typeFilterText = {
-    all: 'همه تراکنش‌ها',
-    sale: 'فقط فروش',
-    service: 'فقط خدمات',
-    return: 'فقط برگشتی',
-    purchase: 'فقط خرید',
-    manual: 'فقط تراکنش دستی',
-  }[selectedType];
-
-  const paginatedStats = paginate(filtered, page);
-  const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`;
-
-  const chartData = filtered.map((s) => ({
+ const chartData = filtered.map((s) => ({
     name: s.name,
     'فروش نقدی': s.cash,
     'فروش چکی': s.check,
     'فروش اقساطی': s.installment,
     'فروش نسیه': s.credit,
-    'خدمات': s.services,
-  }));
+  }))
 
-  const columns: ReportColumn[] = [
+ const columns: ReportColumn[] = [
     { key: 'name', label: 'نام صندوق‌دار', align: 'right' },
     { key: 'count', label: 'تعداد فاکتور', isNumeric: true, align: 'center' },
-    { key: 'cash', label: 'نقدی', isCurrency: true, align: 'left' },
-    { key: 'card', label: 'کارتخوان', isCurrency: true, align: 'left' },
-    { key: 'check', label: 'چکی', isCurrency: true, align: 'left' },
-    { key: 'installment', label: 'اقساطی', isCurrency: true, align: 'left' },
-    { key: 'credit', label: 'نسیه', isCurrency: true, align: 'left' },
-    { key: 'services', label: 'خدمات', isCurrency: true, align: 'left' },
-    { key: 'returns', label: 'برگشتی', isCurrency: true, align: 'left' },
+    { key: 'cash', label: 'فروش نقدی', isCurrency: true, align: 'left' },
+    { key: 'card', label: 'فروش کارتخوان', isCurrency: true, align: 'left' },
+    { key: 'check', label: 'فروش چکی', isCurrency: true, align: 'left' },
+    { key: 'installment', label: 'فروش اقساطی', isCurrency: true, align: 'left' },
+    { key: 'credit', label: 'فروش نسیه', isCurrency: true, align: 'left' },
     { key: 'total', label: 'جمع فروش', isCurrency: true, align: 'left' },
-    { key: 'profit', label: 'سود/زیان', isCurrency: true, align: 'left' },
-    { key: 'manualDeposits', label: 'واریز دستی', isCurrency: true, align: 'left' },
-    { key: 'manualWithdrawals', label: 'برداشت دستی', isCurrency: true, align: 'left' },
-    { key: 'manualExpenses', label: 'هزینه دستی', isCurrency: true, align: 'left' },
-    { key: 'avg', label: 'میانگین', isCurrency: true, align: 'left' },
-  ];
-
-  const rows = filtered.map((s) => ({
+    { key: 'profit', label: 'سود/زیان فروش', isCurrency: true, align: 'left' },
+    { key: 'avg', label: 'میانگین فاکتور', isCurrency: true, align: 'left' },
+  ]
+ const rows = filtered.map((s) => ({
     name: s.name,
     count: s.count,
     cash: s.cash,
@@ -2083,121 +1924,47 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
     check: s.check,
     installment: s.installment,
     credit: s.credit,
-    services: s.services,
-    returns: s.returns,
     total: s.total,
     profit: s.profit,
-    manualDeposits: s.manualDeposits,
-    manualWithdrawals: s.manualWithdrawals,
-    manualExpenses: s.manualExpenses,
     avg: s.count > 0 ? Math.round(s.total / s.count) : 0,
-  }));
-
+  }))
   const meta: ReportMeta = {
-    title: 'گزارش جامع عملکرد صندوق‌داران',
+    title: 'گزارش عملکرد صندوق‌داران',
     storeName: getStoreName(),
     period: periodText,
-    filters: [
-      { label: 'صندوق‌دار', value: cashierFilterText },
-      { label: 'انبار', value: warehouseFilterText },
-      { label: 'نوع تراکنش', value: typeFilterText },
-    ],
-    summary: [
+    filters: [{ label: 'صندوق‌دار', value: cashierFilterText }],
+ summary: [
       { label: 'تعداد صندوق‌دار', value: formatNumberFa(filtered.length), color: 'blue' },
       { label: 'تعداد فاکتور', value: formatNumberFa(totalCount), color: 'gray' },
       { label: 'فروش نقدی', value: formatNumberFa(grandCash), color: 'green' },
       { label: 'فروش چکی', value: formatNumberFa(grandCheck), color: 'amber' },
-      { label: 'فروش اقساطی', value: formatNumberFa(grandInstallment), color: 'blue' },
+  { label: 'فروش اقساطی', value: formatNumberFa(grandInstallment), color: 'blue' },
       { label: 'جمع فروش', value: formatNumberFa(grandTotal), color: 'green' },
       { label: 'سود/زیان فروش', value: formatNumberFa(grandProfit), color: grandProfit >= 0 ? 'green' : 'red' },
     ],
-    note: 'این گزارش فقط برای مدیران قابل دسترسی است.',
-  };
-
-  // ─── صفحه بدون دسترسی ───
-  if (!isManager) {
-    return (
-      <Card className="border-red-200 bg-red-50">
-        <CardContent className="p-8 text-center">
-          <Lock className="w-16 h-16 text-red-400 mx-auto mb-4" />
-          <h3 className="text-lg font-bold text-red-700 mb-2">دسترسی محدود</h3>
-          <p className="text-sm text-red-600">
-            این گزارش فقط برای مدیران سیستم قابل دسترسی است.
-          </p>
-          <p className="text-xs text-red-500 mt-2">
-            لطفاً با مدیر سیستم تماس بگیرید.
-          </p>
-        </CardContent>
-      </Card>
-    );
+    note: 'این گزارش بر اساس فاکتورهای صادر شده توسط هر صندوق‌دار تولید شده است.',
   }
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      {/* نشانگر مدیر */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-l from-blue-50 to-indigo-50 border border-blue-200 rounded-lg">
-        <Shield className="w-4 h-4 text-blue-600" />
-        <span className="text-xs font-bold text-blue-700">گزارش مدیریتی — فقط مدیران دسترسی دارند</span>
-      </div>
-
-      {/* فیلترها */}
       <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <div className="w-[140px] sm:w-[160px]">
-          <label className="text-[10px] text-gray-500 mb-1 block">صندوق‌دار</label>
+        <div className="w-[150px] sm:w-[180px]">
           <Select value={selectedCashier} onValueChange={setSelectedCashier}>
-            <SelectTrigger className="h-9 w-full text-xs sm:text-sm">
-              <SelectValue placeholder="صندوق‌دار" />
-            </SelectTrigger>
+            <SelectTrigger className="h-9 w-full text-xs sm:text-sm"><SelectValue placeholder="صندوق‌دار" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">همه صندوق‌داران</SelectItem>
-              {cashiers.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
+              {cashiers.map((c) => (<SelectItem key={c} value={c}>{c}</SelectItem>))}
             </SelectContent>
           </Select>
         </div>
-
-        <div className="w-[140px] sm:w-[160px]">
-          <label className="text-[10px] text-gray-500 mb-1 block">انبار</label>
-          <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
-            <SelectTrigger className="h-9 w-full text-xs sm:text-sm">
-              <SelectValue placeholder="انبار" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">همه انبارها</SelectItem>
-              {warehouses.map((w: any) => (
-                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="w-[140px] sm:w-[160px]">
-          <label className="text-[10px] text-gray-500 mb-1 block">نوع تراکنش</label>
-          <Select value={selectedType} onValueChange={setSelectedType}>
-            <SelectTrigger className="h-9 w-full text-xs sm:text-sm">
-              <SelectValue placeholder="نوع" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">همه تراکنش‌ها</SelectItem>
-              <SelectItem value="sale">فقط فروش</SelectItem>
-              <SelectItem value="service">فقط خدمات</SelectItem>
-              <SelectItem value="return">فقط برگشتی</SelectItem>
-              <SelectItem value="purchase">فقط خرید</SelectItem>
-              <SelectItem value="manual">فقط تراکنش دستی</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
         <ReportActions
-          onExportExcel={() => exportToExcel(meta, columns, rows, 'گزارش-جامع-عملکرد-صندوق‌داران')}
+          onExportExcel={() => exportToExcel(meta, columns, rows, 'گزارش-عملکرد-صندوق‌داران')}
           onPrint={() => printReport(meta, columns, rows)}
           disabled={filtered.length === 0}
         />
       </div>
 
-      {/* آمار کلی */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
         <StatCard label="تعداد صندوق‌دار" value={filtered.length} icon={<UserCheck className="w-4 h-4" />} color="blue" dir="rtl" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
         <StatCard label="فروش نقدی" value={grandCash} icon={<Banknote className="w-4 h-4" />} color="emerald" suffix="تومان" />
@@ -2206,47 +1973,23 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
         <StatCard label="جمع فروش" value={grandTotal} icon={<Wallet className="w-4 h-4" />} color="teal" suffix="تومان" />
       </div>
 
-      {/* آمار تکمیلی */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-        <StatCard label="خدمات و تعمیرات" value={grandServices} icon={<Receipt className="w-4 h-4" />} color="indigo" suffix="تومان" />
-        <StatCard label="برگشتی‌ها" value={grandReturns} icon={<RotateCcw className="w-4 h-4" />} color="amber" suffix="تومان" hint={`${grandReturnCount} مورد`} />
-        <StatCard label="واریز دستی" value={grandManualDeposits} icon={<TrendingDown className="w-4 h-4" />} color="emerald" suffix="تومان" />
-        <StatCard label="برداشت دستی" value={grandManualWithdrawals} icon={<TrendingUp className="w-4 h-4" />} color="red" suffix="تومان" />
-      </div>
-
-      {/* کارت سود/زیان */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      {/* کارت سود/زیان فروش */}
+      <div className="grid grid-cols-1 gap-2">
         <div className={`rounded-xl p-3 text-white shadow-sm ${grandProfit >= 0 ? 'bg-gradient-to-br from-emerald-600 to-teal-600' : 'bg-gradient-to-br from-red-500 to-red-600'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {grandProfit >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
               <div>
                 <p className="text-xs text-white/80">سود/زیان فروش</p>
-                <p className="text-xs text-white/70 mt-0.5">جمع فروش - بهای تمام شده</p>
+                <p className="text-sm text-white/70 mt-0.5">جمع فروش منهای بهای تمام شده</p>
               </div>
             </div>
-            <p className="text-lg font-bold font-mono" dir="ltr">{formatNumberFa(grandProfit)} ت</p>
-          </div>
-        </div>
-
-        <div className="rounded-xl p-3 bg-gradient-to-br from-slate-600 to-slate-700 text-white shadow-sm">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Wallet className="w-5 h-5" />
-              <div>
-                <p className="text-xs text-white/80">خالص تراکنش دستی</p>
-                <p className="text-xs text-white/70 mt-0.5">واریز - برداشت - هزینه</p>
-              </div>
-            </div>
-            <p className="text-lg font-bold font-mono" dir="ltr">
-              {formatNumberFa(grandManualDeposits - grandManualWithdrawals - grandManualExpenses)} ت
-            </p>
+            <p className="text-lg font-bold font-mono" dir="ltr">{formatNumberFa(grandProfit)} تومان</p>
           </div>
         </div>
       </div>
 
-      {/* نمودار */}
-      {chartData.length > 0 && (
+  {chartData.length > 0 && (
         <ChartCard title="مقایسه عملکرد صندوق‌داران" icon={<BarChart3 className="w-4 h-4 text-blue-600" />}>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -2258,14 +2001,11 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
               <Bar dataKey="فروش نقدی" stackId="a" fill="#10b981" />
               <Bar dataKey="فروش چکی" stackId="a" fill="#ec4899" />
               <Bar dataKey="فروش اقساطی" stackId="a" fill="#8b5cf6" />
-              <Bar dataKey="فروش نسیه" stackId="a" fill="#f59e0b" />
-              <Bar dataKey="خدمات" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="فروش نسیه" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       )}
-
-      {/* جدول */}
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -2284,26 +2024,21 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
           ) : (
             <div className="overflow-x-auto -mx-3 sm:-mx-4">
               <Table>
-                <TableHeader>
+            <TableHeader>
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-right text-xs whitespace-nowrap">نام صندوق‌دار</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap">تعداد</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">نقدی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">کارتخوان</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">چکی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">اقساطی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">نسیه</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">خدمات</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">برگشتی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap">تعداد فاکتور</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش نقدی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">فروش کارتخوان</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش چکی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">فروش اقساطی</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden sm:table-cell">فروش نسیه</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap">جمع فروش</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap">سود/زیان</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">واریز دستی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">برداشت دستی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden lg:table-cell">هزینه دستی</TableHead>
-                    <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">میانگین</TableHead>
+                    <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">میانگین فاکتور</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+             <TableBody>
                   {paginatedStats.map((stat) => (
                     <TableRow key={stat.name} className="hover:bg-emerald-50/50">
                       <TableCell className="text-xs sm:text-sm font-medium whitespace-nowrap">{stat.name}</TableCell>
@@ -2313,18 +2048,11 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
                       <TableCell className="text-xs sm:text-sm text-pink-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(stat.check)}</TableCell>
                       <TableCell className="text-xs sm:text-sm text-purple-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.installment)}</TableCell>
                       <TableCell className="text-xs sm:text-sm text-amber-600 whitespace-nowrap hidden sm:table-cell" dir="ltr">{formatNumberFa(stat.credit)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-indigo-600 whitespace-nowrap hidden md:table-cell" dir="ltr">{formatNumberFa(stat.services)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-amber-600 whitespace-nowrap hidden md:table-cell" dir="ltr">{formatNumberFa(stat.returns)}</TableCell>
                       <TableCell className="text-xs sm:text-sm font-bold whitespace-nowrap" dir="ltr">{formatNumberFa(stat.total)}</TableCell>
                       <TableCell className="text-xs sm:text-sm font-bold whitespace-nowrap" dir="ltr" style={{ color: stat.profit >= 0 ? '#059669' : '#dc2626' }}>
                         {formatNumberFa(stat.profit)}
                       </TableCell>
-                      <TableCell className="text-xs sm:text-sm text-emerald-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.manualDeposits)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-red-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.manualWithdrawals)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-amber-600 whitespace-nowrap hidden lg:table-cell" dir="ltr">{formatNumberFa(stat.manualExpenses)}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-gray-600 whitespace-nowrap hidden md:table-cell" dir="ltr">
-                        {stat.count > 0 ? formatNumberFa(Math.round(stat.total / stat.count)) : '۰'}
-                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm text-gray-600 whitespace-nowrap hidden md:table-cell" dir="ltr">{stat.count > 0 ? formatNumberFa(Math.round(stat.total / stat.count)) : '۰'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -2335,7 +2063,7 @@ function CashierPerformanceReport({ invoices, dateRange, warehouses = [], cashMo
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }
 
 // ============================================================================
@@ -3867,8 +3595,6 @@ export default function ReportsPage() {
   const [customers, setCustomers] = useState<any[]>([])
   const [installmentPlans, setInstallmentPlans] = useState<any[]>([])
   const [journalEntries, setJournalEntries] = useState<any[]>([])
- const [warehouses, setWarehouses] = useState<any[]>([])
-const [cashMovements, setCashMovements] = useState<any[]>([])
   const [dashboardData, setDashboardData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -3880,27 +3606,19 @@ const [cashMovements, setCashMovements] = useState<any[]>([])
 
     setReportLoading(true)
     try {
-   const needsInvoices = ['daily-sales', 'customer-statement', 'profit-loss', 'cashier-performance', 'sales-trend', 'branch-consolidated'].includes(reportId || '')
-const needsCustomers = ['customer-statement'].includes(reportId || '')
-const needsJournal = (tier === 'basic') && ['profit-loss'].includes(reportId || '')
-const needsInstallments = ['installments'].includes(reportId || '')
-// ★ v11.8.0: نیازمندی‌های گزارش عملکرد صندوق‌دار
-const needsWarehouses = ['cashier-performance'].includes(reportId || '')
-const needsCashMovements = ['cashier-performance'].includes(reportId || '')
+      const needsInvoices = ['daily-sales', 'customer-statement', 'profit-loss', 'cashier-performance', 'sales-trend', 'branch-consolidated'].includes(reportId || '')
+      const needsCustomers = ['customer-statement'].includes(reportId || '')
+      const needsJournal = (tier === 'basic') && ['profit-loss'].includes(reportId || '')
+      const needsInstallments = ['installments'].includes(reportId || '')
 
-const promises: Promise<any>[] = []
-if (needsInvoices && invoices.length === 0) promises.push(fetchInvoicesApi(tenantId).then(setInvoices))
-if (needsCustomers && customers.length === 0) promises.push(fetchCustomersApi(tenantId).then(setCustomers))
-if (needsJournal && journalEntries.length === 0) promises.push(fetchJournalEntriesApi(tenantId).then(setJournalEntries))
-if (needsInstallments && features.canAccessInstallments && installmentPlans.length === 0) {
-  promises.push(fetchInstallmentPlansApi(tenantId).then(setInstallmentPlans))
-}
-if (needsWarehouses && warehouses.length === 0) {
-  promises.push(fetchWarehousesApi(tenantId).then(setWarehouses))
-}
-if (needsCashMovements && cashMovements.length === 0) {
-  promises.push(fetchCashMovementsApi(tenantId).then(setCashMovements))
-}
+      const promises: Promise<any>[] = []
+      if (needsInvoices && invoices.length === 0) promises.push(fetchInvoicesApi(tenantId).then(setInvoices))
+      if (needsCustomers && customers.length === 0) promises.push(fetchCustomersApi(tenantId).then(setCustomers))
+      if (needsJournal && journalEntries.length === 0) promises.push(fetchJournalEntriesApi(tenantId).then(setJournalEntries))
+      if (needsInstallments && features.canAccessInstallments && installmentPlans.length === 0) {
+        promises.push(fetchInstallmentPlansApi(tenantId).then(setInstallmentPlans))
+      }
+
       if (promises.length > 0) {
         await Promise.all(promises)
       }
@@ -3908,7 +3626,8 @@ if (needsCashMovements && cashMovements.length === 0) {
       console.error('[Reports] loadReportData error:', err)
     }
     setReportLoading(false)
-}, [invoices.length, customers.length, journalEntries.length, installmentPlans.length, warehouses.length, cashMovements.length, features.canAccessInstallments])
+  }, [invoices.length, customers.length, journalEntries.length, installmentPlans.length, features.canAccessInstallments])
+
   useEffect(() => {
     if (activeReport) {
       loadReportData(activeReport)
@@ -4134,14 +3853,9 @@ if (needsCashMovements && cashMovements.length === 0) {
               {activeReport === 'inventory' && <InventoryReport />}
               {activeReport === 'inventory-advanced' && <InventoryAdvancedReport />}
               {activeReport === 'vat' && <VATReport />}
-         {activeReport === 'cashier-performance' && (
-  <CashierPerformanceReport 
-    invoices={invoices} 
-    dateRange={sharedDateRange}
-    warehouses={warehouses}
-    cashMovements={cashMovements}
-  />
-)}
+              {activeReport === 'cashier-performance' && (
+                <CashierPerformanceReport invoices={invoices} dateRange={sharedDateRange} />
+              )}
               {activeReport === 'installments' && (
                 <InstallmentReport plans={installmentPlans} dateRange={sharedDateRange} />
               )}

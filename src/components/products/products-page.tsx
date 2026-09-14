@@ -63,6 +63,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { BarcodePrintModal } from './barcode-print-modal'
+import { logger } from '@/lib/system-logger'
 
 // ══════════════════════════
 // Helpers
@@ -1107,6 +1108,14 @@ const [savingPrice, setSavingPrice] = useState(false)
       })
       const json = await res.json()
       if (json.success) {
+       logger.info('محصول جدید ثبت شد', {
+    productId: json.data?.id,
+    productName: json.data?.name || 'نامشخص',
+    price: json.data?.price,
+    stock: json.data?.stock,
+    categoryId: json.data?.categoryId,
+  })
+  
         toast({
           title: '✓ کالا ایجاد شد',
           description: json.data.barcode
@@ -1259,6 +1268,13 @@ const [savingPrice, setSavingPrice] = useState(false)
       })
       const json = await res.json()
       if (json.success) {
+      logger.info('محصول ویرایش شد', {
+    productId: json.data?.id,
+    productName: json.data?.name || 'نامشخص',
+    price: json.data?.price,
+    stock: json.data?.stock,
+  })
+  
         toast({ title: '✓ موفق', description: 'کالا به‌روزرسانی شد' })
         // ★ v9.3: در حالت ویرایش، مودال بسته می‌شود
         setEditDialogOpen(false)
@@ -1336,6 +1352,10 @@ const [savingPrice, setSavingPrice] = useState(false)
       )
       const json = await res.json()
       if (json.success) {
+          logger.info('محصول حذف شد', {
+    productId: deletingProduct.id,
+    productName: deletingProduct.name || 'نامشخص',
+  })
         toast({ title: 'موفق', description: json.message })
         setProducts((prev) => prev.filter((p) => p.id !== deletingProduct.id))
         setAllProducts((prev) => prev.filter((p) => p.id !== deletingProduct.id))

@@ -14,7 +14,7 @@ import {
   AlertTriangle, ArrowDownCircle, ArrowUpCircle,
   Receipt, Calendar
 } from 'lucide-react';
-
+import { logger } from '@/lib/system-logger'
 // ═══════════════════════════════════════════════════════════════
 // توابع کمکی
 // ═══════════════════════════════════════════════════════════════
@@ -197,15 +197,25 @@ export default function CashierPanel() {
 
       const data = await res.json();
 
-      if (data.success) {
-        setShowManualModal(false);
-        setTransactionType('deposit');
-        setAmount('');
-        setDescription('');
-        setError('');
-        loadSummary(true);
-        alert('✅ تراکنش با موفقیت ثبت شد');
-      } else {
+     if (data.success) {
+  // ★ v11.9.0: لاگ ثبت تراکنش دستی
+  logger.info('تراکنش دستی ثبت شد', {
+    transactionType: transactionType,
+    amount: Number(amount),
+    description: description.trim(),
+    cashierId: currentUser?.id,
+    cashierName: currentUser?.username,
+    direction: transactionType === 'deposit' ? 'in' : 'out',
+  })
+  
+  setShowManualModal(false);
+  setTransactionType('deposit');
+  setAmount('');
+  setDescription('');
+  setError('');
+  loadSummary(true);
+  alert('✅ تراکنش با موفقیت ثبت شد');
+} else {
         setError(data.error || 'خطا در ثبت تراکنش');
       }
     } catch (err) {

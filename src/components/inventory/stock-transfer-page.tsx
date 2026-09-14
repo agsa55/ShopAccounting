@@ -23,6 +23,7 @@ import {
   ArrowRightLeft, Search, Loader2, CheckCircle2, Package, AlertTriangle,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 interface Warehouse { id: string; name: string; code: string; isDefault?: boolean }
 interface Product {
@@ -267,17 +268,31 @@ export function StockTransferPage() {
           description: description || `انتقال ${formatNumber(qty)} عدد ${selectedProduct.name}`,
         }),
       })
-      const data = await res.json()
+   const data = await res.json()
 
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message || 'انتقال با موفقیت ثبت شد' })
-        setDialogOpen(false)
-        setSelectedProduct(null)
-        setQuantity('1')
-        setDescription('')
-        setProductSearch('')
-        loadData()
-      } else {
+if (data.success) {
+  // ★ v11.9.0: لاگ ثبت انتقال بین انبارها (قبل از null شدن selectedProduct)
+  logger.info('انتقال بین انبارها ثبت شد', {
+    productName: selectedProduct.name,
+    productCode: selectedProduct.code,
+    productId: selectedProduct.id,
+    fromWarehouseId: fromWarehouseId,
+    fromWarehouseName: warehouses.find(w => w.id === fromWarehouseId)?.name || null,
+    toWarehouseId: toWarehouseId,
+    toWarehouseName: warehouses.find(w => w.id === toWarehouseId)?.name || null,
+    quantity: qty,
+    description: description || null,
+  })
+  
+  toast({ title: 'موفق', description: data.message || 'انتقال با موفقیت ثبت شد' })
+  setDialogOpen(false)
+  setSelectedProduct(null)
+  setQuantity('1')
+  setDescription('')
+  setProductSearch('')
+  loadData()
+}
+       else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {

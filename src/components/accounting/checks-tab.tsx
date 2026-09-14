@@ -33,6 +33,7 @@ import {
   ArrowLeft, ArrowRight,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -577,12 +578,34 @@ export function ChecksTab() {
         setChecks(updated)
         await cacheChecks(updated)
         await addCheckToSyncQueue('update', { ...newCheck, id: checkFormId })
+         // ★ v11.9.0: لاگ ویرایش چک
+  logger.info('چک ویرایش شد', {
+    checkId: checkFormId,
+    checkNumber: checkNumber.trim(),
+    checkType: checkType,
+    bankName: checkBank.trim(),
+    amount: amount,
+    dueDate: checkDueDate,
+    customerId: checkCustomerId || null,
+    payee: checkPayee || null,
+  })
         toast({ title: '✓ چک ویرایش شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       } else {
         setChecks(prev => [newCheck, ...prev])
         const updated = [newCheck, ...checks]
         await cacheChecks(updated)
         await addCheckToSyncQueue('create', newCheck)
+         // ★ v11.9.0: لاگ ثبت چک جدید
+  logger.info('چک جدید ثبت شد', {
+    checkId: newCheck.id,
+    checkNumber: checkNumber.trim(),
+    checkType: checkType,
+    bankName: checkBank.trim(),
+    amount: amount,
+    dueDate: checkDueDate,
+    customerId: checkCustomerId || null,
+    payee: checkPayee || null,
+  })
         toast({ title: '✓ چک ایجاد شد', description: isOnline ? 'در حال ارسال به سرور' : 'در صف همگام‌سازی قرار گرفت' })
       }
 
@@ -666,6 +689,19 @@ export function ChecksTab() {
           deposited: '🏦 به بانک سپرده شد',
           returned: '↩️ پس داده شد',
         }
+         // ★ v11.9.0: لاگ تغییر وضعیت چک
+  logger.info('وضعیت چک تغییر کرد', {
+    checkId: checkId,
+    checkNumber: check.checkNumber,
+    checkType: check.type,
+    bankName: check.bankName,
+    amount: check.amount,
+    previousStatus: check.status,
+    newStatus: newStatus,
+    previousStatusLabel: statusLabels[check.status] || check.status,
+    newStatusLabel: statusLabels[newStatus] || newStatus,
+  })
+  
         toast({ title: '✓ موفق', description: data.message || statusLabels[newStatus] })
         await loadChecks()
       } else {
@@ -708,6 +744,16 @@ export function ChecksTab() {
         })
 
         if (res.ok) {
+           // ★ v11.9.0: لاگ حذف چک (قبل از حذف کامل)
+  logger.info('چک حذف شد', {
+    checkId: deleteTarget.id,
+    checkNumber: deleteTarget.checkNumber,
+    checkType: deleteTarget.type,
+    bankName: deleteTarget.bankName,
+    amount: deleteTarget.amount,
+    dueDate: deleteTarget.dueDate,
+    status: deleteTarget.status,
+  })
           toast({ title: '✓ حذف شد', description: 'چک با موفقیت حذف شد' })
           await loadChecks()
         } else {

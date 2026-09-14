@@ -24,6 +24,7 @@ import {
   Search, Eye, XCircle, CheckCircle, Clock, FileText, Calendar,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ============================================================================
 //  Types
@@ -356,15 +357,29 @@ export function StockCountPage() {
           items,
         }),
       })
-      const data = await res.json()
+   const data = await res.json()
 
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message })
-        setCreateDialogOpen(false)
-        setCountedItems({})
-        setProductSearch('')
-        loadData()
-      } else {
+if (data.success) {
+  // ★ v11.9.0: لاگ ثبت سند انبارگردانی
+  logger.info('سند انبارگردانی ثبت شد', {
+    stockCountId: data.data?.id,
+    stockCountNumber: data.data?.number,
+    warehouseId: selectedWarehouse,
+    warehouseName: warehouses.find(w => w.id === selectedWarehouse)?.name || null,
+    countDate: countDate,
+    itemsCount: computedTotals.countedItemsCount,
+    totalShortage: computedTotals.totalShortage,
+    totalSurplus: computedTotals.totalSurplus,
+    netDifference: computedTotals.netDifference,
+  })
+  
+  toast({ title: 'موفق', description: data.message })
+  setCreateDialogOpen(false)
+  setCountedItems({})
+  setProductSearch('')
+  loadData()
+}
+      else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {
@@ -476,11 +491,25 @@ export function StockCountPage() {
         headers: getAuthHeaders(),
         body: JSON.stringify({ action: 'cancel' }),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message })
-        loadData()
-      } else {
+  const data = await res.json()
+
+if (data.success) {
+  // ★ v11.9.0: لاگ لغو سند انبارگردانی
+  logger.info('سند انبارگردانی لغو شد', {
+    stockCountId: sc.id,
+    stockCountNumber: sc.number,
+    warehouseName: sc.warehouseName,
+    itemsCount: sc.itemsCount || sc.totalItems,
+    status: sc.status,
+  })
+  toast({ title: 'موفق', description: data.message })
+  setApproveDialogOpen(false)
+  setApproveNotes('')
+  setDetailDialogOpen(false)
+  setSelectedCount(null)
+  loadData()
+}
+       else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {

@@ -39,6 +39,7 @@ import {
 import { useStore } from '@/lib/store'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import {
   cacheInstallmentPlans,
   cacheInstallmentSchedules,
@@ -1125,14 +1126,22 @@ export default function InstallmentsPage() {
 
       const result = await res.json()
 
-      if (result.success) {
-        toast({
-          title: 'پرداخت موفق ✓',
-          description: result.message || `قسط شماره ${formatNumber(payingSchedule.installmentNumber)} با مبلغ ${formatCurrency(amount)} پرداخت شد`,
-        })
+  if (result.success) {
+  // ★ v11.9.0: لاغ پرداخت قسط (قبل از null شدن payingSchedule)
+  logger.info('پرداخت قسط ثبت شد', {
+    scheduleId: payingSchedule.id,
+    installmentNumber: payingSchedule.installmentNumber,
+    amount: amount,
+    paymentMethod: payMethod,
+    paymentRef: payRef || null,
+    paidAt: payDate || null,
+  })
+  toast({
+    title: 'پرداخت موفق ✓',
+    description: result.message || `قسط شماره ${formatNumber(payingSchedule.installmentNumber)} با مبلغ ${formatCurrency(amount)} پرداخت شد`,
+  })
 
-        await loadData()
-
+  await loadData()
         if (selectedPlan) {
           const res = await fetch(`/api/installment-plans?id=${selectedPlan.id}`)
           const result = await res.json()
@@ -1220,13 +1229,24 @@ export default function InstallmentsPage() {
 
       const result = await res.json()
 
-      if (result.success) {
-        toast({
-          title: 'پرداخت ثبت شد ✓',
-          description: result.message || `پرداخت ${formatCurrency(amount)} با موفقیت ثبت شد`,
-        })
-        setCreditPayDialogOpen(false)
-        setCreditInvoiceToPay(null)
+    if (result.success) {
+  // ★ v11.9.0: لاغ پرداخت نسیه (قبل از null شدن creditInvoiceToPay)
+  logger.info('پرداخت نسیه ثبت شد', {
+    invoiceId: creditInvoiceToPay.id,
+    invoiceNumber: creditInvoiceToPay.invoiceNumber || creditInvoiceToPay.number,
+    customerName: creditInvoiceToPay.customerName,
+    amount: amount,
+    paymentMethod: creditPayMethod,
+    paymentRef: creditPayRef || null,
+    paidAt: creditPayDate || null,
+  })
+  
+  toast({
+    title: 'پرداخت ثبت شد ✓',
+    description: result.message || `پرداخت ${formatCurrency(amount)} با موفقیت ثبت شد`,
+  })
+  setCreditPayDialogOpen(false)
+  setCreditInvoiceToPay(null)
         setCreditPayAmount('')
         setCreditPayRef('')
         setCreditPayDate('')

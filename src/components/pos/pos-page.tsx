@@ -66,7 +66,9 @@ import {
   ScanLine,
   Store, Building2, Landmark, CreditCard as CreditCardIcon
 } from 'lucide-react'
+
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { usePosProductSearch } from '@/lib/use-pos-product-search'
 import { BarcodeScannerModal } from '@/components/pos/barcode-scanner-modal'
 import {
@@ -1338,6 +1340,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
         if (cancelled) return
         console.log('[POS] /api/contacts response:', { success: data.success, count: data.data?.length })
         if (data.success) {
+        
           setCustomerSearchResults(data.data || [])
         } else {
           setCustomerSearchResults([])
@@ -2756,12 +2759,25 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
         invoiceNumber: result.data?.number,
       })
 
-      if (res.ok && result.success) {
-        const isInstallment = ptFinal === 'installment'
-        const isCredit = ptFinal === 'credit'
-        const isCheck = ptFinal === 'check'
+   if (res.ok && result.success) {
+  // ★ v11.9.0: لاگ ثبت فاکتور فروش (همه روش‌های پرداخت)
+  logger.info('فاکتور فروش ثبت شد', {
+    invoiceId: result.data?.id,
+    invoiceNumber: result.data?.number,
+    totalAmount: cartTotals?.totalAmount,
+    paymentType: (paymentType || 'cash').toLowerCase(),
+    customerId: finalCustomerId,
+    warehouseId: selectedWarehouseId || undefined,
+    itemsCount: cart?.length,
+    paidAmount: paidAmount,
+    remainingAmount: remainingAmount,
+  })
 
-        if (isInstallment && result.data?.installmentPlan) {
+  const isInstallment = ptFinal === 'installment'
+  const isCredit = ptFinal === 'credit'
+  const isCheck = ptFinal === 'check'
+
+  if (isInstallment && result.data?.installmentPlan) {
           const plan = result.data.installmentPlan
           toast({
             title: 'فاکتور قسطی ثبت شد',
