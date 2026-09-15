@@ -7,6 +7,7 @@
 // ★ v6.4: پشتیبانی کامل آفلاین (نمایش، ایجاد، کش کردن)
 // ★ v6.4: کارت موبایل رسپانسیو + ذخیره داده تیکت در sessionStorage
 // ★ v9.7.0: جایگزینی navigator.onLine با isApiOnline() از connectivity module
+// ★ v11.9.1: لاگ‌های سیستمی اضافه شد
 // ============================================================================
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore, type AppView } from '@/lib/store'
@@ -26,10 +27,7 @@ import {
   RefreshCw, Inbox, Send, WifiOff, CloudOff
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-<<<<<<< HEAD
-=======
 import { logger } from '@/lib/system-logger'
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 import {
   cacheTickets, getCachedTickets, cacheTicketStats, getCachedTicketStats,
   setLastSyncTimestamp, getLastSyncTimestamp
@@ -234,99 +232,59 @@ export function TicketsPage() {
   const [total, setTotal] = useState(0)
 
   // دیالوگ ایجاد
- // دیالوگ ایجاد
-const [createDialogOpen, setCreateDialogOpen] = useState(false)
-const [submitting, setSubmitting] = useState(false)
-const [form, setForm] = useState({
-  subject: '',
-  description: '',
-  category: 'general',
-  priority: 'normal',
-})
-<<<<<<< HEAD
-
-// ★ v11.9.0: مودال لاگ‌ها
-const [showLogModal, setShowLogModal] = useState(false)
-
-const { toast } = useToast()
-
-// ─── ★ v11.9.0: اضافه کردن لاگ‌ها به توضیحات تیکت ─────────
-const handleAddLogsToDescription = () => {
-  const logs = getLogs()
-  if (logs.length === 0) {
-    toast({
-      title: 'توجه',
-      description: 'لاگی برای افزودن وجود ندارد',
-    })
-    return
-  }
-
-  const formattedLogs = formatLogsForCopy(logs)
-  const logSection = `\n\n═══════════════════════════════════════\n📋 لاگ‌های سیستم (۲۴ ساعت اخیر):\n═══════════════════════════════════════\n${formattedLogs}`
-  
-  setForm(prev => ({
-    ...prev,
-    description: prev.description + logSection,
-  }))
-
-  toast({
-    title: '✅ لاگ‌ها اضافه شدند',
-    description: `${logs.length} لاگ به توضیحات تیکت اضافه شد`,
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [form, setForm] = useState({
+    subject: '',
+    description: '',
+    category: 'general',
+    priority: 'normal',
   })
-}
 
-  // ─── ★ v9.7.0: تشخیص وضعیت آنلاین/آفلاین (هوشمند) ──────────
-  useEffect(() => {
-    // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op)
-    startConnectivityMonitor()
+  // ★ v11.9.0: مودال لاگ‌ها
+  const [showLogModal, setShowLogModal] = useState(false)
 
-=======
+  const { toast } = useToast()
 
-// ★ v11.9.0: مودال لاگ‌ها
-const [showLogModal, setShowLogModal] = useState(false)
+  // ─── ★ v11.9.0: اضافه کردن لاگ‌ها به توضیحات تیکت ─────────
+  const handleAddLogsToDescription = () => {
+    const logs = getLogs()
+    if (logs.length === 0) {
+      toast({
+        title: 'توجه',
+        description: 'لاگی برای افزودن وجود ندارد',
+      })
+      return
+    }
 
-const { toast } = useToast()
+    const formattedLogs = formatLogsForCopy(logs)
+    const logSection = `\n\n═══════════════════════════════════════\n📋 لاگ‌های سیستم (۲۴ ساعت اخیر):\n═══════════════════════════════════════\n${formattedLogs}`
+    
+    setForm(prev => ({
+      ...prev,
+      description: prev.description + logSection,
+    }))
 
-// ─── ★ v11.9.0: اضافه کردن لاگ‌ها به توضیحات تیکت ─────────
-const handleAddLogsToDescription = () => {
-  const logs = getLogs()
-  if (logs.length === 0) {
-    toast({
-      title: 'توجه',
-      description: 'لاگی برای افزودن وجود ندارد',
+    // ★ v11.9.1: لاگ افزودن لاگ‌های سیستم به توضیحات تیکت
+    logger.info('لاگ‌های سیستم به توضیحات تیکت اضافه شد', {
+      logsCount: logs.length,
+      errorLogsCount: logs.filter(l => l.level === 'error').length,
+      warnLogsCount: logs.filter(l => l.level === 'warn').length,
+      infoLogsCount: logs.filter(l => l.level === 'info').length,
+      subject: form.subject.trim() || '(هنوز موضوع وارد نشده)',
     })
-    return
+
+    toast({
+      title: '✅ لاگ‌ها اضافه شدند',
+      description: `${logs.length} لاگ به توضیحات تیکت اضافه شد`,
+    })
   }
 
-  const formattedLogs = formatLogsForCopy(logs)
-  const logSection = `\n\n═══════════════════════════════════════\n📋 لاگ‌های سیستم (۲۴ ساعت اخیر):\n═══════════════════════════════════════\n${formattedLogs}`
-  
-  setForm(prev => ({
-    ...prev,
-    description: prev.description + logSection,
-  }))
-
- // ★ v11.9.1: لاگ افزودن لاگ‌های سیستم به توضیحات تیکت
-logger.info('لاگ‌های سیستم به توضیحات تیکت اضافه شد', {
-  logsCount: logs.length,
-  errorLogsCount: logs.filter(l => l.level === 'error').length,
-  warnLogsCount: logs.filter(l => l.level === 'warn').length,
-  infoLogsCount: logs.filter(l => l.level === 'info').length,
-  subject: form.subject.trim() || '(هنوز موضوع وارد نشده)',
-})
-
-toast({
-  title: '✅ لاگ‌ها اضافه شدند',
-  description: `${logs.length} لاگ به توضیحات تیکت اضافه شد`,
-})
-}
-
   // ─── ★ v9.7.0: تشخیص وضعیت آنلاین/آفلاین (هوشمند) ──────────
   useEffect(() => {
     // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op)
     startConnectivityMonitor()
 
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     // تنظیم اولیه بر اساس وضعیت واقعی API
     setIsOnline(isApiOnline())
 
@@ -453,8 +411,24 @@ toast({
 
   // ─── باز کردن تیکت ──────────────────────────────────────────
   // ★ v6.4: ذخیره کل داده‌های تیکت در sessionStorage برای دسترسی آنی در حالت آفلاین
-<<<<<<< HEAD
   const handleOpenTicket = useCallback((ticketId: string, ticketData?: Ticket) => {
+    // ★ v11.9.1: لاگ باز کردن تیکت (برای آمار استفاده از تیکت‌ها)
+    if (ticketData) {
+      logger.info('تیکت پشتیبانی باز شد', {
+        ticketId: ticketId,
+        ticketNumber: ticketData.ticketNumber,
+        subject: ticketData.subject,
+        category: ticketData.category,
+        categoryLabel: ticketData.categoryLabel,
+        priority: ticketData.priority,
+        priorityLabel: ticketData.priorityLabel,
+        status: ticketData.status,
+        messageCount: ticketData.messageCount,
+        unreadCount: ticketData.unreadCount,
+        isOffline: ticketData._isOffline || false,
+      })
+    }
+    
     useStore.getState().setCurrentView('ticket-detail' as AppView)
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('currentTicketId', ticketId)
@@ -464,34 +438,6 @@ toast({
     }
   }, [])
 
-=======
- const handleOpenTicket = useCallback((ticketId: string, ticketData?: Ticket) => {
-  // ★ v11.9.1: لاگ باز کردن تیکت (برای آمار استفاده از تیکت‌ها)
-  if (ticketData) {
-    logger.info('تیکت پشتیبانی باز شد', {
-      ticketId: ticketId,
-      ticketNumber: ticketData.ticketNumber,
-      subject: ticketData.subject,
-      category: ticketData.category,
-      categoryLabel: ticketData.categoryLabel,
-      priority: ticketData.priority,
-      priorityLabel: ticketData.priorityLabel,
-      status: ticketData.status,
-      messageCount: ticketData.messageCount,
-      unreadCount: ticketData.unreadCount,
-      isOffline: ticketData._isOffline || false,
-    })
-  }
-  
-  useStore.getState().setCurrentView('ticket-detail' as AppView)
-  if (typeof window !== 'undefined') {
-    sessionStorage.setItem('currentTicketId', ticketId)
-    if (ticketData) {
-      sessionStorage.setItem('currentTicketData', JSON.stringify(ticketData))
-    }
-  }
-}, [])
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
   const handleSubmitTicket = async () => {
     if (form.subject.trim().length < 5) {
@@ -553,35 +499,26 @@ toast({
       setPriorityFilter('all')
       setPage(1)
 
-<<<<<<< HEAD
+      // ★ v11.9.1: لاگ ایجاد تیکت آفلاین
+      logger.info('تیکت جدید به صورت آفلاین ایجاد شد', {
+        ticketId: newTicket.id,
+        subject: form.subject.trim(),
+        category: form.category,
+        categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
+        priority: form.priority,
+        priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
+        descriptionLength: form.description.trim().length,
+        includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
+        savedToIndexedDB: true,
+        mode: 'offline',
+      })
+
       toast({
         title: 'ذخیره شد ✓',
         description: 'تیکت به صورت محلی ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.',
       })
       setSubmitting(false)
       return
-=======
-   // ★ v11.9.1: لاگ ایجاد تیکت آفلاین
-logger.info('تیکت جدید به صورت آفلاین ایجاد شد', {
-  ticketId: newTicket.id,
-  subject: form.subject.trim(),
-  category: form.category,
-  categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
-  priority: form.priority,
-  priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
-  descriptionLength: form.description.trim().length,
-  includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
-  savedToIndexedDB: true,
-  mode: 'offline',
-})
-
-toast({
-  title: 'ذخیره شد ✓',
-  description: 'تیکت به صورت محلی ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.',
-})
-setSubmitting(false)
-return
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     }
 
     // ★ ارسال آنلاین
@@ -598,38 +535,29 @@ return
       })
       const data = await res.json()
 
-<<<<<<< HEAD
       if (data.success) {
         const ticketNumber = data.data?.ticketNumber || ''
+        
+        // ★ v11.9.1: لاگ ارسال موفق تیکت (آنلاین)
+        logger.info('تیکت پشتیبانی با موفقیت ارسال شد', {
+          ticketId: data.data?.id || null,
+          ticketNumber: ticketNumber,
+          subject: form.subject.trim(),
+          category: form.category,
+          categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
+          priority: form.priority,
+          priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
+          descriptionLength: form.description.trim().length,
+          includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
+          mode: 'online',
+        })
+        
         toast({
           title: 'تیکت ارسال شد ✓',
           description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.`,
           duration: 6000,
         })
-=======
-    if (data.success) {
-  const ticketNumber = data.data?.ticketNumber || ''
-  
-  // ★ v11.9.1: لاگ ارسال موفق تیکت (آنلاین)
-  logger.info('تیکت پشتیبانی با موفقیت ارسال شد', {
-    ticketId: data.data?.id || null,
-    ticketNumber: ticketNumber,
-    subject: form.subject.trim(),
-    category: form.category,
-    categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
-    priority: form.priority,
-    priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
-    descriptionLength: form.description.trim().length,
-    includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
-    mode: 'online',
-  })
-  
-  toast({
-    title: 'تیکت ارسال شد ✓',
-    description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.`,
-    duration: 6000,
-  })
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
+
         setForm({ subject: '', description: '', category: 'general', priority: 'normal' })
         setCreateDialogOpen(false)
         
@@ -638,53 +566,37 @@ return
         setCategoryFilter('all')
         setPriorityFilter('all')
         setPage(1)
-<<<<<<< HEAD
       } else {
+        // ★ v11.9.1: لاگ خطای API در ارسال تیکت
+        logger.error('خطا در ارسال تیکت پشتیبانی', undefined, {
+          subject: form.subject.trim(),
+          category: form.category,
+          priority: form.priority,
+          error: data.error || 'خطای نامشخص',
+          mode: 'online',
+        })
+        
         toast({
           title: 'خطا',
           description: data.error || 'ثبت تیکت ناموفق بود',
           variant: 'destructive',
         })
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[TicketsPage] submit error:', err)
+      
+      // ★ v11.9.1: لاگ خطای شبکه در ارسال تیکت
+      logger.error('خطای شبکه در ارسال تیکت پشتیبانی', err, {
+        subject: form.subject.trim(),
+        category: form.category,
+        priority: form.priority,
+        mode: 'online',
+      })
+      
       toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
     } finally {
       setSubmitting(false)
     }
-=======
-    } else {
-  // ★ v11.9.1: لاگ خطای API در ارسال تیکت
-  logger.error('خطا در ارسال تیکت پشتیبانی', undefined, {
-    subject: form.subject.trim(),
-    category: form.category,
-    priority: form.priority,
-    error: data.error || 'خطای نامشخص',
-    mode: 'online',
-  })
-  
-  toast({
-    title: 'خطا',
-    description: data.error || 'ثبت تیکت ناموفق بود',
-    variant: 'destructive',
-  })
-}
-  } catch (err: any) {
-  console.error('[TicketsPage] submit error:', err)
-  
-  // ★ v11.9.1: لاگ خطای شبکه در ارسال تیکت
-  logger.error('خطای شبکه در ارسال تیکت پشتیبانی', err, {
-    subject: form.subject.trim(),
-    category: form.category,
-    priority: form.priority,
-    mode: 'online',
-  })
-  
-  toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
-} finally {
-  setSubmitting(false)
-}
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   }
 
   // ─── آمار خلاصه در کارت‌های بالا ─────────────────────────────
@@ -1027,154 +939,179 @@ return
         </>
       )}
 
-      {/* ═══════════════ دیالوگ ایجاد تیکت ═══════════════ */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="font-fa sm:max-w-[560px]" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <TicketIcon className="w-5 h-5 text-emerald-600" />
-              ارسال تیکت به پشتیبانی
-            </DialogTitle>
-          </DialogHeader>
-
-          {!isOnline && (
-            <div className="flex items-start gap-2 p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800">
-              <WifiOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              <p>شما آفلاین هستید. تیکت به صورت محلی ذخیره شده و پس از اتصال به اینترنت ارسال می‌شود.</p>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {/* موضوع */}
-            <div>
-              <Label className="text-xs">
-                موضوع <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                value={form.subject}
-                onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                className="mt-1"
-                placeholder="مثلاً: خطا در ثبت فاکتور فروش"
-                maxLength={500}
-              />
-              <p className="text-[10px] text-gray-400 mt-1">
-                {toFaNum(form.subject.length)}/500 کاراکتر
-              </p>
-            </div>
-
-            {/* دسته‌بندی و اولویت */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">دسته‌بندی</Label>
-                <Select
-                  value={form.category}
-                  onValueChange={(v) => setForm({ ...form, category: v })}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">اولویت</Label>
-                <Select
-                  value={form.priority}
-                  onValueChange={(v) => setForm({ ...form, priority: v })}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">کم</SelectItem>
-                    <SelectItem value="normal">عادی</SelectItem>
-                    <SelectItem value="high">بالا</SelectItem>
-                    <SelectItem value="urgent">فوری</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* توضیحات */}
-            <div>
-              <Label className="text-xs">
-                توضیحات کامل <span className="text-red-500">*</span>
-              </Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                className="mt-1 min-h-[140px] resize-y"
-                placeholder="مشکل یا درخواست خود را با جزئیات بنویسید. هرچه دقیق‌تر بنویسید، سریع‌تر پاسخ می‌گیرید. مثلاً: روی چه صفحه‌ای بودید، چه کاری انجام دادید، چه پیغامی دیدید..."
-                maxLength={10000}
-              />
-              <p className="text-[10px] text-gray-400 mt-1">
-                {toFaNum(form.description.length)}/10000 کاراکتر
-              </p>
-            </div>
-
-            {/* راهنما */}
-        {/* ★ v11.9.0: دکمه اضافه کردن لاگ‌ها */}
-<div>
-  <Button
-    type="button"
-    variant="outline"
-    size="sm"
-    onClick={() => setShowLogModal(true)}
-    className="w-full justify-center gap-2 h-9"
+{/* ═══════════════ دیالوگ ایجاد تیکت (مودال دستی) ═══════════════ */}
+{createDialogOpen && (
+  <div 
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4"
+    onClick={() => setCreateDialogOpen(false)}
   >
-    <FileText className="w-4 h-4" />
-    مشاهده و کپی لاگ‌های سیستم
-  </Button>
-  <p className="text-[10px] text-gray-400 mt-1 text-center">
-    برای کمک به تیم پشتیبانی، لاگ‌های سیستم را بررسی و در صورت نیاز کپی کنید
-  </p>
-</div>
+    <div 
+      className="w-full max-w-[520px] h-[85vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden"
+      dir="rtl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* ═══ Header ثابت ═══ */}
+      <div className="flex items-center gap-2 px-4 sm:px-5 py-3 border-b border-gray-100 shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+          <TicketIcon className="w-4 h-4 text-emerald-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm sm:text-base font-semibold text-gray-900">
+            ارسال تیکت به پشتیبانی
+          </h2>
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            مشکل یا درخواست خود را شرح دهید
+          </p>
+        </div>
+        <button
+          onClick={() => setCreateDialogOpen(false)}
+          className="w-7 h-7 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors shrink-0"
+        >
+          <XCircle className="w-4 h-4 text-gray-400" />
+        </button>
+      </div>
 
-{/* راهنما */}
-<div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-[11px] text-blue-700">
-  <p className="font-medium mb-1">💡 راهنمایی برای پاسخ سریع‌تر:</p>
-  <ul className="space-y-0.5 list-disc pr-4">
-    <li>مشکل را دقیق و مرحله‌به‌مرحله توضیح دهید</li>
-    <li>اگر پیام خطایی دیدید، متن آن را کپی کنید</li>
-    <li>برای باگ‌ها، اولویت «فوری» را فقط برای موارد بحرانی استفاده کنید</li>
-    <li>لاگ‌های سیستم را از دکمه بالا بررسی و کپی کنید</li>
-  </ul>
-</div>
+      {/* ═══ محتوای قابل اسکرول ═══ */}
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-5 py-3">
+        {!isOnline && (
+          <div className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800 mb-3">
+            <WifiOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <p>شما آفلاین هستید. تیکت به صورت محلی ذخیره شده و پس از اتصال به اینترنت ارسال می‌شود.</p>
+          </div>
+        )}
+
+        <div className="space-y-2.5">
+          {/* موضوع */}
+          <div>
+            <Label className="text-xs font-medium">
+              موضوع <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              value={form.subject}
+              onChange={(e) => setForm({ ...form, subject: e.target.value })}
+              className="mt-1 h-9"
+              placeholder="مثلاً: خطا در ثبت فاکتور فروش"
+              maxLength={500}
+            />
+            <p className="text-[9px] text-gray-400 mt-0.5">
+              {toFaNum(form.subject.length)}/500
+            </p>
           </div>
 
-       <DialogFooter>
-  <Button variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={submitting}>
-    انصراف
-  </Button>
-  <Button
-    onClick={handleSubmitTicket}
-    disabled={submitting || form.subject.trim().length < 5 || form.description.trim().length < 10}
-    className="bg-emerald-600 hover:bg-emerald-700"
-  >
-    {submitting ? (
-      <>
-        <Loader2 className="w-4 h-4 animate-spin ml-1" />
-        در حال ارسال...
-      </>
-    ) : (
-      <>
-        <Send className="w-4 h-4 ml-1" />
-        {isOnline ? 'ارسال تیکت' : 'ذخیره آفلاین'}
-      </>
-    )}
-  </Button>
-</DialogFooter>
+          {/* دسته‌بندی و اولویت */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs font-medium">دسته‌بندی</Label>
+              <Select
+                value={form.category}
+                onValueChange={(v) => setForm({ ...form, category: v })}
+              >
+                <SelectTrigger className="mt-1 h-9 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs font-medium">اولویت</Label>
+              <Select
+                value={form.priority}
+                onValueChange={(v) => setForm({ ...form, priority: v })}
+              >
+                <SelectTrigger className="mt-1 h-9 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">کم</SelectItem>
+                  <SelectItem value="normal">عادی</SelectItem>
+                  <SelectItem value="high">بالا</SelectItem>
+                  <SelectItem value="urgent">فوری</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-{/* ★ v11.9.0: مودال لاگ‌های سیستم */}
-<SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
-</DialogContent>
-</Dialog>
+          {/* توضیحات */}
+          <div>
+            <Label className="text-xs font-medium">
+              توضیحات کامل <span className="text-red-500">*</span>
+            </Label>
+            <Textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              className="mt-1 min-h-[100px] resize-y text-sm"
+              placeholder="مشکل یا درخواست خود را با جزئیات بنویسید..."
+              maxLength={10000}
+            />
+            <p className="text-[9px] text-gray-400 mt-0.5">
+              {toFaNum(form.description.length)}/10000
+            </p>
+          </div>
+
+          {/* دکمه لاگ‌ها */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowLogModal(true)}
+            className="w-full justify-center gap-2 h-8 text-xs"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            مشاهده و کپی لاگ‌های سیستم
+          </Button>
+
+          {/* راهنمای فشرده */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-[10px] text-blue-700">
+            <p className="font-medium mb-0.5">💡 راهنمایی:</p>
+            <ul className="space-y-0.5 list-disc pr-4 leading-relaxed">
+              <li>مشکل را مرحله‌به‌مرحله شرح دهید</li>
+              <li>متن پیام خطا را کپی کنید</li>
+              <li>اولویت «فوری» فقط برای موارد بحرانی</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ Footer ثابت ═══ */}
+      <div className="flex items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
+        <Button 
+          variant="outline" 
+          onClick={() => setCreateDialogOpen(false)} 
+          disabled={submitting}
+          className="h-9"
+        >
+          انصراف
+        </Button>
+        <Button
+          onClick={handleSubmitTicket}
+          disabled={submitting || form.subject.trim().length < 5 || form.description.trim().length < 10}
+          className="bg-emerald-600 hover:bg-emerald-700 h-9 gap-1.5"
+        >
+          {submitting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin ml-1" />
+              در حال ارسال...
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4 ml-1" />
+              {isOnline ? 'ارسال تیکت' : 'ذخیره آفلاین'}
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+
+    {/* ★ مودال لاگ‌ها */}
+    <SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
+  </div>
+)}
     </div>
   )
 }

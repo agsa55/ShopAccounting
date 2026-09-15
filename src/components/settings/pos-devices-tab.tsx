@@ -1,6 +1,7 @@
 'use client'
 // src/components/settings/pos-devices-tab.tsx
 // ShopAccounting v11.1 — POS Devices Management Tab
+// ★ v11.9.1: لاگ‌های سیستمی اضافه شد
 // ============================================================================
 // ★★★ v11.1 اصلاحات:
 //   ✓ اضافه شدن Switch یکپارچه‌سازی با صندوق فروش
@@ -375,7 +376,14 @@ export function PosDevicesTab() {
       }))
     }
 
-<<<<<<< HEAD
+    // ★ v11.9.1: لاگ تغییر وضعیت یکپارچه‌سازی کارتخوان
+    logger.info('وضعیت یکپارچه‌سازی کارتخوان تغییر کرد', {
+      enabled: enabled,
+      previousState: !enabled,
+      activeDevicesCount: devices.filter(d => d.isActive).length,
+      totalDevicesCount: devices.length,
+    })
+
     toast({
       title: enabled ? '✅ یکپارچه‌سازی فعال شد' : '⏸️ یکپارچه‌سازی غیرفعال شد',
       description: enabled 
@@ -385,25 +393,6 @@ export function PosDevicesTab() {
     })
 
     setIntegrationSaving(false)
-=======
- // ★ v11.9.1: لاگ تغییر وضعیت یکپارچه‌سازی کارتخوان
-logger.info('وضعیت یکپارچه‌سازی کارتخوان تغییر کرد', {
-  enabled: enabled,
-  previousState: !enabled,
-  activeDevicesCount: devices.filter(d => d.isActive).length,
-  totalDevicesCount: devices.length,
-})
-
-toast({
-  title: enabled ? '✅ یکپارچه‌سازی فعال شد' : '⏸️ یکپارچه‌سازی غیرفعال شد',
-  description: enabled 
-    ? 'دکمه «کارتخوان» در صندوق فروش نمایش داده می‌شود.'
-    : 'دکمه «کارتخوان» از صندوق فروش مخفی شد.',
-  duration: 3000,
-})
-
-setIntegrationSaving(false)
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   }
 
   useEffect(() => { loadIntegrationStatus() }, [loadIntegrationStatus])
@@ -470,40 +459,40 @@ setIntegrationSaving(false)
         headers: getAuthHeaders(),
         body: JSON.stringify(form),
       })
-   const data = await res.json()
-if (data.success) {
-  // ★ v11.9.1: لاگ ثبت یا ویرایش کارتخوان
-  if (editingId) {
-    logger.info('کارتخوان ویرایش شد', {
-      deviceId: editingId,
-      name: form.name.trim(),
-      terminalType: form.terminalType,
-      brand: form.brand,
-      bankName: form.bankName || null,
-      isActive: form.isActive,
-    })
-  } else {
-    logger.info('کارتخوان جدید ثبت شد', {
-      deviceId: data.data?.id,
-      name: form.name.trim(),
-      terminalType: form.terminalType,
-      brand: form.brand,
-      bankName: form.bankName || null,
-      isActive: form.isActive,
-    })
-  }
-  
-  toast({ title: 'موفق', description: editingId ? 'دستگاه به‌روزرسانی شد' : 'دستگاه افزوده شد' })
-  setDialogOpen(false)
-  loadDevices()
-} else {
-  // ★ v11.9.1: لاگ خطای ثبت/ویرایش کارتخوان
-  logger.error('خطا در ثبت/ویرایش کارتخوان', undefined, {
-    editingId: editingId || null,
-    name: form.name.trim(),
-    terminalType: form.terminalType,
-    error: data.error,
-  })
+      const data = await res.json()
+      if (data.success) {
+        // ★ v11.9.1: لاگ ثبت یا ویرایش کارتخوان
+        if (editingId) {
+          logger.info('کارتخوان ویرایش شد', {
+            deviceId: editingId,
+            name: form.name.trim(),
+            terminalType: form.terminalType,
+            brand: form.brand,
+            bankName: form.bankName || null,
+            isActive: form.isActive,
+          })
+        } else {
+          logger.info('کارتخوان جدید ثبت شد', {
+            deviceId: data.data?.id,
+            name: form.name.trim(),
+            terminalType: form.terminalType,
+            brand: form.brand,
+            bankName: form.bankName || null,
+            isActive: form.isActive,
+          })
+        }
+
+        toast({ title: 'موفق', description: editingId ? 'دستگاه به‌روزرسانی شد' : 'دستگاه افزوده شد' })
+        setDialogOpen(false)
+        loadDevices()
+      } else {
+        // ★ v11.9.1: لاگ خطای ثبت/ویرایش کارتخوان
+        logger.error('خطا در ثبت/ویرایش کارتخوان', undefined, {
+          editingId: editingId || null,
+          name: form.name.trim(),
+          terminalType: form.terminalType,
+          error: data.error,
+        })
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {
@@ -512,42 +501,33 @@ if (data.success) {
     setSaving(false)
   }
 
-<<<<<<< HEAD
   const handleDelete = async (id: string) => {
     if (!confirm('آیا از حذف این دستگاه مطمئن هستید؟')) return
+    
+    // پیدا کردن دستگاه قبل از حذف برای لاگ
+    const deviceToDelete = devices.find(d => d.id === id)
+    
     try {
       const res = await fetch(`/api/pos-devices?id=${id}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
-=======
- const handleDelete = async (id: string) => {
-  if (!confirm('آیا از حذف این دستگاه مطمئن هستید؟')) return
-  
-  // پیدا کردن دستگاه قبل از حذف برای لاگ
-  const deviceToDelete = devices.find(d => d.id === id)
-  
-  try {
-    const res = await fetch(`/api/pos-devices?id=${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    })
-    const data = await res.json()
-    if (data.success) {
-      // ★ v11.9.1: لاگ حذف کارتخوان
-      logger.info('کارتخوان حذف شد', {
-        deviceId: id,
-        deviceName: deviceToDelete?.name || 'نامشخص',
-        terminalType: deviceToDelete?.terminalType || null,
-        brand: deviceToDelete?.brand || null,
-        bankName: deviceToDelete?.bankName || null,
-        wasActive: deviceToDelete?.isActive || false,
-        paymentCount: deviceToDelete?.paymentCount || 0,
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
       })
-      
-      toast({ title: 'حذف شد', description: 'دستگاه حذف شد' })
-      loadDevices()
-    } else {
+      const data = await res.json()
+      if (data.success) {
+        // ★ v11.9.1: لاگ حذف کارتخوان
+        logger.info('کارتخوان حذف شد', {
+          deviceId: id,
+          deviceName: deviceToDelete?.name || 'نامشخص',
+          terminalType: deviceToDelete?.terminalType || null,
+          brand: deviceToDelete?.brand || null,
+          bankName: deviceToDelete?.bankName || null,
+          wasActive: deviceToDelete?.isActive || false,
+          paymentCount: deviceToDelete?.paymentCount || 0,
+        })
+
+        toast({ title: 'حذف شد', description: 'دستگاه حذف شد' })
+        loadDevices()
+      } else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
     } catch (err: any) {
@@ -555,49 +535,38 @@ if (data.success) {
     }
   }
 
-<<<<<<< HEAD
   const handleSetActive = async (id: string) => {
+    const deviceToActivate = devices.find(d => d.id === id)
+    
     try {
       const res = await fetch(`/api/pos-devices?id=${id}`, {
         method: 'PATCH',
         headers: getAuthHeaders(),
         body: JSON.stringify({ isActive: true }),
-=======
- const handleSetActive = async (id: string) => {
-  const deviceToActivate = devices.find(d => d.id === id)
-  
-  try {
-    const res = await fetch(`/api/pos-devices?id=${id}`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ isActive: true }),
-    })
-    const data = await res.json()
-    if (data.success) {
-      // ★ v11.9.1: لاگ فعال‌سازی کارتخوان
-      logger.info('کارتخوان فعال شد', {
+      })
+      const data = await res.json()
+      if (data.success) {
+        // ★ v11.9.1: لاگ فعال‌سازی کارتخوان
+        logger.info('کارتخوان فعال شد', {
+          deviceId: id,
+          deviceName: deviceToActivate?.name || 'نامشخص',
+          terminalType: deviceToActivate?.terminalType || null,
+          brand: deviceToActivate?.brand || null,
+          previousActiveDevice: devices.find(d => d.isActive && d.id !== id)?.name || null,
+        })
+
+        toast({ title: 'فعال شد', description: 'این دستگاه به‌عنوان فعال انتخاب شد' })
+        loadDevices()
+      }
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای فعال‌سازی
+      logger.error('خطا در فعال‌سازی کارتخوان', err, {
         deviceId: id,
         deviceName: deviceToActivate?.name || 'نامشخص',
-        terminalType: deviceToActivate?.terminalType || null,
-        brand: deviceToActivate?.brand || null,
-        previousActiveDevice: devices.find(d => d.isActive && d.id !== id)?.name || null,
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
       })
-      
-      toast({ title: 'فعال شد', description: 'این دستگاه به‌عنوان فعال انتخاب شد' })
-      loadDevices()
     }
-  } catch (err: any) {
-    logger.error('خطا در فعال‌سازی کارتخوان', err, {
-      deviceId: id,
-      deviceName: deviceToActivate?.name || 'نامشخص',
-    })
   }
-<<<<<<< HEAD
 
-=======
-}
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   const handleTestConnection = async (device: PosDevice) => {
     setTestingId(device.id)
     try {
@@ -633,24 +602,24 @@ if (data.success) {
       }))
 
       if (result.success) {
-          // ★ v11.9.1: لاگ موفقیت تست اتصال
-  logger.info('تست اتصال کارتخوان موفق بود', {
-    deviceId: device.id,
-    deviceName: device.name,
-    terminalType: device.terminalType,
-    brand: device.brand || null,
-    message: result.message,
-  })
+        // ★ v11.9.1: لاگ موفقیت تست اتصال
+        logger.info('تست اتصال کارتخوان موفق بود', {
+          deviceId: device.id,
+          deviceName: device.name,
+          terminalType: device.terminalType,
+          brand: device.brand || null,
+          message: result.message,
+        })
         toast({ title: 'موفق', description: result.message })
       } else {
-         // ★ v11.9.1: لاگ شکست تست اتصال
-  logger.error('تست اتصال کارتخوان ناموفق بود', undefined, {
-    deviceId: device.id,
-    deviceName: device.name,
-    terminalType: device.terminalType,
-    brand: device.brand || null,
-    message: result.message,
-  })
+        // ★ v11.9.1: لاگ شکست تست اتصال
+        logger.error('تست اتصال کارتخوان ناموفق بود', undefined, {
+          deviceId: device.id,
+          deviceName: device.name,
+          terminalType: device.terminalType,
+          brand: device.brand || null,
+          message: result.message,
+        })
         toast({ title: 'خطا', description: result.message, variant: 'destructive' })
       }
 
@@ -681,53 +650,36 @@ if (data.success) {
             baudRate: 115200,
           }),
         })
-<<<<<<< HEAD
         const data = await res.json()
         if (data.success) {
+          // ★ v11.9.1: لاگ اتصال سریع و ذخیره خودکار کارتخوان
+          logger.info('کارتخوان با اتصال سریع USB شناسایی و ذخیره شد', {
+            deviceId: data.data?.id,
+            deviceName: result.deviceName,
+            deviceInfo: result.deviceInfo,
+            terminalType: 'web-serial',
+            brand: 'pax',
+            connectionMethod: 'quick-connect',
+          })
+
           toast({
             title: '✅ اتصال موفق',
             description: `${result.deviceName} شناسایی و ذخیره شد. حالا می‌توانید از صندوق فروش مبلغ را ارسال کنید.`,
           })
           loadDevices()
         } else {
+          // ★ v11.9.1: لاگ خطای ذخیره دستگاه متصل شده
+          logger.error('اتصال USB موفق اما ذخیره در دیتابیس ناموفق بود', undefined, {
+            deviceName: result.deviceName,
+            deviceInfo: result.deviceInfo,
+            error: data.error,
+          })
+
           toast({
             title: '⚠️ متصل شد اما ذخیره نشد',
             description: `دستگاه متصل است اما در ذخیره خطا رخ داد: ${data.error}`,
             variant: 'destructive',
           })
-=======
-     const data = await res.json()
-if (data.success) {
-  // ★ v11.9.1: لاگ اتصال سریع و ذخیره خودکار کارتخوان
-  logger.info('کارتخوان با اتصال سریع USB شناسایی و ذخیره شد', {
-    deviceId: data.data?.id,
-    deviceName: result.deviceName,
-    deviceInfo: result.deviceInfo,
-    terminalType: 'web-serial',
-    brand: 'pax',
-    connectionMethod: 'quick-connect',
-  })
-  
-  toast({
-    title: '✅ اتصال موفق',
-    description: `${result.deviceName} شناسایی و ذخیره شد. حالا می‌توانید از صندوق فروش مبلغ را ارسال کنید.`,
-  })
-  loadDevices()
-} else {
-  // ★ v11.9.1: لاگ خطای ذخیره دستگاه متصل شده
-  logger.error('اتصال USB موفق اما ذخیره در دیتابیس ناموفق بود', undefined, {
-    deviceName: result.deviceName,
-    deviceInfo: result.deviceInfo,
-    error: data.error,
-  })
-  
-  toast({
-    title: '⚠️ متصل شد اما ذخیره نشد',
-    description: `دستگاه متصل است اما در ذخیره خطا رخ داد: ${data.error}`,
-    variant: 'destructive',
-  })
-
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
         }
       } catch (err: any) {
         toast({
@@ -748,26 +700,19 @@ if (data.success) {
     }
   }
 
-<<<<<<< HEAD
   const handleQuickDisconnect = async () => {
+    // ★ v11.9.1: لاگ قطع اتصال سریع
+    const previousDevice = quickConnect.connectedDevice
+    
+    logger.info('اتصال کارتخوان USB قطع شد', {
+      deviceName: previousDevice?.name || 'نامشخص',
+      deviceInfo: previousDevice?.info || null,
+      disconnectionType: 'manual',
+    })
+
     await quickConnect.disconnect()
     toast({ title: 'قطع شد', description: 'اتصال کارتخوان قطع شد' })
   }
-=======
-const handleQuickDisconnect = async () => {
-  // ★ v11.9.1: لاگ قطع اتصال سریع (قبل از قطع واقعی)
-  const previousDevice = quickConnect.connectedDevice
-  
-  logger.info('اتصال کارتخوان USB قطع شد', {
-    deviceName: previousDevice?.name || 'نامشخص',
-    deviceInfo: previousDevice?.info || null,
-    disconnectionType: 'manual',
-  })
-  
-  await quickConnect.disconnect()
-  toast({ title: 'قطع شد', description: 'اتصال کارتخوان قطع شد' })
-}
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 
   const activeDeviceCount = devices.filter(d => d.isActive).length
 

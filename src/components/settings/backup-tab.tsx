@@ -3,6 +3,7 @@
 // ============================================================================
 // src/components/settings/backup-tab.tsx
 // ShopAccounting — تب پشتیبان‌گیری
+// ★ v11.9.1: لاگ‌های سیستمی اضافه شد
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
@@ -14,10 +15,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 import type { BackupInfo } from '@/lib/tenant-utils'
-<<<<<<< HEAD
-=======
 import { logger } from '@/lib/system-logger'
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 import {
   Database, FileArchive, Loader2, CheckCircle2, Download, RefreshCw,
   Trash2, AlertTriangle,
@@ -71,26 +69,53 @@ export function BackupTab() {
         body: JSON.stringify({}),
       })
       const data = await res.json()
-<<<<<<< HEAD
       if (data.success) {
+        // ★ v11.9.1: لاگ ایجاد پشتیبان جدید
+        logger.info('پشتیبان جدید ایجاد شد', {
+          backupId: data.data?.id || null,
+          fileName: data.data?.fileName || null,
+          fileSize: data.data?.fileSize || 0,
+          fileSizeFormatted: formatSize(data.data?.fileSize || 0),
+          recordCount: data.data?.recordCount || 0,
+          duration: data.data?.duration || null,
+          totalBackups: backups.length + 1,
+        })
+
         setLastBackupResult(data.data)
         fetchBackups()
       } else {
+        // ★ v11.9.1: لاگ خطای ایجاد پشتیبان
+        logger.error('خطا در ایجاد پشتیبان', undefined, {
+          error: data.error,
+        })
+
         alert(data.error || 'خطا در ایجاد پشتیبان')
       }
-    } catch {
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای شبکه در ایجاد پشتیبان
+      logger.error('خطای شبکه در ایجاد پشتیبان', err)
+
       alert('خطا در ارتباط با سرور')
     }
     setCreating(false)
   }
 
   const handleDownloadBackup = async (backupId: string, fileName: string) => {
+    const backupInfo = backups.find(b => b.id === backupId)
+    
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`/api/backup/download?id=${backupId}`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (!res.ok) {
+        // ★ v11.9.1: لاگ خطای دانلود پشتیبان
+        logger.error('خطا در دانلود پشتیبان', undefined, {
+          backupId: backupId,
+          fileName: fileName,
+          httpStatus: res.status,
+        })
+
         alert('خطا در دانلود پشتیبان')
         return
       }
@@ -103,13 +128,32 @@ export function BackupTab() {
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
-    } catch {
+      
+      // ★ v11.9.1: لاگ دانلود موفق پشتیبان
+      logger.info('فایل پشتیبان دانلود شد', {
+        backupId: backupId,
+        fileName: fileName,
+        fileSize: backupInfo?.fileSize || blob.size,
+        fileSizeFormatted: formatSize(backupInfo?.fileSize || blob.size),
+        recordCount: backupInfo?.recordCount || null,
+        createdAt: backupInfo?.createdAt || null,
+      })
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای شبکه در دانلود
+      logger.error('خطای شبکه در دانلود پشتیبان', err, {
+        backupId: backupId,
+        fileName: fileName,
+      })
+
       alert('خطا در دانلود پشتیبان')
     }
   }
 
   const handleRestore = async () => {
     if (!selectedBackupId) return
+    
+    const backupToRestore = backups.find(b => b.id === selectedBackupId)
+    
     setRestoring(true)
     try {
       const token = localStorage.getItem('token')
@@ -123,14 +167,42 @@ export function BackupTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ بازیابی از پشتیبان (عملیات بسیار حساس!)
+        logger.info('⚠️ بازیابی از پشتیبان انجام شد', {
+          backupId: selectedBackupId,
+          fileName: backupToRestore?.fileName || null,
+          backupCreatedAt: backupToRestore?.createdAt || null,
+          backupFileSize: backupToRestore?.fileSize || null,
+          backupRecordCount: backupToRestore?.recordCount || null,
+          restoredCount: data.data?.restoredCount || 0,
+          operationType: 'full_restore',
+          severity: 'critical',
+          warning: 'تمام داده‌های قبلی حذف و جایگزین شد',
+        })
+
         alert(`بازیابی موفق! ${data.data.restoredCount} رکورد بازیابی شد. صفحه رفرش می‌شود...`)
         setRestoreDialogOpen(false)
         setSelectedBackupId(null)
         window.location.reload()
       } else {
+        // ★ v11.9.1: لاگ خطای بازیابی
+        logger.error('خطا در بازیابی از پشتیبان', undefined, {
+          backupId: selectedBackupId,
+          fileName: backupToRestore?.fileName || null,
+          error: data.error,
+          severity: 'critical',
+        })
+
         alert(data.error || 'خطا در بازیابی')
       }
-    } catch {
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای شبکه در بازیابی
+      logger.error('خطای شبکه در بازیابی از پشتیبان', err, {
+        backupId: selectedBackupId,
+        fileName: backupToRestore?.fileName || null,
+        severity: 'critical',
+      })
+
       alert('خطا در ارتباط با سرور')
     }
     setRestoring(false)
@@ -138,6 +210,9 @@ export function BackupTab() {
 
   const handleDeleteBackup = async () => {
     if (!deleteBackupId) return
+    
+    const backupToDelete = backups.find(b => b.id === deleteBackupId)
+    
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`/api/backup?id=${deleteBackupId}`, {
@@ -146,205 +221,40 @@ export function BackupTab() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ حذف پشتیبان
+        logger.info('فایل پشتیبان حذف شد', {
+          backupId: deleteBackupId,
+          fileName: backupToDelete?.fileName || null,
+          fileSize: backupToDelete?.fileSize || null,
+          fileSizeFormatted: backupToDelete ? formatSize(backupToDelete.fileSize) : null,
+          recordCount: backupToDelete?.recordCount || null,
+          createdAt: backupToDelete?.createdAt || null,
+          remainingBackupsCount: backups.length - 1,
+        })
+
         fetchBackups()
       } else {
+        // ★ v11.9.1: لاگ خطای حذف پشتیبان
+        logger.error('خطا در حذف پشتیبان', undefined, {
+          backupId: deleteBackupId,
+          fileName: backupToDelete?.fileName || null,
+          error: data.error,
+        })
+
         alert(data.error || 'خطا در حذف پشتیبان')
       }
-    } catch {
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای شبکه در حذف
+      logger.error('خطای شبکه در حذف پشتیبان', err, {
+        backupId: deleteBackupId,
+        fileName: backupToDelete?.fileName || null,
+      })
+
       alert('خطا در ارتباط با سرور')
     }
     setDeleteDialogOpen(false)
     setDeleteBackupId(null)
   }
-=======
-   if (data.success) {
-  // ★ v11.9.1: لاگ ایجاد پشتیبان جدید
-  logger.info('پشتیبان جدید ایجاد شد', {
-    backupId: data.data?.id || null,
-    fileName: data.data?.fileName || null,
-    fileSize: data.data?.fileSize || 0,
-    fileSizeFormatted: formatSize(data.data?.fileSize || 0),
-    recordCount: data.data?.recordCount || 0,
-    duration: data.data?.duration || null,
-    totalBackups: backups.length + 1,
-  })
-  
-  setLastBackupResult(data.data)
-  fetchBackups()
-} else {
-  // ★ v11.9.1: لاگ خطای ایجاد پشتیبان
-  logger.error('خطا در ایجاد پشتیبان', undefined, {
-    error: data.error,
-  })
-  
-  alert(data.error || 'خطا در ایجاد پشتیبان')
-}
-  } catch (err: any) {
-  // ★ v11.9.1: لاگ خطای شبکه در ایجاد پشتیبان
-  logger.error('خطای شبکه در ایجاد پشتیبان', err)
-  
-  alert('خطا در ارتباط با سرور')
-}
-setCreating(false)
-  }
-
-const handleDownloadBackup = async (backupId: string, fileName: string) => {
-  // پیدا کردن اطلاعات پشتیبان برای لاگ
-  const backupInfo = backups.find(b => b.id === backupId)
-  
-  try {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`/api/backup/download?id=${backupId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    if (!res.ok) {
-      // ★ v11.9.1: لاگ خطای دانلود پشتیبان
-      logger.error('خطا در دانلود پشتیبان', undefined, {
-        backupId: backupId,
-        fileName: fileName,
-        httpStatus: res.status,
-      })
-      
-      alert('خطا در دانلود پشتیبان')
-      return
-    }
-    const blob = await res.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName
-    document.body.appendChild(a)
-    a.click()
-    window.URL.revokeObjectURL(url)
-    document.body.removeChild(a)
-    
-    // ★ v11.9.1: لاگ دانلود موفق پشتیبان
-    logger.info('فایل پشتیبان دانلود شد', {
-      backupId: backupId,
-      fileName: fileName,
-      fileSize: backupInfo?.fileSize || blob.size,
-      fileSizeFormatted: formatSize(backupInfo?.fileSize || blob.size),
-      recordCount: backupInfo?.recordCount || null,
-      createdAt: backupInfo?.createdAt || null,
-    })
-  } catch (err: any) {
-    // ★ v11.9.1: لاگ خطای شبکه در دانلود
-    logger.error('خطای شبکه در دانلود پشتیبان', err, {
-      backupId: backupId,
-      fileName: fileName,
-    })
-    
-    alert('خطا در دانلود پشتیبان')
-  }
-}
- const handleRestore = async () => {
-  if (!selectedBackupId) return
-  
-  // پیدا کردن اطلاعات پشتیبان قبل از بازیابی
-  const backupToRestore = backups.find(b => b.id === selectedBackupId)
-  
-  setRestoring(true)
-  try {
-    const token = localStorage.getItem('token')
-    const res = await fetch('/api/backup/restore', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ backupId: selectedBackupId }),
-    })
-    const data = await res.json()
-    if (data.success) {
-      // ★ v11.9.1: لاگ بازیابی از پشتیبان (عملیات بسیار حساس!)
-      logger.info('⚠️ بازیابی از پشتیبان انجام شد', {
-        backupId: selectedBackupId,
-        fileName: backupToRestore?.fileName || null,
-        backupCreatedAt: backupToRestore?.createdAt || null,
-        backupFileSize: backupToRestore?.fileSize || null,
-        backupRecordCount: backupToRestore?.recordCount || null,
-        restoredCount: data.data?.restoredCount || 0,
-        operationType: 'full_restore',
-        severity: 'critical',
-        warning: 'تمام داده‌های قبلی حذف و جایگزین شد',
-      })
-      
-      alert(`بازیابی موفق! ${data.data.restoredCount} رکورد بازیابی شد. صفحه رفرش می‌شود...`)
-      setRestoreDialogOpen(false)
-      setSelectedBackupId(null)
-      window.location.reload()
-    } else {
-      // ★ v11.9.1: لاگ خطای بازیابی
-      logger.error('خطا در بازیابی از پشتیبان', undefined, {
-        backupId: selectedBackupId,
-        fileName: backupToRestore?.fileName || null,
-        error: data.error,
-        severity: 'critical',
-      })
-      
-      alert(data.error || 'خطا در بازیابی')
-    }
-  } catch (err: any) {
-    // ★ v11.9.1: لاگ خطای شبکه در بازیابی
-    logger.error('خطای شبکه در بازیابی از پشتیبان', err, {
-      backupId: selectedBackupId,
-      fileName: backupToRestore?.fileName || null,
-      severity: 'critical',
-    })
-    
-    alert('خطا در ارتباط با سرور')
-  }
-  setRestoring(false)
-}
-  const handleDeleteBackup = async () => {
-  if (!deleteBackupId) return
-  
-  // پیدا کردن اطلاعات پشتیبان قبل از حذف
-  const backupToDelete = backups.find(b => b.id === deleteBackupId)
-  
-  try {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`/api/backup?id=${deleteBackupId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    const data = await res.json()
-    if (data.success) {
-      // ★ v11.9.1: لاگ حذف پشتیبان
-      logger.info('فایل پشتیبان حذف شد', {
-        backupId: deleteBackupId,
-        fileName: backupToDelete?.fileName || null,
-        fileSize: backupToDelete?.fileSize || null,
-        fileSizeFormatted: backupToDelete ? formatSize(backupToDelete.fileSize) : null,
-        recordCount: backupToDelete?.recordCount || null,
-        createdAt: backupToDelete?.createdAt || null,
-        remainingBackupsCount: backups.length - 1,
-      })
-      
-      fetchBackups()
-    } else {
-      // ★ v11.9.1: لاگ خطای حذف پشتیبان
-      logger.error('خطا در حذف پشتیبان', undefined, {
-        backupId: deleteBackupId,
-        fileName: backupToDelete?.fileName || null,
-        error: data.error,
-      })
-      
-      alert(data.error || 'خطا در حذف پشتیبان')
-    }
-  } catch (err: any) {
-    // ★ v11.9.1: لاگ خطای شبکه در حذف
-    logger.error('خطای شبکه در حذف پشتیبان', err, {
-      backupId: deleteBackupId,
-      fileName: backupToDelete?.fileName || null,
-    })
-    
-    alert('خطا در ارتباط با سرور')
-  }
-  setDeleteDialogOpen(false)
-  setDeleteBackupId(null)
-}
->>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
