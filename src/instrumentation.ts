@@ -86,6 +86,23 @@ export async function register() {
       const { disconnectRedis } = await import('@/lib/redis')
       const { closeAllQueues } = await import('@/lib/queue')
 
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ★★★ v9.4.0: Internal Moidian Scheduler (جایگزین cron-job خارجی)
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      const { moidianScheduler } = await import('@/lib/moidian/scheduler')
+
+      // ★ شروع Scheduler (فقط در محیط Node.js و به صورت ایمن)
+      //   Scheduler داخلی همه tenants را پردازش می‌کند و نیازی به cron-job خارجی ندارد
+      moidianScheduler.start()
+      console.log('[Instrumentation] ✅ Moidian Scheduler started (internal)')
+    } catch (err) {
+      console.error('[Instrumentation] ❌ Failed to start Moidian Scheduler:', (err as Error).message)
+    }
+    // ═══════════════════════════════════════════════════════════════
+
+
       const gracefulShutdown = async (signal: string) => {
         console.log(`[Instrumentation] Received ${signal}, shutting down gracefully...`)
         try {

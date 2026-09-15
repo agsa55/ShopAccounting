@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { resolvePlanTier, resolvePlanName, type PlanTier, type PlanName, type PlanFeatureSet, getPlanFeatures, type PlanInfo, PLANS } from './plan-features';
 
 // ─── AppView type ───────────────────────────────────────────────
@@ -14,7 +14,7 @@ export type AppView =
   | 'landing' | 'login' | 'register'
   | 'dashboard' | 'pos' | 'products' | 'categories'
   | 'customers' | 'invoices' | 'invoice-detail'
-  | 'installments' | 'accounting' | 'journal-entry-detail'
+  | 'installments' | 'checks' | 'accounting' | 'journal-entry-detail'
   | 'settings' | 'settings-store' | 'settings-gateway'
   | 'settings-pos' | 'settings-invoice' | 'settings-backup'
   | 'settings-subscription' | 'settings-employees'
@@ -28,6 +28,7 @@ export type AppView =
   | 'branches'
   | 'tickets'
   | 'ticket-detail'
+   | 'basic-year-end'
 
 export type ViewType = AppView;
 
@@ -573,11 +574,12 @@ logout: () => {
       setHasHydrated: (hydrated) => set({ _hasHydrated: hydrated }),
     }),
 
-    {
-      name: 'shop-accounting-store',
-      version: 8,
+  {
+  name: 'shop-accounting-store',
+  version: 9,  // ★ v9: تغییر به sessionStorage برای جداسازی تب‌ها
+  storage: createJSONStorage(() => sessionStorage),  // ★ تغییر اصلی
 
-      migrate: (persistedState: any, version: number) => {
+  migrate: (persistedState: any, version: number) => {
         if (version < 2) {
           const s = { ...persistedState }
           delete s.currentView
@@ -623,16 +625,29 @@ logout: () => {
           if (!s.installmentPlan) s.installmentPlan = null
           return s as AppState
         }
-        if (version < 8) {
-          const s = { ...persistedState }
-          const planState = computePlanState(s.planName || null)
-          s.planTier = planState.planTier
-          s.planFeatures = planState.planFeatures
-          s.resolvedPlanName = planState.resolvedPlanName
-          s.planInfo = planState.planInfo
-          return s as AppState
-        }
-        return persistedState as AppState
+      if (version < 8) {
+  const s = { ...persistedState }
+  const planState = computePlanState(s.planName || null)
+  s.planTier = planState.planTier
+  s.planFeatures = planState.planFeatures
+  s.resolvedPlanName = planState.resolvedPlanName
+  s.planInfo = planState.planInfo
+  return s as AppState
+}
+if (version < 9) {
+  // ★ v9: انتقال به sessionStorage - state را پاک می‌کنیم
+  // چون نمی‌خواهیم state قبلی از localStorage با تب جدید ترکیب شود
+  console.log('[Store] 🔄 Migrating to sessionStorage (v9)')
+  // پاک کردن localStorage قدیمی
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('shop-accounting-store')
+    }
+  } catch { /* ignore */ }
+  // state خالی برگردان
+  return {} as AppState
+}
+return persistedState as AppState
       },
 
       // ★ فقط فیلدهای ضروری persist میشن — token و user ذخیره نمیشن (امنیت)

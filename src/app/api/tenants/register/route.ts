@@ -1,33 +1,9 @@
 // ============================================================================
-// src/app/api/tenants/register/route.ts — POST /api/tenants/register (v9.0)
-// ShopAccounting — Unified Single Database Architecture
-// ============================================================================
-// ★★★ v9.0 — تغییر ساختار پلن‌ها:
-//   ★ حذف پلن ماهانه — فقط annual (سالانه) و lifetime (مادام‌العمر)
-//   ★ default billingCycle: 'annual' (نه 'monthly')
-//   ★ fallback billingCycle: 'annual' (نه 'monthly')
-//   ★ اگر billingCycle='lifetime' باشد، PlanPrice با durationDays=0 استفاده می‌شود
-//   ★ برای lifetime، expiresAt موقت هم همان منطق ۱ ساعته را دارد
-//     (پس از پرداخت موفق، applySubscriptionPayment در subscription-utils.ts
-//      باید expiresAt را null کند — این باید در آن فایل اصلاح شود)
-//   ★ به‌روزرسانی TIER_MAP با نام‌های فارسی جدید:
-//       simple       → «پایه»    (قبلاً «ساده»)
-//       professional → «پیشرفته» (قبلاً «حرفه‌ای»)
-//       enterprise   → «حرفه‌ای» (قبلاً «سازمانی»)
-//
-// ★★★ v3.29 — افزودن ایجاد خودکار سال مالی برای پلن سازمانی:
-//   ★ import ensureFiscalYearForTenant از auto-fiscal-year.ts
-//   ★ پس از ساخت Tenant، اگر پلن enterprise باشد، سال مالی خودکار ساخته می‌شود
-//   ★ پلن professional: اختیاری (سال مالی ساخته نمی‌شود)
-//   ★ پلن simple: نیازی به سال مالی نیست
-//
-// ★★★ v3.27 — رفع ریشه‌ای مشکل PlanTier خالی هنگام ثبت‌نام:
-//   ★ فراخوانی ensurePlanTiersExist() قبل از جستجوی PlanTier
-//   ★ اگر باز هم PlanTier پیدا نشد، خطای واضح می‌دهد
-//
-// ★★★ v3.0 — بسیار ساده‌شده:
-//   ★ حذف کامل provisioning دیتابیس اختصاصی
-//   ★ همه کاربرها و tenant ها در بانک مشترک ShopAccounting
+// src/app/api/tenants/register/route.ts — POST /api/tenants/register (v11.1)
+// ★ پشتیبانی از startFreeTrial: true برای شروع دوره ۹۰ روزه رایگان
+// ★ پشتیبانی از ownerNationalCode و identityVerified (شاهکار)
+// ★ جلوگیری از ثبت‌نام تکراری با کد ملی یا شماره موبایل
+// ★ tenant واقعی با status=active ساخته می‌شود (نه demo)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -36,39 +12,76 @@ import { parseLegacyPlanName } from '@/lib/plan-limits';
 import type { BillingCycle } from '@/lib/plan-limits';
 import bcrypt from 'bcryptjs';
 import { ensurePlanTiersExist } from '@/lib/ensure-plan-tiers';
-// ★★★ v3.29: helper ایجاد خودکار سال مالی
 import { ensureFiscalYearForTenant } from '@/lib/auto-fiscal-year';
-// ★★★ v5.1.10: استفاده از JWT واقعی به‌جای توکن جعلی
 import { signTokenPair } from '@/lib/jwt';
 
-// ★★★ v9.0: helper محلی برای تشخیص lifetime
 function isLifetimeCycle(cycle: string | null | undefined): boolean {
   if (!cycle) return false
   const lower = String(cycle).toLowerCase().trim()
   return lower === 'lifetime' || lower === 'مادام‌العمر'
 }
 
+const DEMO_DURATION_DAYS = 3
+const FREE_TRIAL_DURATION_DAYS = 90 // ★ دوره رایگان ۹۰ روزه
+
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   console.log('\n╔══════════════════════════════════════════════════════════════╗');
-  console.log('║  [Tenants/Register] NEW REGISTRATION REQUEST (v9.0)          ║');
+  console.log('║  [Tenants/Register] NEW REGISTRATION REQUEST (v11.1)        ║');
   console.log('╚══════════════════════════════════════════════════════════════╝');
 
   try {
     const body = await request.json();
-    const {
-      companyName,
-      subDomain,
-      ownerMobile,
-      ownerEmail,
-      username,
-      password,
-      planTierName,
-      billingCycle,
-      planName,
-    } = body;
+  // ─── بعد (اصلاح شده v11.2) ───
+const {
+  companyName,
+  subDomain,
+  ownerMobile,
+  ownerEmail,
+  ownerNationalCode,  // ★ v11.1: کد ملی
+  username,
+  password,
+  planTierName,
+  billingCycle,
+  planName,
+  startFreeTrial,
+  identityVerified,   // ★ v11.1: آیا هویت تأیید شده
+} = body;
 
-    console.log(`[Register] Input: company=${companyName}, subdomain=${subDomain}, planTier=${planTierName}, billing=${billingCycle}`);
+// ★ v11.2: alias برای استفاده راحت‌تر در IdentityRegistry
+const nationalCode = ownerNationalCode;
+    console.log(`[Register] Input: company=${companyName}, subdomain=${subDomain}, planTier=${planTierName}, billing=${billingCycle}, startFreeTrial=${startFreeTrial}`);
+    console.log(`[Register] Identity: nationalCode=${ownerNationalCode?.substring(0, 3)}****, identityVerified=${identityVerified}`);
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v11.1: بررسی الزامی بودن احراز هویت شاهکار
+    // ═══════════════════════════════════════════════════════════════
+    if (!ownerNationalCode || ownerNationalCode.length !== 10) {
+      return NextResponse.json(
+        { success: false, error: 'کد ملی الزامی است و باید ۱۰ رقم باشد' },
+        { status: 400 }
+      );
+    }
+
+    if (!identityVerified || identityVerified !== true) {
+      console.error('[Register] ❌ identityVerified is not true - rejecting registration');
+      return NextResponse.json(
+        { success: false, error: 'احراز هویت انجام نشده است. لطفاً فرآیند ثبت‌نام را از ابتدا طی کنید.' },
+        { status: 400 }
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ تشخیص نوع درخواست (۳ حالت)
+    // ═══════════════════════════════════════════════════════════════
+    const isFreeTrialRequest = startFreeTrial === true;
+    const isDemoRequest = !isFreeTrialRequest && (
+      planTierName === 'demo' ||
+      planName === 'demo' ||
+      billingCycle === 'trial'
+    );
+
+    console.log(`[Register] isFreeTrialRequest = ${isFreeTrialRequest}, isDemoRequest = ${isDemoRequest}`);
 
     // ─── اعتبارسنجی فیلدهای الزامی ───
     if (!companyName || !subDomain || !ownerMobile || !username || !password) {
@@ -82,6 +95,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'زیردامنه باید حداقل ۳ کاراکتر باشد' },
         { status: 400 }
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v11.1: بررسی یکتا بودن کد ملی (double-check)
+    // ═══════════════════════════════════════════════════════════════
+    const existingNationalCode = await db.client.tenant.findFirst({
+      where: { 
+        ownerNationalCode,
+        status: { not: 'deleted' }
+      },
+    });
+
+    if (existingNationalCode) {
+      console.error(`[Register] ❌ National code already registered: ${ownerNationalCode.substring(0, 3)}****`);
+      return NextResponse.json(
+        { success: false, error: 'این کد ملی قبلاً برای ثبت‌نام استفاده شده است. هر کد ملی فقط یک بار می‌تواند در سیستم ثبت‌نام کند.' },
+        { status: 409 }
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v11.1: بررسی یکتا بودن شماره موبایل (double-check)
+    // ═══════════════════════════════════════════════════════════════
+    const existingMobile = await db.client.tenant.findFirst({
+      where: { 
+        ownerMobile,
+        status: { not: 'deleted' }
+      },
+    });
+
+    if (existingMobile) {
+      console.error(`[Register] ❌ Mobile already registered: ${ownerMobile.substring(0, 4)}****`);
+      return NextResponse.json(
+        { success: false, error: 'این شماره موبایل قبلاً ثبت‌نام کرده است. اگر رمز عبور خود را فراموش کرده‌اید، از گزینه "بازیابی رمز عبور" استفاده کنید.' },
+        { status: 409 }
       );
     }
 
@@ -110,24 +159,25 @@ export async function POST(request: NextRequest) {
     }
 
     // ─── تعیین پلن ───
-    // ★★★ v9.0: default billingCycle از 'monthly' به 'annual' تغییر کرد
     let effectiveTierName: string;
     let effectiveBillingCycle: BillingCycle;
 
-    if (planTierName) {
+    if (isDemoRequest) {
+      effectiveTierName = 'simple';
+      effectiveBillingCycle = 'trial' as BillingCycle;
+    } else if (isFreeTrialRequest) {
+      effectiveTierName = planTierName || 'simple';
+      effectiveBillingCycle = 'annual' as BillingCycle;
+    } else if (planTierName) {
       effectiveTierName = planTierName;
-      // ★★★ v9.0: اگر billingCycle ارسال نشده یا 'monthly' است → 'annual' استفاده کن
       const requestedCycle = (billingCycle as string) || 'annual'
-      // ★ backward compatibility: اگر 'monthly' ارسال شده → 'annual' استفاده کن
       effectiveBillingCycle = (requestedCycle === 'monthly' ? 'annual' : requestedCycle) as BillingCycle;
     } else if (planName) {
       const parsed = parseLegacyPlanName(planName);
       effectiveTierName = parsed.tierName;
-      // ★★★ v9.0: اگر parseLegacyPlanName 'monthly' برگرداند → 'annual' استفاده کن
       effectiveBillingCycle = (parsed.billingCycle === 'monthly' ? 'annual' : parsed.billingCycle) as BillingCycle;
     } else {
       effectiveTierName = 'simple';
-      // ★★★ v9.0: default 'annual' (نه 'monthly')
       effectiveBillingCycle = 'annual' as BillingCycle;
     }
 
@@ -136,18 +186,17 @@ export async function POST(request: NextRequest) {
       effectiveTierName = 'simple';
     }
 
-    // ★★★ v9.0: اعتبارسنجی billingCycle — فقط 'annual' و 'lifetime' مجاز هستند
-    const validCycles: string[] = ['annual', 'lifetime'];
-    if (!validCycles.includes(effectiveBillingCycle)) {
-      console.warn(`[Register] ⚠ Invalid billingCycle "${effectiveBillingCycle}" → fallback to 'annual'`);
-      effectiveBillingCycle = 'annual' as BillingCycle;
+    if (!isDemoRequest && !isFreeTrialRequest) {
+      const validCycles: string[] = ['annual', 'lifetime'];
+      if (!validCycles.includes(effectiveBillingCycle)) {
+        console.warn(`[Register] ⚠ Invalid billingCycle "${effectiveBillingCycle}" → fallback to 'annual'`);
+        effectiveBillingCycle = 'annual' as BillingCycle;
+      }
     }
 
     const isLifetime = isLifetimeCycle(effectiveBillingCycle);
-    console.log(`[Register] Resolved plan: tier=${effectiveTierName}, cycle=${effectiveBillingCycle}, isLifetime=${isLifetime}`);
+    console.log(`[Register] Resolved plan: tier=${effectiveTierName}, cycle=${effectiveBillingCycle}, isLifetime=${isLifetime}, isDemoRequest=${isDemoRequest}, isFreeTrialRequest=${isFreeTrialRequest}`);
 
-    // ═══════════════════════════════════════════════════════════════
-    // ★★★ v3.27: تضمین وجود PlanTiers قبل از جستجو
     // ═══════════════════════════════════════════════════════════════
     try {
       await ensurePlanTiersExist();
@@ -156,10 +205,8 @@ export async function POST(request: NextRequest) {
       console.warn(`[Register] ⚠ ensurePlanTiersExist warning: ${ensureErr.message}`);
     }
 
-    // ─── هش کردن رمز عبور ───
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // ─── جستجوی PlanTier ───
     let planTier: any = null;
     try {
       planTier = await db.client.planTier.findFirst({
@@ -170,76 +217,49 @@ export async function POST(request: NextRequest) {
       console.warn(`[Register] PlanTier lookup failed: ${err.message}`);
     }
 
-    // ★★★ v3.27: اگر PlanTier پیدا نشد، خطای واضح بده
     if (!planTier) {
-      console.error(`[Register] ❌ CRITICAL: PlanTier "${effectiveTierName}" not found after ensure!`);
       return NextResponse.json(
-        {
-          success: false,
-          error: `پلن "${effectiveTierName}" در سیستم یافت نشد. لطفاً با پشتیبانی تماس بگیرید یا دوباره تلاش کنید.`,
-        },
+        { success: false, error: `پلن "${effectiveTierName}" یافت نشد.` },
         { status: 500 }
       );
     }
-
-    // ─── تعیین مدت اشتراک ───
-    // ★★★ v5.1.5: اعتبار موقت ۱ ساعته برای پرداخت
-    //   پس از پرداخت موفق، applySubscriptionPayment آن را به مدت واقعی پلن به‌روزرسانی می‌کند
-    //   ★★★ v9.0: برای lifetime هم همین منطق موقت ۱ ساعته استفاده می‌شود
-    //   (applySubscriptionPayment در subscription-utils.ts باید برای lifetime،
-    //    expiresAt را null کند — این باید در آن فایل اصلاح شود)
-    const now = new Date();
-    const TEMPORARY_DURATION_HOURS = 1; // ۱ ساعت برای تکمیل پرداخت
-    const expiresAt = new Date(now.getTime() + TEMPORARY_DURATION_HOURS * 60 * 60 * 1000);
-
-    // ★ قیمت پلن (برای ارسال به checkout)
-    let price: any = null;
-    try {
-      price = await db.client.planPrice.findUnique({
-        where: {
-          planTierId_billingCycle: {
-            planTierId: planTier.id,
-            billingCycle: effectiveBillingCycle,
-          },
-        },
-      });
-    } catch { /* ignore */ }
-
-    if (!price || !price.isActive) {
-      // ★★★ v9.0: fallback از 'monthly' به 'annual' تغییر کرد
-      console.warn(`[Register] ⚠ PlanPrice not found for ${effectiveTierName}/${effectiveBillingCycle}, falling back to 'annual'`);
-      try {
-        price = await db.client.planPrice.findUnique({
-          where: {
-            planTierId_billingCycle: {
-              planTierId: planTier.id,
-              billingCycle: 'annual',
-            },
-          },
-        });
-        // ★★★ v9.0: اگر fallback به annual پیدا شد، effectiveBillingCycle را هم آپدیت کن
-        if (price && price.isActive) {
-          effectiveBillingCycle = 'annual' as BillingCycle;
-          console.log(`[Register] ✓ Fallback to 'annual' successful`);
-        }
-      } catch { /* ignore */ }
-    }
-
-    if (!price || !price.isActive) {
-      console.error(`[Register] ❌ CRITICAL: No active PlanPrice found for tier "${effectiveTierName}"`);
-      return NextResponse.json(
-        {
-          success: false,
-          error: `قیمت پلن "${effectiveTierName}" در سیستم یافت نشد. لطفاً با پشتیبانی تماس بگیرید.`,
-        },
-        { status: 500 }
-      );
-    }
-
-    console.log(`[Register] ✓ PlanPrice: ${price.price} تومان (${price.billingCycle}, ${price.durationDays} روز)`);
 
     // ═══════════════════════════════════════════════════════════════
-    // ★★★ v3.0: مرحله ۱: ایجاد Tenant در بانک مشترک ───
+    // ★ تعیین status و expiresAt (۳ حالت)
+    // ═══════════════════════════════════════════════════════════════
+    const now = new Date();
+    let expiresAt: Date | null = null;
+    let trialStartAt: Date = now;
+    let trialEndAt: Date | null = null;
+    let isPaid = false;
+    let tenantStatus: string;
+    let planNameValue: string;
+
+    if (isFreeTrialRequest) {
+      // ★★★ حالت جدید: دوره ۹۰ روزه رایگان
+      tenantStatus = 'active';
+      isPaid = false;
+      trialStartAt = now;
+      trialEndAt = new Date(now.getTime() + FREE_TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      planNameValue = effectiveTierName;
+      console.log(`[Register] ✅ Free Trial Mode: ${FREE_TRIAL_DURATION_DAYS} days (ends: ${trialEndAt.toISOString()})`);
+    } else if (isDemoRequest) {
+      // دمو قدیمی (۳ روزه)
+      expiresAt = new Date(now.getTime() + DEMO_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      trialStartAt = now;
+      trialEndAt = expiresAt;
+      tenantStatus = 'demo';
+      planNameValue = 'demo';
+    } else {
+      // پلن پولی (مهلت ۱ ساعته برای پرداخت)
+      const TEMPORARY_DURATION_HOURS = 1;
+      expiresAt = new Date(now.getTime() + TEMPORARY_DURATION_HOURS * 60 * 60 * 1000);
+      tenantStatus = 'pending_payment';
+      planNameValue = `${effectiveTierName}_${effectiveBillingCycle}`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ v11.1: ایجاد tenant با کد ملی و وضعیت احراز هویت
     // ═══════════════════════════════════════════════════════════════
     const tenantId = `tenant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -250,46 +270,69 @@ export async function POST(request: NextRequest) {
         companyName,
         ownerMobile,
         ownerEmail: ownerEmail || null,
-        // ★★★ v5.1.11: status='pending_payment' به‌جای 'active'
-        //   Tenant تا زمان پرداخت موفق، در حالت pending است
-        //   اگر پرداخت لغو یا ناموفق باشد، Tenant حذف می‌شود
-        status: 'pending_payment',
-        planName: `${effectiveTierName}_${effectiveBillingCycle}`,
+        ownerNationalCode,  // ★ v11.1: کد ملی
+        status: tenantStatus,
+        planName: planNameValue,
         planTierId: planTier.id,
         billingCycle: effectiveBillingCycle,
         soldAt: now,
-        expiresAt,
+        expiresAt: expiresAt,
+        // ★ فیلدهای جدید Trial
+        trialStartAt: trialStartAt,
+        trialEndAt: trialEndAt,
+        isPaid: isPaid,
+        // ★ v11.1: فیلدهای جدید احراز هویت
+        identityVerified: true,
+        identityVerifiedAt: now,
+        identityAttempts: 0,
       },
     });
 
-    console.log(`[Register] ✅ Tenant created: ${tenant.id} (planTierId=${planTier.id})`);
+    // بعد از tenant.create، این کد را اضافه کنید:
 
-    // ═══════════════════════════════════════════════════════════════
-    // ★★★ v3.29: ایجاد خودکار سال مالی برای پلن سازمانی ───
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.2: ثبت کد ملی در IdentityRegistry
+// ═══════════════════════════════════════════════════════════════
+try {
+  await db.client.identityRegistry.create({
+    data: {
+      id: `identity-${tenant.id}`,
+      nationalCode: nationalCode,       // ← حالا nationalCode تعریف شده
+      mobile: ownerMobile,
+      tenantId: tenant.id,
+      registeredAt: now,
+      shahkarVerified: true,
+    },
+  })
+  console.log(`[Register] ✅ IdentityRegistry entry created for ${nationalCode.substring(0, 3)}****`)
+} catch (registryErr: any) {
+  console.warn(`[Register] ⚠ IdentityRegistry entry failed: ${registryErr.message}`)
+  // اگر تکراری بود، یعنی باگ در validate-identity
+  if (registryErr.code === 'P2002') {
+    await db.client.tenant.delete({ where: { id: tenant.id } })
+    return NextResponse.json({
+      success: false,
+      error: 'این کد ملی قبلاً ثبت شده است. لطفاً از ورود استفاده کنید.',
+    }, { status: 409 })
+  }
+}
+
+    console.log(`[Register] ✅ Tenant created: ${tenant.id} (status=${tenantStatus}, isPaid=${isPaid}, identityVerified=true)`);
+
     // ═══════════════════════════════════════════════════════════════
     let fiscalYearInfo: any = null;
     try {
       const fyResult = await ensureFiscalYearForTenant(db.client, tenant.id, effectiveTierName);
       if (fyResult.created) {
-        console.log(`[Register] ✅ Auto fiscal year created: ${fyResult.year?.name}`);
-        fiscalYearInfo = {
-          created: true,
-          name: fyResult.year?.name,
-          startDate: fyResult.year?.startDate,
-          endDate: fyResult.year?.endDate,
-        };
+        fiscalYearInfo = { created: true, name: fyResult.year?.name };
       } else {
-        console.log(`[Register] ℹ️ Fiscal year not auto-created: ${fyResult.reason}`);
         fiscalYearInfo = { created: false, reason: fyResult.reason };
       }
     } catch (fyErr: any) {
-      console.warn(`[Register] ⚠ Fiscal year creation warning: ${fyErr.message}`);
       fiscalYearInfo = { created: false, reason: fyErr.message };
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // ★★★ v3.0: مرحله ۲: ایجاد کاربر Admin ───
-    // ═══════════════════════════════════════════════════════════════
     const adminUser = await db.client.storeUser.create({
       data: {
         username,
@@ -301,9 +344,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log(`[Register] ✅ Admin user created: ${adminUser.username} (id: ${adminUser.id})`);
-
-    // ─── ثبت در UserLookups ───
     try {
       await db.client.userLookups.create({
         data: {
@@ -314,14 +354,8 @@ export async function POST(request: NextRequest) {
           isActive: true,
         },
       });
-      console.log(`[Register] ✅ UserLookup created`);
-    } catch (lookupError: any) {
-      console.warn(`[Register] UserLookup create skipped: ${lookupError.message}`);
-    }
+    } catch {}
 
-    // ─── تولید توکن JWT واقعی ───
-    // ★★★ v5.1.10: استفاده از signTokenPair به‌جای توکن جعلی
-    //   این کار ضروری است چون withTenantIsolation در checkout یک JWT معتبر می‌خواهد
     const tokenPair = signTokenPair({
       userId: adminUser.id,
       username,
@@ -331,37 +365,30 @@ export async function POST(request: NextRequest) {
       permissions: ['all'],
       storeName: companyName,
     });
-    const accessToken = tokenPair.accessToken;
-    const refreshToken = tokenPair.refreshToken;
-
-    console.log(`[Register] ✅ JWT tokens generated (expires in ${tokenPair.expiresIn}s)`);
 
     const elapsedMs = Date.now() - startTime;
     console.log(`╔══════════════════════════════════════════════════════════════╗`);
-    console.log(`║  [Register] ✅ REGISTRATION COMPLETED in ${elapsedMs}ms               ║`);
+    console.log(`║  [Register] ✅ REGISTRATION COMPLETED in ${elapsedMs}ms`);
     console.log(`║  Tenant: ${tenant.id}`);
-    console.log(`║  Plan: ${effectiveTierName} / ${effectiveBillingCycle}${isLifetime ? ' (LIFETIME)' : ''}`);
-    console.log(`║  PlanTier: ${planTier.name} (id=${planTier.id})`);
-    console.log(`║  Admin User: ${username} (${adminUser.id})`);
-    if (fiscalYearInfo?.created) {
-      console.log(`║  Fiscal Year: ${fiscalYearInfo.name} (auto-created)`);
-    }
+    console.log(`║  National Code: ${ownerNationalCode.substring(0, 3)}****${ownerNationalCode.substring(7)}`);
+    console.log(`║  Plan: ${effectiveTierName} / ${effectiveBillingCycle}${isFreeTrialRequest ? ' (FREE TRIAL 90 days)' : ''}${isDemoRequest ? ' (DEMO)' : ''}`);
+    console.log(`║  Admin User: ${username}`);
+    console.log(`║  Identity Verified: ✅`);
     console.log(`╚══════════════════════════════════════════════════════════════╝\n`);
 
-    // ★★★ v9.0: TIER_MAP با نام‌های فارسی جدید
     const TIER_MAP: Record<string, { name: string; nameFa: string }> = {
-      simple:        { name: 'simple',       nameFa: 'پایه' },       // ★ v9.0: «ساده» → «پایه»
-      professional:  { name: 'professional', nameFa: 'پیشرفته' },   // ★ v9.0: «حرفه‌ای» → «پیشرفته»
-      enterprise:    { name: 'enterprise',   nameFa: 'حرفه‌ای' },   // ★ v9.0: «سازمانی» → «حرفه‌ای»
+      simple:       { name: 'simple',       nameFa: 'پایه' },
+      professional: { name: 'professional', nameFa: 'پیشرفته' },
+      enterprise:   { name: 'enterprise',   nameFa: 'حرفه‌ای' },
     };
     const tierInfo = TIER_MAP[effectiveTierName] || TIER_MAP.simple;
 
     return NextResponse.json({
       success: true,
       data: {
-        token: accessToken,
-        accessToken,
-        refreshToken,
+        token: tokenPair.accessToken,
+        accessToken: tokenPair.accessToken,
+        refreshToken: tokenPair.refreshToken,
         user: {
           id: adminUser.id,
           username,
@@ -380,22 +407,25 @@ export async function POST(request: NextRequest) {
           planTierName: planTier.name,
           planTierNameFa: planTier.nameFa || tierInfo.nameFa,
           billingCycle: effectiveBillingCycle,
-          isLifetime, // ★★★ v9.0: flag جدید برای مشخص کردن پلن مادام‌العمر
-          isTrial: false,
+          isLifetime,
+          isTrial: isDemoRequest || isFreeTrialRequest,
+          isFreeTrial: isFreeTrialRequest,
           status: tenant.status,
+          isPaid: isPaid,
           isIsolated: false,
-          expiresAt: expiresAt.toISOString(),
+          expiresAt: expiresAt?.toISOString() || null,
+          trialEndAt: trialEndAt?.toISOString() || null,
+          daysRemaining: isFreeTrialRequest ? FREE_TRIAL_DURATION_DAYS : (isDemoRequest ? DEMO_DURATION_DAYS : 0),
+          // ★ v11.1: اطلاعات احراز هویت
+          identityVerified: tenant.identityVerified,
+          identityVerifiedAt: tenant.identityVerifiedAt?.toISOString() || null,
         },
-        // ★★★ v3.29: اطلاعات سال مالی خودکار
         fiscalYear: fiscalYearInfo,
       },
     });
   } catch (error: any) {
     const elapsedMs = Date.now() - startTime;
-    console.error(`╔══════════════════════════════════════════════════════════════╗`);
-    console.error(`║  [Register] ❌ UNEXPECTED ERROR after ${elapsedMs}ms`);
-    console.error(`║  Message: ${error.message}`);
-    console.error(`╚══════════════════════════════════════════════════════════════╝\n`);
+    console.error(`[Register] ❌ UNEXPECTED ERROR after ${elapsedMs}ms: ${error.message}`);
     return NextResponse.json(
       { success: false, error: 'خطا در ثبت‌نام فروشگاه: ' + error.message },
       { status: 500 }

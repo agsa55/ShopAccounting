@@ -22,6 +22,7 @@ import {
   Users, Plus, Search, Edit2, Trash2, Phone, Loader2, AlertCircle, Building2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 interface Supplier {
   id: string
@@ -109,13 +110,37 @@ export function SuppliersPage() {
       })
       const data = await res.json()
 
-      if (data.success) {
-        toast({ title: 'موفق', description: editingSupplier ? 'تامین‌کننده به‌روزرسانی شد' : 'تامین‌کننده ایجاد شد' })
-        setDialogOpen(false)
-        loadData()
-      } else {
-        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
-      }
+    if (data.success) {
+  // ★ v11.9.0: لاگ ثبت یا ویرایش تامین‌کننده
+  if (editingSupplier) {
+    logger.info('تامین‌کننده ویرایش شد', {
+      supplierId: editingSupplier.id,
+      supplierName: form.name.trim(),
+      oldName: editingSupplier.name,
+      code: form.code || null,
+      mobile: form.mobile || null,
+      nationalCode: form.nationalCode || null,
+      creditLimit: form.creditLimit ? Number(form.creditLimit) : 0,
+      isActive: form.isActive,
+    })
+  } else {
+    logger.info('تامین‌کننده جدید ثبت شد', {
+      supplierId: data.data?.id,
+      supplierName: form.name.trim(),
+      code: form.code || null,
+      mobile: form.mobile || null,
+      nationalCode: form.nationalCode || null,
+      creditLimit: form.creditLimit ? Number(form.creditLimit) : 0,
+      isActive: form.isActive,
+    })
+  }
+  
+  toast({ title: 'موفق', description: editingSupplier ? 'تامین‌کننده به‌روزرسانی شد' : 'تامین‌کننده ایجاد شد' })
+  setDialogOpen(false)
+  loadData()
+} else {
+  toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+}
     } catch (err: any) {
       toast({ title: 'خطا', description: err?.message, variant: 'destructive' })
     }
@@ -127,13 +152,22 @@ export function SuppliersPage() {
     try {
       const tid = tenantId || useAppStore.getState().currentTenant?.id
       const res = await fetch(`/api/suppliers?id=${supplier.id}&tenantId=${tid}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'موفق', description: data.message })
-        loadData()
-      } else {
-        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
-      }
+   const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاگ حذف تامین‌کننده
+  logger.info('تامین‌کننده حذف شد', {
+    supplierId: supplier.id,
+    supplierName: supplier.name,
+    supplierCode: supplier.code,
+    mobile: supplier.mobile || null,
+    currentBalance: supplier.currentBalance,
+  })
+  
+  toast({ title: 'موفق', description: data.message })
+  loadData()
+} else {
+  toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+}
     } catch (err: any) {
       toast({ title: 'خطا', description: err?.message, variant: 'destructive' })
     }

@@ -1,7 +1,8 @@
 // ============================================================================
-// src/app/api/invoices/receive-payment/route.ts — POST (v5.1.3 ★★★ Phase 4)
+// src/app/api/invoices/receive-payment/route.ts — POST (v5.2.0 ★★★ Account Fix)
 // ShopAccounting — Universal Invoice Payment Receiver
 // ----------------------------------------------------------------------------
+// ★★★ v5.2.0: استفاده از getStandardAccountIds (auto-seed) به‌جای جستجوی دستی
 // ★★★ این API برای حل مشکل کسب‌وکار ایجاد شده:
 //   وقتی کاربر از پلن حرفه‌ای به ساده downgrade می‌کند، فاکتورهای نسیه/قسطی
 //   قبلی هنوز باقیمانده دارند. صندوق‌دار باید بتونه این مبالغ رو دریافت کنه.
@@ -11,22 +12,24 @@
 //   ۲. فاکتور را به‌روزرسانی می‌کند (paidAmount, remainingAmount, status)
 //   ۳. اگر installmentId پاس شود، قسط مربوطه را به‌روزرسانی می‌کند
 //   ۴. سند حسابداری خودکار ایجاد می‌کند (بدهکار: صندوق/بانک، بستانکار: حساب‌های دریافتنی)
+//   ۵. ★★★ currentBalance مشتری را کاهش می‌دهد (برای فاکتورهای نسیه/قسطی)
 //
 // Body:
 //   {
 //     invoiceId: string,
 //     amount: number,
 //     paymentMethod: 'cash' | 'card' | 'check',
-//     paymentRef?: string,         // شماره رسید/پیگیری
-//     paymentDate?: string,        // ISO date — پیش‌فرض امروز
+//     paymentRef?: string,
+//     paymentDate?: string,
 //     notes?: string,
-//     installmentId?: string       // برای پرداخت قسط خاص
+//     installmentId?: string
 //   }
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 import { randomUUID } from 'crypto'
 
 // ═══════════════════════════════════════════════════════════════
@@ -183,6 +186,25 @@ export const POST = withTenantAndPermission('pos')(
         newStatus,
       })
 
+      // ★★★ اصلاح اصلی: به‌روزرسانی currentBalance مشتری ★★★
+      if (invoice.customerId) {
+        const paymentType = (invoice.paymentType || '').toLowerCase()
+        if (paymentType === 'credit' || paymentType === 'installment') {
+          try {
+            await tenantDb.customer.update({
+              where: { id: invoice.customerId },
+              data: { currentBalance: { decrement: amount } },
+            })
+            console.log('[ReceivePayment] Customer currentBalance decreased:', {
+              customerId: invoice.customerId,
+              amount,
+            })
+          } catch (custErr: any) {
+            console.warn('[ReceivePayment] Failed to update customer balance:', custErr?.message)
+          }
+        }
+      }
+
       // ─── ۶. به‌روزرسانی قسط (در صورت وجود installmentId) ──────────
       let installmentUpdated = false
       if (installmentId) {
@@ -210,7 +232,6 @@ export const POST = withTenantAndPermission('pos')(
               },
             })
 
-            // ★ به‌روزرسانی InstallmentPlan
             if (schedule.plan) {
               const plan = schedule.plan
               const newPaidInstallments = isFullyPaid
@@ -226,7 +247,6 @@ export const POST = withTenantAndPermission('pos')(
 
               const isPlanCompleted = newPaidInstallments >= plan.numberOfInstallments
 
-              // ★ یافتن قسط بعدی
               let nextDueDate: Date | null = null
               if (!isPlanCompleted) {
                 const nextPending = await tenantDb.installmentSchedule.findFirst({
@@ -258,7 +278,6 @@ export const POST = withTenantAndPermission('pos')(
           }
         } catch (instErr: any) {
           console.warn('[ReceivePayment] Installment update failed:', instErr?.message)
-          // ★ ادامه می‌دهیم — پرداخت ثبت شده
         }
       }
 
@@ -279,7 +298,6 @@ export const POST = withTenantAndPermission('pos')(
         }
       } catch (jeErr: any) {
         console.warn('[ReceivePayment] Journal entry creation failed:', jeErr?.message)
-        // ★ ادامه می‌دهیم — پرداخت ثبت شده، فقط سند ایجاد نشد
       }
 
       // ─── ۸. ثبت در AuditLog ──────────────────────────────────────
@@ -331,6 +349,7 @@ export const POST = withTenantAndPermission('pos')(
 
 // ═══════════════════════════════════════════════════════════════
 //  Helper: ایجاد سند حسابداری برای دریافت وجه
+//  ★ v5.2.0: استفاده از getStandardAccountIds به‌جای جستجوی دستی
 // ═══════════════════════════════════════════════════════════════
 
 async function createJournalEntryForPayment(
@@ -342,114 +361,83 @@ async function createJournalEntryForPayment(
   paidAt: Date,
   notes?: string
 ): Promise<string | null> {
-  // ★ ۱. یافتن حساب صندوق یا بانک
-  const isCash = paymentMethod === 'cash'
-  const accountKeyword = isCash ? ['صندوق', 'نقد'] : ['بانک', 'حساب بانکی']
+  try {
+    // ★ v5.2.0: گرفتن حساب‌های استاندارد با auto-seed
+    const accIds = await getStandardAccountIds(tenantId)
 
-  let cashAccount: any = null
+    // ★ انتخاب حساب نقد/بانک بر اساس روش پرداخت
+    let cashAccountId: string | null = null
+    const isCash = paymentMethod === 'cash'
+    
+    if (isCash) {
+      cashAccountId = accIds.cashAccountId
+    } else if (paymentMethod === 'card') {
+      cashAccountId = accIds.bankAccountId || accIds.cashAccountId
+    } else {
+      cashAccountId = accIds.cashAccountId
+    }
 
-  // ★ تلاش اول: جستجو بر اساس نام
-  for (const kw of accountKeyword) {
-    cashAccount = await tenantDb.account.findFirst({
-      where: {
+    if (!cashAccountId) {
+      console.warn('[ReceivePayment] Cash/Bank account not found — skipping journal entry')
+      return null
+    }
+
+    // ★ حساب دریافتنی (بدهکاران تجاری ۱۳۱۰)
+    const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
+
+    if (!receivablesAccountId) {
+      console.warn('[ReceivePayment] Accounts Receivable account not found — skipping journal entry')
+      return null
+    }
+
+    // ★ ایجاد سند حسابداری
+    const jeCount = await tenantDb.journalEntry.count({ where: { tenantId } })
+    const journalNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+    const description = `دریافت وجه فاکتور ${invoice.number}${notes ? ' - ' + notes : ''}`
+
+    const entry = await tenantDb.journalEntry.create({
+      data: {
+        id: randomUUID(),
         tenantId,
-        type: 'asset',
-        name: { contains: kw },
+        number: journalNumber,
+        date: paidAt,
+        description,
+        status: 'posted',
+        sourceType: 'invoice_payment',
+        sourceId: invoice.id,
+        totalDebit: amount,
+        totalCredit: amount,
+        isCancelled: false,
       },
     })
-    if (cashAccount) break
-  }
 
-  // ★ تلاش دوم: جستجو بر اساس کد (10xx برای صندوق/بانک)
-  if (!cashAccount) {
-    cashAccount = await tenantDb.account.findFirst({
-      where: {
-        tenantId,
-        type: 'asset',
-        code: { startsWith: '10' },
+    // ★ خط ۱: بدهکار — صندوق/بانک
+    await tenantDb.journalEntryLine.create({
+      data: {
+        id: randomUUID(),
+        journalEntryId: entry.id,
+        accountId: cashAccountId,
+        debit: amount,
+        credit: 0,
+        description: `دریافت ${isCash ? 'نقدی' : 'کارتخوان/بانکی'} - فاکتور ${invoice.number}`,
       },
     })
-  }
 
-  if (!cashAccount) {
-    console.warn('[ReceivePayment] Cash/Bank account not found — skipping journal entry')
+    // ★ خط ۲: بستانکار — حساب‌های دریافتنی (کاهش طلب از مشتری)
+    await tenantDb.journalEntryLine.create({
+      data: {
+        id: randomUUID(),
+        journalEntryId: entry.id,
+        accountId: receivablesAccountId,
+        debit: 0,
+        credit: amount,
+        description: `تسویه بدهی فاکتور ${invoice.number}`,
+      },
+    })
+
+    return entry.id
+  } catch (err: any) {
+    console.error('[ReceivePayment] createJournalEntryForPayment failed:', err?.message)
     return null
   }
-
-  // ★ ۲. یافتن حساب‌های دریافتنی (مشتریان)
-  let arAccount: any = null
-
-  // ★ تلاش اول: جستجو بر اساس نام
-  const arKeywords = ['دریافتنی', 'مشتری', 'حساب مشتری']
-  for (const kw of arKeywords) {
-    arAccount = await tenantDb.account.findFirst({
-      where: {
-        tenantId,
-        type: 'asset',
-        name: { contains: kw },
-      },
-    })
-    if (arAccount) break
-  }
-
-  // ★ تلاش دوم: جستجو بر اساس کد (11xx برای دریافتنی‌ها)
-  if (!arAccount) {
-    arAccount = await tenantDb.account.findFirst({
-      where: {
-        tenantId,
-        type: 'asset',
-        code: { startsWith: '11' },
-      },
-    })
-  }
-
-  if (!arAccount) {
-    console.warn('[ReceivePayment] Accounts Receivable account not found — skipping journal entry')
-    return null
-  }
-
-  // ★ ۳. ایجاد سند حسابداری
-  const journalNumber = `RP-${Date.now()}-${Math.floor(Math.random() * 1000)}`
-  const description = `دریافت وجه فاکتور ${invoice.number}${notes ? ' - ' + notes : ''}`
-
-  const entry = await tenantDb.journalEntry.create({
-    data: {
-      id: randomUUID(),
-      tenantId,
-      number: journalNumber,
-      date: paidAt,
-      description,
-      status: 'posted',
-      referenceType: 'Invoice',
-      referenceId: invoice.id,
-      isCancelled: false,
-    },
-  })
-
-  // ★ ۴. ایجاد ردیف‌های سند (debit cash, credit A/R)
-  await tenantDb.journalEntryLine.create({
-    data: {
-      id: randomUUID(),
-      journalEntryId: entry.id,
-      tenantId,
-      accountId: cashAccount.id,
-      debit: amount,
-      credit: 0,
-      description: `دریافت ${isCash ? 'نقدی' : 'بانکی'} - فاکتور ${invoice.number}`,
-    },
-  })
-
-  await tenantDb.journalEntryLine.create({
-    data: {
-      id: randomUUID(),
-      journalEntryId: entry.id,
-      tenantId,
-      accountId: arAccount.id,
-      debit: 0,
-      credit: amount,
-      description: `تسویه بدهی فاکتور ${invoice.number}`,
-    },
-  })
-
-  return entry.id
 }

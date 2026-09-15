@@ -377,3 +377,25 @@ button[class*="hover:bg-orange-700"]:hover {
 
 .hover\:text-emerald-600:hover { color: hsl(var(--primary)) !important; }
 .hover\:text-emerald-700:hover { color: hsl(245 75% 58%) !important; }
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

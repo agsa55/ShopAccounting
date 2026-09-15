@@ -1,12 +1,22 @@
-// src/app/api/purchase-invoices/[id]/return/route.ts — v8.7.1 (Fixed)
+// src/app/api/purchase-invoices/[id]/return/route.ts — v8.9.0 (Complete Fix)
 // ============================================================================
-// فاکتور برگشتی خرید — با بررسی موجودی انبار
+// ★★★ v8.9.0 تغییرات:
+//   ★ paidAmount = returnTotal (فاکتور برگشتی = دریافت وجه)
+//   ★ remainingAmount = 0
+//   ★ بررسی مجموع برگشت‌های قبلی (جلوگیری از برگشت تکراری)
+//   ★ پشتیبانی کامل از پرداخت با چک (checkPayableAccountId)
+//   ★ بررسی فاکتور لغو شده
+//   ★ به‌روزرسانی وضعیت چک مرتبط
+//
+// ★★★ v8.8.0 (حفظ شد): getStandardAccountIds + VAT (2160)
+// ★★★ v8.7.1 (حفظ شد): بررسی موجودی انبار قبل از برگشت
 // ============================================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
-import { getTenantPlanInfo } from '@/lib/plan-limits'
-import { resolvePlanTier } from '@/lib/plan-features'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
+import { generateJournalNumber } from '@/lib/journal-number-generator' 
 
 export const POST = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
@@ -56,6 +66,14 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       return NextResponse.json({ success: false, error: 'فاکتور اصلی یافت نشد' }, { status: 404 })
     }
 
+    // ★ v8.9.0: بررسی وضعیت فاکتور اصلی
+    if (originalInvoice.status === 'cancelled') {
+      return NextResponse.json(
+        { success: false, error: 'فاکتور لغو شده قابل برگشت نیست' },
+        { status: 400 }
+      )
+    }
+
     if (originalInvoice.invoiceType === 'purchase_return') {
       return NextResponse.json(
         { success: false, error: 'فاکتور اصلی خودش برگشتی است — امکان برگشت مجدد وجود ندارد' },
@@ -68,7 +86,29 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       where: { purchaseInvoiceId: originalId },
     })
 
-    // ★ اعتبارسنجی: مقدار برگشتی نباید بیشتر از موجودی انبار باشد
+    // ★ v8.9.0: بارگذاری مجموع برگشت‌های قبلی هر آیتم
+    const previousReturns = await tenantDb.purchaseInvoiceItem.findMany({
+      where: {
+        purchaseInvoice: {
+          originalPurchaseInvoiceId: originalId,
+          invoiceType: 'purchase_return',
+          tenantId,
+          status: { not: 'cancelled' },
+        },
+      },
+    })
+
+    // ساخت map از مجموع برگشت‌های قبلی برای هر آیتم اصلی
+    const returnedQtyMap = new Map<string, number>()
+    for (const ret of previousReturns) {
+      const origItem = originalItems.find((oi: any) => oi.productId === ret.productId)
+      if (origItem) {
+        const current = returnedQtyMap.get(origItem.id) || 0
+        returnedQtyMap.set(origItem.id, current + Number(ret.quantity))
+      }
+    }
+
+    // ★ اعتبارسنجی و پردازش آیتم‌ها
     const itemsToProcess: any[] = []
     let returnSubTotal = 0
     let returnDiscount = 0
@@ -83,18 +123,34 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         )
       }
 
+      const origQty = Number(origItem.quantity)
+      const retQty = Number(retItem.quantity)
+
       // ✅ بررسی ۱: مقدار خرید اصلی
-      if (retItem.quantity > origItem.quantity) {
+      if (retQty > origQty) {
         return NextResponse.json(
           {
             success: false,
-            error: `مقدار برگشتی (${retItem.quantity}) نمی‌تواند بیشتر از مقدار خرید (${origItem.quantity}) باشد برای کالای ${origItem.productName}`,
+            error: `مقدار برگشتی (${retQty}) نمی‌تواند بیشتر از مقدار خرید (${origQty}) باشد برای کالای ${origItem.productName}`,
           },
           { status: 400 }
         )
       }
 
-      // ✅ بررسی ۲: موجودی انبار فعلی
+      // ★ v8.9.0: بررسی ۲: مجموع برگشت‌های قبلی + فعلی نباید از خرید بیشتر باشد
+      const alreadyReturned = returnedQtyMap.get(origItem.id) || 0
+      const totalAfterReturn = alreadyReturned + retQty
+      if (totalAfterReturn > origQty) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `برای ${origItem.productName}: قبلاً ${alreadyReturned} عدد برگشت شده. حداکثر ${origQty - alreadyReturned} عدد دیگر قابل برگشت است.`,
+          },
+          { status: 400 }
+        )
+      }
+
+      // ✅ بررسی ۳: موجودی انبار فعلی
       if (origItem.productId) {
         const stockLevel = await tenantDb.stockLevel.findUnique({
           where: {
@@ -105,11 +161,11 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           },
         }).catch(() => null)
 
-        if (stockLevel && retItem.quantity > stockLevel.quantity) {
+        if (stockLevel && retQty > Number(stockLevel.quantity)) {
           return NextResponse.json(
             {
               success: false,
-              error: `موجودی ${origItem.productName} کافی نیست. موجودی فعلی: ${stockLevel.quantity} عدد، تعداد درخواستی برگشت: ${retItem.quantity} عدد`,
+              error: `موجودی ${origItem.productName} کافی نیست. موجودی فعلی: ${stockLevel.quantity} عدد، تعداد درخواستی برگشت: ${retQty} عدد`,
             },
             { status: 400 }
           )
@@ -117,21 +173,21 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       }
 
       // محاسبه مبالغ متناسب با مقدار برگشتی
-      const ratio = origItem.quantity > 0 ? retItem.quantity / origItem.quantity : 0
-      const lineDiscount = origItem.discountAmount * ratio
-      const lineTax = origItem.taxAmount * ratio
-      const lineTotal = origItem.lineTotal * ratio
+      const ratio = origQty > 0 ? retQty / origQty : 0
+      const lineDiscount = Number(origItem.discountAmount) * ratio
+      const lineTax = Number(origItem.taxAmount) * ratio
+      const lineTotal = Number(origItem.lineTotal) * ratio
 
       itemsToProcess.push({
         ...origItem,
-        returnQuantity: retItem.quantity,
+        returnQuantity: retQty,
         returnReason: retItem.returnReason || null,
         lineDiscount,
         lineTax,
         lineTotal,
       })
 
-      returnSubTotal += origItem.unitPrice * retItem.quantity
+      returnSubTotal += Number(origItem.unitPrice) * retQty
       returnDiscount += lineDiscount
       returnTax += lineTax
     }
@@ -151,11 +207,15 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
     })
     const returnNumber = `PR-${(returnCount + 1).toString().padStart(6, '0')}`
 
+    // ★ گرفتن حساب‌های استاندارد
+    await getStandardAccountIds(tenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(tenantId)
+
     const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
 
     // ══════ شروع تراکنش ══════
     const result = await txClient.$transaction(async (tx: any) => {
-      // ۱. ایجاد فاکتور برگشتی خرید
+      // ★ v8.9.0: فاکتور برگشتی = "دریافت وجه" پس paidAmount = returnTotal
       const returnInvoice = await tx.purchaseInvoice.create({
         data: {
           tenantId,
@@ -168,8 +228,8 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           discountAmount: returnDiscount,
           taxAmount: returnTax,
           totalAmount: returnTotal,
-          paidAmount: 0,
-          remainingAmount: returnTotal,
+          paidAmount: returnTotal,  // ★ v8.9.0: کل مبلغ دریافت شده
+          remainingAmount: 0,       // ★ v8.9.0: باقیمانده صفر
           warehouseId: originalInvoice.warehouseId,
           description: description || `برگشت کالا به تامین‌کننده — فاکتور اصلی ${originalInvoice.number}`,
           cashierId: userId,
@@ -206,7 +266,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
           })
 
           if (stockLevel) {
-            const newQty = stockLevel.quantity - item.returnQuantity
+            const newQty = Number(stockLevel.quantity) - item.returnQuantity
             const newAvgCost = newQty > 0 ? stockLevel.averageCost : 0
 
             await tx.stockLevel.update({
@@ -246,41 +306,24 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         }
       }
 
-      // ۳. سند حسابداری برگشتی
+      // ★ v8.9.0: سند حسابداری — پشتیبانی کامل از چک
       try {
-        const accounts = await tx.account.findMany({ where: { tenantId } })
-        let inventoryAccountId: string | null = null
-        let cashAccountId: string | null = null
-        let payableAccountId: string | null = null
-        let taxAccountId: string | null = null
-
-        for (const acc of accounts) {
-          const code = (acc.code || '').toLowerCase()
-          const type = (acc.type || '').toLowerCase()
-          const name = (acc.name || '').toLowerCase()
-
-          if (!inventoryAccountId && (type === 'inventory' || code.startsWith('120') || name.includes('موجودی'))) {
-            inventoryAccountId = acc.id
-          }
-          if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110'))) {
-            cashAccountId = acc.id
-          }
-          if (!payableAccountId && (type === 'payable' || type === 'accounts_payable' || code.startsWith('210'))) {
-            payableAccountId = acc.id
-          }
-          if (!taxAccountId && (type === 'tax' || code.startsWith('190'))) {
-            taxAccountId = acc.id
-          }
-        }
+        const inventoryAccountId = accIds.inventoryAccountId
+        const cashAccountId = accIds.cashAccountId
+        const payableAccountId = accIds.tradePurchasableId || accIds.payablesAccountId
+        const checkPayableAccountId = accIds.checkPayableAccountId || (accIds as any).checkPayableId
+        const vatAccountId = accIds.vatAccountId || accIds.taxAccountId
 
         if (inventoryAccountId) {
-          const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-          const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+      // ★ v8.9.4: تولید شماره منحصر به فرد سند
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[PUT Purchase] 📝 Generated journal number:', jeNumber)
 
-          const isCredit = originalInvoice.paymentType === 'credit'
+          const pt = (originalInvoice.paymentType || 'cash').toLowerCase()
           const lines: any[] = []
           const netAmount = returnSubTotal - returnDiscount
 
+          // ★ بستانکار: موجودی کالا (کاهش)
           lines.push({
             accountId: inventoryAccountId,
             debit: 0,
@@ -288,22 +331,41 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             description: `بستانکار: برگشت کالا به تامین‌کننده — فاکتور برگشتی ${returnNumber}`,
           })
 
-          if (returnTax > 0 && taxAccountId) {
+          // ★ بستانکار: مالیات بر ارزش افزوده (کاهش)
+          if (returnTax > 0 && vatAccountId) {
             lines.push({
-              accountId: taxAccountId,
+              accountId: vatAccountId,
               debit: 0,
               credit: returnTax,
-              description: `بستانکار: مالیات برگشت خرید — فاکتور ${returnNumber}`,
+              description: `بستانکار: مالیات بر ارزش افزوده برگشت خرید — فاکتور ${returnNumber}`,
             })
           }
 
-          const debitAccountId = isCredit ? (payableAccountId || cashAccountId) : cashAccountId
+          // ★ v8.9.0: بدهکار — بر اساس روش پرداخت اصلی
+          let debitAccountId: string | null = null
+          let debitDescription = ''
+
+          if (pt === 'check') {
+            // ★ چک: استفاده از حساب ۲۰۵۰ (چک‌های پرداختنی)
+            debitAccountId = checkPayableAccountId || payableAccountId || cashAccountId
+            debitDescription = `بدهکار: کاهش چک‌های پرداختنی — فاکتور برگشتی خرید ${returnNumber}`
+            console.log('[Return] 💳 Check payment — using account:', debitAccountId)
+          } else if (pt === 'credit') {
+            // نسیه: حساب بستانکاران تجاری
+            debitAccountId = payableAccountId || cashAccountId
+            debitDescription = `بدهکار: بستانکاران تجاری — فاکتور برگشتی خرید ${returnNumber}`
+          } else {
+            // نقدی: صندوق/بانک
+            debitAccountId = cashAccountId
+            debitDescription = `بدهکار: صندوق — فاکتور برگشتی خرید ${returnNumber}`
+          }
+
           if (debitAccountId) {
             lines.push({
               accountId: debitAccountId,
               debit: returnTotal,
               credit: 0,
-              description: `بدهکار: ${isCredit ? 'بدهکاران تجاری' : 'صندوق'} — فاکتور برگشتی خرید ${returnNumber}`,
+              description: debitDescription,
             })
           }
 
@@ -314,7 +376,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
             const journalEntry = await tx.journalEntry.create({
               data: {
                 number: jeNumber,
-                date: new Date(),
+                date: invoiceDate ? new Date(invoiceDate) : new Date(),
                 description: `سند خودکار بابت فاکتور برگشتی خرید ${returnNumber}`,
                 status: 'posted',
                 sourceType: 'purchase_return',
@@ -331,18 +393,43 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
               where: { id: returnInvoice.id },
               data: { journalEntryId: journalEntry.id },
             })
+
+            console.log(`[Return] ✅ سند حسابداری ${jeNumber} صادر شد`)
           }
         }
       } catch (jeErr: any) {
         console.warn('[Return] Auto journal entry failed:', jeErr?.message)
       }
 
-      // ۴. کاهش بدهی تامین‌کننده
-      if (originalInvoice.paymentType === 'credit' && originalInvoice.supplierId) {
+      // ★ v8.9.0: کاهش بدهی تامین‌کننده (نسیه و چک)
+      const pt = (originalInvoice.paymentType || 'cash').toLowerCase()
+      if ((pt === 'credit' || pt === 'check') && originalInvoice.supplierId) {
         await tx.supplier.update({
           where: { id: originalInvoice.supplierId },
           data: { currentBalance: { decrement: returnTotal } },
         }).catch((err: any) => console.warn('[Return] خطا در Supplier.update:', err?.message))
+      }
+
+      // ★ v8.9.0: به‌روزرسانی وضعیت چک مرتبط (در صورت وجود)
+      if (pt === 'check') {
+        try {
+          const existingCheck = await tx.check.findFirst({
+            where: { purchaseInvoiceId: originalId, tenantId },
+          })
+          if (existingCheck) {
+            const newAmount = Math.max(0, Number(existingCheck.amount) - returnTotal)
+            await tx.check.update({
+              where: { id: existingCheck.id },
+              data: {
+                amount: newAmount,
+                description: `${existingCheck.description || ''} [برگشتی ${returnNumber}: -${returnTotal}]`,
+                status: newAmount <= 0 ? 'cancelled' : existingCheck.status,
+              },
+            }).catch((err: any) => console.warn('[Return] Check update failed:', err?.message))
+          }
+        } catch (checkErr: any) {
+          console.warn('[Return] Check handling failed:', checkErr?.message)
+        }
       }
 
       return returnInvoice
@@ -359,7 +446,7 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
         invoiceType: result.invoiceType,
         originalPurchaseInvoiceId: result.originalPurchaseInvoiceId,
       },
-      message: `فاکتور برگشتی خرید با شماره ${returnNumber} با موفقیت ثبت شد. مبلغ: ${returnTotal.toLocaleString('fa-IR')} ریال`,
+      message: `فاکتور برگشتی خرید ${returnNumber} ثبت شد. مبلغ: ${returnTotal.toLocaleString('fa-IR')} ریال`,
     })
   } catch (error: any) {
     console.error('[Purchase Return] Error:', error?.message || error)

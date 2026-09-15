@@ -229,8 +229,14 @@ export function daysInJalaliMonth(jy: number, jm: number): number {
 export function isoToJalali(iso: string | null | undefined): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
   try {
-    const d = new Date(iso)
+    // ★★★ اصلاح باگ یک روز عقب افتادن:
+    // اگر رشته زمان (T) نداشت، ساعت ۱۲ ظهر را به آن اضافه می‌کنیم تا 
+    // تبدیل UTC به Local Time باعث عقب رفتن روز نشود.
+    const safeDateStr = iso.includes('T') ? iso : `${iso}T12:00:00`
+    
+    const d = new Date(safeDateStr)
     if (isNaN(d.getTime())) return null
+    
     const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
     return { jy, jm, jd }
   } catch {

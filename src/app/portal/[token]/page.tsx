@@ -1,29 +1,30 @@
 // ============================================================================
-// src/app/portal/[token]/page.tsx — Customer Portal (v3.36.2 ★★★)
-// ShopAccounting — Customer Portal Page
+// src/app/portal/[token]/page.tsx — Customer Portal (v3.47 ★★★)
+// ShopAccounting — Customer Portal Page with OTP Security
 // ----------------------------------------------------------------------------
-// ★★★ v3.35: صفحه پورتال مشتری برای مشاهده فاکتورها و پرداخت آنلاین
-// ★★★ v3.36.2: پشتیبانی از پرداخت قسط‌به‌قسط
-//   - برای فاکتورهای قسطی، جدول اقساط نمایش داده می‌شود
-//   - هر قسط دکمه پرداخت آنلاین مستقل دارد
-//   - قسط‌های پرداخت‌شده با تیک سبز نمایش داده می‌شوند
-//   - قسط‌های سررسیدنشده با قفل خاکستری
-//   - قسط‌های سررسیدرسیده با دکمه سبز قابل پرداخت
-//   - امکان پرداخت زودهنگام (تا ۷ روز قبل از سررسید)
+// ★★★ v3.47: نمایش پیام موفقیت پرداخت
+//   ★ بنر موفقیت پرداخت بعد از بازگشت از درگاه
+//   ★ نمایش کد پیگیری پرداخت
+//   ★ پیام بعد از ۵ ثانیه مخفی می‌شود
+// ★★★ v3.45: امنیت کامل
+//   - همیشه فرم ورود OTP نمایش داده می‌شود
+//   - portalToken فقط برای شناسایی مشتری استفاده می‌شود
+//   - بعد از تأیید OTP، session token جدید تولید می‌شود
 // ============================================================================
 
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Loader2, Phone, KeyRound, LogOut, Wallet, FileText, CreditCard,
+  Loader2, Phone, KeyRound, LogOut, Wallet, FileText,
   CheckCircle2, Clock, Lock, AlertCircle, Calendar, ChevronDown, ChevronUp,
+  X,
 } from 'lucide-react'
 import { OnlinePaymentButton } from '@/components/invoices/online-payment-button'
 import { InstallmentPayButton } from '@/components/portal/installment-pay-button'
@@ -34,7 +35,6 @@ interface PortalTokenData {
   store: { name: string }
 }
 
-// ★★★ v3.36.2: تایپ برای InstallmentSchedule
 interface InstallmentSchedule {
   id: string
   installmentNumber: number
@@ -47,8 +47,6 @@ interface InstallmentSchedule {
   paymentType: string | null
 }
 
-// ★★★ v3.36.2: تعیین وضعیت نمایش قسط
-// ★★★ v3.36.3: اجازه پرداخت همه اقساط (حتی سررسید‌نشده) — فقط نمایش متفاوت
 function getInstallmentDisplayStatus(schedule: InstallmentSchedule): {
   state: 'paid' | 'partial' | 'due' | 'early' | 'future'
   label: string
@@ -63,54 +61,18 @@ function getInstallmentDisplayStatus(schedule: InstallmentSchedule): {
   const daysUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 
   if (status === 'paid' || status === 'completed') {
-    return {
-      state: 'paid',
-      label: 'پرداخت‌شده',
-      color: 'text-emerald-700',
-      bgColor: 'bg-emerald-50 border-emerald-200',
-      canPay: false,
-    }
+    return { state: 'paid', label: 'پرداخت‌شده', color: 'text-emerald-700', bgColor: 'bg-emerald-50 border-emerald-200', canPay: false }
   }
-
   if (status === 'partial') {
-    return {
-      state: 'partial',
-      label: 'پرداخت جزیی',
-      color: 'text-amber-700',
-      bgColor: 'bg-amber-50 border-amber-200',
-      canPay: true,
-    }
+    return { state: 'partial', label: 'پرداخت جزیی', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-200', canPay: true }
   }
-
-  // ★ pending
   if (daysUntilDue < 0) {
-    return {
-      state: 'due',
-      label: `سررسید گذشته (${Math.abs(daysUntilDue)} روز)`,
-      color: 'text-red-700',
-      bgColor: 'bg-red-50 border-red-200',
-      canPay: true,
-    }
+    return { state: 'due', label: `سررسید گذشته (${Math.abs(daysUntilDue)} روز)`, color: 'text-red-700', bgColor: 'bg-red-50 border-red-200', canPay: true }
   }
-
   if (daysUntilDue <= 7) {
-    return {
-      state: 'early',
-      label: daysUntilDue === 0 ? 'سررسید امروز' : `${daysUntilDue} روز تا سررسید`,
-      color: 'text-orange-700',
-      bgColor: 'bg-orange-50 border-orange-200',
-      canPay: true,
-    }
+    return { state: 'early', label: daysUntilDue === 0 ? 'سررسید امروز' : `${daysUntilDue} روز تا سررسید`, color: 'text-orange-700', bgColor: 'bg-orange-50 border-orange-200', canPay: true }
   }
-
-  // ★★★ v3.36.3: قسط‌های آینده هم قابل پرداخت هستند (پرداخت زودهنگام)
-  return {
-    state: 'future',
-    label: `${daysUntilDue} روز تا سررسید (پرداخت زودهنگام)`,
-    color: 'text-sky-700',
-    bgColor: 'bg-sky-50 border-sky-200',
-    canPay: true, // ★ تغییر از false به true
-  }
+  return { state: 'future', label: `${daysUntilDue} روز تا سررسید (پرداخت زودهنگام)`, color: 'text-sky-700', bgColor: 'bg-sky-50 border-sky-200', canPay: true }
 }
 
 function formatCurrency(n: number): string {
@@ -119,9 +81,15 @@ function formatCurrency(n: number): string {
 
 export default function CustomerPortalPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const token = params.token as string
+  
+  // ★★★ v3.47: بررسی پیام پرداخت از URL
+  const paymentStatus = searchParams.get('payment')
+  const paymentRefId = searchParams.get('refId') || ''
+  const paymentId = searchParams.get('paymentId') || ''
 
-  const [step, setStep] = useState<'login' | 'dashboard'>('login')
+  const [step, setStep] = useState<'loading' | 'login' | 'dashboard'>('loading')
   const [mobile, setMobile] = useState('')
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
@@ -130,46 +98,108 @@ export default function CustomerPortalPage() {
   const [portalData, setPortalData] = useState<PortalTokenData | null>(null)
   const [invoices, setInvoices] = useState<any[]>([])
   const [summary, setSummary] = useState({ totalDebt: 0, invoiceCount: 0 })
-  // ★★★ v3.36.2: state برای expand/collapse جدول اقساط هر فاکتور
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set())
+  
+  // ★★★ v3.47: state برای نمایش پیام‌های پرداخت
+  const [paymentMessage, setPaymentMessage] = useState<{
+    type: 'success' | 'failed' | 'cancelled' | 'error' | 'already_paid' | null
+    refId?: string
+    message?: string
+  }>({ type: null })
 
-  // ★ چک کردن اگر قبلاً وارد شده
-  useEffect(() => {
-    const savedToken = localStorage.getItem('portal_token')
-    if (savedToken) {
-      fetch('/api/portal/invoices', {
-        headers: { Authorization: `Bearer ${savedToken}` },
+  // ★ لود فاکتورها با session token
+  const loadInvoices = useCallback(async (sessionToken: string) => {
+    console.log('[Portal] 📥 Loading invoices...')
+    try {
+      const res = await fetch('/api/portal/invoices', {
+        headers: { Authorization: `Bearer ${sessionToken}` },
       })
-        .then(r => r.json())
-        .then(data => {
-          if (data.success) {
-            // ★★★ v3.36.3: استخراج نام مشتری و نام فروشگاه از پاسخ API
-            //   API ممکن است این فیلدها را در data.data یا data.data.customer/store برگرداند
-            const apiData = data.data || {}
-            const customerName = apiData.customerName ||
-              apiData.customer?.name ||
-              apiData.customer?.firstName ||
-              ''
-            const storeName = apiData.storeName ||
-              apiData.store?.name ||
-              apiData.store ||
-              ''
-
-            setPortalData({
-              portalToken: savedToken,
-              customer: { id: '', name: customerName, mobile: '' },
-              store: { name: storeName },
-            })
-            setInvoices(apiData.invoices || [])
-            setSummary(apiData.summary || { totalDebt: 0, invoiceCount: 0 })
-            setStep('dashboard')
-          } else {
-            localStorage.removeItem('portal_token')
-          }
+      if (!res.ok) {
+        console.error('[Portal] ❌ API error:', res.status)
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const data = await res.json()
+      
+      if (data.success) {
+        const apiData = data.data || {}
+        setInvoices(apiData.invoices || [])
+        setSummary(apiData.summary || { totalDebt: 0, invoiceCount: 0 })
+        setPortalData({
+          portalToken: sessionToken,
+          customer: apiData.customer || { id: '', name: '', mobile: '' },
+          store: apiData.store || { name: 'فروشگاه' },
         })
-        .catch(() => localStorage.removeItem('portal_token'))
+        console.log('[Portal] ✅ Loaded successfully')
+        setStep('dashboard')
+      } else {
+        console.error('[Portal] ❌ API returned success=false:', data.error)
+        setError(data.error || 'خطا در دریافت اطلاعات')
+        setStep('login')
+      }
+    } catch (e: any) {
+      console.error('[Portal] ❌ Load invoices error:', e)
+      setError(e?.message || 'خطا در ارتباط با سرور')
+      setStep('login')
     }
   }, [])
+
+  // ★★★ v3.47: چک کردن پیام پرداخت در URL
+  useEffect(() => {
+    if (paymentStatus) {
+      console.log('[Portal] 🎯 Payment status detected from URL:', paymentStatus)
+      
+      const messages: Record<string, { type: any; message: string }> = {
+        success: { type: 'success', message: 'پرداخت شما با موفقیت انجام شد! فاکتور به‌روزرسانی شده است.' },
+        failed: { type: 'failed', message: 'پرداخت ناموفق بود. در صورت کسر مبلغ، تا ۷۲ ساعت بازگردانده می‌شود.' },
+        cancelled: { type: 'cancelled', message: 'پرداخت لغو شد. می‌توانید دوباره تلاش کنید.' },
+        error: { type: 'error', message: 'خطایی در پردازش پرداخت رخ داد. لطفاً با پشتیبانی تماس بگیرید.' },
+        already_paid: { type: 'already_paid', message: 'این پرداخت قبلاً ثبت شده است.' },
+      }
+      
+      const msg = messages[paymentStatus]
+      if (msg) {
+        setPaymentMessage({
+          type: msg.type,
+          refId: paymentRefId,
+          message: msg.message,
+        })
+        
+        // پاک کردن پارامترها از URL (بدون رفرش)
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href)
+          url.searchParams.delete('payment')
+          url.searchParams.delete('refId')
+          url.searchParams.delete('paymentId')
+          window.history.replaceState({}, '', url.toString())
+        }
+        
+        // پیام را بعد از ۸ ثانیه مخفی کن
+        setTimeout(() => setPaymentMessage({ type: null }), 8000)
+      }
+    }
+  }, [paymentStatus, paymentRefId, paymentId])
+
+  useEffect(() => {
+    console.log('[Portal] 🚀 Component mounted')
+    
+    // اگر token در URL است، فرم OTP نمایش بده (امنیت)
+    if (token && token.length > 10) {
+      console.log('[Portal] 🔐 Token in URL, showing login form for OTP verification')
+      setStep('login')
+      return
+    }
+    
+    // اگر token در localStorage است، مستقیم لود کن
+    const savedToken = typeof window !== 'undefined' ? localStorage.getItem('portal_token') : null
+    if (savedToken && savedToken.length > 10) {
+      console.log('[Portal] 📦 Session token found, loading...')
+      loadInvoices(savedToken)
+      return
+    }
+    
+    console.log('[Portal] 🔐 No token found, showing login form')
+    setStep('login')
+  }, [token, loadInvoices])
 
   // ★ ارسال کد OTP
   const handleSendCode = async () => {
@@ -187,22 +217,11 @@ export default function CustomerPortalPage() {
       })
       const data = await res.json()
       if (data.success) {
-        // ★★★ v3.39: نمایش کد تست اگر در محیط توسعه هستیم
-        if (data.data?._debugCode) {
-          setDevCode(data.data._debugCode)
-        } else if (data._debugCode) {
-          setDevCode(data._debugCode)
-        } else {
-          setDevCode('')
-        }
+        setDevCode(data.data?._debugCode || data._debugCode || '')
         alert('کد تأیید ارسال شد')
       } else {
-        // ★ اگر خطا داشت ولی کد تست برگرداند (محیط dev)
-        if (data._debugCode) {
-          setDevCode(data._debugCode)
-        } else {
-          setError(data.error || 'خطا در ارسال کد')
-        }
+        setDevCode(data._debugCode || '')
+        if (!data._debugCode) setError(data.error || 'خطا در ارسال کد')
       }
     } catch {
       setError('خطا در ارتباط با سرور')
@@ -226,10 +245,12 @@ export default function CustomerPortalPage() {
       })
       const data = await res.json()
       if (data.success) {
-        localStorage.setItem('portal_token', data.data.portalToken)
-        setPortalData(data.data)
-        setStep('dashboard')
-        loadInvoices(data.data.portalToken)
+        console.log('[Portal] ✅ OTP verified')
+        const newToken = data.data.portalToken
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('portal_token', newToken)
+        }
+        loadInvoices(newToken)
       } else {
         setError(data.error || 'کد نامعتبر')
       }
@@ -239,63 +260,11 @@ export default function CustomerPortalPage() {
     setLoading(false)
   }
 
-  // ★ لود فاکتورها
-  // ★★★ v3.36.3: این تابع همچنین portalData را با اطلاعات مشتری و فروشگاه به‌روزرسانی می‌کند
-  //   چون API /api/portal/invoices این اطلاعات را برمی‌گرداند (حتی اگر API login برنگرداند)
-  const loadInvoices = useCallback(async (pToken: string) => {
-    try {
-      const res = await fetch('/api/portal/invoices', {
-        headers: { Authorization: `Bearer ${pToken}` },
-      })
-      const data = await res.json()
-      if (data.success) {
-        const apiData = data.data || {}
-
-        // ★★★ به‌روزرسانی لیست فاکتورها و خلاصه
-        setInvoices(apiData.invoices || [])
-        setSummary(apiData.summary || { totalDebt: 0, invoiceCount: 0 })
-
-        // ★★★ v3.36.3: به‌روزرسانی portalData با نام مشتری و فروشگاه
-        //   اگر API این اطلاعات را برمی‌گرداند، آنها را تنظیم کن
-        //   اگر قبلاً تنظیم شده‌اند (از login)، فقط فیلدهای خالی را پر کن
-        const customerName = apiData.customerName ||
-          apiData.customer?.name ||
-          ''
-        const customerMobile = apiData.customer?.mobile || ''
-        const storeName = apiData.storeName ||
-          apiData.store?.name ||
-          ''
-
-        if (customerName || storeName) {
-          setPortalData((prev) => {
-            // ★ اگر قبلاً portalData تنظیم شده، فقط فیلدهای خالی را پر کن
-            //   اگر نه، یک portalData جدید بساز
-            const prevCustomerName = prev?.customer?.name || ''
-            const prevStoreName = prev?.store?.name || ''
-            const prevMobile = prev?.customer?.mobile || ''
-
-            return {
-              portalToken: pToken,
-              customer: {
-                id: prev?.customer?.id || '',
-                name: prevCustomerName || customerName,
-                mobile: prevMobile || customerMobile,
-              },
-              store: {
-                name: prevStoreName || storeName,
-              },
-            }
-          })
-        }
-      }
-    } catch (e) {
-      console.error('Load invoices error:', e)
-    }
-  }, [])
-
   // ★ خروج
   const handleLogout = () => {
-    localStorage.removeItem('portal_token')
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('portal_token')
+    }
     setStep('login')
     setPortalData(null)
     setInvoices([])
@@ -307,18 +276,25 @@ export default function CustomerPortalPage() {
   const toggleInvoiceExpand = (invoiceId: string) => {
     setExpandedInvoices((prev) => {
       const next = new Set(prev)
-      if (next.has(invoiceId)) {
-        next.delete(invoiceId)
-      } else {
-        next.add(invoiceId)
-      }
+      if (next.has(invoiceId)) next.delete(invoiceId)
+      else next.add(invoiceId)
       return next
     })
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  رندر فرم ورود
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Loading state ───────────────────────────────────────────
+  if (step === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50" dir="rtl">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-500 text-sm">در حال بارگذاری پورتال مشتری...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Login form ──────────────────────────────────────────────
   if (step === 'login') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-blue-50 flex items-center justify-center p-4" dir="rtl">
@@ -332,11 +308,10 @@ export default function CustomerPortalPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="mobile" className="text-sm mb-1.5 block">شماره موبایل</Label>
+              <Label className="text-sm mb-1.5 block">شماره موبایل</Label>
               <div className="relative">
                 <Phone className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
-                  id="mobile"
                   type="tel"
                   value={mobile}
                   onChange={(e) => setMobile(e.target.value)}
@@ -349,11 +324,10 @@ export default function CustomerPortalPage() {
             </div>
 
             <div>
-              <Label htmlFor="code" className="text-sm mb-1.5 block">کد تأیید (۶ رقم)</Label>
+              <Label className="text-sm mb-1.5 block">کد تأیید (۶ رقم)</Label>
               <div className="relative">
                 <KeyRound className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
-                  id="code"
                   type="text"
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -367,20 +341,14 @@ export default function CustomerPortalPage() {
 
             {devCode && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-center">
-                <p className="text-[11px] text-amber-700 font-bold mb-1">
-                  ⚠️ حالت تست (سرویس پیامک در دسترس نیست)
-                </p>
+                <p className="text-[11px] text-amber-700 font-bold mb-1">⚠️ حالت تست (سرویس پیامک در دسترس نیست)</p>
                 <p className="text-[10px] text-amber-600 mb-1">کد تأیید شما:</p>
-                <p className="text-lg font-bold font-mono text-amber-800 tracking-[0.2em]" dir="ltr">
-                  {devCode}
-                </p>
+                <p className="text-lg font-bold font-mono text-amber-800 tracking-[0.2em]" dir="ltr">{devCode}</p>
               </div>
             )}
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-center text-sm text-red-600">
-                {error}
-              </div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-center text-sm text-red-600">{error}</div>
             )}
 
             <Button
@@ -396,12 +364,9 @@ export default function CustomerPortalPage() {
     )
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  رندر داشبورد مشتری
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Dashboard ───────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50" dir="rtl">
-      {/* هدر */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -421,7 +386,82 @@ export default function CustomerPortalPage() {
       </header>
 
       <main className="max-w-4xl mx-auto p-4 space-y-4">
-        {/* ★★★ v3.36.3: کارت خوش‌آمد‌گویی با نام کامل مشتری */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* ★★★ v3.47: بنر پیام پرداخت */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {paymentMessage.type && (
+          <div className={`rounded-xl p-4 flex items-start gap-3 animate-fade-in shadow-sm border-2 ${
+            paymentMessage.type === 'success' ? 'bg-emerald-50 border-emerald-300' :
+            paymentMessage.type === 'already_paid' ? 'bg-blue-50 border-blue-300' :
+            paymentMessage.type === 'cancelled' ? 'bg-gray-50 border-gray-300' :
+            paymentMessage.type === 'failed' ? 'bg-red-50 border-red-300' :
+            'bg-orange-50 border-orange-300'
+          }`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+              paymentMessage.type === 'success' ? 'bg-emerald-600' :
+              paymentMessage.type === 'already_paid' ? 'bg-blue-600' :
+              paymentMessage.type === 'cancelled' ? 'bg-gray-500' :
+              paymentMessage.type === 'failed' ? 'bg-red-600' :
+              'bg-orange-600'
+            }`}>
+              {paymentMessage.type === 'success' || paymentMessage.type === 'already_paid' ? (
+                <CheckCircle2 className="w-6 h-6 text-white" />
+              ) : (
+                <AlertCircle className="w-6 h-6 text-white" />
+              )}
+            </div>
+            <div className="flex-1">
+              <h3 className={`text-sm font-bold mb-1 ${
+                paymentMessage.type === 'success' ? 'text-emerald-900' :
+                paymentMessage.type === 'already_paid' ? 'text-blue-900' :
+                paymentMessage.type === 'cancelled' ? 'text-gray-900' :
+                paymentMessage.type === 'failed' ? 'text-red-900' :
+                'text-orange-900'
+              }`}>
+                {paymentMessage.type === 'success' ? '🎉 پرداخت با موفقیت انجام شد!' :
+                 paymentMessage.type === 'already_paid' ? 'ℹ️ این پرداخت قبلاً ثبت شده' :
+                 paymentMessage.type === 'cancelled' ? '⚠️ پرداخت لغو شد' :
+                 paymentMessage.type === 'failed' ? '❌ پرداخت ناموفق' :
+                 '⚠️ خطا در پرداخت'}
+              </h3>
+              <p className={`text-xs ${
+                paymentMessage.type === 'success' ? 'text-emerald-700' :
+                paymentMessage.type === 'already_paid' ? 'text-blue-700' :
+                paymentMessage.type === 'cancelled' ? 'text-gray-700' :
+                paymentMessage.type === 'failed' ? 'text-red-700' :
+                'text-orange-700'
+              }`}>
+                {paymentMessage.message}
+              </p>
+              {paymentMessage.refId && (
+                <div className={`mt-2 flex items-center gap-2 text-[11px] ${
+                  paymentMessage.type === 'success' ? 'text-emerald-800' :
+                  paymentMessage.type === 'already_paid' ? 'text-blue-800' :
+                  'text-gray-800'
+                }`}>
+                  <span>کد پیگیری:</span>
+                  <span className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-current/20" dir="ltr">
+                    {paymentMessage.refId}
+                  </span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setPaymentMessage({ type: null })}
+              className={`shrink-0 text-lg ${
+                paymentMessage.type === 'success' ? 'text-emerald-600 hover:text-emerald-800' :
+                paymentMessage.type === 'already_paid' ? 'text-blue-600 hover:text-blue-800' :
+                paymentMessage.type === 'cancelled' ? 'text-gray-600 hover:text-gray-800' :
+                paymentMessage.type === 'failed' ? 'text-red-600 hover:text-red-800' :
+                'text-orange-600 hover:text-orange-800'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
+        {/* کارت خوش‌آمد‌گویی */}
         <Card className="border-emerald-200 bg-gradient-to-l from-emerald-50 via-white to-blue-50">
           <CardContent className="p-4 flex items-center gap-3">
             <div className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center shrink-0">
@@ -429,13 +469,9 @@ export default function CustomerPortalPage() {
             </div>
             <div className="flex-1">
               <p className="text-[10px] text-gray-500 mb-0.5">خوش آمدید</p>
-              <h2 className="text-base font-bold text-gray-800">
-                {portalData?.customer.name || 'مشتری گرامی'}
-              </h2>
+              <h2 className="text-base font-bold text-gray-800">{portalData?.customer.name || 'مشتری گرامی'}</h2>
               {portalData?.customer.mobile && (
-                <p className="text-[10px] text-gray-500 font-mono" dir="ltr">
-                  {portalData.customer.mobile}
-                </p>
+                <p className="text-[10px] text-gray-500 font-mono" dir="ltr">{portalData.customer.mobile}</p>
               )}
             </div>
           </CardContent>
@@ -468,23 +504,13 @@ export default function CustomerPortalPage() {
             invoices.map((inv: any) => {
               const remaining = Number(inv.remainingAmount) || 0
               const isInstallment = inv.paymentType === 'installment'
-              const schedules: InstallmentSchedule[] = (inv.installmentPlan?.schedules || []) as InstallmentSchedule[]
-              // ★ مرتب‌سازی اقساط بر اساس installmentNumber
+              const schedules: InstallmentSchedule[] = (inv.installmentPlan?.schedules || [])
               const sortedSchedules = [...schedules].sort((a, b) => a.installmentNumber - b.installmentNumber)
-
-              const pendingInstallments = sortedSchedules.filter(
-                (s) => {
-                  const st = (s.status || '').toLowerCase()
-                  return st === 'pending' || st === 'partial'
-                }
-              )
-
-              // ★ قسط بعدی قابل پرداخت (اولین pending که canPay=true)
-              const nextPayableInstallment = pendingInstallments.find((s) => {
-                const display = getInstallmentDisplayStatus(s)
-                return display.canPay
+              const pendingInstallments = sortedSchedules.filter((s) => {
+                const st = (s.status || '').toLowerCase()
+                return st === 'pending' || st === 'partial'
               })
-
+              const nextPayableInstallment = pendingInstallments.find((s) => getInstallmentDisplayStatus(s).canPay)
               const isExpanded = expandedInvoices.has(inv.id)
 
               return (
@@ -493,13 +519,9 @@ export default function CustomerPortalPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-bold text-gray-800">فاکتور {inv.number}</p>
-                        <p className="text-[10px] text-gray-500">
-                          {new Date(inv.invoiceDate).toLocaleDateString('fa-IR')}
-                        </p>
+                        <p className="text-[10px] text-gray-500">{new Date(inv.invoiceDate).toLocaleDateString('fa-IR')}</p>
                       </div>
-                      <Badge className={
-                        isInstallment ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'
-                      }>
+                      <Badge className={isInstallment ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}>
                         {isInstallment ? 'قسطی' : 'نسیه'}
                       </Badge>
                     </div>
@@ -536,10 +558,9 @@ export default function CustomerPortalPage() {
                       </div>
                     </div>
 
-                    {/* ═══════════ v3.36.2: جدول اقساط برای فاکتورهای قسطی ═══════════ */}
+                    {/* جدول اقساط برای فاکتورهای قسطی */}
                     {isInstallment && sortedSchedules.length > 0 && (
                       <div className="border border-purple-100 rounded-lg overflow-hidden">
-                        {/* هدر قابل کلیک */}
                         <button
                           type="button"
                           onClick={() => toggleInvoiceExpand(inv.id)}
@@ -551,14 +572,9 @@ export default function CustomerPortalPage() {
                               جدول اقساط ({pendingInstallments.length.toLocaleString('fa-IR')} قسط باقی‌مانده از {sortedSchedules.length.toLocaleString('fa-IR')})
                             </span>
                           </div>
-                          {isExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5 text-purple-600" />
-                          ) : (
-                            <ChevronDown className="w-3.5 h-3.5 text-purple-600" />
-                          )}
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-purple-600" /> : <ChevronDown className="w-3.5 h-3.5 text-purple-600" />}
                         </button>
 
-                        {/* محتوای جدول */}
                         {isExpanded && (
                           <div className="divide-y divide-gray-100">
                             {sortedSchedules.map((inst) => {
@@ -580,7 +596,6 @@ export default function CustomerPortalPage() {
                                   }}
                                 >
                                   <div className="flex items-start justify-between gap-2">
-                                    {/* ★ ستون چپ: اطلاعات قسط */}
                                     <div className="flex-1 space-y-1">
                                       <div className="flex items-center gap-2">
                                         <span className="text-[11px] font-bold text-gray-700">
@@ -607,7 +622,6 @@ export default function CustomerPortalPage() {
                                       )}
                                     </div>
 
-                                    {/* ★ ستون راست: دکمه پرداخت یا وضعیت */}
                                     <div className="flex flex-col items-end gap-1 shrink-0">
                                       {display.state === 'paid' ? (
                                         <div className="flex items-center gap-1 text-emerald-600">
@@ -615,20 +629,18 @@ export default function CustomerPortalPage() {
                                           <span className="text-[10px] font-bold">تسویه شد</span>
                                         </div>
                                       ) : display.state === 'partial' ? (
-                                        <>
-                                          <InstallmentPayButton
-                                            invoiceId={inv.id}
-                                            installmentId={inst.id}
-                                            installmentNumber={inst.installmentNumber}
-                                            amount={remainingInst}
-                                            dueDate={inst.dueDate}
-                                            canPay={true}
-                                            variant="default"
-                                            size="sm"
-                                            label={`پرداخت ${formatCurrency(remainingInst)}`}
-                                            className="bg-amber-600 hover:bg-amber-700 text-[10px]"
-                                          />
-                                        </>
+                                        <InstallmentPayButton
+                                          invoiceId={inv.id}
+                                          installmentId={inst.id}
+                                          installmentNumber={inst.installmentNumber}
+                                          amount={remainingInst}
+                                          dueDate={inst.dueDate}
+                                          canPay={true}
+                                          variant="default"
+                                          size="sm"
+                                          label={`پرداخت ${formatCurrency(remainingInst)}`}
+                                          className="bg-amber-600 hover:bg-amber-700 text-[10px]"
+                                        />
                                       ) : display.canPay ? (
                                         <InstallmentPayButton
                                           invoiceId={inv.id}
@@ -644,17 +656,14 @@ export default function CustomerPortalPage() {
                                             display.state === 'due'
                                               ? 'bg-red-600 hover:bg-red-700'
                                               : display.state === 'future'
-                                                ? 'bg-sky-600 hover:bg-sky-700'      // ★ v3.36.3: آبی برای پرداخت زودهنگام
+                                                ? 'bg-sky-600 hover:bg-sky-700'
                                                 : display.state === 'early'
                                                   ? 'bg-orange-600 hover:bg-orange-700'
                                                   : 'bg-emerald-600 hover:bg-emerald-700'
                                           }`}
                                         />
                                       ) : (
-                                        <div
-                                          className="flex items-center gap-1 text-[10px] text-gray-400 px-2 py-1 rounded bg-white"
-                                          title={display.disabledReason}
-                                        >
+                                        <div className="flex items-center gap-1 text-[10px] text-gray-400 px-2 py-1 rounded bg-white" title={display.disabledReason}>
                                           <Lock className="w-3 h-3" />
                                           غیرفعال
                                         </div>
@@ -667,7 +676,6 @@ export default function CustomerPortalPage() {
                           </div>
                         )}
 
-                        {/* ★ اگر جدول بسته است، فقط قسط بعدی را نمایش بده */}
                         {!isExpanded && nextPayableInstallment && (
                           <div className="p-2 bg-orange-50 border-t border-orange-100 flex items-center justify-between">
                             <div className="text-[10px] text-orange-700">
@@ -695,7 +703,7 @@ export default function CustomerPortalPage() {
                       </div>
                     )}
 
-                    {/* ★★★ برای فاکتورهای نسیه (غیر قسطی): دکمه پرداخت آنلاین کل باقی‌مانده */}
+                    {/* دکمه پرداخت آنلاین برای فاکتورهای نسیه */}
                     {!isInstallment && remaining > 0 && (
                       <div className="pt-2 border-t border-gray-100">
                         <OnlinePaymentButton
@@ -708,10 +716,7 @@ export default function CustomerPortalPage() {
                       </div>
                     )}
 
-                    {/* ★★★ برای فاکتورهای قسطی که جدول دارند: دیگر دکمه «پرداخت کل» نمی‌گذاریم
-                         کاربر باید قسط‌به‌قسط پرداخت کند. */}
-
-                    {/* ★ پیام راهنما برای فاکتور تسویه‌شده */}
+                    {/* پیام تسویه شده */}
                     {remaining <= 0 && (
                       <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -727,7 +732,7 @@ export default function CustomerPortalPage() {
           )}
         </div>
 
-        {/* ★★★ v3.36.3: راهنمای رنگ‌ها */}
+        {/* راهنمای وضعیت اقساط */}
         <Card className="border-gray-200 bg-gray-50">
           <CardContent className="p-3">
             <p className="text-[10px] font-bold text-gray-600 mb-1.5">راهنمای وضعیت اقساط:</p>

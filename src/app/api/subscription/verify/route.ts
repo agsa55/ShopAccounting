@@ -1,39 +1,84 @@
 // ============================================================================
-// src/app/api/subscription/verify/route.ts — GET (v9.0 ★★★ Phase 4)
+// src/app/api/subscription/verify/route.ts (v10.0 ★★★)
 // ShopAccounting — Zarinpal Callback Handler for Subscription Payments
 // ----------------------------------------------------------------------------
-// این API callback زرین‌پال را دریافت می‌کند و در صورت موفقیت:
-//   ۱. تراکنش را verify می‌کند
-//   ۲. applySubscriptionPayment را فراخوانی می‌کند که:
-//      - SubscriptionPayments را به‌روزرسانی می‌کند (status=paid, refId)
-//      - Tenant را به‌روزرسانی می‌کند (expiresAt, planTierId, planName)
-//      - Subscriptions را به‌روزرسانی می‌کند (status=active, endDate)
-//   ۳. کاربر را به /subscription/result هدایت می‌کند
-//
-// ★ این مسیر عمومی است (نیاز به توکن ندارد) — در proxy.ts ثبت شده
-//   چون زرین‌پال کاربر را بدون توکن به این مسیر برمی‌گرداند
-// ★★★ tenantId در query string کدگذاری شده (callback URL)
-//   و tierName/billingCycle از paymentMethod رکورد خوانده می‌شوند
-//
-// ★★★ v9.0: پشتیبانی از پلن مادام‌العمر (lifetime)
-//   - اگر billingCycle='lifetime' باشد، expiresAt باید null باشد
-//   - در redirect نهایی، پارامتر expiresAt برای lifetime خالی می‌شود
-//   - fallback billingCycle از 'monthly' به 'annual' تغییر کرد
+// ★ v10.0: حذف ریدایرکت به /subscription/result (که سفید می‌ماند)
+//          و ریدایرکت مستقیم به /{subdomain}/dashboard
+// ★ v9.2: رفع خطای Scope متغیر appUrl و اصلاح قطعی ریدایرکت‌ها در دیپلوی
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { applySubscriptionPayment, cleanupFailedRegistration } from '@/lib/subscription-utils'
 
-// ★★★ v9.0: helper محلی برای تشخیص lifetime
 function isLifetimeCycle(cycle: string | null | undefined): boolean {
   if (!cycle) return false
   const lower = String(cycle).toLowerCase().trim()
   return lower === 'lifetime' || lower === 'مادام‌العمر'
 }
 
+// ★★★ تابع هوشمند تشخیص URL پایه (مشابه checkout)
+function resolveAppUrl(req: NextRequest): string {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl.replace(/\/$/, '')
+  }
+
+  const host = req.headers.get('host')
+  if (host) {
+    const isLocalHost = host.includes('localhost') || host.includes('127.0.0.1')
+    const forwardedProto = req.headers.get('x-forwarded-proto')
+    const protocol = forwardedProto || (isLocalHost ? 'http' : 'https')
+    return `${protocol}://${host}`
+  }
+
+  return (envUrl || 'http://localhost:3000').replace(/\/$/, '')
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ v10.0: تابع کمکی برای دریافت subDomain یک tenant
+//  برای ریدایرکت به /{subdomain}/dashboard استفاده می‌شود
+// ═══════════════════════════════════════════════════════════════
+async function getTenantSubdomain(tenantId: string): Promise<string> {
+  try {
+    const tenant = await db.client.tenant.findUnique({
+      where: { id: tenantId },
+      select: { subDomain: true },
+    })
+    return tenant?.subDomain || ''
+  } catch (err: any) {
+    console.warn('[Subscription Verify] ⚠️ Could not fetch subdomain for tenant:', tenantId, err?.message)
+    return ''
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ v10.0: ساخت URL ریدایرکت به داشبورد با query params
+// ═══════════════════════════════════════════════════════════════
+function buildDashboardUrl(
+  subdomain: string,
+  params: Record<string, string | number | null | undefined>
+): string {
+  const searchParams = new URLSearchParams()
+  
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') {
+      searchParams.set(key, String(value))
+    }
+  })
+  
+  const queryString = searchParams.toString()
+  const basePath = subdomain ? `/${subdomain}/dashboard` : '/dashboard'
+  
+  return queryString ? `${basePath}?${queryString}` : basePath
+}
+
 export async function GET(req: NextRequest) {
-  console.log('[Subscription Verify] Callback received')
+  console.log('[Subscription Verify v10.0] Callback received')
+  
+  // ✅ تعریف appUrl در ابتدای تابع برای اطمینان از دسترسی در تمام بلوک‌ها
+  const appUrl = resolveAppUrl(req)
+
   try {
     const { searchParams } = new URL(req.url)
     const authority = searchParams.get('Authority')
@@ -42,80 +87,106 @@ export async function GET(req: NextRequest) {
 
     // ─── ۱. اعتبارسنجی پارامترها ───────────────────────────────────
     if (!authority || !status || !tenantId) {
-      console.error('[Subscription Verify] Missing required params:', { authority, status, tenantId })
-      return NextResponse.redirect(
-        new URL('/subscription/result?status=error&reason=missing_params', req.url)
-      )
+      console.error('[Subscription Verify v10.0] Missing required params:', { authority, status, tenantId })
+      
+      // ★ v10.0: ریدایرکت به داشبورد با پیام خطا (نه به صفحه result)
+      const subdomain = tenantId ? await getTenantSubdomain(tenantId) : ''
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'error',
+        reason: 'missing_params',
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
 
-    // ─── ۲. اگر کاربر پرداخت را لغو کرده ────────────────────────────
-    if (status !== 'OK') {
-      console.log('[Subscription Verify] Payment cancelled by user')
-      // ★ به‌روزرسانی رکورد به cancelled
+    // ─── ۲. دریافت subDomain برای استفاده در تمام ریدایرکت‌ها ─────
+    const subdomain = await getTenantSubdomain(tenantId)
+    console.log('[Subscription Verify v10.0] 🏠 Tenant subdomain:', subdomain || '(empty - using root)')
+
+    // ─── ۳. اگر کاربر پرداخت را لغو کرده ────────────────────────────
+    const isSuccessful = status === 'OK' || status === 'ok'
+    if (!isSuccessful) {
+      console.log('[Subscription Verify v10.0] ❌ Payment cancelled by user (Status=' + status + ')')
       try {
         await db.client.subscriptionPayments.updateMany({
           where: { paymentRef: authority, tenantId },
           data: { status: 'cancelled' },
         })
       } catch (err) {
-        console.warn('[Subscription Verify] Failed to mark as cancelled:', err)
+        console.warn('[Subscription Verify v10.0] Failed to mark as cancelled:', err)
       }
 
-      // ★★★ v5.1.11: حذف Tenant اگر در حالت pending_payment است
-      //   این کار باعث می‌شود زیردامنه آزاد شود و کاربر بتواند دوباره ثبت‌نام کند
-      console.log('[Subscription Verify] Cleaning up pending Tenant (payment cancelled):', tenantId)
-      const cleanupResult = await cleanupFailedRegistration(tenantId)
-      console.log('[Subscription Verify] Cleanup result:', cleanupResult)
+      console.log('[Subscription Verify v10.0] Cleaning up pending Tenant:', tenantId)
+      await cleanupFailedRegistration(tenantId)
 
-      return NextResponse.redirect(
-        new URL(`/subscription/result?status=cancelled&tenantId=${tenantId}`, req.url)
-      )
+      // ★ v10.0: ریدایرکت مستقیم به داشبورد با پیام لغو
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'cancelled',
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
 
-    // ─── ۳. یافتن رکورد پرداخت ─────────────────────────────────────
+    // ─── ۴. یافتن رکورد پرداخت ─────────────────────────────────────
     const payment = await db.client.subscriptionPayments.findFirst({
       where: { paymentRef: authority, tenantId },
     })
 
     if (!payment) {
-      console.error('[Subscription Verify] Payment record not found for authority:', authority)
-      return NextResponse.redirect(
-        new URL('/subscription/result?status=error&reason=not_found', req.url)
-      )
+      console.error('[Subscription Verify v10.0] Payment record not found for authority:', authority)
+      
+      // ★ v10.0: ریدایرکت به داشبورد با پیام خطا
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'error',
+        reason: 'not_found',
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
 
     // ★ اگر قبلاً پرداخت شده، idempotent
     if (payment.isPaid) {
-      console.log('[Subscription Verify] Payment already processed:', payment.id)
-      // ★ خواندن اطلاعات tenant برای redirect با اطلاعات کامل
+      console.log('[Subscription Verify v10.0] Payment already processed:', payment.id)
       const tenant = await db.client.tenant.findUnique({ where: { id: tenantId } })
-      // ★★★ v9.0: fallback billingCycle از 'monthly' به 'annual' تغییر کرد
       const fallbackCycle = tenant?.billingCycle || 'annual'
-      const isLifetime = isLifetimeCycle(fallbackCycle)
-      return NextResponse.redirect(
-        new URL(
-          `/subscription/result?status=already_paid&tenantId=${tenantId}&tierName=${tenant?.planName || 'simple'}&billingCycle=${fallbackCycle}${isLifetime ? '&isLifetime=1' : ''}`,
-          req.url
-        )
-      )
+      
+      // ★ v10.0: ریدایرکت به داشبورد با پیام already_paid
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'already_paid',
+        tierName: tenant?.planName || 'simple',
+        billingCycle: fallbackCycle,
+        isLifetime: isLifetimeCycle(fallbackCycle) ? '1' : null,
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
 
-    // ─── ۴. دریافت مرچنت کد از ENV ────────────────────────────────
+    // ─── ۵. دریافت مرچنت کد از ENV ────────────────────────────────
     const merchantId = process.env.ZARINPAL_MERCHANT_ID
     if (!merchantId) {
-      console.error('[Subscription Verify] ZARINPAL_MERCHANT_ID not set')
-      return NextResponse.redirect(
-        new URL('/subscription/result?status=error&reason=no_merchant', req.url)
-      )
+      console.error('[Subscription Verify v10.0] ZARINPAL_MERCHANT_ID not set')
+      
+      // ★ v10.0: ریدایرکت به داشبورد با پیام خطا
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'error',
+        reason: 'no_merchant',
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
 
-    // ─── ۵. ارسال درخواست Verify به زرین‌پال ──────────────────────
+    // ─── ۶. ارسال درخواست Verify به زرین‌پال ──────────────────────
     const isSandbox = process.env.ZARINPAL_SANDBOX === 'true'
     const apiVerifyUrl = isSandbox
       ? 'https://sandbox.zarinpal.com/pg/v4/payment/verify.json'
       : 'https://api.zarinpal.com/pg/v4/payment/verify.json'
 
-    console.log('[Subscription Verify] Sending verify to Zarinpal:', {
+    console.log('[Subscription Verify v10.0] Sending verify to Zarinpal:', {
       merchantId: merchantId.substring(0, 6) + '...',
       amount: payment.amount,
       sandbox: isSandbox,
@@ -135,72 +206,106 @@ export async function GET(req: NextRequest) {
     })
 
     const verifyData = await verifyResponse.json()
-    console.log('[Subscription Verify] Zarinpal verify response:', verifyData)
+    console.log('[Subscription Verify v10.0] Zarinpal verify response:', verifyData)
 
     const code = verifyData?.data?.code
     const refId = verifyData?.data?.ref_id
 
+    // ★ v2.0: استخراج اطلاعات اضافی برای گزارش
+    const fee = verifyData?.data?.fee || 0
+    const feeType = verifyData?.data?.fee_type || 'Merchant'
+    const cardPan = verifyData?.data?.card_pan || ''
+
+    console.log('[Subscription Verify v10.0] 📊 Transaction details:', {
+      code, refId, fee, feeType, cardPan: cardPan ? '****' + cardPan.slice(-4) : ''
+    })
+
     // ★ کدهای موفق: 100 (پرداخت موفق) یا 200 (پرداخت تسهیمی)
     if (code === 100 || code === 200) {
-      // ─── ۶. اعمال پرداخت روی Tenant ─────────────────────────────
-      const result = await applySubscriptionPayment(authority, refId)
+      // ─── ۷. اعمال پرداخت روی Tenant ─────────────────────────────
+      // ★★★ v9.4: استخراج discountPercent از SubscriptionPayments
+      let discountPercent = 0
+      try {
+        const paymentDetails = await db.client.subscriptionPayments.findFirst({
+          where: { paymentRef: authority, tenantId },
+          select: { amount: true },
+        })
+        discountPercent = 0
+      } catch (err) {
+        console.warn('[Subscription Verify v10.0] Could not fetch payment details:', err)
+      }
+
+      const result = await applySubscriptionPayment(authority, refId, discountPercent)
 
       if (result.success) {
-        console.log('[Subscription Verify] Payment applied successfully:', result)
+        console.log('[Subscription Verify v10.0] ✅ Payment applied successfully:', result)
 
-        // ★★★ v9.0: اگر پلن مادام‌العمر است → expiresAt خالی در URL
         const isLifetime = isLifetimeCycle(result.newBillingCycle)
-        const expiresAtParam = isLifetime
-          ? ''  // ★ برای lifetime، expiresAt خالی
-          : `&expiresAt=${encodeURIComponent(result.newExpiresAt?.toISOString() || '')}`
-        const lifetimeParam = isLifetime ? '&isLifetime=1' : ''
-
-        return NextResponse.redirect(
-          new URL(
-            `/subscription/result?status=success&refId=${refId}&tenantId=${tenantId}&tierName=${result.newTierName}&billingCycle=${result.newBillingCycle}${expiresAtParam}${lifetimeParam}`,
-            req.url
-          )
-        )
+        
+        // ★ v10.0: ریدایرکت مستقیم به داشبورد (بدون صفحه result)
+        const redirectPath = buildDashboardUrl(subdomain, {
+          payment: 'success',
+          refId: String(refId),
+          tierName: result.newTierName,
+          billingCycle: result.newBillingCycle,
+          isLifetime: isLifetime ? '1' : null,
+          expiresAt: (!isLifetime && result.newExpiresAt) ? result.newExpiresAt.toISOString() : null,
+        })
+        
+        console.log('[Subscription Verify v10.0] 🚀 Redirecting to dashboard:', redirectPath)
+        return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
       } else {
-        console.error('[Subscription Verify] Failed to apply payment:', result.error)
-        // ★ در این حالت، پرداخت از طرف زرین‌پال موفق بوده ولی در دیتابیس خطا داده
-        //   این یک وضعیت اضطراری است — باید لاگ شود و به کاربر اطلاع داده شود
-        return NextResponse.redirect(
-          new URL(
-            `/subscription/result?status=apply_failed&refId=${refId}&reason=${encodeURIComponent(result.error || 'unknown')}&tenantId=${tenantId}`,
-            req.url
-          )
-        )
+        console.error('[Subscription Verify v10.0] ❌ Failed to apply payment:', result.error)
+        
+        // ★ v10.0: ریدایرکت به داشبورد با پیام apply_failed
+        const redirectPath = buildDashboardUrl(subdomain, {
+          payment: 'apply_failed',
+          refId: String(refId),
+          reason: result.error || 'unknown',
+        })
+        
+        console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+        return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
       }
     } else {
       // ★ پرداخت ناموفق
-      console.error('[Subscription Verify] Payment verification failed, code:', code)
+      console.error('[Subscription Verify v10.0] Payment verification failed, code:', code)
       try {
         await db.client.subscriptionPayments.updateMany({
           where: { paymentRef: authority, tenantId },
           data: { status: 'failed' },
         })
       } catch (err) {
-        console.warn('[Subscription Verify] Failed to mark as failed:', err)
+        console.warn('[Subscription Verify v10.0] Failed to mark as failed:', err)
       }
 
-      // ★★★ v5.1.11: حذف Tenant اگر در حالت pending_payment است
-      //   این کار باعث می‌شود زیردامنه آزاد شود و کاربر بتواند دوباره ثبت‌نام کند
-      console.log('[Subscription Verify] Cleaning up pending Tenant (payment failed):', tenantId)
-      const cleanupResult = await cleanupFailedRegistration(tenantId)
-      console.log('[Subscription Verify] Cleanup result:', cleanupResult)
+      console.log('[Subscription Verify v10.0] Cleaning up pending Tenant:', tenantId)
+      await cleanupFailedRegistration(tenantId)
 
-      return NextResponse.redirect(
-        new URL(
-          `/subscription/result?status=failed&code=${code}&tenantId=${tenantId}`,
-          req.url
-        )
-      )
+      // ★ v10.0: ریدایرکت مستقیم به داشبورد با پیام failed
+      const redirectPath = buildDashboardUrl(subdomain, {
+        payment: 'failed',
+        code: String(code),
+      })
+      
+      console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+      return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
     }
   } catch (error: any) {
-    console.error('[Subscription Verify] Unexpected error:', error)
-    return NextResponse.redirect(
-      new URL('/subscription/result?status=error&reason=server_error', req.url)
-    )
+    console.error('[Subscription Verify v10.0] Unexpected error:', error)
+    
+    // ★ v10.0: در صورت خطای کلی، ریدایرکت به داشبورد با پیام error
+    // تلاش برای یافتن tenantId از URL
+    const url = new URL(req.url)
+    const tenantId = url.searchParams.get('tenantId') || ''
+    const subdomain = tenantId ? await getTenantSubdomain(tenantId) : ''
+    
+    const redirectPath = buildDashboardUrl(subdomain, {
+      payment: 'error',
+      reason: 'server_error',
+    })
+    
+    console.log('[Subscription Verify v10.0] 🚀 Redirecting to:', redirectPath)
+    return NextResponse.redirect(new URL(redirectPath, appUrl), 303)
   }
 }

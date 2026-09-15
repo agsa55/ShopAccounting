@@ -1,7 +1,11 @@
 // ============================================================================
-// src/app/api/portal/login/route.ts — POST (v3.39 ★★★)
+// src/app/api/portal/login/route.ts — POST (v3.46 ★★★)
 // ShopAccounting — Customer Portal Login with IPPanel OTP
 // ----------------------------------------------------------------------------
+// ★★★ v3.46: اصلاح حالت verify
+//   - استفاده از customer.portalToken از دیتابیس (به جای تولید JWT)
+//   - تولید portalToken جدید اگر در دیتابیس نبود
+//   - دریافت storeName از Tenant یا StoreSetting
 // ★★★ v3.39: مهاجرت از SMS.ir به IPPanel (همان سیستم ورود اصلی)
 // ★ ارسال کد ۶ رقمی از طریق IPPanel
 // ★ fallback به mock mode اگر IPPanel در دسترس نباشد
@@ -9,7 +13,6 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import { sendOtpViaIpPanel, generateOtpCode } from '@/lib/sms/ippanel'
 
@@ -40,6 +43,7 @@ export async function POST(req: NextRequest) {
         lastName: true,
         mobile: true,
         tenantId: true,
+        portalToken: true,
       },
     })
 
@@ -214,29 +218,69 @@ export async function POST(req: NextRequest) {
         data: { isUsed: true, verifiedAt: new Date() },
       })
 
-      // ★ ساخت JWT پورتال
-      const portalToken = jwt.sign(
-        {
-          type: 'portal',
-          customerId: customer.id,
-          tenantId: customer.tenantId,
-          mobile: customer.mobile,
-        },
-        process.env.JWT_SECRET || 'shopaccounting-secret',
-        { expiresIn: '24h' }
-      )
+      // ═══════════════════════════════════════════════════════════════
+      // ★★★ v3.46: استفاده از portalToken از دیتابیس (به جای JWT)
+      // ═══════════════════════════════════════════════════════════════
+      let portalToken = customer.portalToken
+
+      // اگر portalToken در دیتابیس نبود، یکی جدید تولید و ذخیره کن
+      if (!portalToken) {
+        portalToken = crypto.randomBytes(32).toString('hex')
+        try {
+          await db.client.customer.update({
+            where: { id: customer.id },
+            data: { portalToken },
+          })
+          console.log('[Portal Login] ✅ Generated new portalToken for customer:', customer.id)
+        } catch (err: any) {
+          console.error('[Portal Login] ❌ Failed to save portalToken:', err?.message)
+        }
+      } else {
+        console.log('[Portal Login] ✅ Using existing portalToken from database')
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★★★ v3.46: دریافت storeName از Tenant یا StoreSetting
+      // ═══════════════════════════════════════════════════════════════
+      let storeName = 'فروشگاه'
+      try {
+        const tenant = await db.client.tenant.findUnique({
+          where: { id: customer.tenantId },
+          select: { companyName: true },
+        })
+        if (tenant?.companyName) {
+          storeName = tenant.companyName
+        } else {
+          const storeSetting = await db.client.storeSetting.findFirst({
+            where: { tenantId: customer.tenantId },
+            select: { storeName: true },
+          })
+          if (storeSetting?.storeName) {
+            storeName = storeSetting.storeName
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Portal Login] ⚠️ Failed to get store name:', err?.message)
+      }
+
+      console.log('[Portal Login] ✅ Verify successful:', {
+        customerId: customer.id,
+        customerName: `${customer.firstName} ${customer.lastName}`.trim(),
+        storeName,
+        portalTokenLength: portalToken?.length,
+      })
 
       return NextResponse.json({
         success: true,
         data: {
-          portalToken,
+          portalToken,  // ★★★ v3.46: portalToken از دیتابیس (نه JWT)
           customer: {
             id: customer.id,
             name: `${customer.firstName || ''} ${customer.lastName || ''}`.trim(),
             mobile: customer.mobile,
           },
           store: {
-            name: 'فروشگاه',
+            name: storeName,
           },
         },
       })

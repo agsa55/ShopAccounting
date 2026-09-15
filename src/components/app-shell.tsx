@@ -1,13 +1,17 @@
 'use client'
 
 // ============================================================================
-// src/components/app-shell.tsx — v8.8.10
-// ★ PWA Install Button + دکمه نصب در هدر
+// src/components/app-shell.tsx — v10.3 ★★★
+// ★ هشدار ۳ روزه + قفل خودکار + تشخیص SUBSCRIPTION_EXPIRED
+// ★ همه پلن‌ها مادام‌العمر — بدون نمایش زمان
+// ★ LockOverlay برای قفل کامل سیستم
+// ★ WarningBanner برای دوره هشدار ۳ روزه
+// ★ v10.3: تشخیص قفل از middleware (پاسخ 403 با SUBSCRIPTION_EXPIRED)
 // ============================================================================
 
 import { useEffect, useMemo, useState } from 'react'
 import { useStore, type AppView } from '@/lib/store'
-import { resolvePlan, getFeaturesByPlanName } from '@/lib/plan-features'
+import { resolvePlan, getFeaturesByPlanName, type PlanFeatureSet } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
 
 // ★ PWA
@@ -18,7 +22,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, // ★ آیکون نصب PWA
+  Download, AlertTriangle, ChevronLeft, Calendar, Landmark, Archive
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -41,7 +45,7 @@ import { Separator } from '@/components/ui/separator'
 import { OfflineBanner } from '@/components/ui/offline-indicator'
 import { OfflineModal } from '@/components/ui/offline-modal'
 
-import { DemoBanner } from '@/components/demo/demo-banner'
+
 import { useDemoStatus } from '@/lib/use-demo-status'
 
 import DashboardPage from '@/components/dashboard/dashboard-page'
@@ -50,7 +54,6 @@ import ProductsPage from '@/components/products/products-page'
 import CategoriesPage from '@/components/products/categories-page'
 import CustomersPage from '@/components/customers/customers-page'
 import InvoicesPage from '@/components/invoices/invoices-page'
-import InvoiceDetail from '@/components/invoices/invoice-detail'
 import InstallmentsPage from '@/components/installments/installments-page'
 import JournalEntriesPage from '@/components/accounting/journal-entries-page'
 import JournalEntryDetail from '@/components/accounting/journal-entry-detail'
@@ -66,6 +69,15 @@ import { ContactsPage } from '@/components/contacts/contacts-page'
 import { TicketsPage } from '@/components/tickets/tickets-page'
 import { TicketDetail } from '@/components/tickets/ticket-detail'
 import { useSidebar } from '@/components/ui/sidebar'
+import { ChecksTab } from '@/components/accounting/checks-tab'
+import { BasicYearEndPage } from '@/components/settings/basic-year-end-page'
+import UpgradePlanPage from '@/components/upgrade/upgrade-plan-page'
+// بعد از سایر import ها:
+import { SystemLogModal } from '@/components/SystemLogModal'
+// بعد از سایر import ها:
+import { installApiLogger } from '@/lib/api-logger'
+import { installGlobalErrorHandler } from '@/lib/global-error-handler'
+import { useAutoCleanup } from '@/hooks/useAutoCleanup'
 
 /* ══════════════════════════════════════════════════════════════════
    ★ InvoicesHub
@@ -211,6 +223,7 @@ interface NavItem {
   permKey: string
   requiredFeature?: 'canAccessInstallments' | 'canViewAccounts' | 'canViewJournals' | 'canMultiBranch' | 'canAccessCredit' | 'canStockTransfer' | 'canStockCount'
   disabledInDemo?: boolean
+  showWhen?: (features: PlanFeatureSet) => boolean
 }
 
 interface NavGroup {
@@ -227,33 +240,46 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: 'کالا و انبار',
+    label: 'کالاها و فاکتورها',
     items: [
       { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
-      { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
+        { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
+ 
     ],
   },
   {
-    label: 'فروش و خرید',
+    label: 'انبارها و طرف حساب',
     items: [
-      { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
+       
       { label: 'طرف حساب', icon: Users, view: 'contacts' as any, permKey: 'accounting' },
-      { label: 'اقساط', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
+      { label: 'اقساط و نسیه', icon: CreditCard, view: 'installments', permKey: 'installments', requiredFeature: 'canAccessInstallments' },
+        { label: 'انبارها', icon: WarehouseIcon, view: 'warehouses-hub' as any, permKey: 'accounting' },
+           { label: 'شعب', icon: Building2, view: 'branches' as any, permKey: 'accounting', requiredFeature: 'canMultiBranch' },
+      {
+        label: 'چک‌ها',
+        icon: Landmark,
+        view: 'checks',
+        permKey: 'checks',
+        requiredFeature: 'canAccessCredit',
+        showWhen: (features: PlanFeatureSet) => !features.canViewAccounts
+      },
     ],
   },
   {
     label: 'مالی و گزارش',
     items: [
       { label: 'حسابداری', icon: BookOpen, view: 'accounting', permKey: 'accounting', requiredFeature: 'canViewAccounts' },
-      { label: 'گزارش‌ها', icon: BarChart3, view: 'reports', permKey: 'reports' },
+        { label: 'گزارش‌ها', icon: BarChart3, view: 'reports', permKey: 'reports' },
+  
     ],
   },
   {
     label: 'سیستم',
     items: [
-      { label: 'شعب', icon: Building2, view: 'branches' as any, permKey: 'accounting', requiredFeature: 'canMultiBranch' },
+    
       { label: 'تنظیمات', icon: Settings, view: 'settings', permKey: 'settings' },
+       
     ],
   },
   {
@@ -275,9 +301,9 @@ const viewLabels: Record<string, string> = {
   customers: 'مشتریان',
   invoices: 'فاکتورها',
   'invoices-hub': 'فاکتورها',
-  'invoice-detail': 'جزئیات فاکتور فروش',
   'purchase-invoices': 'فاکتورها',
-  installments: 'اقساط',
+  installments: 'نسیه و اقساط',
+  checks: 'چک‌ها',
   accounting: 'حسابداری',
   'journal-entry-detail': 'جزئیات سند',
   settings: 'تنظیمات',
@@ -286,7 +312,7 @@ const viewLabels: Record<string, string> = {
   'settings-pos': 'تنظیمات صندوق',
   'settings-invoice': 'تنظیمات فاکتور',
   'settings-backup': 'پشتیبان‌گیری',
-  'settings-subscription': 'اشتراک',
+  'subscription-tab': 'اشتراک',
   'settings-employees': 'کارکنان',
   reports: 'گزارش‌ها',
   'upgrade-plan': 'ارتقای پلن',
@@ -299,13 +325,14 @@ const viewLabels: Record<string, string> = {
   contacts: 'طرفین حساب',
   tickets: 'تیکت پشتیبانی',
   'ticket-detail': 'جزئیات تیکت',
+  'basic-year-end': 'بستن حساب',
 }
 
 /* ─── Helpers ────────────────────────────────────────────────── */
 
 const FULL_ACCESS_ROLES = new Set(['Admin', 'Manager', 'Owner', 'admin', 'manager', 'owner'])
 
-function isFullAccessRole(role: string | undefined): boolean {
+function isFullAccessRole(role: string | null | undefined): boolean {
   return !!role && FULL_ACCESS_ROLES.has(role)
 }
 
@@ -314,15 +341,15 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'مدیر سیستم', manager: 'مدیر', owner: 'مالک', cashier: 'صندوق‌دار',
 }
 
-function getRoleLabel(role: string | undefined): string {
+function getRoleLabel(role: string | null | undefined): string {
   if (!role) return 'کاربر'
   return ROLE_LABELS[role] || role
 }
 
 function checkAccess(
   view: AppView,
-  role: string | undefined,
-  permissions: string[] | undefined,
+  role: string | null | undefined,
+  permissions: string[] | null | undefined,
   planFeatures?: any
 ): boolean {
   if (!role) return false
@@ -351,43 +378,247 @@ function checkAccess(
 function renderCurrentView(view: AppView) {
   const viewStr = view as string
   switch (viewStr) {
-    case 'dashboard':             return <DashboardPage />
-    case 'pos':                   return <PosPage />
-    case 'products':              return <ProductsPage />
-    case 'categories':            return <CategoriesPage />
-    case 'customers':             return <CustomersPage />
-    case 'invoices-hub':          return <InvoicesHub />
-    case 'invoices':              return <InvoicesHub />
-    case 'purchase-invoices':     return <InvoicesHub />
-    case 'invoice-detail':        return <InvoiceDetail />
-    case 'installments':          return <InstallmentsPage />
-    case 'accounting':            return <JournalEntriesPage />
-    case 'journal-entry-detail':  return <JournalEntryDetail />
+    case 'dashboard': return <DashboardPage />
+    case 'pos': return <PosPage />
+    case 'products': return <ProductsPage />
+    case 'categories': return <CategoriesPage />
+    case 'customers': return <CustomersPage />
+    case 'invoices-hub': return <InvoicesHub />
+    case 'invoices': return <InvoicesHub />
+    case 'purchase-invoices': return <InvoicesHub />
+    case 'installments': return <InstallmentsPage />
+    case 'checks': return <ChecksTab />
+    case 'accounting': return <JournalEntriesPage />
+    case 'journal-entry-detail': return <JournalEntryDetail />
     case 'settings':
     case 'settings-store':
     case 'settings-gateway':
     case 'settings-pos':
     case 'settings-invoice':
     case 'settings-backup':
-    case 'settings-subscription':
-    case 'settings-employees':    return <SettingsPage />
-    case 'reports':               return <ReportsPage />
-    case 'upgrade-plan':          return <SettingsPage />
-    case 'suppliers':             return <SuppliersPage />
-    case 'warehouses-hub':        return <WarehousesHub />
-    case 'warehouses':            return <WarehousesHub />
-    case 'stock-transfer':        return <WarehousesHub />
-    case 'stock-count':           return <WarehousesHub />
-    case 'branches':              return <BranchesPage />
-    case 'contacts':              return <ContactsPage />
-    case 'tickets':               return <TicketsPage />
-    case 'ticket-detail':         return <TicketDetail />
-    default:                      return <DashboardPage />
+    case 'subscription-tab':
+    case 'settings-employees': return <SettingsPage />
+    case 'reports': return <ReportsPage />
+    case 'upgrade-plan': return <UpgradePlanPage />
+    case 'suppliers': return <SuppliersPage />
+    case 'warehouses-hub': return <WarehousesHub />
+    case 'warehouses': return <WarehousesHub />
+    case 'stock-transfer': return <WarehousesHub />
+    case 'stock-count': return <WarehousesHub />
+    case 'branches': return <BranchesPage />
+    case 'contacts': return <ContactsPage />
+    case 'tickets': return <TicketsPage />
+    case 'ticket-detail': return <TicketDetail />
+    case 'basic-year-end': return <BasicYearEndPage />
+    default: return <DashboardPage />
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AppSidebar
+   ★ v10.3: تابع کمکی برای تشخیص SUBSCRIPTION_EXPIRED
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ v10.7: تابع کمکی برای تشخیص SUBSCRIPTION_EXPIRED
+   ★ با Fail-Open در صورت خطای شبکه
+   ═══════════════════════════════════════════════════════════════ */
+
+async function checkSubscriptionStatusAPI(token: string): Promise<{
+  isLocked: boolean
+  isLifetime: boolean
+  daysRemaining: number
+  fromMiddleware: boolean
+  isError: boolean  // ★ v10.7: flag جدید
+}> {
+  try {
+    // ★ v10.7: timeout برای جلوگیری از hang در قطعی شبکه
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // ۸ ثانیه timeout
+    
+    const res = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    
+    clearTimeout(timeoutId)
+
+    // ★ v10.3: تشخیص قفل از middleware (پاسخ 403)
+    if (res.status === 403) {
+      try {
+        const errData = await res.json()
+        if (errData.code === 'SUBSCRIPTION_EXPIRED') {
+          console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED from middleware (403)')
+          return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true, isError: false }
+        }
+      } catch { }
+    }
+
+    const data = await res.json()
+
+    // ★ v10.3: تشخیص قفل از success: false با SUBSCRIPTION_EXPIRED
+    if (!data.success && data.code === 'SUBSCRIPTION_EXPIRED') {
+      console.log('[checkSubscriptionStatusAPI] 🔒 SUBSCRIPTION_EXPIRED in response')
+      return { isLocked: true, isLifetime: false, daysRemaining: 0, fromMiddleware: true, isError: false }
+    }
+
+    if (data.success && data.data) {
+      const d = data.data
+      const lifetime = d.daysUntilUpdate === -1 || (d.status === 'active' && d.daysUntilUpdate === -1)
+
+      if (lifetime) {
+        return { isLocked: false, isLifetime: true, daysRemaining: -1, fromMiddleware: false, isError: false }
+      } else {
+        const days = d.daysUntilUpdate ?? 0
+        const locked = d.isLocked || days <= 0
+        return { isLocked: locked, isLifetime: false, daysRemaining: days, fromMiddleware: false, isError: false }
+      }
+    }
+
+    return { isLocked: false, isLifetime: false, daysRemaining: -1, fromMiddleware: false, isError: false }
+  } catch (err) {
+    // ★ v10.7: در صورت هر خطایی (شبکه، timeout، ...) → Fail-Open
+    console.warn('[checkSubscriptionStatusAPI] ⚠️ Error (fail-open):', err)
+    return { 
+      isLocked: false,      // ★ قفل نکن
+      isLifetime: false, 
+      daysRemaining: 999,   // ★ عدد بالا تا <= 0 نشود
+      fromMiddleware: false, 
+      isError: true          // ★ علامت‌گذاری به عنوان خطا
+    }
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ v10.4: LockOverlay — قفل‌کننده کامل سیستم هنگام انقضای اشتراک
+   ★ فقط یک دکمه "به‌روزرسانی" (بدون کلمه اشتراک)
+   ═══════════════════════════════════════════════════════════════ */
+
+function LockOverlay({ onUpgrade }: { onUpgrade: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4"
+      dir="rtl"
+    >
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 text-center space-y-5 border-2 border-red-300">
+        {/* آیکون قفل */}
+        <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+          <AlertTriangle className="w-10 h-10 text-red-600" />
+        </div>
+
+        {/* عنوان */}
+        <div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">
+            🔒 سیستم قفل شده است
+          </h2>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            مهلت سه‌روزه به‌روزرسانی به پایان رسیده است.
+            <br />
+            برای ادامه استفاده از سیستم، لطفاً به‌روزرسانی کنید.
+          </p>
+        </div>
+
+        {/* اطلاعات */}
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
+          <p className="font-bold mb-2">⚠️ در حالت قفل:</p>
+          <ul className="list-disc list-inside text-right space-y-1 text-red-700">
+            <li>ثبت فاکتور جدید امکان‌پذیر نیست</li>
+            <li>دسترسی به گزارش‌ها مسدود است</li>
+            <li>امکان ویرایش اطلاعات وجود ندارد</li>
+            <li>فقط مشاهده اطلاعات قبلی ممکن است</li>
+          </ul>
+        </div>
+
+        {/* ★ v10.4: فقط یک دکمه "به‌روزرسانی" */}
+        <div className="pt-2">
+          <Button
+            onClick={onUpgrade}
+            className="w-full h-12 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold gap-2 shadow-lg text-base"
+          >
+            <CreditCard className="w-5 h-5" />
+            به‌روزرسانی
+          </Button>
+        </div>
+
+        {/* زیرنویس */}
+        <p className="text-[10px] text-slate-400 pt-2">
+          💡 با به‌روزرسانی، بلافاصله دسترسی شما باز می‌شود
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ v10.1: WarningBanner — بنر هشدار ۳ روزه بالای صفحه
+   ═══════════════════════════════════════════════════════════════ */
+
+function WarningBanner({
+  daysRemaining,
+  onUpgrade
+}: {
+  daysRemaining: number
+  onUpgrade: () => void
+}) {
+  const isUrgent = daysRemaining <= 1
+
+  return (
+    <div
+      onClick={onUpgrade}
+      className={`mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 sm:p-4 cursor-pointer transition-all hover:shadow-lg ${isUrgent
+          ? 'bg-gradient-to-r from-red-600 to-red-700 text-white animate-pulse'
+          : 'bg-gradient-to-r from-orange-500 to-amber-600 text-white'
+        }`}
+      dir="rtl"
+    >
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0 ${isUrgent ? 'animate-bounce' : ''}`}>
+          <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className={`font-bold text-sm sm:text-base ${isUrgent ? 'animate-pulse' : ''}`}>
+              {isUrgent
+                ? '⚠️ فقط فردا فرصت دارید!'
+                : `⏰ ${daysRemaining} روز تا قفل سیستم`
+              }
+            </h3>
+            <span className={`text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-bold ${isUrgent ? 'bg-red-800 text-white' : 'bg-orange-800 text-white'
+              }`}>
+              فوری
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-white/90 leading-relaxed">
+            {isUrgent
+              ? 'برای جلوگیری از قفل شدن سیستم، همین حالا سیستم را به روزرسانی کنید.'
+              : 'مهلت سه‌روزه به‌روزرسانی  رو به پایان است. پس از اتمام، سیستم قفل می‌شود.'
+            }
+          </p>
+        </div>
+
+        <div className="shrink-0 hidden sm:block">
+          <Button
+            variant="secondary"
+            className={`font-bold gap-1 ${isUrgent
+                ? 'bg-white text-red-700 hover:bg-red-50'
+                : 'bg-white text-orange-700 hover:bg-orange-50'
+              }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            به‌روزرسانی
+          </Button>
+        </div>
+
+        <ChevronLeft className="w-5 h-5 shrink-0 sm:hidden" />
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AppSidebar — v10.3 ★★★
    ═══════════════════════════════════════════════════════════════ */
 
 function AppSidebar() {
@@ -398,73 +629,125 @@ function AppSidebar() {
   const user = useStore((s) => s.user)
   const notifications = useStore((s) => s.notifications) ?? []
   const planName = useStore((s) => s.planName)
+  const billingCycle = useStore((s) => s.selectedBillingCycle)
 
-  const planFeatures = getFeaturesByPlanName(planName)
+  const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
   const { isDemo, status: demoStatus } = useDemoStatus()
-  const isDemoActive = isDemo && !demoStatus?.isExpired
 
+  // ★ v10.1: وضعیت اشتراک
+   // ★ v10.6: وضعیت اشتراک — تشخیص دقیق دمو از API (نه hook)
   const [daysRemaining, setDaysRemaining] = useState(0)
+  const [hoursRemaining, setHoursRemaining] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
-  const [realPlanName, setRealPlanName] = useState<string>('')
+  const [isLifetime, setIsLifetime] = useState(false)
+  const [isDemoTenant, setIsDemoTenant] = useState(false)
+  const [realPlanName, setRealPlanName] = useState<string | null>(null)
+  // ★ v10.6: فقط وقتی واقعاً از API تایید شود که دمو است
+  const [verifiedIsDemo, setVerifiedIsDemo] = useState<boolean | null>(null)
 
+  // ★ v10.6: بررسی واقعی وضعیت دمو از API (به جای hook)
+  useEffect(() => {
+    async function verifyDemoStatus() {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) return
+        
+        const res = await fetch('/api/tenants/trial-check?_t=' + Date.now(), {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        const data = await res.json()
+        
+        if (data.success && data.data) {
+          // ★ فقط وقتی billingCycle === 'trial' و isPaid === false → دمو واقعی
+          const isRealDemo = data.data.billingCycle === 'trial' && !data.data.isPaid
+          setVerifiedIsDemo(isRealDemo)
+          setIsDemoTenant(isRealDemo)
+        } else {
+          setVerifiedIsDemo(false)
+        }
+      } catch (err) {
+        console.warn('[AppSidebar] verifyDemoStatus error:', err)
+        setVerifiedIsDemo(false)
+      }
+    }
+    
+    verifyDemoStatus()
+  }, [])
+
+  // ★ v10.6: isDemoPlan فقط وقتی verifiedIsDemo === true
+  // اگر verifiedIsDemo === null (هنوز چک نشده) → false در نظر می‌گیریم تا کارت دمو اشتباه نشان داده نشود
+  const isDemoPlan = verifiedIsDemo === true
+
+  // ★ v10.7: بررسی وضعیت اشتراک (با Fail-Open)
   useEffect(() => {
     async function checkSubscription() {
       try {
         const token = localStorage.getItem('token')
         if (!token) return
 
-        const res = await fetch('/api/tenants/trial-check', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        const data = await res.json()
+        // ★ v10.7: استفاده از تابع کمکی مشترک
+        const result = await checkSubscriptionStatusAPI(token)
 
-        if (data.success) {
-          setDaysRemaining(data.data.daysRemaining)
-          setIsExpired(data.data.isExpired)
+        // ★★★ v10.7: اگر خطا رخ داده، وضعیت را تغییر نده (Fail-Open)
+        if (result.isError) {
+          console.warn('[AppSidebar] ⚠️ Network/API error - keeping current state (fail-open)')
+          return  // وضعیت قبلی را حفظ کن
+        }
 
-          if (data.data.planName) {
-            setRealPlanName(data.data.planName)
-            useStore.getState().setPlanName(data.data.planName)
-          } else if (data.data.tierName) {
-            setRealPlanName(data.data.tierName)
-            useStore.getState().setPlanName(data.data.tierName)
+        if (result.fromMiddleware && result.isLocked) {
+          console.log('[AppSidebar] 🔒 Locked by middleware')
+          setIsLifetime(false)
+          setDaysRemaining(0)
+          setHoursRemaining(0)
+          setIsExpired(true)
+          return
+        }
+
+        setIsLifetime(result.isLifetime)
+
+        if (result.isLifetime) {
+          setDaysRemaining(-1)
+          setHoursRemaining(0)
+          setIsExpired(false)
+        } else {
+          setDaysRemaining(result.daysRemaining)
+          setHoursRemaining(0)
+          setIsExpired(result.isLocked || result.daysRemaining <= 0)
+        }
+
+        // ★ تعیین نام پلن
+        let displayPlanName = 'simple'
+        try {
+          const res2 = await fetch('/api/tenants/trial-check', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const data2 = await res2.json()
+          if (data2.success && data2.data) {
+            displayPlanName = data2.data.planName || data2.data.planTierName || 'simple'
           }
+        } catch { }
 
+        setRealPlanName(displayPlanName)
+        useStore.getState().setPlanName(displayPlanName)
+
+        // ★ ذخیره در cache
+        try {
           const { cachePlan } = await import('@/lib/offline-db')
           await cachePlan({
-            planName: data.data.planName || data.data.tierName,
-            daysRemaining: data.data.daysRemaining,
-            isExpired: data.data.isExpired,
+            planName: displayPlanName,
+            daysRemaining: result.isLifetime ? -1 : result.daysRemaining,
+            hoursRemaining: 0,
+            isExpired: result.isLocked || false,
+            isDemo: false,
+            isLifetime: result.isLifetime,
             cached_at: Date.now(),
           })
-        } else {
-          console.warn('[AppSidebar] trial-check failed with success:false')
-          const { getCachedPlan } = await import('@/lib/offline-db')
-          const cachedPlan = await getCachedPlan()
-
-          if (cachedPlan?.planName) {
-            setRealPlanName(cachedPlan.planName)
-            useStore.getState().setPlanName(cachedPlan.planName)
-            setDaysRemaining(cachedPlan.daysRemaining || 0)
-            setIsExpired(cachedPlan.isExpired || false)
-          }
-        }
+        } catch { }
       } catch (err) {
-        console.warn('[AppSidebar] Fetch error, using cached plan:', err)
-        try {
-          const { getCachedPlan } = await import('@/lib/offline-db')
-          const cachedPlan = await getCachedPlan()
-
-          if (cachedPlan?.planName) {
-            setRealPlanName(cachedPlan.planName)
-            useStore.getState().setPlanName(cachedPlan.planName)
-            setDaysRemaining(cachedPlan.daysRemaining || 0)
-            setIsExpired(cachedPlan.isExpired || false)
-          }
-        } catch (cacheErr) {
-          console.error('[AppSidebar] Error reading cached plan:', cacheErr)
-        }
+        // ★ v10.7: در صورت هر خطای غیرمنتظره، وضعیت را تغییر نده
+        console.warn('[AppSidebar] ⚠️ Unexpected error - keeping current state:', err)
       }
     }
 
@@ -472,14 +755,15 @@ function AppSidebar() {
     const interval = setInterval(checkSubscription, 60000)
     return () => clearInterval(interval)
   }, [])
-
-  const effectivePlanName = realPlanName || planName
+  
+  const effectivePlanName = (isDemoPlan ? 'demo' : (realPlanName || planName || 'simple')) as string
   const effectiveFeatures = getFeaturesByPlanName(effectivePlanName)
   const unreadCount = notifications.filter(n => !n.isRead).length
 
   const visibleGroups = useMemo(() => {
     if (!user) return []
     const filterItem = (item: NavItem): boolean => {
+      if (item.showWhen && !item.showWhen(effectiveFeatures)) return false
       if (item.requiredFeature && !effectiveFeatures[item.requiredFeature]) return false
       if (!isFullAccessRole(user.role) && !(user.permissions && user.permissions.includes('all'))) {
         const perms = user.permissions || []
@@ -516,110 +800,201 @@ function AppSidebar() {
     return parts[0]?.[0] || 'م'
   }, [user])
 
+  const getPlanLabel = (name: string) => {
+    const n = (name || '').toString().toLowerCase();
+    if (n === 'trial' || n === 'demo') return 'تست ۳ روزه';
+    if (n === 'simple' || n === 'basic') return 'پلن پایه';
+    if (n === 'professional' || n === 'advanced') return 'پلن پیشرفته';
+    if (n === 'enterprise' || n === 'professional_plus' || n === 'ultimate') return 'پلن حرفه‌ای';
+    return name || 'پلن پایه';
+  };
+
   return (
-    <Sidebar
-      side="right"
-      collapsible="icon"
-      className="border-l-2 border-gray-200 bg-gradient-to-b from-gray-50 to-white shadow-lg"
+   <Sidebar
+  side="right"
+  collapsible="icon"
+  className="border-l border-emerald-900/50 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl"
+
     >
-      <SidebarHeader className="p-2">
+  <SidebarHeader className="p-2 border-b border-white/5">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="gap-2 sm:gap-3">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-emerald-600 text-white shrink-0">
-                <Store className="size-4" />
-              </div>
-              <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
-                <span className="text-xs sm:text-sm font-semibold truncate">
-                  {storeName || 'فروشگاه'}
-                </span>
-              </div>
-            </SidebarMenuButton>
+        <SidebarMenuButton size="lg" className="gap-2 sm:gap-3 hover:bg-white/5 transition-colors">
+  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shrink-0 shadow-lg shadow-emerald-500/30">
+    <Store className="size-4" />
+  </div>
+  <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
+    <span className="text-xs sm:text-sm font-semibold truncate text-white">
+      {storeName || 'فروشگاه'}
+    </span>
+  </div>
+</SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
 
         <div className="mt-1.5 px-1 group-data-[collapsible=icon]:hidden">
-          {isDemoActive ? (
-            <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs text-amber-700">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="font-medium">تست دمو</span>
-                </div>
-                <span className="text-[10px] text-amber-600">
-                  {`${demoStatus?.daysRemaining || 0} روز و ${demoStatus?.hoursRemaining || 0} ساعت`}
-                </span>
-              </div>
-              <a
-                href="/subscription/renew"
-                className="mt-1.5 w-full text-[10px] py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md transition-colors flex items-center justify-center gap-1"
-              >
-                <RefreshCw className="w-2.5 h-2.5" />
-                خرید پلن
-              </a>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <SidebarPlanCard onClick={() => setCurrentView('settings-subscription' as AppView)} />
-              <a
-                href="/subscription/renew"
-                className="w-full text-[10px] py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md transition-colors flex items-center justify-center gap-1 font-medium"
-              >
-                <RefreshCw className="w-2.5 h-2.5" />
-                تمدید / ارتقا اشتراک
-              </a>
+          {isDemoPlan ? (
+            // ─── کارت دمو واقعی ───
+       <div className="p-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg backdrop-blur-sm">
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-1 text-[11px] text-amber-300">
+      <Sparkles className="w-3 h-3 shrink-0" />
+      <span className="font-medium">نسخه دمو</span>
+    </div>
+    <span className="text-[9px] text-amber-200 font-medium">
+      {(() => {
+        const d = demoStatus?.daysRemaining ?? daysRemaining ?? 3;
+        if (d <= 0) return 'منقضی';
+        return `${Number(d).toLocaleString('fa-IR')} روز`;
+      })()}
+    </span>
+  </div>
 
-              {isDemo && demoStatus?.isExpired ? (
-                <p className="text-[9px] text-red-600 text-center font-medium">
-                  دوره آزمایشی پایان یافت — اشتراک تهیه کنید
-                </p>
-              ) : (
-                <>
-                  {!isExpired && daysRemaining > 0 && daysRemaining !== -1 && (
-                    <p className="text-[9px] text-gray-500 text-center flex items-center justify-center gap-0.5">
-                      <Clock className="w-2.5 h-2.5" />
-                      {daysRemaining > 30
-                        ? `${Math.floor(daysRemaining / 30)} ماه و ${daysRemaining % 30} روز`
-                        : `${daysRemaining} روز`}
-                      {' '}تا پایان اشتراک
-                    </p>
-                  )}
-                  {daysRemaining === -1 && (
-                    <p className="text-[9px] text-emerald-600 text-center font-medium flex items-center justify-center gap-0.5">
-                      <Sparkles className="w-2.5 h-2.5" />
-                      اشتراک مادام‌العمر
-                    </p>
-                  )}
-                  {isExpired && (
-                    <p className="text-[9px] text-red-600 text-center font-medium">
-                      اشتراک منقضی شده — تمدید کنید
-                    </p>
-                  )}
-                </>
-              )}
+</div>
+          ) : (
+            // ─── کارت پلن‌های عادی (v10.1 — منطق ۳ روزه) ───
+            <div
+              onClick={() => {
+                if (isExpired) {
+                  setCurrentView('upgrade-plan' as AppView)
+                } else if (daysRemaining > 0 && daysRemaining <= 3) {
+                  setCurrentView('upgrade-plan' as AppView)
+                } else {
+                  setCurrentView('subscription-tab' as AppView)
+                }
+              }}
+         className={`cursor-pointer group p-2 rounded-lg transition-all duration-200 ${isExpired
+    ? 'bg-red-500/20 border-2 border-red-500/50 hover:shadow-lg hover:shadow-red-500/20 animate-pulse'
+    : daysRemaining > 0 && daysRemaining <= 3
+      ? 'bg-orange-500/20 border-2 border-orange-500/50 hover:shadow-lg hover:shadow-orange-500/20'
+      : isLifetime
+        ? 'bg-purple-500/20 border border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/20'
+        : 'bg-white/5 border border-white/10 hover:shadow-lg hover:shadow-emerald-500/10 hover:border-emerald-500/30'
+  }`}
+            >
+              {/* ★ حالت ۱: قفل کامل */}
+        {isExpired ? (
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-red-500/30 flex items-center justify-center shrink-0">
+          <AlertTriangle className="w-3 h-3 text-red-300" />
+        </div>
+        <span className="text-[10px] font-bold text-red-200">
+          سیستم قفل شده
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-red-500/30 text-red-200">
+        منقضی
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-red-200 font-medium">
+        برای ادامه کلیک کنید
+      </span>
+      <ChevronLeft className="w-3 h-3 text-red-300" />
+    </div>
+  </>
+     ) : daysRemaining > 0 && daysRemaining <= 3 ? (
+  /* ★ حالت ۲: هشدار ۳ روزه */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-orange-500/30 flex items-center justify-center shrink-0 animate-bounce">
+          <AlertTriangle className="w-3 h-3 text-orange-300" />
+        </div>
+        <span className="text-[10px] font-bold text-orange-200">
+          هشدار به‌روزرسانی
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-bold bg-orange-500 text-white">
+        {daysRemaining} روز
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-orange-100 font-medium leading-tight">
+        {daysRemaining === 1
+          ? '⚠️ فقط فردا!'
+          : `⚠️ ${daysRemaining} روز تا قفل`}
+      </span>
+      <ChevronLeft className="w-3 h-3 text-orange-300" />
+    </div>
+  </>
+      ) : isLifetime ? (
+  /* ★ حالت ۳: مادام‌العمر — فقط نام پلن */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-purple-500/30 flex items-center justify-center shrink-0">
+          <Sparkles className="w-3 h-3 text-purple-300" />
+        </div>
+        <span className="text-[10px] font-bold text-white">
+          {getPlanLabel(effectivePlanName)}
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-purple-500/30 text-purple-200">
+        مادام‌العمر
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-slate-400 font-medium">
+        بدون محدودیت
+      </span>
+      <ChevronLeft className="w-3 h-3 text-slate-400" />
+    </div>
+  </>
+  ) : (
+  /* ★ حالت ۴: فعال با بیش از ۳ روز — فقط نام پلن + فعال */
+  <>
+    <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-md bg-emerald-500/30 flex items-center justify-center shrink-0">
+          <Sparkles className="w-3 h-3 text-emerald-300" />
+        </div>
+        <span className="text-[10px] font-bold text-white">
+          {getPlanLabel(effectivePlanName)}
+        </span>
+      </div>
+      <span className="text-[8px] px-1 py-0.5 rounded font-medium bg-emerald-500/30 text-emerald-200">
+        فعال
+      </span>
+    </div>
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-slate-400 font-medium">
+        اشتراک فعال
+      </span>
+      <ChevronLeft className="w-3 h-3 text-slate-400" />
+    </div>
+  </>
+)}
             </div>
           )}
         </div>
       </SidebarHeader>
 
-      <SidebarSeparator />
+<SidebarSeparator className="bg-white/10" />
 
       <SidebarContent>
         {visibleGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel className="text-[10px] font-bold text-gray-400 uppercase tracking-wide px-3 py-0.5 group-data-[collapsible=icon]:hidden">
+          <SidebarGroup key={group.label} className="py-0 my-0">
+          <SidebarGroupLabel className="text-[10px] font-bold text-emerald-400/70 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
               {group.label}
             </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
+            <SidebarGroupContent className="py-0">
+              <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => {
                   const isActive = baseView === (item.view as string)
-                  const isItemDisabled = isDemo && item.disabledInDemo
+                  const isItemDisabled = (isDemoPlan && item.disabledInDemo)
                   return (
                     <SidebarMenuItem key={item.view}>
                       <SidebarMenuButton
-                        isActive={isActive && !isItemDisabled}
+                        isActive={isActive && !isItemDisabled && !isExpired}
                         onClick={() => {
+                          // ★ v10.1: اگر سیستم قفل است → همه کلیک‌ها به upgrade
+                          if (isExpired) {
+                            setCurrentView('upgrade-plan' as AppView)
+                            return
+                          }
                           if (isItemDisabled) return
                           setCurrentView(item.view)
                           if (isMobile) {
@@ -627,22 +1002,33 @@ function AppSidebar() {
                           }
                         }}
                         tooltip={item.label}
-                        className={`gap-2 sm:gap-2.5 h-8 sm:h-9 ${
-                          isItemDisabled
-                            ? 'opacity-50 cursor-not-allowed hover:bg-transparent'
-                            : isActive
-                              ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 font-semibold'
-                              : 'hover:bg-gray-100'
-                        }`}
+                      className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-lg transition-all ${isExpired
+    ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-500'
+    : isItemDisabled
+      ? 'opacity-50 cursor-not-allowed hover:bg-transparent text-slate-500'
+      : isActive
+        ? 'bg-gradient-to-l from-emerald-600/30 to-emerald-500/20 text-white font-semibold shadow-md shadow-emerald-500/20 border-r-2 border-emerald-400'
+        : 'hover:bg-white/10 text-slate-300 hover:text-white'
+  }`}
                       >
-                        <item.icon className={`size-4 ${isActive && !isItemDisabled ? 'text-emerald-600' : ''}`} />
+                   <item.icon className={`size-4 ${isExpired 
+  ? 'text-slate-500' 
+  : isActive && !isItemDisabled 
+    ? 'text-emerald-400' 
+    : 'text-slate-400'
+}`} />
                         <span className="text-xs sm:text-sm">{item.label}</span>
 
-                        {isItemDisabled && (
-                          <Badge className="ms-auto bg-amber-100 text-amber-700 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden">
-                            دمو
-                          </Badge>
-                        )}
+                    {isExpired && (
+  <Badge className="ms-auto bg-red-500/30 text-red-200 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden border border-red-500/50">
+    قفل
+  </Badge>
+)}
+{isItemDisabled && !isExpired && (
+  <Badge className="ms-auto bg-amber-500/30 text-amber-200 text-[8px] px-1 py-0 h-4 min-w-4 group-data-[collapsible=icon]:hidden border border-amber-500/50">
+    دمو
+  </Badge>
+)}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )
@@ -653,28 +1039,28 @@ function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="p-2">
-        <SidebarSeparator />
-        <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
-          <Avatar className="size-7 sm:size-8 border border-emerald-200">
-            <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[10px] sm:text-xs font-semibold">
-              {userInitials}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
-            <span className="text-[11px] sm:text-xs font-medium truncate">{userDisplayName}</span>
-            <span className="text-[9px] sm:text-[10px] text-muted-foreground">{getRoleLabel(user?.role)}</span>
-          </div>
-        </div>
-      </SidebarFooter>
+  <SidebarFooter className="p-2 border-t border-white/5">
+  <SidebarSeparator className="bg-white/10" />
+  <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
+    <Avatar className="size-7 sm:size-8 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
+      <AvatarFallback className="bg-transparent text-white text-[10px] sm:text-xs font-semibold">
+        {userInitials}
+      </AvatarFallback>
+    </Avatar>
+    <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
+      <span className="text-[11px] sm:text-xs font-medium truncate text-white">{userDisplayName}</span>
+      <span className="text-[9px] sm:text-[10px] text-slate-400">{getRoleLabel(user?.role)}</span>
+    </div>
+  </div>
+</SidebarFooter>
 
-      <SidebarRail />
+  <SidebarRail className="bg-slate-900/50 border-l border-white/5" />
     </Sidebar>
   )
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ★ PWAInstallButton — دکمه نصب اپ
+   ★ PWAInstallButton
    ═══════════════════════════════════════════════════════════════ */
 
 function PWAInstallButton() {
@@ -682,7 +1068,6 @@ function PWAInstallButton() {
   const [installing, setInstalling] = useState(false)
   const [justInstalled, setJustInstalled] = useState(false)
 
-  // اگر نصب شده یا قابل نصب نیست، نمایش نده
   if (isInstalled || !canInstall) return null
 
   const handleInstall = async () => {
@@ -706,8 +1091,8 @@ function PWAInstallButton() {
       disabled={installing}
       className={`
         gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3
-        border-emerald-300 text-emerald-700
-        hover:bg-emerald-50 hover:border-emerald-400
+       border-emerald-500/50 text-emerald-300
+hover:bg-emerald-500/20 hover:border-emerald-400/70
         transition-all duration-200 shrink-0
         ${installing ? 'opacity-70 cursor-not-allowed' : ''}
         ${justInstalled ? 'border-green-400 text-green-700 bg-green-50' : ''}
@@ -730,6 +1115,49 @@ function PWAInstallButton() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ★ SyncIndicator
+   ═══════════════════════════════════════════════════════════════ */
+function SyncIndicator() {
+  const pendingCount = useStore((s) => s.pendingSyncCount)
+  const isOnline = useStore((s) => s.isOnline)
+
+  if (pendingCount === 0 || !isOnline) return null
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+    className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3 border-amber-500/50 text-amber-300 hover:bg-amber-500/20 transition-all"
+      onClick={async () => {
+        const { syncEngine } = await import('@/lib/sync-engine')
+        const result = await syncEngine.sync()
+
+        if (result.succeeded > 0) {
+          useStore.getState().addNotification({
+            title: '✅ همگام‌سازی موفق',
+            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
+            type: 'success',
+          })
+        }
+        if (result.failed > 0) {
+          useStore.getState().addNotification({
+            title: '⚠️ خطا در همگام‌سازی',
+            message: `${result.failed} تغییر همگام‌سازی نشد`,
+            type: 'warning',
+          })
+        }
+      }}
+    >
+      <RefreshCw className="h-3 w-3 animate-spin" />
+      <span className="hidden sm:inline">همگام‌سازی</span>
+      <span className="bg-amber-600 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+        {pendingCount}
+      </span>
+    </Button>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
 
@@ -740,14 +1168,15 @@ function AppHeader() {
   const notifications = useStore((s) => s.notifications) ?? []
   const markNotificationRead = useStore((s) => s.markNotificationRead)
   const markAllNotificationsRead = useStore((s) => s.markAllNotificationsRead)
+  
+  // ★ v11.9.0: مودال لاگ‌ها
+  const [showLogModal, setShowLogModal] = useState(false)
 
   const unreadCount = notifications.filter(n => !n.isRead).length
   const canAccessSettings = isFullAccessRole(user?.role)
 
   const handleLogout = async () => {
     try {
-      console.log('[AppHeader] 🚪 Starting logout process...')
-
       if ('serviceWorker' in navigator) {
         try {
           const registrations = await navigator.serviceWorker.getRegistrations()
@@ -773,10 +1202,10 @@ function AppHeader() {
         'planName', 'tenant-slug', 'auth-token', 'shop-accounting-store',
       ]
       keysToRemove.forEach((key) => {
-        try { localStorage.removeItem(key) } catch (e) {}
+        try { localStorage.removeItem(key) } catch (e) { }
       })
 
-      try { sessionStorage.clear() } catch (e) {}
+      try { sessionStorage.clear() } catch (e) { }
 
       const cookiesToClear = ['tenant-slug', 'tenant-view', 'auth-token', 'token', 'refreshToken']
       const hostname = window.location.hostname
@@ -785,7 +1214,7 @@ function AppHeader() {
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname}; SameSite=Lax;`
           document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname}; SameSite=Lax;`
-        } catch (e) {}
+        } catch (e) { }
       })
 
       useStore.setState({
@@ -814,7 +1243,7 @@ function AppHeader() {
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
         })
-      } catch (err) {}
+      } catch (err) { }
 
       setTimeout(() => {
         window.location.href = `/?logout=1&t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`
@@ -827,38 +1256,68 @@ function AppHeader() {
   }
 
   return (
-    <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b bg-white px-2 sm:px-3 md:px-4 shadow-sm sticky top-0 z-10">
-      <SidebarTrigger className="-mr-1 shrink-0 rotate-180" />
-      <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block" />
+  <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-emerald-900/50 bg-gradient-to-l from-slate-900 via-slate-800 to-slate-900 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-xl sticky top-0 z-10">
+    <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-300 hover:bg-white/10 hover:text-white transition-colors" />
+   <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-white/20" />
 
       <Breadcrumb className="flex-1 min-w-0 overflow-hidden">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="hidden md:inline-block">
-            <BreadcrumbPage className="text-[10px] md:text-xs text-muted-foreground truncate">
-              {storeName || 'فروشگاه'}
-            </BreadcrumbPage>
+        <BreadcrumbPage className="text-[10px] md:text-xs text-slate-400 truncate">
+  {storeName || 'فروشگاه'}
+</BreadcrumbPage>
           </BreadcrumbItem>
-          <BreadcrumbSeparator className="hidden md:inline-block" />
+      <BreadcrumbSeparator className="hidden md:inline-block text-white/30" />
           <BreadcrumbItem>
-            <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-medium truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
-              {viewLabels[currentView] || currentView}
-            </BreadcrumbPage>
+         <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-white truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
+  {viewLabels[currentView] || currentView}
+</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-        {/* ★ دکمه نصب PWA */}
-        <PWAInstallButton />
+      <div className="hidden sm:flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 shadow-sm backdrop-blur-sm" dir="rtl">
+  <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+  <span className="text-[11px] font-semibold text-white whitespace-nowrap">
+            {(() => {
+              const now = new Date();
+              const formatter = new Intl.DateTimeFormat('fa-IR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              });
+              const parts = formatter.formatToParts(now);
+              const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+              const day = parts.find(p => p.type === 'day')?.value || '';
+              const month = parts.find(p => p.type === 'month')?.value || '';
+              const year = parts.find(p => p.type === 'year')?.value || '';
+              return `${weekday} ${day} ${month} ${year}`;
+            })()}
+          </span>
+        </div>
+<PWAInstallButton />
+<SyncIndicator />
+<OfflineModal />
 
-        <OfflineModal />
+{/* ── ★ v11.9.0: دکمه مشاهده لاگ‌های سیستم ── */}
+<Button
+  variant="ghost"
+  size="icon"
+  className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+  onClick={() => setShowLogModal(true)}
+  title="مشاهده لاگ‌های سیستم"
+>
+  <FileText className="size-3.5 sm:size-4" />
+</Button>
 
-        {/* ── Notifications ── */}
-        <DropdownMenu>
+{/* ── Notifications ── */}
+<DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0">
-              <Bell className="size-3.5 sm:size-4 text-gray-500" />
+          <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors">
+              <Bell className="size-3.5 sm:size-4" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -left-0.5 flex size-3.5 sm:size-4 items-center justify-center rounded-full bg-red-500 text-[7px] sm:text-[9px] font-bold text-white leading-none">
                   {unreadCount > 9 ? '+۹' : unreadCount}
@@ -866,9 +1325,9 @@ function AppHeader() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 sm:w-72 md:w-80 bg-white border border-gray-200 shadow-lg rounded-lg">
-            <DropdownMenuLabel className="flex items-center justify-between">
-              <span className="text-xs sm:text-sm">اعلان‌ها</span>
+          <DropdownMenuContent align="end" className="w-64 sm:w-72 md:w-80 bg-white border border-slate-200 shadow-lg rounded-lg">
+            <DropdownMenuLabel className="flex items-center justify-between text-slate-700">
+              <span className="text-xs sm:text-sm font-semibold">اعلان‌ها</span>
               {unreadCount > 0 && (
                 <button
                   onClick={() => markAllNotificationsRead()}
@@ -880,7 +1339,7 @@ function AppHeader() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             {notifications.length === 0 ? (
-              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-muted-foreground">
+              <div className="py-4 sm:py-6 text-center text-xs sm:text-sm text-slate-500">
                 اعلانی وجود ندارد
               </div>
             ) : (
@@ -888,17 +1347,17 @@ function AppHeader() {
                 <DropdownMenuItem
                   key={notification.id}
                   onClick={() => markNotificationRead(notification.id)}
-                  className="flex flex-col items-start gap-1 p-2 sm:p-2.5 md:p-3 cursor-pointer"
+                  className="flex flex-col items-start gap-1 p-2 sm:p-2.5 md:p-3 cursor-pointer hover:bg-slate-50"
                 >
                   <div className="flex items-center gap-1.5 sm:gap-2 w-full">
                     {!notification.isRead && (
                       <div className="size-1.5 sm:size-2 rounded-full bg-emerald-500 shrink-0" />
                     )}
-                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate">
+                    <span className="text-[11px] sm:text-xs md:text-sm font-medium flex-1 truncate text-slate-800">
                       {notification.title}
                     </span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] md:text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                  <span className="text-[9px] sm:text-[10px] md:text-xs text-slate-500 line-clamp-2 leading-relaxed">
                     {notification.message}
                   </span>
                 </DropdownMenuItem>
@@ -910,27 +1369,26 @@ function AppHeader() {
         {/* ── User Menu ── */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0">
-              <Avatar className="size-6 md:size-7 border border-emerald-200">
-                <AvatarFallback className="bg-emerald-100 text-emerald-700 text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
-                  {user?.username?.charAt(0) || 'م'}
-                </AvatarFallback>
-              </Avatar>
-              <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate">
-                {user?.username || 'کاربر'}
-              </span>
-            </Button>
+          <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0 hover:bg-white/10 transition-colors">
+  <Avatar className="size-6 md:size-7 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-md shadow-emerald-500/20">
+    <AvatarFallback className="bg-transparent text-white text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
+      {user?.username?.charAt(0) || 'م'}
+    </AvatarFallback>
+  </Avatar>
+  <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-white">
+    {user?.username || 'کاربر'}
+  </span>
+</Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-48 sm:w-52 md:w-56 bg-white border border-gray-200 shadow-lg rounded-lg"
-            style={{ backgroundColor: 'white' }}
+            className="w-48 sm:w-52 md:w-56 bg-white border border-slate-200 shadow-lg rounded-lg"
           >
             <DropdownMenuLabel>
               <div className="flex flex-col gap-1">
-                <span className="text-xs sm:text-sm">{user?.username || 'کاربر'}</span>
-                <span className="text-[10px] sm:text-xs font-normal text-muted-foreground">
-                  {getRoleLabel(user?.role)} - {user?.username}
+                <span className="text-xs sm:text-sm font-semibold text-slate-800">{user?.username || 'کاربر'}</span>
+                <span className="text-[10px] sm:text-xs font-normal text-slate-500">
+                  {getRoleLabel(user?.role)}
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -938,19 +1396,13 @@ function AppHeader() {
             {canAccessSettings && (
               <DropdownMenuItem
                 onClick={() => useStore.getState().setCurrentView('settings')}
+                className="text-slate-700 hover:bg-slate-50 "
               >
-                <Settings className="size-4 ms-2" />
+                <Settings className="size-4 ms-2"  />
                 تنظیمات
               </DropdownMenuItem>
             )}
-            {canAccessSettings && (
-              <DropdownMenuItem
-                onClick={() => useStore.getState().setCurrentView('settings-subscription' as AppView)}
-              >
-                <CreditCard className="size-4 ms-2" />
-                اشتراک و پلن
-              </DropdownMenuItem>
-            )}
+        
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleLogout}
@@ -960,14 +1412,17 @@ function AppHeader() {
               خروج از حساب
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+     </DropdownMenu>
+
+      {/* ★ v11.9.0: مودال لاگ‌های سیستم */}
+      <SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
+    </div>
     </header>
   )
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   AppShell
+   AppShell — v10.3 ★★★
    ═══════════════════════════════════════════════════════════════ */
 
 export default function AppShell() {
@@ -975,7 +1430,30 @@ export default function AppShell() {
   const user = useStore((s) => s.user)
   const setCurrentView = useStore((s) => s.setCurrentView)
   const planName = useStore((s) => s.planName)
-  const planFeatures = getFeaturesByPlanName(planName)
+  const planFeatures = getFeaturesByPlanName(planName || 'simple')
+
+  // ★ v11.9.0: پاکسازی خودکار لاگ‌های قدیمی
+  useAutoCleanup()
+
+  // ★ v10.1: وضعیت اشتراک
+  const [isSystemLocked, setIsSystemLocked] = useState(false)
+  const [daysRemaining, setDaysRemaining] = useState<number>(-1)
+  const [isLifetime, setIsLifetime] = useState(false)
+
+  // ★ v11.9.0: نصب خودکار API Logger و Global Error Handler
+  useEffect(() => {
+    installApiLogger()
+    installGlobalErrorHandler()
+    
+    // ثبت اولین لاگ برای تست
+    import('@/lib/system-logger').then(({ logger }) => {
+      logger.info('System started', {
+        userAgent: navigator.userAgent,
+        url: window.location.href,
+        timestamp: new Date().toISOString(),
+      })
+    })
+  }, [])
 
   useEffect(() => {
     if (!user) return
@@ -986,124 +1464,89 @@ export default function AppShell() {
         : (user.permissions || []).includes('dashboard')
           ? 'dashboard'
           : (user.permissions || [])[0]
-              ? (navItems.find(n => n.permKey === (user.permissions || [])[0])?.view ?? 'dashboard')
-              : 'dashboard'
+            ? (navItems.find(n => n.permKey === (user.permissions || [])[0])?.view ?? 'dashboard')
+            : 'dashboard'
       setCurrentView(firstView as AppView)
     }
   }, [user, currentView, setCurrentView, planFeatures])
 
-  // ★ Service Worker + Online/Offline + Sync
+   // ★ v10.7: بررسی وضعیت اشتراک هر ۳۰ ثانیه (با Fail-Open)
   useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    let syncInterval: NodeJS.Timeout | null = null
-    let domContentLoadedListener: (() => void) | null = null
-
-    const triggerSync = async () => {
+    async function checkSubscriptionStatus() {
       try {
-        const { syncEngine } = await import('@/lib/sync-engine')
-        const result = await syncEngine.sync()
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) return
 
-        if (result.succeeded > 0) {
-          useStore.getState().addNotification({
-            title: '✅ همگام‌سازی موفق',
-            message: `${result.succeeded} تغییر با سرور همگام‌سازی شد`,
-            type: 'success',
-          })
+        // ★ v10.7: استفاده از تابع کمکی مشترک
+        const result = await checkSubscriptionStatusAPI(token)
+
+        // ★★★ v10.7: اگر خطا رخ داده، هرگز قفل نکن (Fail-Open)
+        if (result.isError) {
+          console.warn('[AppShell] ⚠️ Network/API error - keeping system OPEN (fail-open)')
+          setIsSystemLocked(false)
+          // وضعیت قبلی را حفظ کن (تغییر نده)
+          return
         }
 
-        if (result.failed > 0) {
-          useStore.getState().addNotification({
-            title: '⚠️ خطا در همگام‌سازی',
-            message: `${result.failed} تغییر همگام‌سازی نشد — مجدداً تلاش می‌شود`,
-            type: 'warning',
-          })
+        if (result.fromMiddleware && result.isLocked) {
+          console.log('[AppShell] 🔒 Locked by middleware (SUBSCRIPTION_EXPIRED)')
+          setIsLifetime(false)
+          setDaysRemaining(0)
+          setIsSystemLocked(true)
+          return
         }
 
-        const { getSyncQueueCount } = await import('@/lib/offline-db')
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
+        setIsLifetime(result.isLifetime)
+
+        if (result.isLifetime) {
+          setDaysRemaining(-1)
+          setIsSystemLocked(false)
+        } else {
+          setDaysRemaining(result.daysRemaining)
+          setIsSystemLocked(result.isLocked || result.daysRemaining <= 0)
+        }
       } catch (err) {
-        console.error('[AppShell] triggerSync error:', err)
+        // ★ v10.7: در صورت هر خطای غیرمنتظره هم سیستم را قفل نکن
+        console.warn('[AppShell] ⚠️ Unexpected error - keeping system OPEN:', err)
+        setIsSystemLocked(false)
       }
     }
 
-    const handleOnline = () => {
-      useStore.getState().setOnline(true)
-      useStore.getState().addNotification({
-        title: '🌐 اتصال برقرار شد',
-        message: 'در حال همگام‌سازی تغییرات...',
-        type: 'info',
-      })
-      triggerSync()
+    checkSubscriptionStatus()
+    const interval = setInterval(checkSubscriptionStatus, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
-      if (syncInterval) clearInterval(syncInterval)
-      syncInterval = setInterval(async () => {
-        const count = useStore.getState().pendingSyncCount
-        if (count > 0) {
-          await triggerSync()
-        } else {
-          if (syncInterval) clearInterval(syncInterval)
-        }
-      }, 30000)
-    }
+  useEffect(() => {
+    if (typeof window === 'undefined') return
 
-    const handleOffline = () => {
-      useStore.getState().setOnline(false)
-      if (syncInterval) clearInterval(syncInterval)
-      useStore.getState().addNotification({
-        title: '📡 اتصال قطع شد',
-        message: 'تغییرات شما ذخیره و پس از اتصال همگام‌سازی می‌شوند',
-        type: 'warning',
-      })
-    }
+    import('@/lib/sync-engine').then(({ syncEngine }) => {
+      syncEngine.init()
+    })
 
-       // ★ ثبت Service Worker — از pwa-register.tsx مجزا است
-    // ★ این فقط برای sync پیام‌رسانی است، ثبت اصلی در PWARegister انجام می‌شود
     const listenToSW = async () => {
       if (!('serviceWorker' in navigator)) return
       try {
-        // ★ فقط listen می‌کنیم، ثبت نمی‌کنیم (PWARegister انجام می‌دهد)
         navigator.serviceWorker.addEventListener('message', (event) => {
           if (event.data?.type === 'TRIGGER_SYNC') {
-            console.log('[AppShell] TRIGGER_SYNC from SW')
-            triggerSync()
-          }
-          if (event.data?.type === 'SW_UPDATED') {
-            console.log('[AppShell] SW updated, new version available')
+            import('@/lib/sync-engine').then(({ syncEngine }) => syncEngine.sync())
           }
         })
-
-        // ★ فیکس: controllerchange دیگر reload نمی‌کند
-        // در dev این رویداد مدام فایر می‌شد (چون Turbopack فایل‌ها رو rebuild می‌کنه)
-        // و اگر reload() اینجا بود → حلقه بی‌نهایت
-        // الان فقط log می‌کنیم — reload فقط در production و با تأیید کاربر انجام میشه
         navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('[AppShell] SW controller changed (new version active) — no auto-reload in dev')
+          console.log('[AppShell] SW controller changed')
         })
-
       } catch (err) {
         console.warn('[AppShell] SW listener error:', err)
       }
     }
+
     const initialOnline = navigator.onLine
     useStore.getState().setOnline(initialOnline)
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', () => useStore.getState().setOnline(true))
+    window.addEventListener('offline', () => useStore.getState().setOnline(false))
 
     listenToSW()
-
-    const updatePendingCount = async () => {
-      try {
-        const { getSyncQueueCount } = await import('@/lib/offline-db')
-        const count = await getSyncQueueCount()
-        useStore.getState().setPendingSyncCount(count)
-      } catch { /* ignore */ }
-    }
-
-    updatePendingCount()
-    const countInterval = setInterval(updatePendingCount, 10000)
 
     let preloadTimer: NodeJS.Timeout | null = null
     if (initialOnline) {
@@ -1111,7 +1554,6 @@ export default function AppShell() {
         try {
           const { syncEngine } = await import('@/lib/sync-engine')
           await syncEngine.preloadData()
-          console.log('[AppShell] ✅ Preload data completed')
         } catch (err) {
           console.warn('[AppShell] ⚠️ Preload failed:', err)
         }
@@ -1119,16 +1561,111 @@ export default function AppShell() {
     }
 
     return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-      clearInterval(countInterval)
-      if (syncInterval) clearInterval(syncInterval)
+      window.removeEventListener('online', () => useStore.getState().setOnline(true))
+      window.removeEventListener('offline', () => useStore.getState().setOnline(false))
       if (preloadTimer) clearTimeout(preloadTimer)
-      if (domContentLoadedListener) {
-        document.removeEventListener('DOMContentLoaded', domContentLoadedListener)
-      }
     }
   }, [])
+
+  // ★ v11.9.0: گوش دادن به خطاهای محدودیت پلن
+useEffect(() => {
+  if (typeof window === 'undefined') return
+  
+  const handlePlanLimitError = (event: CustomEvent) => {
+    const { url, message, endpoint } = event.detail
+    
+    // نمایش مودال ارتقا با پیام مناسب
+    useStore.getState().addNotification({
+      title: '🔒 ارتقای پلن لازم است',
+      message: message || 'این قابلیت در پلن فعلی شما در دسترس نیست. برای دسترسی، پلن خود را ارتقا دهید.',
+      type: 'warning',
+    })
+    
+    // لاگ برای دیباگ
+    console.log('[AppShell] 🔒 Plan limit error detected:', { url, message })
+  }
+  
+  window.addEventListener('plan-limit-error', handlePlanLimitError as EventListener)
+  
+  return () => {
+    window.removeEventListener('plan-limit-error', handlePlanLimitError as EventListener)
+  }
+}, [])
+
+  // ═══════════════════════════════════════════════════════════════
+//  ★ v11.0: نمایش Toast پس از پرداخت موفق
+// ═══════════════════════════════════════════════════════════════
+useEffect(() => {
+  if (typeof window === 'undefined') return
+  
+  const url = new URL(window.location.href)
+  const paymentStatus = url.searchParams.get('payment')
+  const refId = url.searchParams.get('refId')
+  const tierName = url.searchParams.get('tierName')
+  const reason = url.searchParams.get('reason')
+  
+  if (!paymentStatus) return
+  
+  console.log('[AppShell] 💳 Payment status from URL:', paymentStatus)
+  
+  // پاک کردن query params از URL
+  const cleanUrl = window.location.pathname
+  window.history.replaceState({}, '', cleanUrl)
+  
+  // نمایش toast بر اساس وضعیت
+  if (paymentStatus === 'success') {
+    useStore.getState().addNotification({
+      title: '🎉 پرداخت موفق!',
+      message: `اشتراک شما با موفقیت فعال شد. شناسه پرداخت: ${refId || '—'}${tierName ? ` — پلن: ${tierName}` : ''}`,
+      type: 'success',
+    })
+    
+    // رفرش کردن وضعیت اشتراک (برای باز شدن قفل)
+    setTimeout(() => {
+      window.location.reload()
+    }, 1500)
+  }
+  
+  if (paymentStatus === 'already_paid') {
+    useStore.getState().addNotification({
+      title: '✅ پرداخت قبلاً ثبت شده',
+      message: 'این تراکنش قبلاً پردازش شده است.',
+      type: 'success',
+    })
+  }
+  
+  if (paymentStatus === 'cancelled') {
+    useStore.getState().addNotification({
+      title: '❌ پرداخت لغو شد',
+      message: 'شما پرداخت را لغو کردید. در صورت تمایل می‌توانید دوباره تلاش کنید.',
+      type: 'warning',
+    })
+  }
+  
+  if (paymentStatus === 'failed') {
+    useStore.getState().addNotification({
+      title: '❌ پرداخت ناموفق',
+      message: 'پرداخت شما ناموفق بود. در صورت کسر مبلغ، تا ۲۴ ساعت برگردانده می‌شود.',
+      type: 'error',
+    })
+  }
+  
+  if (paymentStatus === 'apply_failed') {
+    useStore.getState().addNotification({
+      title: '⚠️ خطا در فعال‌سازی',
+      message: `پرداخت شما موفق بود اما در فعال‌سازی اشتراک خطایی رخ داد. لطفاً با پشتیبانی تماس بگیرید. دلیل: ${reason || 'نامشخص'}`,
+      type: 'error',
+    })
+  }
+  
+  if (paymentStatus === 'error') {
+    useStore.getState().addNotification({
+      title: '⚠️ خطا در پرداخت',
+      message: `مشکلی در پردازش پرداخت پیش آمد. لطفاً دوباره تلاش کنید. دلیل: ${reason || 'نامشخص'}`,
+      type: 'error',
+    })
+  }
+}, [])
 
   const canViewCurrentPage = checkAccess(
     currentView,
@@ -1138,21 +1675,50 @@ export default function AppShell() {
   )
   const isPosView = currentView === 'pos'
 
+  const handleUpgrade = () => {
+    console.log('[AppShell] 🔄 Navigating to upgrade-plan page')
+    setCurrentView('upgrade-plan' as AppView)
+  }
+
+  // ★ v10.1: آیا در دوره هشدار ۳ روزه هستیم؟
+  const isWarningPeriod = !isLifetime && daysRemaining > 0 && daysRemaining <= 3
+
+  // ★ v10.4: اگر در صفحه به‌روزرسانی هستیم، LockOverlay را نشان نده
+  // این باعث می‌شود کاربر بتواند صفحه به‌روزرسانی را ببیند
+  const isOnUpgradePage = currentView === 'upgrade-plan'
+  const shouldShowLockOverlay = isSystemLocked && !isOnUpgradePage
+
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
+       <SidebarInset>
         <OfflineBanner />
-        <DemoBanner />
         <AppHeader />
+        {/* ★ v10.1: بنر هشدار ۳ روزه */}
+        {isWarningPeriod && !isSystemLocked && (
+          <WarningBanner daysRemaining={daysRemaining} onUpgrade={handleUpgrade} />
+        )}
+
+        {/* ★ v10.4: قفل‌کننده کامل سیستم (به جز صفحه به‌روزرسانی) */}
+        {shouldShowLockOverlay && <LockOverlay onUpgrade={handleUpgrade} />}
+
+        {/* ★ v10.4: بنر کوچک در صفحه به‌روزرسانی برای یادآوری قفل بودن */}
+        {isSystemLocked && isOnUpgradePage && (
+          <div className="mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 bg-red-50 border border-red-200 flex items-center gap-3" dir="rtl">
+            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+            <p className="text-xs sm:text-sm text-red-800 font-medium flex-1">
+              🔒 سیستم قفل است. برای باز شدن دسترسی، پلن خود را به‌روزرسانی کنید.
+            </p>
+          </div>
+        )}
 
         {isPosView ? (
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden bg-white relative">
             {canViewCurrentPage ? <PosPage /> : <DashboardPage />}
           </div>
         ) : (
-          <ScrollArea className="flex-1">
-            <main className="p-2 sm:p-3 md:p-4 lg:p-6 max-w-full overflow-x-hidden">
+          <ScrollArea className="flex-1 bg-white relative">
+            <main className="p-2 sm:p-3 md:p-4 lg:p-6 max-w-full overflow-x-hidden min-h-screen">
               {canViewCurrentPage
                 ? renderCurrentView(currentView)
                 : renderCurrentView('dashboard')}
@@ -1161,5 +1727,6 @@ export default function AppShell() {
         )}
       </SidebarInset>
     </SidebarProvider>
+  
   )
 }

@@ -35,6 +35,7 @@ export interface JournalEntry {
   totalDebit: number
   totalCredit: number
   status: 'DRAFT' | 'POSTED' | 'CANCELLED' | string
+  isPosted?: boolean // ← این خط را اضافه کنید
   entryType?: string
   referenceType?: string
   referenceId?: string
@@ -240,8 +241,31 @@ export const mockAccounts: Account[] = [
 ]
 
 // ★★★ v3.18: mockJournalEntries خالی شد — دیگر نباید استفاده بشه
-export const mockJournalEntries: JournalEntry[] = []
-
+// ★★★ داده‌های نمونه برای تست حالت آفلاین
+export const mockJournalEntries: JournalEntry[] = [
+  {
+    id: 'mock-offline-1',
+    entryNumber: 'JV-1403-001',
+    number: 'JV-1403-001',
+    date: new Date().toISOString(),
+    entryDate: new Date().toISOString(),
+    description: 'سند نمونه تست حالت آفلاین - پرداخت هزینه',
+    totalDebit: 2500000,
+    totalCredit: 2500000,
+    status: 'POSTED',
+    isPosted: true,
+    sourceType: 'manual',
+    isManual: true,
+    items: [
+      { accountId: 'acc-10', accountName: 'هزینه‌های اداری', accountCode: '5100', debit: 2500000, credit: 0 },
+      { accountId: 'acc-1', accountName: 'صندوق', accountCode: '1000', debit: 0, credit: 2500000 },
+    ],
+    lines: [
+      { accountId: 'acc-10', accountName: 'هزینه‌های اداری', accountCode: '5100', debit: 2500000, credit: 0 },
+      { accountId: 'acc-1', accountName: 'صندوق', accountCode: '1000', debit: 0, credit: 2500000 },
+    ]
+  }
+]
 export const mockDashboardStats: DashboardStats = {
   todaySales: 0,
   todayInvoices: 0,

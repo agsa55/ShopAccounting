@@ -1,21 +1,15 @@
 'use client'
 
 // ============================================================================
-// src/components/portal/installment-pay-button.tsx — v3.36.2 ★★★
+// src/components/portal/installment-pay-button.tsx — v9.0 ★★★
 // ----------------------------------------------------------------------------
 // ★ دکمه پرداخت آنلاین برای یک قسط خاص (نه کل فاکتور)
-// ★ این کامپوننت خودکفاست (self-contained) و به OnlinePaymentButton وابسته نیست.
-// ★ نحوه کار:
-//   ۱) کاربر کلیک می‌کند
-//   ۲) POST /api/payments/online/request با { invoiceId, installmentId }
-//   ۳) در صورت موفقیت، redirect به paymentUrl (درگاه زرین‌پال)
-//   ۴) کاربر پرداخت می‌کند → بازگشت به /api/payments/online/verify
-//   ۵) verify قسط را به‌روزرسانی می‌کند → redirect به /portal/payment-result
+// ★★★ v9.0: تغییر endpoint به /api/payments/online/create (درگاه اختصاصی فروشگاه)
 // ============================================================================
 
 import { useState } from 'react'
-import { CreditCard, Loader2, Lock, CheckCircle2, AlertCircle } from 'lucide-react'
-import { Button, ButtonProps } from '@/components/ui/button'
+import { CreditCard, Loader2, Lock, AlertCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface InstallmentPayButtonProps {
   invoiceId: string
@@ -23,12 +17,10 @@ interface InstallmentPayButtonProps {
   installmentNumber: number
   amount: number
   dueDate: string
-  // ★ آیا قسط قابل پرداخت است؟ (pending + سررسید رسیده یا نزدیک)
   canPay?: boolean
-  // ★ دلیل عدم امکان پرداخت (نمایش tooltip)
   disabledReason?: string
-  variant?: ButtonProps['variant']
-  size?: ButtonProps['size']
+   variant?: 'default' | 'outline' | 'ghost' | 'secondary' | 'destructive' | 'link'
+  size?: 'default' | 'sm' | 'lg' | 'icon'
   className?: string
   label?: string
 }
@@ -61,7 +53,8 @@ export function InstallmentPayButton({
         ? localStorage.getItem('portal_token')
         : null
 
-      const res = await fetch('/api/payments/online/request', {
+      // ★ v9.0: تغییر endpoint به create (درگاه اختصاصی فروشگاه)
+      const res = await fetch('/api/payments/online/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -72,9 +65,10 @@ export function InstallmentPayButton({
 
       const data = await res.json()
 
-      if (data.success && data.data?.paymentUrl) {
-        // ★ redirect به درگاه زرین‌پال
-        window.location.href = data.data.paymentUrl
+      const paymentUrl = data.data?.paymentUrl || data.data?.gatewayUrl
+      if (data.success && paymentUrl) {
+        // ★ redirect به درگاه پرداخت
+        window.location.href = paymentUrl
       } else {
         setError(data.error || 'خطا در ایجاد درخواست پرداخت')
         setLoading(false)

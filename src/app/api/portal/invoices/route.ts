@@ -1,71 +1,94 @@
 // ============================================================================
-// src/app/api/portal/invoices/route.ts — GET (v3.36.3 ★★★)
+// src/app/api/portal/invoices/route.ts — GET (v3.43 ★★★)
 // ShopAccounting — Customer Portal Invoices
 // ----------------------------------------------------------------------------
-// ★★★ v3.35: دریافت فاکتورها و اقساط مشتری برای پورتال
+// ★★★ v3.43: استفاده از portalToken به جای JWT
+//   - portalToken یک random string است (نه JWT)
+//   - مستقیماً از دیتابیس customer را با portalToken پیدا می‌کنیم
+//   - ساده‌تر و مطمئن‌تر از JWT verification
 // ★★★ v3.36.3: افزودن نام مشتری و نام فروشگاه به پاسخ API
-//   - customer: { id, name, mobile }
-//   - store: { name }
-//   تا پورتال بتواند کارت خوش‌آمد‌گویی با نام کامل مشتری نمایش دهد
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import jwt from 'jsonwebtoken'
 
 export async function GET(req: NextRequest) {
   try {
-    // ★ احراز هویت با JWT پورتال
+    // ─── دریافت portalToken ─────────────────────────────────────
+    // اولویت ۱: Authorization header (Bearer token)
+    // اولویت ۲: portal_token از کوکی
+    // اولویت ۳: x-portal-token از header (ست شده توسط middleware)
     const authHeader = req.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    let portalToken: string | null = null
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      portalToken = authHeader.replace('Bearer ', '')
+    } else {
+      portalToken = req.cookies.get('portal_token')?.value || 
+                    req.headers.get('x-portal-token') ||
+                    null
+    }
+
+    if (!portalToken) {
+      console.error('[Portal Invoices] ❌ No portal token found')
       return NextResponse.json({ success: false, error: 'احراز هویت نشده' }, { status: 401 })
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'shopaccounting-secret')
-    } catch {
-      return NextResponse.json({ success: false, error: 'توکن نامعتبر یا منقضی' }, { status: 401 })
-    }
+    console.log('[Portal Invoices] 🔍 Looking up customer with portalToken:', portalToken.substring(0, 16) + '...')
 
-    if (decoded.type !== 'portal' || !decoded.customerId || !decoded.tenantId) {
-      return NextResponse.json({ success: false, error: 'دسترسی غیرمجاز' }, { status: 403 })
-    }
-
-    const customerId = decoded.customerId
-    const tenantId = decoded.tenantId
-
-    // ─── ۱. دریافت اطلاعات مشتری ─────────────────────────────
-    // ★★★ v3.36.3: دریافت نام و موبایل مشتری برای کارت خوش‌آمد‌گویی
+    // ─── پیدا کردن customer از portalToken ─────────────────────
+    // ★★★ v3.43: جستجوی مستقیم در دیتابیس (به جای JWT verification)
     const customer = await db.client.customer.findFirst({
-      where: { id: customerId, tenantId },
+      where: { 
+        portalToken,
+        isBlacklisted: false,
+      },
       select: {
         id: true,
         firstName: true,
         lastName: true,
         mobile: true,
+        tenantId: true,
       },
     })
 
-    // ★ ترکیب نام و نام خانوادگی
-    const customerName = customer
-      ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
-      : 'مشتری گرامی'
+    if (!customer) {
+      console.error('[Portal Invoices] ❌ Customer not found for portalToken')
+      return NextResponse.json({ success: false, error: 'توکن نامعتبر یا مشتری یافت نشد' }, { status: 401 })
+    }
 
-    // ─── ۲. دریافت نام فروشگاه از تنظیمات ────────────────────
-    // ★★★ v3.36.3: دریافت نام فروشگاه برای نمایش در هدر پورتال
+    const customerId = customer.id
+    const tenantId = customer.tenantId
+
+    console.log('[Portal Invoices] ✅ Customer found:', {
+      customerId,
+      tenantId,
+      name: `${customer.firstName} ${customer.lastName}`,
+    })
+
+    // ─── ۱. ترکیب نام مشتری ──────────────────────────────────
+    const customerName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'مشتری گرامی'
+
+    // ─── ۲. دریافت نام فروشگاه ───────────────────────────────
     let storeName = 'فروشگاه'
     try {
-      const storeSetting = await db.client.storeSetting.findFirst({
-        where: { tenantId },
-        select: { storeName: true },
+      const tenant = await db.client.tenant.findUnique({
+        where: { id: tenantId },
+        select: { companyName: true },
       })
-      if (storeSetting?.storeName) {
-        storeName = storeSetting.storeName
+      if (tenant?.companyName) {
+        storeName = tenant.companyName
+      } else {
+        const storeSetting = await db.client.storeSetting.findFirst({
+          where: { tenantId },
+          select: { storeName: true },
+        })
+        if (storeSetting?.storeName) {
+          storeName = storeSetting.storeName
+        }
       }
-    } catch {
-      // اگر StoreSetting در دسترس نبود، نام پیش‌فرض استفاده می‌شود
+    } catch (err: any) {
+      console.warn('[Portal Invoices] ⚠️ Failed to get store name:', err?.message)
     }
 
     // ─── ۳. دریافت فاکتورهای مشتری ─────────────────────────────
@@ -73,10 +96,10 @@ export async function GET(req: NextRequest) {
       where: {
         customerId,
         tenantId,
-        // فقط فاکتورهایی که بدهی دارند یا نسیه/قسطی هستند
         OR: [
           { paymentType: 'credit' },
           { paymentType: 'installment' },
+          { remainingAmount: { gt: 0 } },
         ],
       },
       select: {
@@ -104,19 +127,25 @@ export async function GET(req: NextRequest) {
     // ─── ۴. محاسبه خلاصه ──────────────────────────────────────
     const totalDebt = invoices.reduce((sum: number, inv: any) => sum + (Number(inv.remainingAmount) || 0), 0)
 
+    console.log('[Portal Invoices] ✅ Success:', {
+      customerId,
+      customerName,
+      storeName,
+      invoiceCount: invoices.length,
+      totalDebt,
+    })
+
     return NextResponse.json({
       success: true,
       data: {
-        // ★★★ v3.36.3: اطلاعات مشتری و فروشگاه
         customer: {
           id: customerId,
           name: customerName,
-          mobile: customer?.mobile || '',
+          mobile: customer.mobile || '',
         },
         store: {
           name: storeName,
         },
-        // ★ برای backward compatibility (در صورت استفاده از فرمت‌های قدیمی)
         customerName,
         storeName,
         invoices,
@@ -127,7 +156,7 @@ export async function GET(req: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('[Portal Invoices] Error:', error)
+    console.error('[Portal Invoices] ❌ Error:', error)
     return NextResponse.json({ success: false, error: 'خطای سرور' }, { status: 500 })
   }
 }

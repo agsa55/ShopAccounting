@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -44,8 +43,66 @@ import {
   ChevronDown,
   AlertTriangle,
   X,
+  CloudOff,
+  Upload,
+  RefreshCw,
 } from 'lucide-react'
+
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
+
+// ============ Helpers ============
+function toFaNum(n: number | string | null | undefined): string {
+  if (n === null || n === undefined) return '۰'
+  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+// ★ Custom Switch با رنگ‌بندی دقیق: آبی برای فعال، خاکستری کدر برای غیرفعال
+// ★ Custom Switch با رنگ‌بندی دقیق و موقعیت‌دهی صحیح در RTL
+// رنگ آبی برای checked (فعال) و خاکستری کدر برای unchecked (غیرفعال)
+// موقعیت دایره: راست برای فعال، چپ برای غیرفعال (در RTL و LTR یکسان)
+function CustomSwitch({
+  checked,
+  onCheckedChange,
+  disabled = false,
+}: {
+  checked: boolean
+  onCheckedChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
+        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      } ${
+        checked
+          ? 'bg-blue-600'   // ★ آبی روشن برای حالت فعال
+          : 'bg-gray-300'   // ★ خاکستری کدر برای حالت غیرفعال
+      }`}
+    >
+      <span className="sr-only">وضعیت فعال</span>
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute top-0 h-5 w-5 rounded-full bg-white shadow ring-0 transition-all duration-200 ease-in-out ${
+          checked ? 'right-0' : 'left-0'
+        }`}
+      />
+    </button>
+  )
+}
 
 // ============ Types ============
 
@@ -59,6 +116,8 @@ interface Category {
   parent?: { id: string; name: string } | null
   children?: Category[]
   _isOffline?: boolean
+  _offlineAction?: 'create' | 'update' | 'delete'
+  _syncStatus?: 'pending' | 'syncing' | 'failed'
 }
 
 // ============ Main Component ============
@@ -70,12 +129,11 @@ export default function CategoriesPage() {
   const tenantId = useAppStore((s) => s.tenantId)
   const isOnline = useAppStore((s) => s.isOnline)
 
-  // Data state
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
 
-  // UI state
   const [searchQuery, setSearchQuery] = useState('')
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -83,32 +141,69 @@ export default function CategoriesPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
-  // Add form state
   const [formName, setFormName] = useState('')
   const [formParentId, setFormParentId] = useState<string>('none')
   const [formIsActive, setFormIsActive] = useState(true)
 
-  // Edit form state
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [editFormName, setEditFormName] = useState('')
   const [editFormParentId, setEditFormParentId] = useState<string>('none')
   const [editFormIsActive, setEditFormIsActive] = useState(true)
 
-  // Delete state
   const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   // ============ Load Data ============
-
   const loadCategories = useCallback(async () => {
     setLoading(true)
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      console.log('[Categories] 📡 آفلاین — بارگذاری از cache...')
+      try {
+        const { getCachedCategories } = await import('@/lib/offline-db')
+        const cached = await getCachedCategories()
+        if (cached.length > 0) {
+          setCategories(cached.map((c: any) => ({ ...c, _isOffline: true })))
+          console.log(`[Categories] ✅ ${toFaNum(cached.length)} دسته از cache بارگذاری شد`)
+          if (!isOnline) {
+            toast({
+              title: '📡 حالت آفلاین',
+              description: 'دسته‌بندی‌ها از حافظه محلی بارگذاری شدند',
+              duration: 3000,
+            })
+          }
+        } else {
+          setCategories([])
+          if (!isOnline) {
+            toast({
+              title: '📡 حالت آفلاین',
+              description: 'داده‌ای در حافظه محلی یافت نشد. لطفاً یک‌بار آنلاین وارد شوید.',
+              duration: 3000,
+            })
+          }
+        }
+      } catch (err) {
+        console.error('[Categories] خطا در بارگذاری cache:', err)
+        setCategories([])
+      }
+      setLoading(false)
+      return
+    }
+
     try {
-      const res = await fetch(`/api/categories?tenantId=${tenantId}`)
+      const headers = getAuthHeaders()
+      const res = await fetch(`/api/categories?tenantId=${tenantId}`, { headers })
       const json = await res.json()
       if (json.success && json.data) {
         const cats = json.data.categories || json.data
         if (Array.isArray(cats)) {
           setCategories(cats)
+          try {
+            const { cacheCategories } = await import('@/lib/offline-db')
+            await cacheCategories(cats)
+            console.log(`[Categories] ✅ ${toFaNum(cats.length)} دسته cache شد`)
+          } catch {}
         } else {
           setCategories([])
         }
@@ -117,10 +212,25 @@ export default function CategoriesPage() {
       }
     } catch (error) {
       console.error('Error loading categories:', error)
-      setCategories([])
+      try {
+        const { getCachedCategories } = await import('@/lib/offline-db')
+        const cached = await getCachedCategories()
+        if (cached.length > 0) {
+          setCategories(cached.map((c: any) => ({ ...c, _isOffline: true })))
+          toast({
+            title: '⚠️ خطای شبکه',
+            description: 'از داده‌های ذخیره‌شده استفاده شد',
+            duration: 3000,
+          })
+        } else {
+          setCategories([])
+        }
+      } catch {
+        setCategories([])
+      }
     }
     setLoading(false)
-  }, [tenantId])
+  }, [tenantId, isOnline, toast])
 
   useEffect(() => {
     if (tenantId) {
@@ -128,16 +238,52 @@ export default function CategoriesPage() {
     }
   }, [tenantId, loadCategories])
 
-  // ============ Build Tree ============
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('[Categories] 🟢 آنلاین شد — همگام‌سازی...')
+      try { (useAppStore.getState() as any).setOnline?.(true) } catch {}
+      import('@/lib/sync-engine').then(({ syncEngine }) => {
+        syncEngine.init()
+        syncEngine.sync().then(() => {
+          loadCategories()
+        }).catch((err) => {
+          console.error('[Categories] Sync failed:', err)
+        })
+      }).catch(() => {})
+    }
+    const handleOffline = () => {
+      console.log('[Categories] 🔴 آفلاین شد')
+      try { (useAppStore.getState() as any).setOnline?.(false) } catch {}
+      toast({
+        title: '📡 اتصال قطع شد',
+        description: 'حالت آفلاین فعال شد — تغییرات پس از اتصال همگام‌سازی می‌شوند',
+        duration: 3000,
+      })
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [loadCategories, toast])
 
+  useEffect(() => {
+    if (isOnline && navigator.onLine && categories.some(c => c._isOffline)) {
+      const timer = setTimeout(() => {
+        loadCategories()
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [isOnline, loadCategories, categories])
+
+  // ============ Build Tree ============
   const categoryTree = useMemo(() => {
     const map = new Map<string, Category>()
     const roots: Category[] = []
-
     categories.forEach((cat) => {
       map.set(cat.id, { ...cat, children: [] })
     })
-
     map.forEach((cat) => {
       if (cat.parentId && map.has(cat.parentId)) {
         const parent = map.get(cat.parentId)!
@@ -147,15 +293,11 @@ export default function CategoriesPage() {
         roots.push(cat)
       }
     })
-
     return roots
   }, [categories])
 
-  // ============ Flat list for table ============
-
   const flatCategories = useMemo(() => {
     const result: (Category & { level: number })[] = []
-
     const walk = (nodes: Category[], level: number) => {
       nodes.forEach((node) => {
         result.push({ ...node, level })
@@ -164,16 +306,12 @@ export default function CategoriesPage() {
         }
       })
     }
-
     walk(categoryTree, 0)
     return result
   }, [categoryTree, expandedIds])
 
-  // ============ Search filter ============
-
   const filteredCategories = useMemo(() => {
     if (!searchQuery.trim()) return flatCategories
-
     const q = searchQuery.trim().toLowerCase()
     return flatCategories.filter(
       (cat) =>
@@ -182,13 +320,9 @@ export default function CategoriesPage() {
     )
   }, [flatCategories, searchQuery])
 
-  // ============ Root categories for parent selector ============
-
   const rootCategories = useMemo(() => {
     return categories.filter((c) => !c.parentId)
   }, [categories])
-
-  // ============ Toggle expand/collapse ============
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -220,8 +354,6 @@ export default function CategoriesPage() {
     setExpandedIds(new Set())
   }, [])
 
-  // ============ Auto-expand all on first load ============
-
   useEffect(() => {
     if (categoryTree.length > 0 && expandedIds.size === 0) {
       expandAll()
@@ -230,7 +362,6 @@ export default function CategoriesPage() {
   }, [categoryTree.length > 0])
 
   // ============ Add Category handlers ============
-
   const openAddDialog = useCallback(() => {
     setFormName('')
     setFormParentId('none')
@@ -240,7 +371,51 @@ export default function CategoriesPage() {
 
   const handleSave = useCallback(async () => {
     if (!formName.trim()) {
-      toast({ title: 'خطا', description: 'نام دسته‌بندی الزامی است' })
+      toast({ title: 'خطا', description: 'نام دسته‌بندی الزامی است', variant: 'destructive' })
+      return
+    }
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      setSaving(true)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'POST',
+          url: '/api/categories',
+          body: {
+            name: formName.trim(),
+            parentId: formParentId === 'none' ? null : formParentId,
+            isActive: formIsActive,
+            tenantId,
+          },
+        })
+        const tempCat: Category = {
+          id: `offline-${Date.now()}`,
+          name: formName.trim(),
+          parentId: formParentId === 'none' ? null : formParentId,
+          isActive: formIsActive,
+          tenantId: tenantId || '',
+          productCount: 0,
+          _isOffline: true,
+          _offlineAction: 'create',
+          _syncStatus: 'pending',
+        }
+        setCategories((prev) => [...prev, tempCat])
+        toast({
+          title: '📡 در صف ذخیره شد',
+          description: 'دسته‌بندی پس از اتصال به سرور ثبت می‌شود',
+          duration: 4000,
+        })
+        setAddDialogOpen(false)
+        setFormName('')
+        setFormParentId('none')
+        setFormIsActive(true)
+      } catch (error) {
+        console.error('[Categories] Offline save error:', error)
+        toast({ title: 'خطا', description: 'خطا در ذخیره آفلاین', variant: 'destructive' })
+      }
+      setSaving(false)
       return
     }
 
@@ -252,33 +427,69 @@ export default function CategoriesPage() {
         isActive: formIsActive,
         tenantId,
       }
-
       const res = await fetch('/api/categories', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(body),
       })
-
       const json = await res.json()
-
-      if (json.success) {
-        toast({ title: 'دسته‌بندی اضافه شد' })
-        setAddDialogOpen(false)
-        setFormName('')
-        setFormParentId('none')
-        setFormIsActive(true)
-        loadCategories()
+    if (json.success) {
+  // ★ v11.9.0: لاگ ثبت دسته‌بندی جدید
+  logger.info('دسته‌بندی جدید ثبت شد', {
+    categoryName: formName.trim(),
+    parentId: formParentId === 'none' ? null : formParentId,
+    isActive: formIsActive,
+  })
+  
+  toast({ title: '✓ دسته‌بندی اضافه شد', description: json.message || 'عملیات موفق' })
+  setAddDialogOpen(false)
+  setFormName('')
+  setFormParentId('none')
+  setFormIsActive(true)
+  await loadCategories()
       } else {
-        toast({ title: 'خطا', description: json.error || 'خطا در ذخیره دسته‌بندی' })
+        toast({ title: 'خطا', description: json.error || 'خطا در ذخیره دسته‌بندی', variant: 'destructive' })
       }
     } catch (error) {
-      toast({ title: 'خطا', description: 'خطا در ذخیره دسته‌بندی' })
+      console.error('[Categories] Online save error:', error)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'POST',
+          url: '/api/categories',
+          body: {
+            name: formName.trim(),
+            parentId: formParentId === 'none' ? null : formParentId,
+            isActive: formIsActive,
+            tenantId,
+          },
+        })
+        const tempCat: Category = {
+          id: `offline-${Date.now()}`,
+          name: formName.trim(),
+          parentId: formParentId === 'none' ? null : formParentId,
+          isActive: formIsActive,
+          tenantId: tenantId || '',
+          productCount: 0,
+          _isOffline: true,
+          _offlineAction: 'create',
+          _syncStatus: 'pending',
+        }
+        setCategories((prev) => [...prev, tempCat])
+        toast({
+          title: '⚠️ ذخیره آفلاین',
+          description: 'ارتباط با سرور برقرار نشد. دسته‌بندی آفلاین ذخیره شد.',
+          duration: 4000,
+        })
+        setAddDialogOpen(false)
+      } catch {
+        toast({ title: 'خطا', description: 'خطا در ذخیره دسته‌بندی', variant: 'destructive' })
+      }
     }
     setSaving(false)
-  }, [formName, formParentId, formIsActive, tenantId, loadCategories, toast])
+  }, [formName, formParentId, formIsActive, tenantId, isOnline, loadCategories, toast])
 
   // ============ Edit Category handlers ============
-
   const openEditDialog = useCallback((cat: Category) => {
     setEditingCategory(cat)
     setEditFormName(cat.name)
@@ -290,7 +501,52 @@ export default function CategoriesPage() {
   const handleUpdate = useCallback(async () => {
     if (!editingCategory) return
     if (!editFormName.trim()) {
-      toast({ title: 'خطا', description: 'نام دسته‌بندی الزامی است' })
+      toast({ title: 'خطا', description: 'نام دسته‌بندی الزامی است', variant: 'destructive' })
+      return
+    }
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (!trulyOnline) {
+      setSaving(true)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'PUT',
+          url: `/api/categories/${editingCategory.id}`,
+          body: {
+            name: editFormName.trim(),
+            parentId: editFormParentId === 'none' ? null : editFormParentId,
+            isActive: editFormIsActive,
+            tenantId,
+          },
+        })
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.id === editingCategory.id
+              ? {
+                  ...c,
+                  name: editFormName.trim(),
+                  parentId: editFormParentId === 'none' ? null : editFormParentId,
+                  isActive: editFormIsActive,
+                  _isOffline: true,
+                  _offlineAction: 'update',
+                  _syncStatus: 'pending',
+                }
+              : c
+          )
+        )
+        toast({
+          title: '📡 در صف بروزرسانی قرار گرفت',
+          description: 'تغییرات پس از اتصال اعمال می‌شود',
+          duration: 4000,
+        })
+        setEditDialogOpen(false)
+        setEditingCategory(null)
+      } catch (error) {
+        console.error('[Categories] Offline update error:', error)
+        toast({ title: 'خطا', description: 'خطا در بروزرسانی آفلاین', variant: 'destructive' })
+      }
+      setSaving(false)
       return
     }
 
@@ -302,31 +558,73 @@ export default function CategoriesPage() {
         isActive: editFormIsActive,
         tenantId,
       }
-
       const res = await fetch(`/api/categories/${editingCategory.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(body),
       })
-
       const json = await res.json()
-
-      if (json.success) {
-        toast({ title: 'دسته‌بندی بروزرسانی شد' })
-        setEditDialogOpen(false)
-        setEditingCategory(null)
-        loadCategories()
+   if (json.success) {
+  // ★ v11.9.0: لاگ ویرایش دسته‌بندی
+  logger.info('دسته‌بندی ویرایش شد', {
+    categoryId: editingCategory?.id,
+    categoryName: editFormName.trim(),
+    oldName: editingCategory?.name,
+    parentId: editFormParentId === 'none' ? null : editFormParentId,
+    isActive: editFormIsActive,
+  })
+  
+  toast({ title: '✓ دسته‌بندی بروزرسانی شد', description: json.message || 'عملیات موفق' })
+  setEditDialogOpen(false)
+  setEditingCategory(null)
+  await loadCategories()
       } else {
-        toast({ title: 'خطا', description: json.error || 'خطا در بروزرسانی دسته‌بندی' })
+        toast({ title: 'خطا', description: json.error || 'خطا در بروزرسانی دسته‌بندی', variant: 'destructive' })
       }
     } catch (error) {
-      toast({ title: 'خطا', description: 'خطا در بروزرسانی دسته‌بندی' })
+      console.error('[Categories] Online update error:', error)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'PUT',
+          url: `/api/categories/${editingCategory.id}`,
+          body: {
+            name: editFormName.trim(),
+            parentId: editFormParentId === 'none' ? null : editFormParentId,
+            isActive: editFormIsActive,
+            tenantId,
+          },
+        })
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.id === editingCategory.id
+              ? {
+                  ...c,
+                  name: editFormName.trim(),
+                  parentId: editFormParentId === 'none' ? null : editFormParentId,
+                  isActive: editFormIsActive,
+                  _isOffline: true,
+                  _offlineAction: 'update',
+                  _syncStatus: 'pending',
+                }
+              : c
+          )
+        )
+        toast({
+          title: '⚠️ ذخیره آفلاین',
+          description: 'ارتباط با سرور برقرار نشد. تغییرات آفلاین ذخیره شد.',
+          duration: 4000,
+        })
+        setEditDialogOpen(false)
+        setEditingCategory(null)
+      } catch {
+        toast({ title: 'خطا', description: 'خطا در بروزرسانی دسته‌بندی', variant: 'destructive' })
+      }
     }
     setSaving(false)
-  }, [editingCategory, editFormName, editFormParentId, editFormIsActive, tenantId, loadCategories, toast])
+  }, [editingCategory, editFormName, editFormParentId, editFormIsActive, tenantId, isOnline, loadCategories, toast])
 
   // ============ Delete Category handlers ============
-
   const openDeleteDialog = useCallback((cat: Category) => {
     setDeletingCategory(cat)
     setDeleteDialogOpen(true)
@@ -334,47 +632,136 @@ export default function CategoriesPage() {
 
   const handleDelete = useCallback(async () => {
     if (!deletingCategory) return
+    const trulyOnline = isOnline && navigator.onLine
+
+    if (deletingCategory._isOffline && deletingCategory._offlineAction === 'create') {
+      setDeleting(true)
+      try {
+        setCategories((prev) => prev.filter((c) => c.id !== deletingCategory.id))
+        toast({ title: '✓ حذف شد', description: 'دسته‌بندی آفلاین حذف شد' })
+        setDeleteDialogOpen(false)
+        setDeletingCategory(null)
+      } catch (error) {
+        toast({ title: 'خطا', description: 'خطا در حذف آفلاین', variant: 'destructive' })
+      }
+      setDeleting(false)
+      return
+    }
+
+    if (!trulyOnline) {
+      setDeleting(true)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'DELETE',
+          url: `/api/categories/${deletingCategory.id}?tenantId=${tenantId}`,
+          body: {},
+        })
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.id === deletingCategory.id
+              ? { ...c, _isOffline: true, _offlineAction: 'delete', _syncStatus: 'pending' }
+              : c
+          )
+        )
+        toast({
+          title: '📡 در صف حذف قرار گرفت',
+          description: 'دسته‌بندی پس از اتصال از سرور حذف می‌شود',
+          duration: 4000,
+        })
+        setDeleteDialogOpen(false)
+        setDeletingCategory(null)
+      } catch (error) {
+        console.error('[Categories] Offline delete error:', error)
+        toast({ title: 'خطا', description: 'خطا در حذف آفلاین', variant: 'destructive' })
+      }
+      setDeleting(false)
+      return
+    }
 
     setDeleting(true)
     try {
       const res = await fetch(`/api/categories/${deletingCategory.id}?tenantId=${tenantId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       })
-
       const json = await res.json()
-
-      if (json.success) {
-        toast({ title: 'دسته‌بندی حذف شد' })
-        setDeleteDialogOpen(false)
-        setDeletingCategory(null)
-        loadCategories()
+    if (json.success) {
+  // ★ v11.9.0: لاگ حذف دسته‌بندی (قبل از null شدن deletingCategory)
+  logger.info('دسته‌بندی حذف شد', {
+    categoryId: deletingCategory.id,
+    categoryName: deletingCategory.name,
+    parentId: deletingCategory.parentId,
+    productCount: deletingCategory.productCount,
+  })
+  
+  toast({ title: '✓ دسته‌بندی حذف شد', description: json.message || 'عملیات موفق' })
+  setCategories((prev) => prev.filter((c) => c.id !== deletingCategory.id))
+  setDeleteDialogOpen(false)
+  setDeletingCategory(null)
+  await loadCategories()
       } else {
-        toast({ title: 'خطا', description: json.error || 'خطا در حذف دسته‌بندی' })
+        toast({ title: 'خطا', description: json.error || 'خطا در حذف دسته‌بندی', variant: 'destructive' })
       }
     } catch (error) {
-      toast({ title: 'خطا', description: 'خطا در حذف دسته‌بندی' })
+      console.error('[Categories] Online delete error:', error)
+      try {
+        const { addToSyncQueue } = await import('@/lib/offline-db')
+        await addToSyncQueue('category', {
+          method: 'DELETE',
+          url: `/api/categories/${deletingCategory.id}?tenantId=${tenantId}`,
+          body: {},
+        })
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.id === deletingCategory.id
+              ? { ...c, _isOffline: true, _offlineAction: 'delete', _syncStatus: 'pending' }
+              : c
+          )
+        )
+        toast({
+          title: '⚠️ حذف آفلاین',
+          description: 'ارتباط با سرور برقرار نشد. حذف پس از اتصال انجام می‌شود.',
+          duration: 4000,
+        })
+        setDeleteDialogOpen(false)
+        setDeletingCategory(null)
+      } catch {
+        toast({ title: 'خطا', description: 'خطا در حذف دسته‌بندی', variant: 'destructive' })
+      }
     }
     setDeleting(false)
-  }, [deletingCategory, tenantId, loadCategories, toast])
+  }, [deletingCategory, tenantId, isOnline, loadCategories, toast])
 
-  // ============ Category stats ============
-
+    // ============ Category stats ============
   const totalCategories = categories.length
-  const activeCategories = categories.filter((c) => c.isActive).length
-  const rootCount = categories.filter((c) => !c.parentId).length
+  const activeCategories = categories.filter((c) => c.isActive && c._offlineAction !== 'delete').length
+  const rootCount = categories.filter((c) => !c.parentId && c._offlineAction !== 'delete').length
+  const offlineCount = categories.filter((c) => c._isOffline && c._offlineAction !== 'delete').length
+  const pendingDeleteCount = categories.filter((c) => c._offlineAction === 'delete').length
 
   const hasChildren = deletingCategory?.children && deletingCategory.children.length > 0
 
-  // ============ Render ============
+  const triggerSync = useCallback(async () => {
+    if (isSyncing || !isOnline) return
+    setIsSyncing(true)
+    try {
+      const { syncEngine } = await import('@/lib/sync-engine')
+      syncEngine.init()
+      await syncEngine.sync()
+      await loadCategories()
+    } catch (err) {
+      console.error('[Categories] Manual sync failed:', err)
+      toast({ title: 'خطا در همگام‌سازی', description: 'لطفاً دوباره تلاش کنید', variant: 'destructive' })
+    }
+    setIsSyncing(false)
+  }, [isSyncing, isOnline, loadCategories, toast])
 
+  // ============ Render ============
   return (
     <div className="flex flex-col h-full bg-gray-50/80" dir="rtl">
-
-      {/* ─── Header ─── */}
       <header className="bg-white border-b border-gray-200 px-3 sm:px-5 lg:px-6 py-3 shrink-0">
         <div className="flex items-center justify-between gap-2">
-
-          {/* Title */}
           <div className="flex items-center gap-2 min-w-0">
             <div className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 rounded-lg bg-blue-600 text-white shrink-0">
               <Grid3x3 className="w-4 h-4 sm:w-4.5 sm:h-4.5 lg:w-5 lg:h-5" />
@@ -384,24 +771,48 @@ export default function CategoriesPage() {
                 دسته‌بندی‌ها
               </h1>
               <p className="text-[10px] sm:text-xs text-gray-500 hidden sm:block">
-                مدیریت دسته‌بندی‌های محصولات
+                مدیریت دسته‌بندی‌های کالاها
               </p>
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
             {!isOnline && (
-              <Badge
-                variant="outline"
-                className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5 py-0.5"
-              >
+              <Badge variant="outline" className="gap-1 text-[10px] border-amber-300 text-amber-700 bg-amber-50 px-1.5 py-0.5">
                 <WifiOff className="w-2.5 h-2.5" />
                 <span className="hidden sm:inline">آفلاین</span>
               </Badge>
             )}
 
-            {/* Mobile search toggle */}
+            {offlineCount > 0 && (
+              <Badge
+                variant="outline"
+                className="gap-1 text-[10px] border-blue-300 text-blue-700 bg-blue-50 cursor-pointer px-1.5 py-0.5"
+                onClick={() => isOnline && triggerSync()}
+                title="کلیک کنید تا همگام‌سازی شود"
+              >
+                {isSyncing ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Upload className="w-2.5 h-2.5" />
+                )}
+                <span className="hidden sm:inline">{toFaNum(offlineCount)} در انتظار</span>
+                <span className="sm:hidden">{toFaNum(offlineCount)}</span>
+              </Badge>
+            )}
+
+            {isOnline && offlineCount > 0 && !isSyncing && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={triggerSync}
+                className="h-8 sm:h-9 text-xs border-blue-300 text-blue-600 hover:bg-blue-50 px-2 sm:px-3"
+              >
+                <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 sm:ml-1" />
+                <span className="hidden sm:inline">همگام‌سازی</span>
+              </Button>
+            )}
+
             <Button
               variant="outline"
               size="icon"
@@ -422,7 +833,6 @@ export default function CategoriesPage() {
           </div>
         </div>
 
-        {/* Mobile Search (expandable) */}
         {mobileSearchOpen && (
           <div className="mt-2 sm:hidden">
             <div className="relative">
@@ -448,31 +858,39 @@ export default function CategoriesPage() {
         )}
       </header>
 
-      {/* ─── Stats Bar ─── */}
+      {!isOnline && offlineCount > 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-3 sm:px-5 py-2 shrink-0">
+          <CloudOff className="w-4 h-4 text-amber-600 shrink-0" />
+          <div className="flex-1 text-xs text-amber-700">
+            <span className="font-bold">{toFaNum(offlineCount)} تغییر آفلاین </span>
+            <span className="hidden sm:inline">در انتظار همگام‌سازی با سرور هستند.</span>
+            <span className="sm:hidden">در انتظار sync</span>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border-b border-gray-100 px-3 sm:px-5 lg:px-6 py-2 shrink-0">
         <div className="flex items-center gap-3 sm:gap-5 lg:gap-6 text-[10px] sm:text-xs text-gray-500 flex-wrap">
           <span>
             مجموع:{' '}
-            <strong className="text-gray-900">{totalCategories}</strong>{' '}
+            <strong className="text-gray-900">{toFaNum(totalCategories - pendingDeleteCount)}</strong>{' '}
             <span className="hidden sm:inline">دسته‌بندی</span>
           </span>
           <span className="hidden sm:inline">
-            فعال: <strong className="text-emerald-600">{activeCategories}</strong>
+            فعال: <strong className="text-emerald-600">{toFaNum(activeCategories)}</strong>
           </span>
           <span className="hidden md:inline">
-            دسته اصلی: <strong className="text-blue-600">{rootCount}</strong>
+            دسته اصلی: <strong className="text-blue-600">{toFaNum(rootCount)}</strong>
           </span>
           <span className="hidden lg:inline text-gray-300">|</span>
           <span className="hidden lg:inline text-gray-400">
-            {filteredCategories.length} آیتم نمایش داده می‌شود
+            {toFaNum(filteredCategories.length)} آیتم نمایش داده می‌شود
           </span>
         </div>
       </div>
 
-      {/* ─── Search + Controls (Desktop / Tablet) ─── */}
       <div className="bg-white border-b border-gray-100 px-3 sm:px-5 lg:px-6 py-2 sm:py-2.5 shrink-0 hidden sm:block">
         <div className="flex items-center gap-2 lg:gap-3">
-          {/* Search */}
           <div className="relative flex-1 max-w-xs lg:max-w-sm">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <Input
@@ -484,7 +902,6 @@ export default function CategoriesPage() {
             />
           </div>
 
-          {/* Expand/Collapse */}
           <div className="flex items-center gap-1.5 mr-auto">
             <Button
               variant="outline"
@@ -508,11 +925,10 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      {/* ─── Mobile Controls Bar ─── */}
       <div className="bg-white border-b border-gray-100 px-3 py-1.5 shrink-0 sm:hidden">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] text-gray-400">
-            {filteredCategories.length} دسته‌بندی
+            {toFaNum(filteredCategories.length)} دسته‌بندی
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -538,14 +954,12 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      {/* ─── Main Content ─── */}
       <div className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 sm:py-24 lg:py-32 text-gray-400">
             <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-blue-600 mb-3" />
             <p className="text-xs sm:text-sm font-medium">در حال بارگذاری</p>
           </div>
-
         ) : filteredCategories.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 sm:py-24 lg:py-32 text-gray-400 px-4">
             <FolderTree className="w-12 h-12 sm:w-14 sm:h-14 mb-3 opacity-40" />
@@ -565,10 +979,8 @@ export default function CategoriesPage() {
               </Button>
             )}
           </div>
-
         ) : (
           <>
-            {/* ══ Desktop/Tablet Table (md+) ══ */}
             <div className="hidden md:block">
               <Table>
                 <TableHeader>
@@ -580,7 +992,7 @@ export default function CategoriesPage() {
                       دسته والد
                     </TableHead>
                     <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center w-[15%]">
-                      محصولات
+                      کالاها
                     </TableHead>
                     <TableHead className="text-xs font-semibold text-gray-600 h-9 text-center w-[10%]">
                       وضعیت
@@ -602,7 +1014,6 @@ export default function CategoriesPage() {
                           cat._isOffline ? 'bg-amber-50/50' : ''
                         }`}
                       >
-                        {/* Name */}
                         <TableCell className="py-2">
                           <div
                             className="flex items-center gap-1.5"
@@ -629,16 +1040,26 @@ export default function CategoriesPage() {
                               {cat.name}
                             </span>
                             {cat._isOffline && (
-                              <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1 shrink-0">
-                                آفلاین
+                              <Badge
+                                variant="outline"
+                                className={`text-[9px] h-4 px-1 shrink-0 ${
+                                  cat._offlineAction === 'delete'
+                                    ? 'border-red-300 text-red-600 bg-red-50'
+                                    : cat._offlineAction === 'create'
+                                    ? 'border-emerald-300 text-emerald-600 bg-emerald-50'
+                                    : 'border-amber-300 text-amber-600 bg-amber-50'
+                                }`}
+                              >
+                                {cat._offlineAction === 'delete' ? 'حذف آفلاین' :
+                                 cat._offlineAction === 'create' ? 'جدید آفلاین' :
+                                 'ویرایش آفلاین'}
                               </Badge>
                             )}
                             {nodeHasChildren && (
                               <Badge variant="secondary" className="text-[9px] bg-gray-100 text-gray-500 h-4 px-1 shrink-0">
-                                {cat.children!.length}
+                                {toFaNum(cat.children!.length)}
                               </Badge>
                             )}
-                            {/* Show parent inline on tablet when column hidden */}
                             {cat.parent?.name && (
                               <span className="text-[10px] text-gray-400 lg:hidden truncate">
                                 ({cat.parent.name})
@@ -647,22 +1068,19 @@ export default function CategoriesPage() {
                           </div>
                         </TableCell>
 
-                        {/* Parent – desktop only */}
                         <TableCell className="py-2 text-xs text-gray-500 hidden lg:table-cell">
                           {cat.parent?.name || (
                             <span className="text-gray-300">دسته اصلی</span>
                           )}
                         </TableCell>
 
-                        {/* Product count */}
                         <TableCell className="py-2 text-center">
                           <Badge variant="outline" className="text-[10px] font-medium border-gray-200 whitespace-nowrap">
-                            {cat.productCount}
-                            <span className="hidden lg:inline"> محصول</span>
+                            {toFaNum(cat.productCount)}
+                            <span className="hidden lg:inline"> کالا</span>
                           </Badge>
                         </TableCell>
 
-                        {/* Status */}
                         <TableCell className="py-2 text-center">
                           {cat.isActive ? (
                             <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 gap-0.5">
@@ -672,29 +1090,30 @@ export default function CategoriesPage() {
                           ) : (
                             <Badge variant="outline" className="text-[10px] border-gray-300 text-gray-500">
                               <span className="hidden lg:inline">غیرفعال</span>
-                              <span className="lg:hidden">—</span>
+                              <span className="lg-hidden">—</span>
                             </Badge>
                           )}
                         </TableCell>
 
-                        {/* Actions */}
                         <TableCell className="py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                              size="sm"
                               onClick={() => openEditDialog(cat)}
-                              title="ویرایش"
+                              disabled={cat._offlineAction === 'delete'}
+                              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:text-gray-300 disabled:hover:bg-transparent"
+                              title={cat._offlineAction === 'delete' ? 'این دسته در صف حذف است' : 'ویرایش'}
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                              size="sm"
                               onClick={() => openDeleteDialog(cat)}
-                              title="حذف"
+                              disabled={cat._offlineAction === 'delete'}
+                              className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 disabled:text-gray-300 disabled:hover:bg-transparent"
+                              title={cat._offlineAction === 'delete' ? 'در صف حذف' : 'حذف'}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
@@ -707,7 +1126,6 @@ export default function CategoriesPage() {
               </Table>
             </div>
 
-            {/* ══ Mobile Card View (< md) ══ */}
             <div className="md:hidden p-2.5 space-y-2">
               {filteredCategories.map((cat) => {
                 const nodeHasChildren = cat.children && cat.children.length > 0
@@ -724,9 +1142,7 @@ export default function CategoriesPage() {
                     style={{ marginRight: `${Math.min(cat.level * 12, 36)}px` }}
                   >
                     <CardContent className="p-3">
-                      {/* Row 1: expand + icon + name + status */}
                       <div className="flex items-center gap-1.5">
-                        {/* Expand button */}
                         {nodeHasChildren ? (
                           <button
                             onClick={() => toggleExpand(cat.id)}
@@ -746,12 +1162,10 @@ export default function CategoriesPage() {
 
                         <Grid3x3 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
 
-                        {/* Name */}
                         <span className="font-semibold text-sm text-gray-900 flex-1 truncate">
                           {cat.name}
                         </span>
 
-                        {/* Status badge */}
                         {cat.isActive ? (
                           <Badge className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 shrink-0 px-1.5">
                             فعال
@@ -762,28 +1176,28 @@ export default function CategoriesPage() {
                           </Badge>
                         )}
 
-                        {/* Action buttons */}
                         <div className="flex items-center gap-0.5 shrink-0">
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            size="sm"
                             onClick={() => openEditDialog(cat)}
+                            disabled={cat._offlineAction === 'delete'}
+                            className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:text-gray-300 disabled:hover:bg-transparent"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                            size="sm"
                             onClick={() => openDeleteDialog(cat)}
+                            disabled={cat._offlineAction === 'delete'}
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 disabled:text-gray-300 disabled:hover:bg-transparent"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </div>
                       </div>
 
-                      {/* Row 2: meta info */}
                       <div className="flex items-center gap-2.5 mt-1.5 pr-8 flex-wrap">
                         {cat.parent?.name && (
                           <span className="text-[10px] text-gray-400">
@@ -791,16 +1205,27 @@ export default function CategoriesPage() {
                           </span>
                         )}
                         <span className="text-[10px] text-gray-400">
-                          {cat.productCount} محصول
+                          {toFaNum(cat.productCount)} کالا
                         </span>
                         {nodeHasChildren && (
                           <span className="text-[10px] text-blue-500">
-                            {cat.children!.length} زیردسته
+                            {toFaNum(cat.children!.length)} زیردسته
                           </span>
                         )}
                         {cat._isOffline && (
-                          <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 h-4 px-1">
-                            آفلاین
+                          <Badge
+                            variant="outline"
+                            className={`text-[9px] h-4 px-1 ${
+                              cat._offlineAction === 'delete'
+                                ? 'border-red-300 text-red-600 bg-red-50'
+                                : cat._offlineAction === 'create'
+                                ? 'border-emerald-300 text-emerald-600 bg-emerald-50'
+                                : 'border-amber-300 text-amber-600 bg-amber-50'
+                            }`}
+                          >
+                            {cat._offlineAction === 'delete' ? 'حذف آفلاین' :
+                             cat._offlineAction === 'create' ? 'جدید آفلاین' :
+                             'ویرایش آفلاین'}
                           </Badge>
                         )}
                       </div>
@@ -813,9 +1238,6 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      {/* ════════════════════════════════
-          Add Dialog
-      ════════════════════════════════ */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
         <DialogContent
           className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-md lg:max-w-lg mx-auto rounded-xl"
@@ -827,7 +1249,7 @@ export default function CategoriesPage() {
               افزودن دسته‌بندی جدید
             </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              دسته‌بندی جدید برای محصولات ایجاد کنید
+              دسته‌بندی جدید برای کالاها ایجاد کنید
             </DialogDescription>
           </DialogHeader>
 
@@ -853,7 +1275,7 @@ export default function CategoriesPage() {
                 <SelectTrigger className="h-9 sm:h-10 text-sm border-gray-200">
                   <SelectValue placeholder="انتخاب دسته والد" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[99999]">
                   <SelectItem value="none">
                     <span className="text-gray-500">بدون والد (دسته اصلی)</span>
                   </SelectItem>
@@ -867,12 +1289,19 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
-              <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
+                <span className="text-[10px] text-gray-400 mt-0.5">
+                  {formIsActive ? 'این دسته در فروشگاه نمایش داده می‌شود' : 'این دسته مخفی خواهد بود'}
+                </span>
+              </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-medium ${formIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <span className={`text-xs font-medium transition-colors ${
+                  formIsActive ? 'text-blue-600' : 'text-gray-400'
+                }`}>
                   {formIsActive ? 'فعال' : 'غیرفعال'}
                 </span>
-                <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
+                <CustomSwitch checked={formIsActive} onCheckedChange={setFormIsActive} />
               </div>
             </div>
           </div>
@@ -900,9 +1329,6 @@ export default function CategoriesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ════════════════════════════════
-          Edit Dialog
-      ════════════════════════════════ */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent
           className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-md lg:max-w-lg mx-auto rounded-xl"
@@ -940,7 +1366,7 @@ export default function CategoriesPage() {
                 <SelectTrigger className="h-9 sm:h-10 text-sm border-gray-200">
                   <SelectValue placeholder="انتخاب دسته والد" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[99999]">
                   <SelectItem value="none">
                     <span className="text-gray-500">بدون والد (دسته اصلی)</span>
                   </SelectItem>
@@ -956,12 +1382,19 @@ export default function CategoriesPage() {
             </div>
 
             <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
-              <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
+              <div className="flex flex-col">
+                <label className="text-xs font-medium text-gray-700">وضعیت فعال</label>
+                <span className="text-[10px] text-gray-400 mt-0.5">
+                  {editFormIsActive ? 'این دسته در فروشگاه نمایش داده می‌شود' : 'این دسته مخفی خواهد بود'}
+                </span>
+              </div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-medium ${editFormIsActive ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <span className={`text-xs font-medium transition-colors ${
+                  editFormIsActive ? 'text-blue-600' : 'text-gray-400'
+                }`}>
                   {editFormIsActive ? 'فعال' : 'غیرفعال'}
                 </span>
-                <Switch checked={editFormIsActive} onCheckedChange={setEditFormIsActive} />
+                <CustomSwitch checked={editFormIsActive} onCheckedChange={setEditFormIsActive} />
               </div>
             </div>
           </div>
@@ -989,9 +1422,6 @@ export default function CategoriesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ════════════════════════════════
-          Delete Dialog
-      ════════════════════════════════ */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent
           className="w-[calc(100%-1.5rem)] sm:w-full sm:max-w-sm lg:max-w-md mx-auto rounded-xl"
@@ -1009,7 +1439,6 @@ export default function CategoriesPage() {
 
           {deletingCategory && (
             <div className="space-y-3 py-3">
-              {/* Category info */}
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <Grid3x3 className="w-4 h-4 text-red-600 shrink-0" />
@@ -1018,17 +1447,16 @@ export default function CategoriesPage() {
                 {deletingCategory.parent?.name && (
                   <p className="text-xs text-gray-500 pr-6">والد: {deletingCategory.parent.name}</p>
                 )}
-                <p className="text-xs text-gray-500 pr-6">{deletingCategory.productCount} محصول</p>
+                <p className="text-xs text-gray-500 pr-6">{toFaNum(deletingCategory.productCount)} کالا</p>
               </div>
 
-              {/* Children warning */}
               {hasChildren && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="text-xs text-amber-700">
                       <p className="font-medium">
-                        این دسته‌بندی {deletingCategory.children!.length} زیردسته دارد.
+                        این دسته‌بندی {toFaNum(deletingCategory.children!.length)} زیردسته دارد.
                       </p>
                       <p className="mt-0.5">با حذف این دسته‌بندی، زیردسته‌ها تحت تأثیر قرار می‌گیرند.</p>
                     </div>
@@ -1036,16 +1464,15 @@ export default function CategoriesPage() {
                 </div>
               )}
 
-              {/* Products warning */}
               {deletingCategory.productCount > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="text-xs text-amber-700">
                       <p className="font-medium">
-                        {deletingCategory.productCount} محصول در این دسته‌بندی وجود دارد.
+                        {toFaNum(deletingCategory.productCount)} کالا در این دسته‌بندی وجود دارد.
                       </p>
-                      <p className="mt-0.5">قبل از حذف، محصولات را به دسته‌بندی دیگری منتقل کنید.</p>
+                      <p className="mt-0.5">قبل از حذف، کالاها را به دسته‌بندی دیگری منتقل کنید.</p>
                     </div>
                   </div>
                 </div>

@@ -44,7 +44,9 @@ import {
   Phone,
   Wallet,
 } from 'lucide-react'
+
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -257,18 +259,40 @@ export default function CustomersPage() {
 
       const data = await res.json()
 
-      if (data.success) {
-        toast({
-          title: editingCustomer ? 'مشتری ویرایش شد' : 'مشتری جدید اضافه شد',
-          description: editingCustomer
-            ? 'اطلاعات مشتری با موفقیت به‌روزرسانی شد'
-            : 'مشتری جدید با موفقیت به فروشگاه اضافه شد',
-        })
-        setDialogOpen(false)
-        setForm(emptyForm)
-        setEditingCustomer(null)
-        loadCustomers()
-      } else {
+   if (data.success) {
+  // ★ v11.9.0: لاگ ثبت یا ویرایش مشتری
+  const customerName = `${form.firstName.trim()} ${form.lastName.trim()}`.trim()
+  if (editingCustomer) {
+    logger.info('مشتری ویرایش شد', {
+      customerId: editingCustomer.id,
+      customerName: customerName,
+      oldName: `${editingCustomer.firstName} ${editingCustomer.lastName}`.trim(),
+      mobile: form.mobile.trim() || null,
+      nationalCode: form.nationalCode.trim() || null,
+      creditLimit: form.creditLimit ? Number(form.creditLimit) : 0,
+    })
+  } else {
+    logger.info('مشتری جدید ثبت شد', {
+      customerId: data.data?.id,
+      customerName: customerName,
+      mobile: form.mobile.trim() || null,
+      nationalCode: form.nationalCode.trim() || null,
+      creditLimit: form.creditLimit ? Number(form.creditLimit) : 0,
+    })
+  }
+
+  toast({
+    title: editingCustomer ? 'مشتری ویرایش شد' : 'مشتری جدید اضافه شد',
+    description: editingCustomer
+      ? 'اطلاعات مشتری با موفقیت به‌روزرسانی شد'
+      : 'مشتری جدید با موفقیت به فروشگاه اضافه شد',
+  })
+  setDialogOpen(false)
+  setForm(emptyForm)
+  setEditingCustomer(null)
+  loadCustomers()
+}
+      else {
         toast({
           title: 'خطا',
           description: data.error || 'خطا در ارتباط با سرور',
@@ -312,12 +336,22 @@ export default function CustomersPage() {
 
       const data = await res.json()
 
-      if (data.success) {
-        toast({ title: 'مشتری حذف شد', description: 'مشتری با موفقیت حذف شد' })
-        setDeleteDialogOpen(false)
-        setDeletingCustomer(null)
-        loadCustomers()
-      } else {
+    if (data.success) {
+  // ★ v11.9.0: لاگ حذف مشتری (قبل از null شدن deletingCustomer)
+  logger.info('مشتری حذف شد', {
+    customerId: deletingCustomer.id,
+    customerName: `${deletingCustomer.firstName} ${deletingCustomer.lastName}`.trim(),
+    customerCode: deletingCustomer.code,
+    mobile: deletingCustomer.mobile,
+    currentBalance: deletingCustomer.currentBalance,
+  })
+
+  toast({ title: 'مشتری حذف شد', description: 'مشتری با موفقیت حذف شد' })
+  setDeleteDialogOpen(false)
+  setDeletingCustomer(null)
+  loadCustomers()
+}
+       else {
         toast({
           title: 'خطا',
           description: data.error || 'خطا در حذف مشتری',

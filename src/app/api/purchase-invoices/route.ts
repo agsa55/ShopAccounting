@@ -1,9 +1,10 @@
 // ============================================================================
-// src/app/api/purchase-invoices/route.ts — v8.8.6
-// فاکتور خرید با سند حسابداری خودکار + موجودی + میانگین وزنی
-// ★ v8.8.6: فیکس اساسی انتخاب حساب (استفاده صحیح از accounts-auto-seed)
+// src/app/api/purchase-invoices/route.ts — v8.9.3 (Fixed Check Display After Refresh)
+// ★ v8.9.3: رفع باگ عدم نمایش اطلاعات چک بعد از رفرش (Manual Join تضمینی)
+// ★ v8.9.2: رفع باگ عدم نمایش اطلاعات چک بعد از رفرش
+// ★ v8.9.0: پشتیبانی از خرید با چک + سند حسابداری خودکار
+// ★ استفاده از حساب ۲۰۵۰ (چک‌های پرداختنی) برای جلوگیری از سند تکراری
 // ============================================================================
-
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
@@ -12,129 +13,22 @@ import {
   getStandardAccountIds,
 } from '@/lib/accounts-auto-seed'
 
-// ═══════════════════════════════════════════════════════════════
-//  Helper: لیست فاکتورها با relation
-// ═══════════════════════════════════════════════════════════════
-async function safeInvoiceFindMany(
-  tenantDb: any,
-  where: any,
-  orderBy: any,
-  skip: number,
-  take: number
-) {
-  const invoices = await tenantDb.purchaseInvoice.findMany({
-    where, orderBy, skip, take,
-  })
+import { generateJournalNumber } from '@/lib/journal-number-generator'
+import { syncOpeningBalanceWithInventory } from '@/lib/sync-opening-balance'
 
-  if (invoices.length === 0) return invoices
-
-  const supplierIds = [
-    ...new Set(invoices.map((i: any) => i.supplierId).filter(Boolean)),
-  ]
-  const warehouseIds = [
-    ...new Set(invoices.map((i: any) => i.warehouseId).filter(Boolean)),
-  ]
-
-  const [suppliers, warehouses] = await Promise.all([
-    supplierIds.length > 0
-      ? tenantDb.supplier.findMany({
-          where: { id: { in: supplierIds } },
-          select: { id: true, name: true, code: true },
-        })
-      : [],
-    warehouseIds.length > 0
-      ? tenantDb.warehouse.findMany({
-          where: { id: { in: warehouseIds } },
-          select: { id: true, name: true },
-        })
-      : [],
-  ])
-
-  const suppliersMap  = new Map(suppliers.map((s: any)  => [s.id, s]))
-  const warehousesMap = new Map(warehouses.map((w: any) => [w.id, w]))
-
-  return invoices.map((inv: any) => ({
-    ...inv,
-    supplier:  inv.supplierId  ? suppliersMap.get(inv.supplierId)   ?? null : null,
-    warehouse: inv.warehouseId ? warehousesMap.get(inv.warehouseId) ?? null : null,
-  }))
-}
+// ★ v8.9.3: جلوگیری از کش Next.js (علت اصلی عدم نمایش بعد از رفرش)
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // ═══════════════════════════════════════════════════════════════
-//  Helper: شماره سند بعدی
-// ═══════════════════════════════════════════════════════════════
-async function nextJENumber(tenantId: string, tx: any): Promise<string> {
-  const count = await tx.journalEntry.count({ where: { tenantId } })
-  return `JE-${(count + 1).toString().padStart(6, '0')}`
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Helper: ساخت و ذخیره سند حسابداری
-// ═══════════════════════════════════════════════════════════════
-async function buildAndSaveJournal(opts: {
-  tenantId:    string
-  tx:          any
-  date:        Date
-  description: string
-  sourceType:  string
-  sourceId:    string
-  createdBy:   string | null
-  lines: Array<{
-    accountId:   string
-    debit:       number
-    credit:      number
-    description: string
-  }>
-}): Promise<any> {
-  const { tenantId, tx, date, description, sourceType, sourceId, createdBy, lines } = opts
-
-  if (lines.length < 2) {
-    throw new Error(`حداقل ۲ خط سند نیاز است (الان: ${lines.length})`)
-  }
-
-  const totalDebit  = lines.reduce((s, l) => s + (l.debit  || 0), 0)
-  const totalCredit = lines.reduce((s, l) => s + (l.credit || 0), 0)
-
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(`عدم تراز سند: بدهکار=${totalDebit} بستانکار=${totalCredit}`)
-  }
-
-  const number = await nextJENumber(tenantId, tx)
-
-  const entry = await tx.journalEntry.create({
-    data: {
-      tenantId,
-      number,
-      date,
-      description,
-      status:     'posted',
-      sourceType,
-      sourceId,
-      totalDebit,
-      totalCredit,
-      createdBy,
-      lines: { create: lines },
-    },
-  })
-
-  console.log(
-    `[Journal] ${number} ساخته شد — ${lines.length} خط` +
-    ` — بدهکار: ${totalDebit} — بستانکار: ${totalCredit}`
-  )
-
-  return entry
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  GET — لیست فاکتورهای خرید
+//  GET
 // ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('accounting')(
-  async (req: NextRequest, _ctx: any, tenant: any) => {
+  async (req: NextRequest, ctx: any, tenant: any) => {
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
       const { searchParams } = new URL(req.url)
-
       const page       = parseInt(searchParams.get('page')       || '1')
       const limit      = parseInt(searchParams.get('limit')      || '50')
       const status     = searchParams.get('status')
@@ -151,26 +45,159 @@ export const GET = withTenantAndPermission('accounting')(
         ]
       }
 
-      const [invoices, total] = await Promise.all([
-        safeInvoiceFindMany(
-          tenantDb, where,
-          { createdAt: 'desc' },
-          (page - 1) * limit,
-          limit
-        ),
-        tenantDb.purchaseInvoice.count({ where }),
-      ])
+      let invoices: any[] = []
+
+      try {
+        // ★ v8.9.3: حذف Checks از include و استفاده از Manual Join تضمینی
+        // این کار از خطای Prisma (به دلیل named relation) جلوگیری می‌کند
+        const rawInvoices = await tenantDb.purchaseInvoice.findMany({
+          where,
+          include: {
+            Supplier: {
+              select: { id: true, name: true, code: true }
+            },
+            Warehouse: {
+              select: { id: true, name: true, code: true }
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        })
+
+        invoices = rawInvoices.map((inv: any) => ({
+          ...inv,
+          supplier: inv.Supplier || null,
+          warehouse: inv.Warehouse || null,
+        }))
+      } catch (err: any) {
+        console.error('[PurchaseInvoices GET] findMany with include error:', err?.message)
+        // Fallback: بدون include
+        try {
+          const rawFallback = await tenantDb.purchaseInvoice.findMany({
+            where,
+            select: {
+              id: true, number: true, invoiceDate: true, status: true,
+              paymentType: true, totalAmount: true, paidAmount: true,
+              supplierId: true, warehouseId: true, description: true, createdAt: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+          })
+          invoices = rawFallback
+        } catch (err2: any) {
+          console.error('[PurchaseInvoices GET] select fallback also failed:', err2?.message)
+          invoices = []
+        }
+      }
+
+      const total = await tenantDb.purchaseInvoice.count({ where })
+
+      // ★ v8.9.3: اگر supplier یا warehouse در include نبود (یعنی fallback اجرا شد)، دستی join کن
+      if (invoices.length > 0 && invoices[0].supplier === undefined) {
+        console.log('[PurchaseInvoices GET] Manual join for supplier and warehouse...')
+        const supplierIds  = [...new Set(invoices.map((inv: any) => inv.supplierId).filter(Boolean))]
+        const warehouseIds = [...new Set(invoices.map((inv: any) => inv.warehouseId).filter(Boolean))]
+
+        let suppliers: any[] = []
+        if (supplierIds.length > 0) {
+          suppliers = await tenantDb.supplier.findMany({
+            where: { id: { in: supplierIds } },
+            select: { id: true, name: true, code: true }
+          })
+        }
+
+        let warehouses: any[] = []
+        if (warehouseIds.length > 0) {
+          warehouses = await tenantDb.warehouse.findMany({
+            where: { id: { in: warehouseIds } },
+            select: { id: true, name: true, code: true }
+          })
+        }
+
+        const supplierMap  = new Map(suppliers.map((s: any) => [s.id, s]))
+        const warehouseMap = new Map(warehouses.map((w: any) => [w.id, w]))
+
+        invoices = invoices.map((inv: any) => ({
+          ...inv,
+          supplier:  inv.supplierId  ? supplierMap.get(inv.supplierId)   || null : null,
+          warehouse: inv.warehouseId ? warehouseMap.get(inv.warehouseId) || null : null,
+        }))
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v8.9.3: Manual Join تضمینی برای چک‌ها
+      // این بخش حتی اگر include با خطا مواجه شود، چک‌ها را مستقیماً fetch می‌کند
+      // ═══════════════════════════════════════════════════════════════
+      const invoiceIds = invoices.map((inv: any) => inv.id).filter(Boolean)
+      const checksMap = new Map()
+
+      if (invoiceIds.length > 0) {
+        try {
+          const checks = await tenantDb.check.findMany({
+            where: {
+              purchaseInvoiceId: { in: invoiceIds },
+              tenantId,
+            },
+            select: {
+              id: true,
+              status: true,
+              checkNumber: true,
+              bankName: true,
+              branchName: true,
+              dueDate: true,
+              payeeName: true,
+              amount: true,
+              purchaseInvoiceId: true,
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+
+          for (const c of checks) {
+            if (c.purchaseInvoiceId && !checksMap.has(c.purchaseInvoiceId)) {
+              checksMap.set(c.purchaseInvoiceId, c)
+            }
+          }
+          console.log(`[PurchaseInvoices GET] ✅ Found ${checks.length} checks for ${invoiceIds.length} invoices`)
+        } catch (err: any) {
+          console.warn('[PurchaseInvoices GET] ⚠️ Failed to fetch checks manually:', err?.message)
+        }
+      }
+
+      // ★ v8.9.3: اتصال چک‌ها به فاکتورها
+      const invoicesWithCheckStatus = invoices.map((inv: any) => {
+        const check = checksMap.get(inv.id) || null
+        return {
+          ...inv,
+          checkStatus: check?.status || null,
+          checkInfo: check
+            ? {
+                id: check.id,
+                status: check.status,
+                checkNumber: check.checkNumber,
+                bankName: check.bankName,
+                branchName: check.branchName,
+                dueDate: check.dueDate instanceof Date
+                  ? check.dueDate.toISOString().split('T')[0]
+                  : (typeof check.dueDate === 'string' ? check.dueDate.substring(0, 10) : check.dueDate),
+                payeeName: check.payeeName,
+                amount: check.amount,
+              }
+            : null,
+        }
+      })
 
       return NextResponse.json({
         success: true,
-        data: invoices,
+        data: invoicesWithCheckStatus,
         pagination: {
           page, limit, total,
           totalPages: Math.ceil(total / limit),
         },
       })
     } catch (error: any) {
-      console.error('[PurchaseInvoices GET]', error?.message)
+      console.error('[PurchaseInvoices GET] error:', error)
       return NextResponse.json(
         { success: false, error: 'خطا در بارگذاری فاکتورهای خرید' },
         { status: 500 }
@@ -179,32 +206,135 @@ export const GET = withTenantAndPermission('accounting')(
   }
 )
 
+// ─── ایجاد سند حسابداری خودکار برای خرید ────────────────────
+async function createPurchaseAutoJournalEntry(
+  tx: any,
+  tenantId: string,
+  invoice: any,
+  paymentType: string,
+  inventoryAccountId: string | null,
+  payablesAccountId: string | null,
+  checkPayableAccountId: string | null,
+  cashAccountId: string | null,
+  vatAccountId: string | null,
+) {
+  try {
+    console.log('[PurchaseJE] 🚀 Creating auto journal entry for:', invoice.number, 'paymentType:', paymentType)
+    const totalAmount = invoice.totalAmount || 0
+    if (totalAmount <= 0) {
+      console.log('[PurchaseJE] ⏭️ Skipped: totalAmount <= 0')
+      return
+    }
+  // ★ v11.7.1: تولید شماره منحصر به فرد سند (جلوگیری از تکرار)
+const jeNumber = await generateJournalNumber(tx, tenantId)
+console.log('[PurchaseJE] 📝 Generated journal number:', jeNumber)
+    const lines: any[] = []
+    const pt = (paymentType || 'cash').toLowerCase()
+    const isCreditOrCheck = pt === 'credit' || pt === 'check'
+    const netAmount = invoice.subTotal - invoice.discountAmount
+
+    if (inventoryAccountId) {
+      lines.push({
+        accountId: inventoryAccountId,
+        debit: netAmount,
+        credit: 0,
+        description: 'بدهکار: افزایش موجودی کالا بابت خرید',
+      })
+    }
+
+    if (invoice.taxAmount > 0 && vatAccountId) {
+      lines.push({
+        accountId: vatAccountId,
+        debit: invoice.taxAmount,
+        credit: 0,
+        description: 'بدهکار: مالیات بر ارزش افزوده خرید',
+      })
+    }
+
+    if (isCreditOrCheck) {
+      let creditAccountId: string | null = null
+      let description = ''
+      if (pt === 'check') {
+        creditAccountId = checkPayableAccountId || payablesAccountId || null
+        description = 'بستانکار: چک پرداختنی بابت فاکتور خرید'
+        console.log('[PurchaseJE] 💳 Check payment - using account:', creditAccountId, '(2050 preferred)')
+      } else {
+        creditAccountId = payablesAccountId || null
+        description = 'بستانکار: بستانکاران تجاری بابت فاکتور خرید'
+        console.log('[PurchaseJE] 💰 Credit payment - using account:', creditAccountId)
+      }
+      if (creditAccountId) {
+        lines.push({
+          accountId: creditAccountId,
+          debit: 0,
+          credit: totalAmount,
+          description,
+        })
+      }
+    } else {
+      if (cashAccountId) {
+        lines.push({
+          accountId: cashAccountId,
+          debit: 0,
+          credit: totalAmount,
+          description: 'بستانکار: پرداخت نقدی بابت فاکتور خرید',
+        })
+      }
+    }
+
+    if (lines.length >= 2) {
+      const totalDebit  = lines.reduce((sum: number, l: any) => sum + l.debit, 0)
+      const totalCredit = lines.reduce((sum: number, l: any) => sum + l.credit, 0)
+      console.log('[PurchaseJE] 💾 Creating journal entry:', {
+        number: jeNumber, totalDebit, totalCredit,
+        balanced: Math.abs(totalDebit - totalCredit) < 0.01,
+        paymentType: pt,
+      })
+      await tx.journalEntry.create({
+        data: {
+          number: jeNumber,
+          date: invoice.invoiceDate || invoice.createdAt || new Date(),
+          description: `سند خودکار بابت فاکتور خرید ${invoice.number}${isCreditOrCheck ? ` (${pt === 'check' ? 'چک' : 'نسیه'})` : ''}`,
+          status: 'posted',
+          sourceType: 'purchase_invoice',
+          sourceId: invoice.id,
+          totalDebit,
+          totalCredit,
+          tenantId,
+          lines: { create: lines },
+        },
+      })
+      console.log('[PurchaseJE] ✅ Journal entry created successfully:', jeNumber)
+    } else {
+      console.warn('[PurchaseJE] ⚠️ Not enough lines to create journal entry:', lines.length)
+    }
+  } catch (error: any) {
+    console.error('[PurchaseJE] ❌ Failed to create auto journal entry:', error?.message)
+    console.error('[PurchaseJE] ❌ Error stack:', error?.stack)
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
-//  POST — ایجاد فاکتور خرید
+//  POST
 // ═══════════════════════════════════════════════════════════════
 export const POST = withTenantAndPermission('accounting')(
-  async (req: NextRequest, _ctx: any, tenant: any) => {
+  async (req: NextRequest, ctx: any, tenant: any) => {
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
-      const body     = await req.json()
-
+      const body = await req.json()
       const {
-        items,
-        supplierId,
-        warehouseId,
-        paymentType,
-        description,
-        invoiceDate,
+        items, supplierId, warehouseId, paymentType,
+        description, invoiceDate, checkData,
       } = body
 
-      // ── اعتبارسنجی ─────────────────────────────────────────────
       if (!items || items.length === 0) {
         return NextResponse.json(
           { success: false, error: 'حداقل یک آیتم الزامی است' },
           { status: 400 }
         )
       }
+
       if (!warehouseId) {
         return NextResponse.json(
           { success: false, error: 'انتخاب انبار الزامی است' },
@@ -212,23 +342,10 @@ export const POST = withTenantAndPermission('accounting')(
         )
       }
 
-      const warehouse = await tenantDb.warehouse.findFirst({
-        where: { id: warehouseId, tenantId },
-      })
-      if (!warehouse) {
-        return NextResponse.json(
-          { success: false, error: 'انبار یافت نشد' },
-          { status: 400 }
-        )
-      }
-
-      // ── شماره فاکتور ────────────────────────────────────────────
-      const count         = await tenantDb.purchaseInvoice.count({ where: { tenantId } })
+      const count = await tenantDb.purchaseInvoice.count({ where: { tenantId } })
       const invoiceNumber = `PUR-${(count + 1).toString().padStart(5, '0')}`
 
-      // ── محاسبه مبالغ ────────────────────────────────────────────
       let subTotal = 0, discountAmount = 0, taxAmount = 0
-
       const invoiceItems = items.map((item: any) => {
         const lineTotal =
           item.quantity * item.unitPrice
@@ -249,75 +366,55 @@ export const POST = withTenantAndPermission('accounting')(
       })
 
       const totalAmount     = subTotal - discountAmount + taxAmount
-      const isCredit        = (paymentType || 'cash').toLowerCase() === 'credit'
-      const paidAmount      = isCredit ? 0           : totalAmount
-      const remainingAmount = isCredit ? totalAmount  : 0
+      const pt = (paymentType || 'cash').toLowerCase()
+      const isCreditOrCheck = pt === 'credit' || pt === 'check'
+      const paidAmount      = isCreditOrCheck ? 0           : totalAmount
+      const remainingAmount = isCreditOrCheck ? totalAmount  : 0
 
-      // ── ★★★ گرفتن حساب‌ها قبل از transaction ──────────────────
-      // ensureDefaultAccounts اول seed می‌کنه، بعد getStandardAccountIds
-      // می‌خونه — این تضمین می‌کنه همیشه حساب درست برگردونه
-      await ensureDefaultAccounts(tenantId)
-      const accIds = await getStandardAccountIds(tenantId)
-
-      // ★★★ لاگ کامل برای debug
-      console.log('[PurchaseInvoice POST] Resolved account IDs:', {
-        cash:            accIds.cashAccountId,        // باید 1010 باشه
-        inventory:       accIds.inventoryAccountId,   // باید 1200 باشه
-        tradePayable:    accIds.tradePurchasableId,   // باید 2010 باشه (نسیه)
-        generalPayable:  accIds.payablesAccountId,    // باید 2000 باشه
-        tax:             accIds.taxAccountId,          // باید 2150 باشه
+      const invoice = await tenantDb.purchaseInvoice.create({
+        data: {
+          tenantId,
+          supplierId:      supplierId || null,
+          number:          invoiceNumber,
+          invoiceDate:     invoiceDate ? new Date(invoiceDate) : new Date(),
+          status:          'confirmed',
+          paymentType:     pt,
+          subTotal,
+          discountAmount,
+          taxAmount,
+          totalAmount,
+          paidAmount,
+          remainingAmount,
+          warehouseId,
+          description:     description || null,
+        },
       })
 
-      // ── Transaction ─────────────────────────────────────────────
-      const txClient = (tenantDb as any).$transaction ? tenantDb : db.client
+      console.log('[PurchaseInvoice POST] ✅ Invoice created:', {
+        id: invoice.id, number: invoice.number, paymentType: pt,
+      })
 
-      const result = await txClient.$transaction(async (tx: any) => {
-
-        // ─── ۱. ایجاد فاکتور ─────────────────────────────────────
-        const invoice = await tx.purchaseInvoice.create({
+      for (const item of invoiceItems) {
+        await tenantDb.purchaseInvoiceItem.create({
           data: {
-            tenantId,
-            supplierId:      supplierId || null,
-            number:          invoiceNumber,
-            invoiceDate:     invoiceDate ? new Date(invoiceDate) : new Date(),
-            status:          'confirmed',
-            paymentType:     (paymentType || 'cash').toLowerCase(),
-            subTotal,
-            discountAmount,
-            taxAmount,
-            totalAmount,
-            paidAmount,
-            remainingAmount,
-            warehouseId,
-            description:     description || null,
-            cashierId:       tenant.user?.id || null,
+            purchaseInvoiceId: invoice.id,
+            productId:         item.productId,
+            productName:       item.productName,
+            quantity:          item.quantity,
+            unitPrice:         item.unitPrice,
+            discountAmount:    item.discountAmount,
+            taxAmount:         item.taxAmount,
+            lineTotal:         item.lineTotal,
           },
         })
 
-        // ─── ۲. آیتم‌ها + موجودی انبار ──────────────────────────
-        for (const item of invoiceItems) {
-          // ثبت آیتم فاکتور
-          await tx.purchaseInvoiceItem.create({
-            data: {
-              purchaseInvoiceId: invoice.id,
-              productId:         item.productId,
-              productName:       item.productName,
-              quantity:          item.quantity,
-              unitPrice:         item.unitPrice,
-              discountAmount:    item.discountAmount,
-              taxAmount:         item.taxAmount,
-              lineTotal:         item.lineTotal,
-            },
-          })
-
-          if (item.productId) {
-            // ★ میانگین وزنی
-            const netUnitCost =
-              item.quantity > 0
-                ? (item.unitPrice * item.quantity - item.discountAmount) / item.quantity
-                : item.unitPrice
-
-            const stockLevel = await tx.stockLevel.findUnique({
+        if (item.productId) {
+          const netUnitCost =
+            item.quantity > 0
+              ? (item.unitPrice * item.quantity - item.discountAmount) / item.quantity
+              : item.unitPrice
+          try {
+            const stockLevel = await tenantDb.stockLevel.findUnique({
               where: {
                 warehouseId_productId: {
                   warehouseId,
@@ -325,14 +422,12 @@ export const POST = withTenantAndPermission('accounting')(
                 },
               },
             })
-
             if (stockLevel) {
               const oldValue   = stockLevel.quantity * stockLevel.averageCost
               const newValue   = oldValue + item.quantity * netUnitCost
               const newQty     = stockLevel.quantity + item.quantity
               const newAvgCost = newQty > 0 ? newValue / newQty : netUnitCost
-
-              await tx.stockLevel.update({
+              await tenantDb.stockLevel.update({
                 where: {
                   warehouseId_productId: {
                     warehouseId,
@@ -345,7 +440,7 @@ export const POST = withTenantAndPermission('accounting')(
                 },
               })
             } else {
-              await tx.stockLevel.create({
+              await tenantDb.stockLevel.create({
                 data: {
                   tenantId,
                   warehouseId,
@@ -355,9 +450,7 @@ export const POST = withTenantAndPermission('accounting')(
                 },
               })
             }
-
-            // ★ حرکت انبار
-            await tx.stockMovement.create({
+            await tenantDb.stockMovement.create({
               data: {
                 tenantId,
                 productId:     item.productId,
@@ -370,147 +463,139 @@ export const POST = withTenantAndPermission('accounting')(
                 description:   `فاکتور خرید ${invoiceNumber}`,
               },
             })
-
-            // ★ به‌روزرسانی Product
-            await tx.product.update({
+            await tenantDb.product.update({
               where: { id: item.productId },
               data: {
                 purchasePrice: netUnitCost,
                 currentStock:  { increment: item.quantity },
               },
             })
+          } catch (stockErr: any) {
+            console.warn('[PurchaseInvoice POST] Stock update failed (non-blocking):', stockErr?.message)
           }
         }
+      }
 
-        // ─── ۳. سند حسابداری خودکار ─────────────────────────────
+      try {
+        await ensureDefaultAccounts(tenantId)
+        const accountIds = await getStandardAccountIds(tenantId)
+        await createPurchaseAutoJournalEntry(
+          tenantDb, tenantId, invoice, pt,
+          accountIds.inventoryAccountId,
+          accountIds.payablesAccountId,
+          accountIds.checkPayableAccountId || (accountIds as any).checkPayableId,
+          accountIds.cashAccountId,
+          accountIds.vatAccountId,
+        )
+      } catch (jeErr: any) {
+        console.warn('[PurchaseInvoice POST] Auto journal failed (non-blocking):', jeErr?.message)
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v11.0: همگام‌سازی سند افتتاحیه با موجودی جدید
+      // ═══════════════════════════════════════════════════════════════
+      syncOpeningBalanceWithInventory(tenantId, tenantDb)
+        .then((result) => {
+          console.log('[PurchaseInvoice POST] 🔄 Opening balance sync result:', result.message)
+        })
+        .catch((err) => {
+          console.warn('[PurchaseInvoice POST] ⚠️ Opening balance sync failed (non-blocking):', err?.message)
+        })
+
+      let createdCheck: any = null
+      if (pt === 'check' && checkData) {
         try {
-          const lines: Array<{
-            accountId: string
-            debit: number
-            credit: number
-            description: string
-          }> = []
-
-          const netAmount = subTotal - discountAmount
-
-          // ★★★ بدهکار: موجودی کالا (1200)
-          if (!accIds.inventoryAccountId) {
-            throw new Error('حساب موجودی کالا (1200) یافت نشد')
+          let finalPayeeName = checkData.payeeName?.trim() || null
+          if (!finalPayeeName && supplierId) {
+            try {
+              const supplier = await tenantDb.supplier.findUnique({
+                where: { id: supplierId },
+                select: { name: true }
+              })
+              if (supplier?.name) {
+                finalPayeeName = supplier.name
+              }
+            } catch (err: any) {
+              console.warn('[PurchaseInvoice POST] Failed to fetch supplier name:', err?.message || 'خطای نامشخص')
+            }
           }
-          lines.push({
-            accountId:   accIds.inventoryAccountId,
-            debit:       netAmount,
-            credit:      0,
-            description: `بدهکار: خرید کالا — ${invoiceNumber}`,
+          createdCheck = await tenantDb.check.create({
+            data: {
+              tenantId,
+              type: 'payable',
+              checkNumber: checkData.checkNumber?.trim() || `CHK-${Date.now().toString().slice(-6)}`,
+              bankName: checkData.bankName?.trim() || 'نامشخص',
+              branchName: checkData.branchName?.trim() || null,
+              amount: totalAmount,
+              issueDate: checkData.issueDate ? new Date(checkData.issueDate) : new Date(),
+              dueDate: checkData.dueDate ? new Date(checkData.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              supplierId: supplierId || null,
+              payeeName: finalPayeeName || 'تامین‌کننده',
+              description: `چک پرداختنی بابت فاکتور خرید ${invoiceNumber}`,
+              status: 'pending',
+              purchaseInvoiceId: invoice.id,
+            },
           })
-
-          // ★★★ بدهکار: مالیات (2150) — فقط اگه مالیات داشت
-          if (taxAmount > 0 && accIds.taxAccountId) {
-            lines.push({
-              accountId:   accIds.taxAccountId,
-              debit:       taxAmount,
-              credit:      0,
-              description: `بدهکار: مالیات خرید — ${invoiceNumber}`,
-            })
-          }
-
-          // ★★★ بستانکار: انتخاب حساب درست
-          //   نقدی  → 1010 صندوق فروشگاه (cashAccountId)
-          //   نسیه  → 2010 بستانکاران تجاری (tradePurchasableId)
-          //          fallback: 2000 پرداختنی (payablesAccountId)
-          //          fallback نهایی: 1010 صندوق
-          let creditAccountId: string | null = null
-          let creditLabel = ''
-
-          if (isCredit) {
-            creditAccountId =
-              accIds.tradePurchasableId   // 2010 بستانکاران تجاری ← درست
-              ?? accIds.payablesAccountId // 2000 پرداختنی ← fallback
-              ?? accIds.cashAccountId     // 1010 ← آخرین راه
-            creditLabel = 'بستانکاران تجاری (نسیه)'
-          } else {
-            creditAccountId = accIds.cashAccountId  // 1010 صندوق ← همیشه
-            creditLabel = 'صندوق فروشگاه'
-          }
-
-          if (!creditAccountId) {
-            throw new Error(
-              isCredit
-                ? 'حساب بستانکاران تجاری (2010) یافت نشد'
-                : 'حساب صندوق (1010) یافت نشد'
-            )
-          }
-
-          lines.push({
-            accountId:   creditAccountId,
-            debit:       0,
-            credit:      totalAmount,
-            description: `بستانکار: ${creditLabel} — ${invoiceNumber}`,
+          console.log('[PurchaseInvoice POST] ✅ Check created:', {
+            id: createdCheck.id,
+            checkNumber: createdCheck.checkNumber,
+            payeeName: createdCheck.payeeName,
+            amount: totalAmount,
           })
-
-          console.log('[PurchaseInvoice POST] Journal lines:', lines.map(l => ({
-            accountId: l.accountId,
-            debit:     l.debit,
-            credit:    l.credit,
-          })))
-
-          // ★ ساخت سند
-          const journalEntry = await buildAndSaveJournal({
-            tenantId,
-            tx,
-            date:        invoice.invoiceDate || new Date(),
-            description: `سند خودکار — فاکتور خرید ${invoiceNumber}`,
-            sourceType:  'purchase_invoice',
-            sourceId:    invoice.id,
-            createdBy:   tenant.user?.id || null,
-            lines,
-          })
-
-          // ★ ربط سند به فاکتور
-          await tx.purchaseInvoice.update({
-            where: { id: invoice.id },
-            data:  { journalEntryId: journalEntry.id },
-          })
-
-          console.log(
-            `[PurchaseInvoice POST] سند ${journalEntry.number} ثبت شد:`,
-            `Dr.1200(${netAmount}) / Cr.${isCredit ? '2010' : '1010'}(${totalAmount})`
-          )
-
-        } catch (jeErr: any) {
-          // سند اختیاری — فاکتور ذخیره می‌شه
-          console.warn(
-            '[PurchaseInvoice POST] Journal failed (non-blocking):',
-            jeErr?.message
-          )
+        } catch (checkErr: any) {
+          console.error('[PurchaseInvoice POST] ❌ Check creation failed:', checkErr?.message)
+          createdCheck = { error: true, errorMessage: checkErr?.message, errorCode: checkErr?.code, errorMeta: checkErr?.meta }
         }
+      }
 
-        // ─── ۴. به‌روزرسانی مانده تامین‌کننده (نسیه) ────────────
-        if (isCredit && supplierId) {
-          try {
-            await tx.supplier.update({
-              where: { id: supplierId },
-              data:  { currentBalance: { increment: totalAmount } },
-            })
-          } catch (supErr: any) {
-            console.warn(
-              '[PurchaseInvoice POST] Supplier balance failed:',
-              supErr?.message
-            )
-          }
-        }
-
-        return invoice
-      })
+      // ═══════════════════════════════════════════════════════════════
+      // ★ v11.6.3: ثبت خودکار تراکنش خروجی صندوق (فاکتور خرید نقدی)
+      // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش خروجی صندوق (بدون shiftId)
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ★ v11.6.4: ثبت خودکار تراکنش خروجی صندوق
+// ═══════════════════════════════════════════════════════════════
+try {
+  const cashierId = tenant.user?.id || null
+  
+  if (paidAmount > 0 && pt === 'cash' && cashierId) {
+    await (tenantDb as any).cashMovement.create({
+      data: {
+        shiftId: null,  // ★ موقتاً null
+        tenantId,
+        cashierId,
+        transactionType: 'purchase',
+        paymentMethod: 'cash',
+        amount: paidAmount,
+        type: 'out',
+        description: `خرید فاکتور ${invoiceNumber}`,
+      },
+    })
+    
+    console.log('[PurchaseInvoice POST] ✅ CashMovement created:', {
+      type: 'purchase',
+      amount: paidAmount,
+      cashierId,
+      invoiceNumber,
+    })
+  }
+} catch (cashErr: any) {
+  console.warn('[PurchaseInvoice POST] ⚠️ CashMovement creation failed:', cashErr?.message)
+}
+      // ═══════════════════════════════════════════════════════════════
 
       return NextResponse.json({
         success: true,
-        data:    result,
-        message: `فاکتور خرید ${invoiceNumber} با موفقیت ثبت شد`,
+        data: {
+          ...invoice,
+          check: createdCheck,
+        },
+        message: `فاکتور خرید ${invoiceNumber} با موفقیت ثبت شد${createdCheck ? ' و چک پرداختنی ایجاد شد' : ''}`,
       }, { status: 201 })
-
     } catch (error: any) {
-      console.error('[PurchaseInvoices POST]', error?.message)
+      console.error('[PurchaseInvoices POST] error:', error)
       return NextResponse.json(
         { success: false, error: error?.message || 'خطا در ایجاد فاکتور خرید' },
         { status: 500 }

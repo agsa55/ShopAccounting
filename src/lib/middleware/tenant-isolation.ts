@@ -1,7 +1,13 @@
 // ============================================================================
-// src/lib/middleware/tenant-isolation.ts — Tenant Isolation Middleware (v3.36.4 ★★★)
+// src/lib/middleware/tenant-isolation.ts — Tenant Isolation Middleware (v4.0 ★★★)
 // ----------------------------------------------------------------------------
-// ★★★ v3.36.4: پشتیبانی کامل از توکن‌های پورتال مشتری
+// ★★★ v4.0: اصلاحات امنیتی بحرانی:
+//   ★ جایگزینی decodeJwtPayload (بدون verify) با jwt.verify واقعی
+//   ★ جلوگیری از دسترسی با JWT جعلی (Tenant Spoofing)
+//   ★ افزودن fallback با JWT_REFRESH_SECRET
+//   ★ Fail-closed: اگر secret نباشد، درخواست رد می‌شود
+//
+// ★★★ v3.36.4 (حفظ شد): پشتیبانی کامل از توکن‌های پورتال مشتری
 //   - اگر payload.type === 'portal' باشد، کاربر به‌عنوان مشتری شناخته می‌شود
 //   - نقش 'Customer' به او داده می‌شود
 //   - برای مسیرهای عمومی (pos برای پرداخت آنلاین، customers خودش) دسترسی داده می‌شود
@@ -16,6 +22,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { checkSubscriptionStatus } from '@/lib/plan-limits'
+
+// ★★★ v4.0: import واقعی jsonwebtoken برای verify امضا
+import jwt from 'jsonwebtoken'
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v4.1: لیست API‌هایی که حتی در حالت قفل هم مجاز هستند
+// این لیست در سطح module تعریف شده تا در همه توابع قابل دسترس باشد
+// ═══════════════════════════════════════════════════════════════
+const ALLOWED_WHEN_EXPIRED = [
+  '/api/subscription/update-status',       // نمایش وضعیت و قیمت
+  '/api/payments/create-update-payment',   // ایجاد تراکنش پرداخت
+  '/api/payments/verify-update-payment',   // callback پرداخت
+  '/api/tenants/trial-check',              // بررسی وضعیت tenant
+  '/api/auth/verify',                      // احراز هویت
+  '/api/auth/login',                       // لاگین
+  '/api/auth/logout',                      // خروج
+  '/api/setup-wizard/status',              // وضعیت ویزارد
+]
 
 export interface TenantContext {
   user: any
@@ -104,14 +128,47 @@ function extractToken(req: NextRequest): string | null {
   return null
 }
 
-function decodeJwtPayload(token: string): any {
+// ★★★ v4.0: تابع verify واقعی JWT (جایگزین decodeJwtPayload ناامن)
+// ─────────────────────────────────────────────────────────────────────────────
+// قبلاً فقط payload را decode می‌کرد بدون بررسی امضا:
+//   const payload = Buffer.from(parts[1], 'base64url').toString('utf-8')
+//   return JSON.parse(payload)
+// این یعنی هر کسی می‌توانست JWT جعلی بسازد و به داده هر tenant دسترسی پیدا کند!
+//
+// حالا با jwt.verify امضا را بررسی می‌کند.
+// اگر secret موجود نباشد، درخواست رد می‌شود (fail-closed).
+// ─────────────────────────────────────────────────────────────────────────────
+function verifyJwtToken(token: string): { valid: boolean; payload: any; error?: string } {
+  const secret = process.env.JWT_ACCESS_SECRET
+
+  if (!secret) {
+    console.error('[TenantIsolation] ★ CRITICAL: JWT_ACCESS_SECRET is not set!')
+    return { valid: false, payload: null, error: 'JWT secret configured نشده است' }
+  }
+
   try {
-    const parts = token.split('.')
-    if (parts.length !== 3) return null
-    const payload = Buffer.from(parts[1], 'base64url').toString('utf-8')
-    return JSON.parse(payload)
-  } catch {
-    return null
+    const payload = jwt.verify(token, secret) as any
+    return { valid: true, payload }
+  } catch (err: any) {
+    // ★ اگر verify با ACCESS_SECRET ناموفق بود، با REFRESH_SECRET هم امتحان کن
+    // (برخی توکن‌ها ممکن است با secret دیگری امضا شده باشند)
+    const refreshSecret = process.env.JWT_REFRESH_SECRET
+    if (refreshSecret && refreshSecret !== secret) {
+      try {
+        const payload = jwt.verify(token, refreshSecret) as any
+        return { valid: true, payload }
+      } catch {
+        // هر دو ناموفق — ادامه به خطا
+      }
+    }
+
+    const errorMessage = err?.name === 'TokenExpiredError'
+      ? 'توکن منقضی شده است'
+      : err?.name === 'JsonWebTokenError'
+        ? 'توکن نامعتبر است'
+        : 'خطا در اعتبارسنجی توکن'
+
+    return { valid: false, payload: null, error: errorMessage }
   }
 }
 
@@ -121,14 +178,98 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
     return NextResponse.json({ success: false, error: 'توکن احراز هویت الزامی است' }, { status: 401 })
   }
 
-  const payload = decodeJwtPayload(token)
-  if (!payload) {
-    return NextResponse.json({ success: false, error: 'توکن نامعتبر است' }, { status: 401 })
+  // ★★★ v4.0: verify واقعی JWT (نه فقط decode)
+  const { valid, payload, error } = verifyJwtToken(token)
+
+  if (!valid || !payload) {
+    return NextResponse.json(
+      { success: false, error: error || 'توکن نامعتبر است', code: 'INVALID_TOKEN' },
+      { status: 401 }
+    )
+  }
+
+   const userId = payload.userId || payload.sub || payload.id
+  const tenantId = payload.tenantId || payload.tid
+  // ★★★ v3.36.4: استخراج نوع توکن و customerId (برای پورتال)
+  const tokenType = payload.type
+  const portalCustomerId = payload.customerId
+
+  if (!tenantId) {
+    return NextResponse.json({ success: false, error: 'شناسه فروشگاه در توکن یافت نشد' }, { status: 400 })
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v4.3: Safety Net — بررسی تطابق tenant-slug cookie با token
+  // این یک لایه حفاظتی برای تشخیص نشت داده است
+  // ═══════════════════════════════════════════════════════════════
+  const cookieSlug = req.cookies.get('tenant-slug')?.value
+
+  let tenant: any
+  try {
+    tenant = await db.client.tenant.findUnique({
+      where: { id: tenantId },
+      include: { planTier: true },
+    })
+  } catch {
+    try {
+      tenant = await db.client.tenant.findUnique({ where: { id: tenantId } })
+    } catch (err: any) {
+      return NextResponse.json({ success: false, error: 'خطا در دریافت اطلاعات فروشگاه' }, { status: 500 })
+    }
+  }
+
+  if (!tenant) {
+    return NextResponse.json({ success: false, error: 'فروشگاه یافت نشد' }, { status: 404 })
+  }
+
+  // ★ v4.3: بررسی نهایی — tenant باید با subDomain در cookie مطابقت داشته باشد
+  // اگر cookie وجود دارد و با tenant متفاوت است، مشکوک است
+  if (cookieSlug && tenant.subDomain && cookieSlug !== tenant.subDomain) {
+    console.warn(`[TenantIsolation] ⚠️ Tenant mismatch detected!`)
+    console.warn(`[TenantIsolation]    Cookie tenant-slug: ${cookieSlug}`)
+    console.warn(`[TenantIsolation]    Token tenant.subDomain: ${tenant.subDomain}`)
+    console.warn(`[TenantIsolation]    Token tenantId: ${tenantId}`)
+    // ⚠️ بلاک نمی‌کنیم چون ممکن است cookie قدیمی باشد
+    // فقط لاگ می‌زنیم تا در production رصد کنیم
+    // اگر این لاگ زیاد دیده شد، باید بلاک کنیم
+  }
+
+ 
+
+  let subscription: any
+  try {
+    subscription = await checkSubscriptionStatus(tenantId)
+  } catch {
+    subscription = {
+      isActive: true,
+      isTrial: false,
+      isExpired: false,
+      daysRemaining: 30,
+      tierName: 'simple',
+      tierNameFa: 'ساده',
+      billingCycle: 'monthly',
+      isIsolated: false,
+    }
+  }
+
+ async function buildTenantContext(req: NextRequest): Promise<TenantContext | NextResponse> {
+  const token = extractToken(req)
+  if (!token) {
+    return NextResponse.json({ success: false, error: 'توکن احراز هویت الزامی است' }, { status: 401 })
+  }
+
+  // ★★★ v4.0: verify واقعی JWT (نه فقط decode)
+  const { valid, payload, error } = verifyJwtToken(token)
+
+  if (!valid || !payload) {
+    return NextResponse.json(
+      { success: false, error: error || 'توکن نامعتبر است', code: 'INVALID_TOKEN' },
+      { status: 401 }
+    )
   }
 
   const userId = payload.userId || payload.sub || payload.id
   const tenantId = payload.tenantId || payload.tid
-  // ★★★ v3.36.4: استخراج نوع توکن و customerId (برای پورتال)
   const tokenType = payload.type
   const portalCustomerId = payload.customerId
 
@@ -170,11 +311,157 @@ async function buildTenantContext(req: NextRequest): Promise<TenantContext | Nex
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v4.1: لیست API‌هایی که حتی در حالت قفل هم مجاز هستند
+  // این API‌ها برای فرآیند به‌روزرسانی و احراز هویت ضروری هستند
+  // ═══════════════════════════════════════════════════════════════
+  const ALLOWED_WHEN_EXPIRED = [
+    '/api/subscription/update-status',       // نمایش وضعیت و قیمت
+    '/api/payments/create-update-payment',   // ایجاد تراکنش پرداخت
+    '/api/payments/verify-update-payment',   // callback پرداخت
+    '/api/tenants/trial-check',              // بررسی وضعیت tenant
+    '/api/auth/verify',                      // احراز هویت
+    '/api/auth/login',                       // لاگین
+    '/api/auth/logout',                      // خروج
+    '/api/setup-wizard/status',              // وضعیت ویزارد
+  ]
+
+  const currentPath = new URL(req.url).pathname
+
   if (subscription.isExpired) {
-    return NextResponse.json(
-      { success: false, error: 'اشتراک شما منقضی شده است. لطفاً طرح خود را تمدید کنید.', code: 'SUBSCRIPTION_EXPIRED' },
-      { status: 403 }
-    )
+    const isAllowed = ALLOWED_WHEN_EXPIRED.some(path => currentPath.startsWith(path))
+    
+    if (!isAllowed) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          // ★ v4.2: پیام بدون کلمه "تمدید" - حس مالکیت مادام‌العمر
+          error: 'دوره استفاده شما به پایان رسیده است. برای ادامه، سیستم را به‌روزرسانی کنید.', 
+          code: 'SUBSCRIPTION_EXPIRED' 
+        },
+        { status: 403 }
+      )
+    }
+    console.log(`[TenantIsolation] ⚠️ Expired but allowed: ${currentPath}`)
+  }
+  
+  const tenantDb = db.client
+
+  let user: any = null
+  let isPortalUser = false
+  let customerId: string | undefined = undefined
+
+  // ★★★ v3.36.4: تشخیص توکن پورتال
+  if (tokenType === 'portal') {
+    isPortalUser = true
+
+    if (portalCustomerId) {
+      try {
+        const customer = await db.client.customer.findFirst({
+          where: { id: portalCustomerId, tenantId },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            mobile: true,
+            currentBalance: true,
+            isBlacklisted: true,
+          },
+        })
+
+        if (customer) {
+          customerId = customer.id
+          user = {
+            id: customer.id,
+            role: 'Customer',
+            permissions: ['pos', 'customers', 'dashboard', 'invoices'],
+            customerId: customer.id,
+            customerName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim(),
+            customerMobile: customer.mobile,
+            isBlacklisted: customer.isBlacklisted,
+          }
+        } else {
+          user = {
+            id: portalCustomerId,
+            role: 'Customer',
+            permissions: ['pos', 'customers', 'dashboard'],
+            customerId: portalCustomerId,
+          }
+          customerId = portalCustomerId
+        }
+      } catch (err: any) {
+        console.warn('[TenantIsolation] Failed to load portal customer:', err?.message)
+        user = {
+          id: portalCustomerId,
+          role: 'Customer',
+          permissions: ['pos', 'customers', 'dashboard'],
+          customerId: portalCustomerId,
+        }
+        customerId = portalCustomerId
+      }
+    } else {
+      return NextResponse.json(
+        { success: false, error: 'توکن پورتال نامعتبر است', code: 'INVALID_PORTAL_TOKEN' },
+        { status: 401 }
+      )
+    }
+  } else if (userId) {
+    try {
+      user = await tenantDb.storeUser.findFirst({
+        where: { id: userId, tenantId, isActive: true },
+      })
+    } catch {
+      try {
+        user = await db.client.portalUsers.findFirst({
+          where: { id: userId, isActive: true },
+        })
+      } catch { /* ignore */ }
+    }
+  }
+
+  const planTierName = subscription.tierName || tenant.planTier?.name || 'simple'
+  const planTierNameFa = subscription.tierNameFa
+    || tenant.planTier?.nameFa
+    || (planTierName === 'simple' ? 'ساده'
+      : planTierName === 'professional' ? 'حرفه‌ای'
+      : planTierName === 'enterprise' ? 'سازمانی'
+      : 'ساده')
+
+  const context: TenantContext = {
+    user: user || { id: userId, role: 'Cashier', permissions: [] },
+    tenantId,
+    tenantDb,
+    isIsolated: false,
+    isTrial: false,
+    daysRemaining: subscription.daysRemaining ?? 0,
+    planName: tenant.planName || planTierName,
+    planTierName,
+    planTierNameFa,
+    billingCycle: subscription.billingCycle || tenant.billingCycle || 'monthly',
+    tenant,
+    isPortalUser,
+    customerId,
+  }
+
+  return context
+}
+
+  const currentPath = new URL(req.url).pathname
+
+  if (subscription.isExpired) {
+    const isAllowed = ALLOWED_WHEN_EXPIRED.some(path => currentPath.startsWith(path))
+    
+    if (!isAllowed) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'اشتراک شما منقضی شده است. لطفاً طرح خود را تمدید کنید.', 
+          code: 'SUBSCRIPTION_EXPIRED' 
+        },
+        { status: 403 }
+      )
+    }
+    console.log(`[TenantIsolation] ⚠️ Expired but allowed: ${currentPath}`)
   }
 
   const tenantDb = db.client

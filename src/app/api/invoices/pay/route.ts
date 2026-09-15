@@ -1,31 +1,22 @@
 // ============================================================================
-// src/app/api/invoices/pay/route.ts — POST / GET (v3.3 — NEW)
+// src/app/api/invoices/pay/route.ts — POST / GET (v3.7.0 — Account Fix + Check Support)
 // ShopAccounting — Unified Single Database Architecture
 // ============================================================================
-// ★★★ v3.3 — ایجاد endpoint جدید برای ثبت پرداخت فاکتور نسیه
+// ★★★ v3.7.0 تغییرات:
+//   ★ استفاده از getStandardAccountIds (auto-seed) به‌جای جستجوی دستی
+//   ★ پشتیبانی از فاکتورهای check و installment (علاوه بر credit)
+//   ★ افزودن 'check' به validPaymentTypes
 //
-// عملیات:
-//   1. اعتبارسنجی فاکتور (paymentType=credit, status != paid)
-//   2. اعتبارسنجی مبلغ پرداخت (<= remainingAmount)
-//   3. ایجاد رکورد در InvoicePayment
-//   4. بروزرسانی paidAmount و remainingAmount فاکتور
-//   5. تغییر status فاکتور (paid | partial)
-//   6. کاهش currentBalance مشتری (به اندازه مبلغ پرداخت)
-//   7. ایجاد سند حسابداری خودکار:
-//      - بدهکار: صندوق/بانک
-//      - بستانکار: حساب‌های دریافتنی (مشتری)
-//
-// Plan Gating:
-//   - فقط پلن‌های حرفه‌ای و سازمانی (canAccessCredit)
-//   - اگه پلن ساده باشه → 403 forbidden
+// ★★★ v3.6 (حفظ شد): قفل امنیتی برای رد کردن فاکتورهای نامعتبر
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
+import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/invoices/pay — ثبت پرداخت فاکتور نسیه
+//  POST /api/invoices/pay — ثبت پرداخت فاکتور نسیه/قسطی/چک
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -52,7 +43,8 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    const validPaymentTypes = ['cash', 'card', 'bank', 'pos']
+    // ★ v3.7.0: افزودن 'check' به validPaymentTypes
+    const validPaymentTypes = ['cash', 'card', 'bank', 'pos', 'check']
     const finalPaymentType = (paymentType || 'cash').toLowerCase()
     if (!validPaymentTypes.includes(finalPaymentType)) {
       return NextResponse.json(
@@ -90,13 +82,15 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       )
     }
 
-    // ─── ۴. بررسی نوع فاکتور ─────────────────────────────────
+    // ─── ۴. بررسی نوع فاکتور (قفل امنیتی) ─────────────────────────────────
     const invoicePaymentType = (invoice.paymentType || 'cash').toLowerCase()
-    if (invoicePaymentType !== 'credit') {
+    
+    // ★ v3.7.0: اجازه پرداخت برای credit، check و installment
+    if (invoicePaymentType !== 'credit' && invoicePaymentType !== 'check' && invoicePaymentType !== 'installment') {
       return NextResponse.json(
         {
           success: false,
-          error: 'این فاکتور نسیه نیست. ثبت پرداخت فقط برای فاکتورهای نسیه مجاز است.',
+          error: 'این فاکتور نقدی پرداخت شده یا نوع آن قابل تسویه از اینجا نیست',
           code: 'NOT_CREDIT_INVOICE',
         },
         { status: 400 }
@@ -118,19 +112,19 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
     const remainingAmount = invoice.remainingAmount || (totalAmount - currentPaid)
 
     if (paidAmount > remainingAmount + 1) {
-      // ★ ۱ تومان تلورانس برای خطای گرد کردن
       return NextResponse.json(
         {
           success: false,
-          error: `مبلغ پرداخت (${paidAmount.toLocaleString('fa-IR')} تومان) بیش از مبلغ باقیمانده (${remainingAmount.toLocaleString('fa-IR')} تومان) است`,
+          error: `مبلغ پرداخت (${paidAmount.toLocaleString('fa-IR')} ریال) بیش از مبلغ باقیمانده (${remainingAmount.toLocaleString('fa-IR')} ریال) است`,
           code: 'AMOUNT_EXCEEDS_REMAINING',
         },
         { status: 400 }
       )
     }
 
+    const paymentDate = paidAt ? new Date(paidAt) : new Date()
+
     // ─── ۷. شروع تراکنش اتمیک ───────────────────────────────
-    // ★ همه عملیات در یک تراکنش — اگه هرکدوم شکست خورد، همه rollback می‌شن
     const result = await tenantDb.$transaction(async (tx: any) => {
       // ★ ۷.۱ — ایجاد رکورد پرداخت
       const payment = await tx.invoicePayment.create({
@@ -139,8 +133,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
           amount: paidAmount,
           paymentType: finalPaymentType,
           paymentRef: paymentRef || null,
-          // ★★★ v3.4: پذیرش تاریخ پرداخت از کلاینت (اگه ارسال نشه، تاریخ جاری استفاده می‌شه)
-          paidAt: paidAt ? new Date(paidAt) : new Date(),
+          paidAt: paymentDate,
           tenantId,
         },
       })
@@ -151,7 +144,7 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       const newStatus = newRemainingAmount <= 1 ? 'paid' : 'partial'
 
       // ★ ۷.۳ — بروزرسانی فاکتور
-      const updatedInvoice = await tx.invoice.update({
+      await tx.invoice.update({
         where: { id: invoice.id },
         data: {
           paidAmount: newPaidAmount,
@@ -160,51 +153,77 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         },
       })
 
-      // ★ ۷.۴ — کاهش currentBalance مشتری
-      let customerUpdated = false
+      // ★ ۷.۴ — کاهش currentBalance مشتری (بلافاصله به اندازه مبلغ پرداختی)
       if (invoice.customerId) {
-        try {
-          await tx.customer.update({
-            where: { id: invoice.customerId },
-            data: {
-              currentBalance: { decrement: paidAmount },
-            },
-          })
-          customerUpdated = true
-        } catch (custErr: any) {
+        await tx.customer.update({
+          where: { id: invoice.customerId },
+          data: {
+            currentBalance: { decrement: paidAmount },
+          },
+        }).catch((custErr: any) => {
           console.warn('[InvoicesPay] Failed to update customer balance:', custErr?.message)
-          // ★ ادامه میدیم — حتی اگه بروزرسانی مشتری شکست بخوره، پرداخت ثبت بشه
-        }
+        })
       }
 
       // ★ ۷.۵ — ایجاد سند حسابداری خودکار
+      // ★ v3.7.0: استفاده از getStandardAccountIds
       let journalCreated = false
       try {
-        journalCreated = await createCreditPaymentJournal(
-          tx, tenantId, invoice, payment, paidAmount, finalPaymentType
-        )
+        const accIds = await getStandardAccountIds(tenantId)
+        
+        let cashAccountId: string | null = null
+        if (finalPaymentType === 'cash') {
+          cashAccountId = accIds.cashAccountId
+        } else if (finalPaymentType === 'card' || finalPaymentType === 'bank' || finalPaymentType === 'pos') {
+          cashAccountId = accIds.bankAccountId || accIds.cashAccountId
+        } else {
+          cashAccountId = accIds.cashAccountId
+        }
+        
+        const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
+
+        if (cashAccountId && receivablesAccountId) {
+          const jeCount = await tx.journalEntry.count({ where: { tenantId } })
+          const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+          const methodLabel = finalPaymentType === 'cash' ? 'نقدی' : finalPaymentType === 'check' ? 'چک' : 'کارتخوان/بانکی'
+
+          await tx.journalEntry.create({
+            data: {
+              number: jeNumber,
+              date: paymentDate,
+              description: `سند خودکار: دریافت وجه فاکتور ${invoice.number} (${methodLabel})`,
+              status: 'posted',
+              sourceType: 'invoice_payment',
+              sourceId: payment.id,
+              totalDebit: paidAmount,
+              totalCredit: paidAmount,
+              createdBy: null,
+              tenantId,
+              lines: {
+                create: [
+                  {
+                    accountId: cashAccountId,
+                    debit: paidAmount,
+                    credit: 0,
+                    description: `بدهکار: واریز وجه فاکتور ${invoice.number}`,
+                  },
+                  {
+                    accountId: receivablesAccountId,
+                    debit: 0,
+                    credit: paidAmount,
+                    description: `بستانکار: تسویه حساب دریافتنی فاکتور ${invoice.number}`,
+                  },
+                ],
+              },
+            },
+          })
+          journalCreated = true
+        }
       } catch (jeErr: any) {
         console.warn('[InvoicesPay] Auto journal entry failed (non-blocking):', jeErr?.message)
       }
 
-      return {
-        payment,
-        invoice: updatedInvoice,
-        customerUpdated,
-        journalCreated,
-        newStatus,
-        newPaidAmount,
-        newRemainingAmount,
-      }
-    })
-
-    console.log('[InvoicesPay] Payment recorded successfully:', {
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.number,
-      paidAmount,
-      newStatus: result.newStatus,
-      customerUpdated: result.customerUpdated,
-      journalCreated: result.journalCreated,
+      return { payment, newStatus, newPaidAmount, newRemainingAmount, journalCreated }
     })
 
     // ─── ۸. پاسخ موفقیت ──────────────────────────────────────
@@ -221,7 +240,6 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         totalPaid: result.newPaidAmount,
         remainingAmount: result.newRemainingAmount,
         status: result.newStatus,
-        customerBalanceUpdated: result.customerUpdated,
         journalEntryCreated: result.journalCreated,
       },
     }, { status: 201 })
@@ -309,108 +327,3 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     )
   }
 })
-
-// ═══════════════════════════════════════════════════════════════
-//  Helper: ایجاد سند حسابداری برای پرداخت نسیه
-// ═══════════════════════════════════════════════════════════════
-
-async function createCreditPaymentJournal(
-  tx: any,
-  tenantId: string,
-  invoice: any,
-  payment: any,
-  paidAmount: number,
-  paymentType: string
-): Promise<boolean> {
-  try {
-    // ★ یافتن حساب‌های مناسب
-    let cashAccountId: string | null = null
-    let receivablesAccountId: string | null = null
-
-    const accounts = await tx.account.findMany({ where: { tenantId } })
-
-    for (const acc of accounts) {
-      const code = (acc.code || '').toLowerCase()
-      const type = (acc.type || '').toLowerCase()
-      const name = (acc.name || '').toLowerCase()
-
-      // ★ برای کارتخوان/بانک، حساب بانک رو پیدا کن
-      if (!cashAccountId) {
-        if (paymentType === 'cash' && (type === 'cash' || name.includes('صندوق'))) {
-          cashAccountId = acc.id
-        } else if (paymentType === 'card' || paymentType === 'pos' || paymentType === 'bank') {
-          if (type === 'bank' || name.includes('بانک') || code.startsWith('1102')) {
-            cashAccountId = acc.id
-          }
-        }
-        // ★ fallback: هر حساب cash/bank
-        if (!cashAccountId && (type === 'cash' || type === 'bank' || code.startsWith('110'))) {
-          cashAccountId = acc.id
-        }
-      }
-
-      if (!receivablesAccountId && (type === 'receivable' || code.startsWith('130') || name.includes('طلب') || name.includes('دریافتنی'))) {
-        receivablesAccountId = acc.id
-      }
-    }
-
-    if (!cashAccountId || !receivablesAccountId) {
-      console.warn('[InvoicesPay] Could not find required accounts for journal entry', {
-        cashAccountId, receivablesAccountId,
-      })
-      return false
-    }
-
-    // ★ شماره سند
-    const jeCount = await tx.journalEntry.count({ where: { tenantId } })
-    const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
-
-    const paymentTypeLabel: Record<string, string> = {
-      cash: 'نقدی',
-      card: 'کارتخوان',
-      bank: 'بانکی',
-      pos: 'کارتخوان',
-    }
-    const methodLabel = paymentTypeLabel[paymentType] || 'نقدی'
-
-    // ★ ایجاد سند
-    await tx.journalEntry.create({
-      data: {
-        number: jeNumber,
-        date: new Date(),
-        description: `سند خودکار: دریافت نسیه فاکتور ${invoice.number} (${methodLabel})`,
-        status: 'posted',
-        sourceType: 'invoice_payment',
-        sourceId: payment.id,
-        totalDebit: paidAmount,
-        totalCredit: paidAmount,
-        createdBy: null,
-        tenantId,
-        lines: {
-          create: [
-            {
-              accountId: cashAccountId,
-              debit: paidAmount,
-              credit: 0,
-              description: `بدهکار: واریز نسیه فاکتور ${invoice.number} (${methodLabel})`,
-            },
-            {
-              accountId: receivablesAccountId,
-              debit: 0,
-              credit: paidAmount,
-              description: `بستانکار: تسویه حساب دریافتنی فاکتور ${invoice.number}`,
-            },
-          ],
-        },
-      },
-    })
-
-    console.log('[InvoicesPay] Journal entry created:', {
-      jeNumber, invoiceId: invoice.id, paidAmount,
-    })
-    return true
-  } catch (error: any) {
-    console.error('[InvoicesPay] Journal entry creation failed:', error?.message)
-    return false
-  }
-}

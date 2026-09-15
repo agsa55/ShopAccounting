@@ -1,7 +1,10 @@
-// src/app/api/fiscal-years/route.ts — v8.5 ★★★
+// ============================================================================
+// src/app/api/fiscal-years/route.ts — v9.1 ★★★
 // ShopAccounting — Fiscal Year Management API
 // ============================================================================
-// ★★★ v8.5: محاسبه تعداد اسناد بر اساس بازه تاریخ (نه relation)
+// ★★★ v9.1: حذف ساخت سال جدید و سند افتتاحیه از PUT
+//   - PUT فقط: بستن + سند اختتامیه
+//   - سال جدید توسط SetupWizard (renewal_setup) ساخته می‌شود
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -25,7 +28,6 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
 
     const activeYearRaw = years.find((y: any) => y.isActive && !y.isClosed) || null
 
-    // ★★★ v8.5: محاسبه تعداد اسناد و پیشرفت برای سال فعال (بر اساس بازه تاریخ)
     let activeYear = activeYearRaw
     if (activeYearRaw) {
       let entryCount = 0
@@ -56,8 +58,6 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       }
     }
 
-    // ★ محاسبه entryCount برای همه سال‌ها
-    // ★★★ v8.5.1: اضافه شدن type annotation برای رفع خطای TS2345
     const enrichedYears: any[] = []
     for (const y of years) {
       let count = 0
@@ -195,228 +195,396 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT — بستن سال فعال + ایجاد خودکار سال جدید
+//  PUT — بستن سال فعال + سند اختتامیه (بدون سال جدید)
+//  ★ v9.1: فقط بستن + اختتامیه — سال جدید توسط SetupWizard ساخته می‌شود
 // ═══════════════════════════════════════════════════════════════
 
-export const PUT = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
-  try {
-    const features = getFeaturesByPlanName(tenant.planTierName)
-    if (!features.canCloseFiscalYear) {
-      return NextResponse.json(
-        { success: false, error: 'بستن سال مالی فقط در پلن حرفه‌ای و سازمانی در دسترس است' },
-        { status: 403 }
-      )
-    }
+export const PUT = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const features = getFeaturesByPlanName(tenant.planTierName)
+      if (!features.canCloseFiscalYear) {
+        return NextResponse.json(
+          { success: false, error: 'بستن سال مالی فقط در پلن حرفه‌ای و سازمانی در دسترس است' },
+          { status: 403 }
+        )
+      }
 
-    const tenantDb = tenant.tenantDb
-    const tenantId = tenant.tenantId
-    const body = await req.json()
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+      const body = await req.json()
 
-    const activeYear = await tenantDb.fiscalYear.findFirst({
-      where: { tenantId, isActive: true, isClosed: false },
-    })
+      const {
+        forceClose,
+        earlyCloseReason,
+        earlyCloseConfirmed,
+      } = body
 
-    if (!activeYear) {
-      return NextResponse.json(
-        { success: false, error: 'هیچ سال مالی فعالی برای بستن وجود ندارد' },
-        { status: 400 }
-      )
-    }
-
-    // ★★★ v8.8: بررسی اینکه ۳۶۵ روز از شروع سال مالی گذشته باشد
-    const startDate = activeYear.startDate
-    const endDate = activeYear.endDate
-    const now = new Date()
-
-    // محاسبه تعداد روزهای گذشته از شروع سال
-    const daysPassed = Math.floor((now.getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24))
-
-    if (daysPassed < 365) {
-      const remainingDays = 365 - daysPassed
-      return NextResponse.json(
-        {
-          success: false,
-          error: `هنوز زمان بستن سال مالی نرسیده است. ${remainingDays.toLocaleString('fa-IR')} روز تا پایان سال مالی باقی مانده است. بستن سال مالی فقط پس از گذشت ۳۶۵ روز امکان‌پذیر است.`,
-          code: 'YEAR_NOT_COMPLETED',
-          data: { daysPassed, remainingDays, startDate, endDate },
-        },
-        { status: 400 }
-      )
-    }
-
-    // ★ محاسبه سود/زیان
-    const entries = await tenantDb.journalEntry.findMany({
-      where: { tenantId, status: 'posted', date: { gte: startDate, lte: endDate } },
-      include: { lines: true },
-    })
-
-    const accountsList = await tenantDb.account.findMany({
-      where: { tenantId },
-      select: { id: true, code: true, type: true, name: true },
-    })
-
-    const accountMap = new Map<string, { type: string; code: string; name: string }>()
-    for (const a of accountsList) {
-      accountMap.set(a.id, {
-        type: (a.type || '').toLowerCase(),
-        code: a.code || '',
-        name: (a.name || '').toLowerCase(),
+      // ── ۱. یافتن سال فعال ────────────────────────────────────
+      const activeYear = await tenantDb.fiscalYear.findFirst({
+        where: { tenantId, isActive: true, isClosed: false },
       })
-    }
 
-    const revenueBalances = new Map<string, number>()
-    const expenseBalances = new Map<string, number>()
+      if (!activeYear) {
+        return NextResponse.json(
+          { success: false, error: 'هیچ سال مالی فعالی برای بستن وجود ندارد' },
+          { status: 400 }
+        )
+      }
 
-    for (const entry of entries) {
-      for (const line of entry.lines || []) {
-        const acc = accountMap.get(line.accountId || '')
-        if (!acc) continue
+      // ── ۲. محاسبات زمانی و تعیین حالت ───────────────────────
+      const now = new Date()
+      const startDate = new Date(activeYear.startDate)
+      const endDate = new Date(activeYear.endDate)
 
-        const isRevenue = acc.type === 'revenue' || acc.type === 'sales' || acc.code.startsWith('4') || acc.name.includes('فروش') || acc.name.includes('درآمد')
-        const isExpense = acc.type === 'expense' || acc.type === 'cogs' || acc.type === 'cost' || acc.code.startsWith('5') || acc.name.includes('هزینه') || acc.name.includes('بها تمام')
+      const daysUntilEnd = Math.ceil(
+        (endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      )
+      const daysPassed = Math.floor(
+        (now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+      )
 
-        if (isRevenue) {
-          const current = revenueBalances.get(line.accountId!) || 0
-          revenueBalances.set(line.accountId!, current + (line.credit || 0) - (line.debit || 0))
-        } else if (isExpense) {
-          const current = expenseBalances.get(line.accountId!) || 0
-          expenseBalances.set(line.accountId!, current + (line.debit || 0) - (line.credit || 0))
+      const NORMAL_WINDOW_DAYS = 7
+      const MIN_DAYS_FOR_EARLY = 180
+
+      let closeMode: 'normal' | 'early' | 'too_early' = 'normal'
+      if (daysUntilEnd <= NORMAL_WINDOW_DAYS) {
+        closeMode = 'normal'
+      } else if (daysPassed >= MIN_DAYS_FOR_EARLY) {
+        closeMode = 'early'
+      } else {
+        closeMode = 'too_early'
+      }
+
+      // ── ۳. اعتبارسنجی بر اساس حالت ───────────────────────────
+      if (closeMode === 'too_early' && !forceClose) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `بستن سال مالی در این زمان ممکن نیست. فقط ${daysPassed} روز از سال سپری شده است. حداقل ${MIN_DAYS_FOR_EARLY} روز لازم است.`,
+            code: 'TOO_EARLY',
+          },
+          { status: 400 }
+        )
+      }
+
+      if (closeMode === 'early' && !earlyCloseConfirmed) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'برای بستن زودهنگام سال مالی، تأیید ویژه لازم است.',
+            code: 'EARLY_CLOSE_NOT_CONFIRMED',
+          },
+          { status: 400 }
+        )
+      }
+
+      if (closeMode === 'early' && (!earlyCloseReason || earlyCloseReason.trim().length < 10)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'برای بستن زودهنگام، دلیل موجه (حداقل ۱۰ کاراکتر) الزامی است.',
+            code: 'EARLY_CLOSE_REASON_REQUIRED',
+          },
+          { status: 400 }
+        )
+      }
+
+      // ── ۴. بررسی اسناد Draft ──────────────────────────────────
+      if (!forceClose) {
+        const draftCount = await tenantDb.journalEntry.count({
+          where: {
+            tenantId,
+            status: 'draft',
+            date: { gte: activeYear.startDate, lte: activeYear.endDate },
+          },
+        })
+        if (draftCount > 0) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `${draftCount} سند Draft وجود دارد. ابتدا آنها را تأیید یا حذف کنید.`,
+              code: 'HAS_DRAFT_ENTRIES',
+            },
+            { status: 400 }
+          )
         }
       }
-    }
 
-    const totalRevenue = Array.from(revenueBalances.values()).reduce((s, v) => s + v, 0)
-    const totalExpense = Array.from(expenseBalances.values()).reduce((s, v) => s + v, 0)
-    const netProfit = totalRevenue - totalExpense
-
-    let retainedEarningsAccountId: string | null = null
-    for (const [accId, acc] of accountMap) {
-      if (acc.type === 'equity' || acc.code.startsWith('3') || acc.name.includes('سود انباشته') || acc.name.includes('انباشته')) {
-        retainedEarningsAccountId = accId
-        break
+      // ── ۵. ساخت توضیحات سال ──────────────────────────────────
+      let notesText = `بسته شد در ${new Date().toISOString().split('T')[0]}`
+      if (closeMode === 'early') {
+        notesText += ` — ⚠️ بستن زودهنگام (${daysUntilEnd} روز زودتر) — دلیل: ${earlyCloseReason.trim()}`
       }
-    }
 
-    const jeCount = await tenantDb.journalEntry.count({ where: { tenantId } })
-    const jeNumber = `JE-CLOSE-${(jeCount + 1).toString().padStart(6, '0')}`
+      // ── ۶. اجرای تراکنش (فقط بستن + اختتامیه) ───────────────
+      const result = await tenantDb.$transaction(async (tx: any) => {
+        const { createClosingEntry } = await import('@/lib/accounting/closing-entry')
 
-    const closingLines: any[] = []
-
-    for (const [accId, balance] of revenueBalances) {
-      if (Math.abs(balance) > 0.001) {
-        closingLines.push({
-          accountId: accId,
-          debit: balance > 0 ? balance : 0,
-          credit: balance < 0 ? Math.abs(balance) : 0,
-          description: 'بستن حساب درآمد',
-        })
-      }
-    }
-
-    for (const [accId, balance] of expenseBalances) {
-      if (Math.abs(balance) > 0.001) {
-        closingLines.push({
-          accountId: accId,
-          debit: balance < 0 ? Math.abs(balance) : 0,
-          credit: balance > 0 ? balance : 0,
-          description: 'بستن حساب هزینه',
-        })
-      }
-    }
-
-    if (retainedEarningsAccountId && Math.abs(netProfit) > 0.001) {
-      if (netProfit > 0) {
-        closingLines.push({ accountId: retainedEarningsAccountId, debit: 0, credit: netProfit, description: 'انتقال سود به سود انباشته' })
-      } else {
-        closingLines.push({ accountId: retainedEarningsAccountId, debit: Math.abs(netProfit), credit: 0, description: 'انتقال زیان به سود انباشته' })
-      }
-    }
-
-    const totalDebit = closingLines.reduce((s, l) => s + l.debit, 0)
-    const totalCredit = closingLines.reduce((s, l) => s + l.credit, 0)
-
-    let closingEntryNumber = jeNumber
-    let closingLinesCount = 0
-
-    if (closingLines.length >= 2) {
-      const createdEntry = await tenantDb.journalEntry.create({
-        data: {
-          number: jeNumber,
-          fiscalYearId: activeYear.id,
-          date: endDate,
-          description: `سند بستن سال مالی ${activeYear.name}`,
-          status: 'posted',
-          sourceType: 'fiscal_year_close',
-          totalDebit,
-          totalCredit,
+        // ۶.۱. صدور سند اختتامیه
+        const closingResult = await createClosingEntry(
+          tx,
           tenantId,
-          lines: { create: closingLines },
-        },
+          activeYear.id,
+          activeYear.name,
+          activeYear.endDate
+        )
+
+        if (!closingResult.success) {
+          throw new Error(`خطا در ایجاد سند اختتامیه: ${closingResult.error}`)
+        }
+
+        // ۶.۲. بستن سال فعلی (بدون ایجاد سال جدید)
+        await tx.fiscalYear.update({
+          where: { id: activeYear.id },
+          data: {
+            isClosed: true,
+            closedAt: new Date(),
+            isActive: false,
+            notes: `${notesText} — سود/زیان: ${closingResult.netProfit.toLocaleString('fa-IR')} ریال — سند اختتامیه: ${closingResult.entryNumber}`,
+          },
+        })
+
+        return {
+          closedYear: {
+            id: activeYear.id,
+            name: activeYear.name,
+            startDate: activeYear.startDate,
+            endDate: activeYear.endDate,
+            closedAt: new Date(),
+          },
+          closingEntry: {
+            number: closingResult.entryNumber,
+            totalRevenue: closingResult.totalRevenue,
+            totalExpense: closingResult.totalExpense,
+            netProfit: closingResult.netProfit,
+          },
+          closeMode,
+          earlyCloseReason: closeMode === 'early' ? earlyCloseReason : null,
+        }
       })
-      closingEntryNumber = createdEntry.number
-      closingLinesCount = closingLines.length
+
+      const message = `سال مالی «${activeYear.name}» با موفقیت بسته شد. سند اختتامیه صادر شد.`
+
+      return NextResponse.json({
+        success: true,
+        data: result,
+        message,
+      })
+    } catch (error: any) {
+      console.error('[FiscalYears PUT] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطا در بستن سال مالی' },
+        { status: 500 }
+      )
     }
-
-    await tenantDb.fiscalYear.update({
-      where: { id: activeYear.id },
-      data: {
-        isClosed: true,
-        closedAt: new Date(),
-        isActive: false,
-        notes: `بسته شد در ${new Date().toISOString().split('T')[0]} — سود/زیان: ${netProfit.toLocaleString('fa-IR')} ریال`,
-      },
-    })
-
-    // ★ ایجاد سال جدید
-    const newStartDate = new Date(endDate)
-    newStartDate.setDate(newStartDate.getDate() + 1)
-    const newEndDate = new Date(newStartDate)
-    newEndDate.setDate(newEndDate.getDate() + 364)
-
-    const newYearName = body.newYearName?.trim() || generateNextYearName(activeYear.name)
-
-    const newYear = await tenantDb.fiscalYear.create({
-      data: {
-        tenantId,
-        name: newYearName,
-        startDate: newStartDate,
-        endDate: newEndDate,
-        isActive: true,
-        isClosed: false,
-      },
-    })
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        closedYear: { id: activeYear.id, name: activeYear.name },
-        newYear: { id: newYear.id, name: newYear.name },
-        totalRevenue,
-        totalExpense,
-        netProfit,
-        closingEntryNumber,
-        closingLinesCount,
-      },
-      message: `سال مالی «${activeYear.name}» بسته شد — ${netProfit >= 0 ? 'سود' : 'زیان'}: ${Math.abs(netProfit).toLocaleString('fa-IR')} ریال. سال جدید «${newYearName}» ایجاد و فعال شد.`,
-    })
-  } catch (error: any) {
-    console.error('[FiscalYears PUT] Error:', error?.message || error)
-    return NextResponse.json({ success: false, error: 'خطا در بستن سال مالی' }, { status: 500 })
   }
-})
+)
 
 // ═══════════════════════════════════════════════════════════════
-//  Helper
+//  PATCH — عملیات روی یک سال مالی (activate / update)
+// ═══════════════════════════════════════════════════════════════
+
+export const PATCH = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const features = getFeaturesByPlanName(tenant.planTierName)
+      if (!features.canFiscalYearManagement) {
+        return NextResponse.json(
+          { success: false, error: 'مدیریت سال مالی در پلن فعلی در دسترس نیست' },
+          { status: 403 }
+        )
+      }
+
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+      const body = await req.json()
+
+      // استخراج yearId از URL
+      const { pathname } = new URL(req.url)
+      const segments = pathname.split('/').filter(Boolean)
+      const yearId = segments[segments.length - 1]
+
+      if (!yearId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه سال مالی مشخص نشده است' },
+          { status: 400 }
+        )
+      }
+
+      const year = await tenantDb.fiscalYear.findFirst({
+        where: { id: yearId, tenantId },
+      })
+
+      if (!year) {
+        return NextResponse.json(
+          { success: false, error: 'سال مالی یافت نشد' },
+          { status: 404 }
+        )
+      }
+
+      const { action, name } = body
+
+      if (action === 'activate') {
+        if (year.isClosed) {
+          return NextResponse.json(
+            { success: false, error: 'سال بسته‌شده قابل فعال‌سازی نیست' },
+            { status: 400 }
+          )
+        }
+
+        await tenantDb.fiscalYear.updateMany({
+          where: { tenantId, isActive: true },
+          data: { isActive: false },
+        }).catch(() => {})
+
+        await tenantDb.fiscalYear.update({
+          where: { id: yearId },
+          data: { isActive: true },
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `سال مالی «${year.name}» فعال شد`,
+        })
+      }
+
+      if (action === 'update') {
+        if (!name || name.trim().length < 2) {
+          return NextResponse.json(
+            { success: false, error: 'نام سال مالی باید حداقل ۲ کاراکتر باشد' },
+            { status: 400 }
+          )
+        }
+
+        await tenantDb.fiscalYear.update({
+          where: { id: yearId },
+          data: { name: name.trim() },
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `نام سال مالی به «${name.trim()}» تغییر کرد`,
+        })
+      }
+
+      return NextResponse.json(
+        { success: false, error: 'عملیات نامعتبر' },
+        { status: 400 }
+      )
+    } catch (error: any) {
+      console.error('[FiscalYears PATCH] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطا در به‌روزرسانی سال مالی' },
+        { status: 500 }
+      )
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════
+//  DELETE — حذف سال مالی (فقط سال‌های خالی و غیرفعال)
+// ═══════════════════════════════════════════════════════════════
+
+export const DELETE = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const features = getFeaturesByPlanName(tenant.planTierName)
+      if (!features.canFiscalYearManagement) {
+        return NextResponse.json(
+          { success: false, error: 'مدیریت سال مالی در پلن فعلی در دسترس نیست' },
+          { status: 403 }
+        )
+      }
+
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+
+      // استخراج yearId از URL
+      const { pathname } = new URL(req.url)
+      const segments = pathname.split('/').filter(Boolean)
+      const yearId = segments[segments.length - 1]
+
+      if (!yearId) {
+        return NextResponse.json(
+          { success: false, error: 'شناسه سال مالی مشخص نشده است' },
+          { status: 400 }
+        )
+      }
+
+      const year = await tenantDb.fiscalYear.findFirst({
+        where: { id: yearId, tenantId },
+      })
+
+      if (!year) {
+        return NextResponse.json(
+          { success: false, error: 'سال مالی یافت نشد' },
+          { status: 404 }
+        )
+      }
+
+      if (year.isClosed) {
+        return NextResponse.json(
+          { success: false, error: 'سال بسته‌شده قابل حذف نیست' },
+          { status: 400 }
+        )
+      }
+
+      if (year.isActive) {
+        return NextResponse.json(
+          { success: false, error: 'سال فعال قابل حذف نیست. ابتدا سال دیگری را فعال کنید' },
+          { status: 400 }
+        )
+      }
+
+      // بررسی وجود اسناد در این سال
+      const entryCount = await tenantDb.journalEntry.count({
+        where: {
+          tenantId,
+          date: { gte: year.startDate, lte: year.endDate },
+        },
+      })
+
+      if (entryCount > 0) {
+        return NextResponse.json(
+          { success: false, error: `این سال مالی دارای ${entryCount} سند است و قابل حذف نیست` },
+          { status: 400 }
+        )
+      }
+
+      await tenantDb.fiscalYear.delete({
+        where: { id: yearId },
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: `سال مالی «${year.name}» حذف شد`,
+      })
+    } catch (error: any) {
+      console.error('[FiscalYears DELETE] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطا در حذف سال مالی' },
+        { status: 500 }
+      )
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════
+//  Helper — تولید نام سال بعدی (با پشتیبانی ارقام فارسی)
 // ═══════════════════════════════════════════════════════════════
 
 function generateNextYearName(prevName: string): string {
-  const faYearMatch = prevName.match(/(\d{4})/)
+  const faYearMatch = prevName.match(/([۰-۹]{4}|\d{4})/)
   if (faYearMatch) {
     const yearStr = faYearMatch[1]
     const isFa = /[۰-۹]/.test(yearStr)
     let year: number
     if (isFa) {
-      year = parseInt(yearStr.replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))), 10)
+      year = parseInt(
+        yearStr.replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))),
+        10
+      )
     } else {
       year = parseInt(yearStr, 10)
     }

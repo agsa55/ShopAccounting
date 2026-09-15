@@ -1,9 +1,11 @@
 'use client'
 
 // ============================================================================
-// src/components/pos/pos-page.tsx — v9.1 ★ OFFLINE-OPTIMIZED
-// ★ جستجوی آفلاین از IndexedDB + localStorage
-// ★ بارگذاری محصولات، مشتریان، انبارها از cache
+// src/components/pos/pos-page.tsx — v11.7 ★ FINAL FIXED VERSION
+// ★ v11.7: رفع کامل خطاهای scope — handleConfirmInvoiceFinal داخل کامپوننت
+// ★ v11.6: حذف راهنمای F2/F4/ESC + فیلتر انبار + هدر ستون‌ها + UI بهبودیافته
+// ★ v11.5: جستجوی حرفه‌ای با Navigation کیبورد
+// ★ v11.1: یکپارچه‌سازی با کارتخوان
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
@@ -62,8 +64,11 @@ import {
   Crown,
   Camera,
   ScanLine,
+  Store, Building2, Landmark, CreditCard as CreditCardIcon
 } from 'lucide-react'
+
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { usePosProductSearch } from '@/lib/use-pos-product-search'
 import { BarcodeScannerModal } from '@/components/pos/barcode-scanner-modal'
 import {
@@ -75,6 +80,8 @@ import {
   type ReferenceCodeType,
   REFERENCE_CODE_TYPES,
 } from '@/lib/pos-adapters'
+
+import CashierPanel from './cashier-panel';
 
 // ═══════════════════════════════════════════════════════════════
 //  ★★★ Print Receipt Types
@@ -407,6 +414,49 @@ function getUnitNameFa(product: Product): string {
   return 'عدد'
 }
 
+// ============ واحدهای اعشاری (Decimal Units) ============
+const DECIMAL_UNIT_IDS = [
+  'unit-kg', 'unit-g', 'unit-liter', 'unit-ml',
+  'unit-meter', 'unit-cm', 'unit-m2', 'unit-ton',
+]
+const DECIMAL_UNIT_LABELS = [
+  'کگ', 'گ', 'لی', 'ملی', 'م', 'سم', 'م²', 'تن',
+  'کیلوگرم', 'گرم', 'لیتر', 'میلی‌لیتر', 'متر', 'سانتی‌متر', 'مترمربع',
+]
+
+function isDecimalUnitLabel(label?: string | null): boolean {
+  return label ? DECIMAL_UNIT_LABELS.includes(label) : false
+}
+
+function isDecimalUnitProduct(product?: Product | null): boolean {
+  if (!product) return false
+  const unitId = product.unitId || product.unit?.id
+  if (unitId && DECIMAL_UNIT_IDS.includes(unitId)) return true
+  return isDecimalUnitLabel(getUnitLabel(product))
+}
+
+function getQuantityStep(isDecimal: boolean): number {
+  return isDecimal ? 0.5 : 1
+}
+
+function getMinQuantity(isDecimal: boolean): number {
+  return isDecimal ? 0.5 : 1
+}
+
+function roundQuantity(qty: number, isDecimal: boolean): number {
+  if (!isDecimal) return Math.max(1, Math.round(qty))
+  return Math.max(0.001, Math.round(qty * 1000) / 1000)
+}
+
+function parseQuantityInput(s: string): number {
+  const normalized = toEnNum(s)
+    .replace(/[٫\/،,]/g, '.')
+    .replace(/[^\d.]/g, '')
+  const parts = normalized.split('.')
+  const clean = parts.length > 1 ? parts[0] + '.' + parts.slice(1).join('') : parts[0]
+  return parseFloat(clean)
+}
+
 // ============ Format helpers ============
 
 function formatPrice(price: number): string {
@@ -723,7 +773,26 @@ export default function PosPage() {
   const { toast } = useToast()
   const searchInputRef = useRef<HTMLInputElement>(null)
 
+  const isProcessingScan = useRef(false)
   const hasHydrated = useStore((s) => s._hasHydrated)
+  const lastKeyTimeRef = useRef<number>(0)
+  const barcodeBufferRef = useRef<string>('')
+  const barcodeTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const highlightText = (text: string, query: string): React.ReactNode => {
+    if (!query || query.length < 2) return text
+    try {
+      const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+      const parts = text.split(regex)
+      return parts.map((part, i) =>
+        regex.test(part)
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 font-bold px-0.5 rounded">{part}</mark>
+          : part
+      )
+    } catch {
+      return text
+    }
+  }
 
   // Store state
   const cart = useStore((s) => s.cart) ?? []
@@ -743,17 +812,60 @@ export default function PosPage() {
 
   const storeName = useStore((s) => s.storeName)
   const user = useStore((s) => s.user)
+  const branchId = user?.branchId || null
 
   const planName = useStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
+
+
+  const [posIntegrationEnabled, setPosIntegrationEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    const cached = localStorage.getItem('pos_integration_enabled')
+    return cached !== null ? cached === 'true' : true
+  })
+
+  // ★ v11.6.3: استیت‌های صندوق‌دار
+const [showManualTransactionModal, setShowManualTransactionModal] = useState(false);
+const [showReportModal, setShowReportModal] = useState(false);
+const [cashierStatsRefreshKey, setCashierStatsRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleIntegrationChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>
+      if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
+        setPosIntegrationEnabled(customEvent.detail.enabled)
+        console.log('[POS] 🔄 یکپارچه‌سازی کارتخوان تغییر کرد:', customEvent.detail.enabled)
+      }
+    }
+    window.addEventListener('pos-integration-changed', handleIntegrationChange)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'pos_integration_enabled' && e.newValue !== null) {
+        setPosIntegrationEnabled(e.newValue === 'true')
+      }
+    }
+    window.addEventListener('storage', handleStorageChange)
+    const handleFocus = () => {
+      const cached = localStorage.getItem('pos_integration_enabled')
+      if (cached !== null) {
+        setPosIntegrationEnabled(cached === 'true')
+      }
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('pos-integration-changed', handleIntegrationChange)
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
 
   const allowedPaymentTypes = useMemo(() => {
     const allowed = planFeatures.posPaymentTypes
     return paymentTypeConfig.filter((pt) => {
       const key = pt.value.toLowerCase()
+      if (key === 'card' && !posIntegrationEnabled) return false
       return allowed.includes(key as any)
     })
-  }, [planFeatures])
+  }, [planFeatures, posIntegrationEnabled])
 
   // Data state
   const [products, setProducts] = useState<Product[]>([])
@@ -781,6 +893,8 @@ export default function PosPage() {
   })
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
 
+  const [highlightedIndex, setHighlightedIndex] = useState(-1)
+
   // Installment dialog state
   const [installmentDialogOpen, setInstallmentDialogOpen] = useState(false)
   const [installmentDownPayment, setInstallmentDownPayment] = useState(0)
@@ -792,6 +906,15 @@ export default function PosPage() {
   const [creditDialogOpen, setCreditDialogOpen] = useState(false)
   const [creditDueDate, setCreditDueDate] = useState('')
   const [creditDescription, setCreditDescription] = useState('')
+
+  const [checkDialogOpen, setCheckDialogOpen] = useState(false)
+  const [checkNumber, setCheckNumber] = useState('')
+  const [checkBank, setCheckBank] = useState('')
+  const [checkDueDate, setCheckDueDate] = useState('')
+  const [checkPayee, setCheckPayee] = useState('')
+  const [checkCustomerSearch, setCheckCustomerSearch] = useState('')
+  const [checkSelectedCustomerId, setCheckSelectedCustomerId] = useState<string | null>(null)
+  const [checkSelectedCustomerName, setCheckSelectedCustomerName] = useState('')
 
   // Card payment state
   const [cardPaymentDialogOpen, setCardPaymentDialogOpen] = useState(false)
@@ -807,10 +930,6 @@ export default function PosPage() {
 
   // Tax override
   const [taxOverrideAmount, setTaxOverrideAmount] = useState<number | null>(null)
-
-  // Barcode scanner
-  const lastKeyTimeRef = useRef<number>(0)
-  const barcodeBufferRef = useRef<string>('')
 
   // Scanner & thermal print
   const [scannerOpen, setScannerOpen] = useState(false)
@@ -833,14 +952,118 @@ export default function PosPage() {
   // Warehouse state
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('')
+    // ★ v11.8: موجودی انبار انتخاب‌شده برای فیلتر دقیق جستجو
+  const [warehouseStocks, setWarehouseStocks] = useState<Record<string, number>>({})
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerSearchResults, setCustomerSearchResults] = useState<any[]>([])
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<PrintTemplate>('thermal-80mm')
   const [printSubmitting, setPrintSubmitting] = useState(false)
   const [invoiceDiscountPercent, setInvoiceDiscountPercent] = useState<string>('')
+  const [branches, setBranches] = useState<any[]>([])
+
+  // ★ v11.6.3: اطلاعات صندوق‌دار فعلی
+
+const tenantId = useStore((s) => s.tenantId) ?? '';
 
   // ============ Effects ============
+
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const res = await fetch('/api/branches', { headers: getAuthHeaders() })
+        const data = await res.json()
+        if (data.success) setBranches(data.data || [])
+      } catch (err) {
+        console.error('Failed to fetch branches', err)
+      }
+    }
+    fetchBranches()
+  }, [])
+
+   // ★ v11.9: بارگذاری موجودی انبار انتخاب‌شده برای فیلتر دقیق جستجو
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchWarehouseStocks = async () => {
+      if (!selectedWarehouseId) {
+        if (!cancelled) setWarehouseStocks({})
+        return
+      }
+
+      // حالت آفلاین: از currentStock کلی محصولات استفاده کن
+      if (!isOnline || !navigator.onLine) {
+        if (cancelled) return
+        const stockMap: Record<string, number> = {}
+        products.forEach((p) => {
+          stockMap[p.id] = Number(p.currentStock || 0)
+        })
+        setWarehouseStocks(stockMap)
+        console.log(`[POS] 📡 آفلاین — موجودی ${Object.keys(stockMap).length} محصول از state خوانده شد`)
+        return
+      }
+
+      // حالت آنلاین: موجودی دقیق انبار را از سرور بخوان
+      try {
+        const tid = getTenantIdFromStore()
+        const res = await fetch(
+          `/api/stock-levels?warehouseId=${selectedWarehouseId}&tenantId=${tid}`,
+          { headers: getAuthHeaders() }
+        )
+
+        if (res.ok) {
+          const data = await res.json()
+          if (data.success && Array.isArray(data.data)) {
+            const stockMap: Record<string, number> = {}
+            data.data.forEach((level: any) => {
+              if (level.productId) {
+                stockMap[level.productId] = Number(level.quantity || 0)
+              }
+            })
+            if (!cancelled) {
+              setWarehouseStocks(stockMap)
+              console.log(`[POS] ✅ موجودی ${data.data.length} محصول برای انبار ${selectedWarehouseId} بارگذاری شد`)
+            }
+            return
+          }
+        }
+
+        // اگر API خطا داد، از currentStock کلی استفاده کن
+        if (!cancelled) {
+          const stockMap: Record<string, number> = {}
+          products.forEach((p) => {
+            stockMap[p.id] = Number(p.currentStock || 0)
+          })
+          setWarehouseStocks(stockMap)
+          console.log(`[POS] ⚠️ خطا در API — از currentStock کلی استفاده شد`)
+        }
+      } catch (err) {
+        console.warn('[POS] خطا در بارگذاری موجودی انبار:', err)
+        if (!cancelled) {
+          const stockMap: Record<string, number> = {}
+          products.forEach((p) => {
+            stockMap[p.id] = Number(p.currentStock || 0)
+          })
+          setWarehouseStocks(stockMap)
+        }
+      }
+    }
+
+    fetchWarehouseStocks()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWarehouseId, isOnline, products])
+
+  const currentWarehouse = useMemo(() => {
+    return warehouses.find((w: any) => w.id === selectedWarehouseId) || null
+  }, [warehouses, selectedWarehouseId])
+
+  const currentBranch = useMemo(() => {
+    if (!currentWarehouse?.branchId) return null
+    return branches.find((b: any) => b.id === currentWarehouse.branchId) || null
+  }, [branches, currentWarehouse])
 
   useEffect(() => {
     if (thermalPrintOpen) {
@@ -861,7 +1084,6 @@ export default function PosPage() {
     recentsLoading: posRecentsLoading,
   } = usePosProductSearch()
 
-  // ★ OFFLINE-OPTIMIZED: بارگذاری داده‌ها از cache یا سرور
   const loadData = useCallback(async () => {
     console.log('[POS] 🔄 شروع بارگذاری داده‌ها...')
     setLoading(true)
@@ -873,7 +1095,6 @@ export default function PosPage() {
       return
     }
 
-    // ★ اگر آفلاین است، از cache بخوان
     if (!navigator.onLine) {
       console.log('[POS] 📡 آفلاین — بارگذاری از cache...')
       try {
@@ -938,7 +1159,6 @@ export default function PosPage() {
       return
     }
 
-    // ★ آنلاین — واکشی از سرور
     const safeFetch = async (url: string): Promise<any | null> => {
       try {
         const res = await fetch(url, { headers: getAuthHeaders() })
@@ -949,7 +1169,6 @@ export default function PosPage() {
       }
     }
 
-    // Load categories
     const categoriesData = await safeFetch(`/api/categories?tenantId=${tenantId}`)
     if (categoriesData?.success) {
       const raw = categoriesData.data
@@ -962,8 +1181,6 @@ export default function PosPage() {
         }))
       )
       console.log(`[POS] ✅ ${cats.length} دسته بارگذاری شد`)
-
-      // ★ Cache categories
       try {
         const { cacheCategories } = await import('@/lib/offline-db')
         await cacheCategories(cats)
@@ -973,7 +1190,6 @@ export default function PosPage() {
       console.warn('[POS] ⚠️ دسته‌بندی‌ها بارگذاری نشد')
     }
 
-    // Load warehouses
     const whData = await safeFetch(`/api/warehouses?tenantId=${tenantId}`)
     if (whData?.success) {
       const warehouses = whData.data ?? []
@@ -985,8 +1201,6 @@ export default function PosPage() {
         setSelectedWarehouseId(warehouses[0].id)
       }
       console.log(`[POS] ✅ ${warehouses.length} انبار بارگذاری شد`)
-
-      // ★ Cache warehouses
       try {
         const { cacheWarehousesMeta } = await import('@/lib/offline-db')
         await cacheWarehousesMeta(warehouses)
@@ -996,7 +1210,6 @@ export default function PosPage() {
       console.warn('[POS] ⚠️ انبارها بارگذاری نشد')
     }
 
-    // Load customers
     const customersData = await safeFetch(
       `/api/customers?tenantId=${tenantId}&limit=10`
     )
@@ -1005,17 +1218,15 @@ export default function PosPage() {
       const custs = Array.isArray(raw) ? raw : (raw?.customers ?? [])
       setCustomers(custs)
       console.log(`[POS] ✅ ${custs.length} مشتری بارگذاری شد`)
-
-      // ★ Cache customers
       try {
         const { cacheCustomers } = await import('@/lib/offline-db')
         await cacheCustomers(custs)
       } catch {}
-       } else {
+    } else {
       setCustomers([])
       console.warn('[POS] ⚠️ مشتریان بارگذاری نشد')
     }
-    // Load recents
+
     try {
       await posLoadRecents()
       console.log('[POS] ✅ محصولات اخیر بارگذاری شد')
@@ -1030,27 +1241,55 @@ export default function PosPage() {
 
   useEffect(() => {
     let mounted = true
-    
     if (mounted) {
       loadData()
     }
-    
     return () => {
       mounted = false
     }
   }, [loadData])
 
   useEffect(() => {
+    const handleOnline = () => {
+      console.log('[POS] 🟢 آنلاین شد — بارگذاری مجدد داده‌ها...')
+      useStore.getState().setOnline(true)
+      loadData()
+      import('@/lib/sync-engine').then(({ syncEngine }) => {
+        syncEngine.init()
+        syncEngine.sync().catch(() => {})
+      }).catch(() => {})
+      toast({
+        title: '🟢 اتصال برقرار شد',
+        description: 'داده‌ها به‌روزرسانی و صف آفلاین همگام‌سازی می‌شود',
+        duration: 4000,
+      })
+    }
+    const handleOffline = () => {
+      console.log('[POS] 🔴 آفلاین شد')
+      useStore.getState().setOnline(false)
+      toast({
+        title: '📡 اتصال قطع شد',
+        description: 'حالت آفلاین فعال شد — داده‌ها از حافظه محلی خوانده می‌شوند',
+        duration: 4000,
+      })
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [loadData, toast])
+
+  useEffect(() => {
     const handleInventoryChanged = async () => {
       console.log('[POS] inventory-changed event')
       await posLoadRecents()
     }
-
     window.addEventListener('inventory-changed', handleInventoryChanged)
     return () => window.removeEventListener('inventory-changed', handleInventoryChanged)
   }, [posLoadRecents])
 
-  // ★ جستجوی مشتری (آفلاین + آنلاین)
   useEffect(() => {
     const term = customerSearch.trim()
     if (term.length < 2) {
@@ -1065,7 +1304,6 @@ export default function PosPage() {
       return
     }
 
-    // ★ اگر آفلاین است، از customers state جستجو کن
     if (!navigator.onLine) {
       const termLower = term.toLowerCase()
       const filtered = customers.filter((c) => {
@@ -1078,7 +1316,6 @@ export default function PosPage() {
       return
     }
 
-    // ★ آنلاین — واکشی از سرور
     setCustomerSearchLoading(true)
     let cancelled = false
     const timer = setTimeout(async () => {
@@ -1103,6 +1340,7 @@ export default function PosPage() {
         if (cancelled) return
         console.log('[POS] /api/contacts response:', { success: data.success, count: data.data?.length })
         if (data.success) {
+        
           setCustomerSearchResults(data.data || [])
         } else {
           setCustomerSearchResults([])
@@ -1139,16 +1377,35 @@ export default function PosPage() {
     setTaxOverrideAmount(null)
   }, [cartItemsSignature])
 
-    // ============ Derived data ============
+  // ============ Derived data ============
 
+  // ★ v11.6: فیلتر کالاها بر اساس انبار انتخابی
   const filteredProducts = useMemo(() => {
     const searchQ = posSearchQuery.trim()
 
+       // ★ v11.9: فیلتر دقیق بر اساس موجودی انبار انتخاب‌شده
+    const filterByWarehouse = (items: any[]) => {
+      if (!selectedWarehouseId) {
+        return items
+      }
+      
+      return items.filter((p) => {
+        // موجودی این محصول در انبار انتخاب‌شده
+        const stockInWarehouse = warehouseStocks[p.id]
+        // اگر موجودی در انبار انتخابی تعریف نشده، یعنی در آن انبار موجود نیست
+        const hasStockInWarehouse = stockInWarehouse !== undefined && stockInWarehouse > 0
+        
+        console.log(`[POS] فیلتر انبار: ${p.name} | موجودی در انبار: ${stockInWarehouse} | نتیجه: ${hasStockInWarehouse}`)
+        
+        return hasStockInWarehouse
+      })
+    }
+
     if (searchQ.length >= 2) {
-      // ★ OFFLINE: جستجوی محلی
       if (!isOnline || !navigator.onLine) {
         const q = searchQ.toLowerCase()
-        let offlineResults = posRecents.filter((p) => {
+        const offlineSource = posRecents.length > 0 ? posRecents : products
+        let offlineResults = offlineSource.filter((p) => {
           if (p.isActive === false) return false
           return (
             p.name?.toLowerCase().includes(q) ||
@@ -1159,45 +1416,64 @@ export default function PosPage() {
             p.barcode?.includes(searchQ)
           )
         })
-
         if (selectedCategory !== 'all') {
           offlineResults = offlineResults.filter((p) => p.categoryId === selectedCategory)
         }
-
+        offlineResults = filterByWarehouse(offlineResults)
         console.log(`[POS] 📡 جستجوی آفلاین: ${offlineResults.length} نتیجه`)
         return offlineResults
       }
-
-      // ★ ONLINE: جستجوی سرور
       if (posSearchStatus === 'searching') return []
-
       let results = posSearchResults.filter((p) => p.isActive !== false)
+
+      const q = searchQ.toLowerCase()
+      results = results.filter((p) => {
+        return (
+          p.name?.toLowerCase().includes(q) ||
+          p.name?.includes(searchQ) ||
+          p.code?.toLowerCase() === q ||
+          p.code?.includes(searchQ) ||
+          p.barcode === searchQ ||
+          p.barcode?.includes(searchQ)
+        )
+      })
 
       if (selectedCategory !== 'all') {
         results = results.filter((p) => p.categoryId === selectedCategory)
       }
-
+      results = filterByWarehouse(results)
+     console.log(`[POS] 🔍 جستجو: "${searchQ}" | نتایج: ${results.length} (انبار: ${selectedWarehouseId})`)
       return results
     }
-
-    // ★ بدون جستجو: نمایش محصولات اخیر
-    if (posRecents.length === 0) return []
-
-    let recents = posRecents.filter((p) => p.isActive !== false)
-
+    const recentsSource = posRecents.length > 0 ? posRecents : products
+    if (recentsSource.length === 0) return []
+    let recents = recentsSource.filter((p) => p.isActive !== false)
     if (selectedCategory !== 'all') {
       recents = recents.filter((p) => p.categoryId === selectedCategory)
     }
-
+    recents = filterByWarehouse(recents)
     return recents
   }, [
     posSearchQuery,
     posSearchResults,
     posSearchStatus,
     posRecents,
+    products,
     selectedCategory,
+    selectedWarehouseId,
+     warehouseStocks,
     isOnline,
   ])
+
+  useEffect(() => {
+    setHighlightedIndex(filteredProducts.length > 0 ? 0 : -1)
+  }, [filteredProducts])
+
+  useEffect(() => {
+    if (posSearchQuery.length < 2) {
+      setHighlightedIndex(-1)
+    }
+  }, [posSearchQuery])
 
   const cartTotals = useMemo(() => {
     let subTotal = 0
@@ -1244,47 +1520,58 @@ export default function PosPage() {
   // ============ Handlers ============
 
   const handleAddToCart = useCallback(
-    (product: Product) => {
-      if (product.currentStock <= 0) {
+    (product: any) => {
+      console.log('1️⃣ [START] handleAddToCart فراخوانی شد برای:', product.name)
+
+      // ★ v11.9: موجودی واقعی انبار انتخاب‌شده
+      const warehouseStock = selectedWarehouseId
+        ? (warehouseStocks[product.id] ?? 0)
+        : product.currentStock
+
+      console.log('2️⃣ [STOCK] موجودی در انبار انتخابی:', warehouseStock)
+
+      if (warehouseStock <= 0) {
+        console.log('❌ [BLOCKED] موجودی محصول در انبار انتخابی صفر است')
         toast({
           title: 'محصول ناموجود است',
-          description: `${product.name} در انبار موجود نیست`,
+          description: `${product.name} در انبار انتخابی موجود نیست`,
           variant: 'destructive',
         })
         return
       }
 
-      setProducts((prev) => {
+      setProducts((prev: any[]) => {
         if (prev.find((p) => p.id === product.id)) return prev
-        
-        // ★ Cache محصول جدید
-        const { cacheProducts } = require('@/lib/offline-db')
-        cacheProducts([...prev, product]).catch((err: any) => {
-          console.warn('[POS] Failed to cache product:', err)
-        })
-        
-        return [...prev, product]
+        const updatedProducts = [...prev, product]
+        import('@/lib/offline-db').then(({ cacheProducts }: any) => {
+          cacheProducts(updatedProducts).catch((err: any) => console.warn('[POS] Cache failed:', err))
+        }).catch(() => {})
+        return updatedProducts
       })
 
-      const existingItem = cart.find((c) => c.productId === product.id)
-      if (existingItem && existingItem.quantity >= product.currentStock) {
+      console.log('3️⃣ [CART CHECK] طول فعلی سبد خرید:', cart.length)
+      const existingItem = cart.find((c: any) => c.productId === product.id)
+
+      if (existingItem && existingItem.quantity >= warehouseStock) {
+        console.log('❌ [BLOCKED] تعداد در سبد از موجودی انبار بیشتر است')
         toast({
           title: 'موجودی کافی نیست',
-          description: `موجودی فعلی: ${formatPrice(product.currentStock)} ${getUnitLabel(product)}`,
+          description: `موجودی فعلی در انبار: ${warehouseStock}`,
           variant: 'destructive',
         })
         return
       }
 
       if (typeof addToCart !== 'function') {
-        console.warn('[POS] addToCart is not a function yet')
+        console.log('❌ [BLOCKED] تابع addToCart تعریف نشده است')
         toast({ title: 'لطفاً صبر کنید', description: 'سیستم در حال بارگذاری است' })
         return
       }
 
+      console.log('4️⃣ [EXECUTING] در حال محاسبه و فراخوانی addToCart...')
       const lineTotal = computeLineTotal(1, product.salePrice, 0, product.taxRate)
 
-      addToCart({
+      const newItem = {
         productId: product.id,
         productName: product.name,
         quantity: 1,
@@ -1292,11 +1579,16 @@ export default function PosPage() {
         discount: 0,
         taxRate: product.taxRate,
         lineTotal,
-        currentStock: product.currentStock,
+        currentStock: warehouseStock,
         unitLabel: getUnitLabel(product),
-      })
+      }
 
-      // ★ Toast آفلاین
+      console.log('5️⃣ [PAYLOAD] آبجکت ارسالی به addToCart:', newItem)
+
+      addToCart(newItem)
+
+      console.log('✅ [SUCCESS] addToCart اجرا شد.')
+
       if (!isOnline) {
         toast({
           title: '📡 آفلاین',
@@ -1305,8 +1597,127 @@ export default function PosPage() {
         })
       }
     },
-    [addToCart, cart, toast, isOnline]
+    [addToCart, cart, toast, isOnline, setProducts, selectedWarehouseId, warehouseStocks]
   )
+  // ══════════════════════════════════════════════════════════════
+  // ★ بارکدخوان هوشمند در سطح کل صفحه (با پشتیبانی کامل آفلاین)
+  // ══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const handleGlobalKeyDown = async (e: KeyboardEvent) => {
+      if (isProcessingScan.current) {
+        e.preventDefault()
+        return
+      }
+
+      if (document.activeElement === searchInputRef.current) return
+
+      const activeEl = document.activeElement as HTMLElement | null
+      if (activeEl) {
+        const tagName = activeEl.tagName.toLowerCase()
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          tagName === 'select' ||
+          activeEl.isContentEditable
+        ) {
+          return
+        }
+      }
+
+      if (e.key === 'Enter') {
+        const barcode = barcodeBufferRef.current.trim()
+        if (barcode.length >= 3) {
+          e.preventDefault()
+
+          isProcessingScan.current = true
+
+          try {
+            if (!navigator.onLine) {
+              const offlineSource = posRecents.length > 0 ? posRecents : products
+              const cachedProduct = offlineSource.find(
+                (p) => p.isActive !== false && (p.barcode === barcode || p.code === barcode)
+              )
+
+              if (cachedProduct) {
+                handleAddToCart(cachedProduct)
+                toast({
+                  title: '✓ افزودن به سبد (آفلاین)',
+                  description: cachedProduct.name
+                })
+              } else {
+                toast({
+                  title: '📡 آفلاین — یافت نشد',
+                  description: `بارکد "${barcode}" در حافظه محلی ثبت نشده است`,
+                  variant: 'destructive',
+                })
+              }
+            } else {
+              const foundByBarcode = await posLookupByBarcode(barcode)
+              if (foundByBarcode && foundByBarcode.id) {
+                handleAddToCart(foundByBarcode)
+                toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
+              } else {
+                const codeFound = await posLookupByCode(barcode)
+                if (codeFound && codeFound.id) {
+                  handleAddToCart(codeFound)
+                  toast({ title: '✓ افزودن به سبد', description: codeFound.name })
+                } else {
+                  toast({
+                    title: 'یافت نشد',
+                    description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
+                    variant: 'destructive',
+                  })
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[POS] Global barcode scan error:', err)
+            toast({ title: 'خطا', description: 'خطا در پردازش بارکد', variant: 'destructive' })
+          } finally {
+            barcodeBufferRef.current = ''
+            if (barcodeTimerRef.current) {
+              clearTimeout(barcodeTimerRef.current)
+              barcodeTimerRef.current = null
+            }
+
+            setTimeout(() => {
+              isProcessingScan.current = false
+            }, 500)
+          }
+        }
+        return
+      }
+
+      if (e.key === 'Escape') {
+        barcodeBufferRef.current = ''
+        if (barcodeTimerRef.current) {
+          clearTimeout(barcodeTimerRef.current)
+          barcodeTimerRef.current = null
+        }
+        return
+      }
+
+      if (e.key.length > 1) return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+
+      barcodeBufferRef.current += e.key
+
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current)
+      }
+      barcodeTimerRef.current = setTimeout(() => {
+        barcodeBufferRef.current = ''
+      }, 2000)
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+      if (barcodeTimerRef.current) {
+        clearTimeout(barcodeTimerRef.current)
+      }
+    }
+  }, [posLookupByBarcode, posLookupByCode, handleAddToCart, toast, posRecents, products])
 
   const handleIncreaseQuantity = useCallback(
     (productId: string) => {
@@ -1314,8 +1725,9 @@ export default function PosPage() {
       if (item) {
         const product = products.find((p) => p.id === productId)
         const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
-        const newQty = item.quantity + 1
-
+        const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+        const step = getQuantityStep(isDecimal)
+        const newQty = roundQuantity(item.quantity + step, isDecimal)
         if (newQty > maxStock) {
           toast({
             title: 'موجودی کافی نیست',
@@ -1324,7 +1736,6 @@ export default function PosPage() {
           })
           return
         }
-
         const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
         useStore.setState((state) => ({
           cart: state.cart.map((c) =>
@@ -1341,8 +1752,14 @@ export default function PosPage() {
   const handleDecreaseQuantity = useCallback(
     (productId: string) => {
       const item = cart.find((c) => c.productId === productId)
-      if (item && item.quantity > 1) {
-        const newQty = item.quantity - 1
+      if (item) {
+        const product = products.find((p) => p.id === productId)
+        const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+        const step = getQuantityStep(isDecimal)
+        const minQty = getMinQuantity(isDecimal)
+        if (item.quantity <= minQty) return
+        const newQty = roundQuantity(item.quantity - step, isDecimal)
+        if (newQty < minQty) return
         const newLineTotal = computeLineTotal(newQty, item.unitPrice, item.discount, item.taxRate)
         useStore.setState((state) => ({
           cart: state.cart.map((c) =>
@@ -1353,7 +1770,38 @@ export default function PosPage() {
         }))
       }
     },
-    [cart]
+    [cart, products]
+  )
+
+  const handleQuantityChange = useCallback(
+    (productId: string, newQuantity: number) => {
+      const item = cart.find((c) => c.productId === productId)
+      if (!item) return
+      if (isNaN(newQuantity) || newQuantity <= 0) return
+      const product = products.find((p) => p.id === productId)
+      const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
+      let qty = roundQuantity(newQuantity, isDecimal)
+      const maxStock = product?.currentStock ?? item.currentStock ?? Infinity
+      if (qty > maxStock) {
+        qty = roundQuantity(maxStock, isDecimal)
+        toast({
+          title: 'موجودی کافی نیست',
+          description: `حداکثر موجودی: ${formatPrice(maxStock)} ${product ? getUnitLabel(product) : item.unitLabel || 'عدد'} — همان مقدار اعمال شد`,
+          variant: 'destructive',
+          duration: 4000,
+        })
+      }
+      if (qty === item.quantity) return
+      const newLineTotal = computeLineTotal(qty, item.unitPrice, item.discount, item.taxRate)
+      useStore.setState((state) => ({
+        cart: state.cart.map((c) =>
+          c.productId === productId
+            ? { ...c, quantity: qty, lineTotal: newLineTotal }
+            : c
+        ),
+      }))
+    },
+    [cart, products, toast]
   )
 
   const handleUnitPriceChange = useCallback(
@@ -1388,187 +1836,193 @@ export default function PosPage() {
     []
   )
 
+  // ══════════════════════════════════════════════════════════════
+  // ★ v11.5: هندل کامل کیبورد برای dropdown جستجو
+  // ══════════════════════════════════════════════════════════════
   const handleSearchKeyDown = useCallback(
-    async (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && posSearchQuery.trim()) {
-        const q = posSearchQuery.trim()
-        const offline = !isOnline || !navigator.onLine
-
-        // ★ OFFLINE: جستجو در cache
-        if (offline) {
-          const qLower = q.toLowerCase()
-          
-          // ۱. جستجو با بارکد
-          const byBarcode = posRecents.find(
-            (p) => p.isActive !== false && p.barcode === q
-          )
-          if (byBarcode) {
-            handleAddToCart(byBarcode)
-            posSearchSetQuery('')
-            return
-          }
-
-          // ۲. جستجو با کد
-          const byCode = posRecents.find(
-            (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
-          )
-          if (byCode) {
-            handleAddToCart(byCode)
-            posSearchSetQuery('')
-            return
-          }
-
-          // ۳. جستجو با نام
-          const byName = posRecents.find(
-            (p) =>
-              p.isActive !== false &&
-              (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
-          )
-          if (byName) {
-            handleAddToCart(byName)
-            posSearchSetQuery('')
-            return
-          }
-
-          // ۴. اولین نتیجه filteredProducts
-          if (filteredProducts.length > 0) {
-            handleAddToCart(filteredProducts[0])
-            posSearchSetQuery('')
-            return
-          }
-
-          toast({
-            title: '📡 آفلاین — یافت نشد',
-            description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
-            variant: 'destructive',
+    async (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'ArrowDown') {
+        if (filteredProducts.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          setHighlightedIndex(prev => {
+            const next = prev < filteredProducts.length - 1 ? prev + 1 : 0
+            setTimeout(() => {
+              document.getElementById(`pos-product-item-${next}`)?.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth',
+              })
+            }, 0)
+            return next
           })
-          return
         }
+        return
+      }
 
-        // ★ ONLINE: جستجو در سرور
-        if (/^\d{4,13}$/.test(q)) {
-          const found = await posLookupByBarcode(q)
-          if (found) {
-            handleAddToCart(found)
-            posSearchSetQuery('')
-            return
-          }
+      if (e.key === 'ArrowUp') {
+        if (filteredProducts.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          setHighlightedIndex(prev => {
+            const next = prev > 0 ? prev - 1 : filteredProducts.length - 1
+            setTimeout(() => {
+              document.getElementById(`pos-product-item-${next}`)?.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth',
+              })
+            }, 0)
+            return next
+          })
         }
-
-        const codeFound = await posLookupByCode(q)
-        if (codeFound) {
-          handleAddToCart(codeFound)
-          posSearchSetQuery('')
-          return
-        }
-
-        if (posSearchResults.length > 0) {
-          handleAddToCart(posSearchResults[0])
-          posSearchSetQuery('')
-          return
-        }
-
-        toast({
-          title: 'یافت نشد',
-          description: `محصولی با بارکد/کد "${q}" یافت نشد`,
-          variant: 'destructive',
-        })
+        return
       }
 
       if (e.key === 'Escape') {
         posSearchSetQuery('')
+        setHighlightedIndex(-1)
         searchInputRef.current?.blur()
+        return
+      }
+
+      if (e.key === 'Tab') {
+        setHighlightedIndex(-1)
+        return
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+
+        if (isProcessingScan.current) return
+
+        const q = (e.currentTarget as HTMLInputElement).value.trim().replace(/[\r\n]/g, '')
+        if (!q) return
+
+        isProcessingScan.current = true
+        const offline = !isOnline || !navigator.onLine
+
+        try {
+          if (highlightedIndex >= 0 && highlightedIndex < filteredProducts.length) {
+            const product = filteredProducts[highlightedIndex]
+            if (product && product.id && product.currentStock > 0) {
+              handleAddToCart(product)
+              toast({ title: '✓ افزودن به سبد', description: product.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              searchInputRef.current?.focus()
+              return
+            }
+          }
+
+          if (offline) {
+            const qLower = q.toLowerCase()
+            const offlineSource = posRecents.length > 0 ? posRecents : products
+
+            const byBarcode = offlineSource.find(
+              (p) => p.isActive !== false && p.barcode === q
+            )
+            if (byBarcode) {
+              handleAddToCart(byBarcode)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byBarcode.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            const byCode = offlineSource.find(
+              (p) => p.isActive !== false && p.code?.toLowerCase() === qLower
+            )
+            if (byCode) {
+              handleAddToCart(byCode)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byCode.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            const byName = offlineSource.find(
+              (p) =>
+                p.isActive !== false &&
+                (p.name?.toLowerCase().includes(qLower) || p.name?.includes(q))
+            )
+            if (byName) {
+              handleAddToCart(byName)
+              toast({ title: '✓ افزودن به سبد (آفلاین)', description: byName.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+
+            toast({
+              title: '📡 آفلاین — یافت نشد',
+              description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
+              variant: 'destructive',
+            })
+            return
+          }
+
+          const foundByBarcode = await posLookupByBarcode(q)
+          if (foundByBarcode && foundByBarcode.id) {
+            handleAddToCart(foundByBarcode)
+            toast({ title: '✓ افزودن به سبد', description: foundByBarcode.name })
+            posSearchSetQuery('')
+            setHighlightedIndex(-1)
+            return
+          }
+
+          const codeFound = await posLookupByCode(q)
+          if (codeFound && codeFound.id) {
+            handleAddToCart(codeFound)
+            toast({ title: '✓ افزودن به سبد', description: codeFound.name })
+            posSearchSetQuery('')
+            setHighlightedIndex(-1)
+            return
+          }
+
+          if (posSearchResults.length > 0) {
+            const firstResult = posSearchResults[0]
+            if (firstResult && firstResult.id) {
+              handleAddToCart(firstResult)
+              toast({ title: '✓ افزودن به سبد', description: firstResult.name })
+              posSearchSetQuery('')
+              setHighlightedIndex(-1)
+              return
+            }
+          }
+
+          toast({
+            title: 'یافت نشد',
+            description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
+            variant: 'destructive',
+          })
+
+        } catch (error) {
+          console.error('Barcode scan error:', error)
+          toast({ title: 'خطا', description: 'خطا در پردازش اسکن', variant: 'destructive' })
+        } finally {
+          setTimeout(() => {
+            isProcessingScan.current = false
+          }, 500)
+        }
       }
     },
     [
-      posSearchQuery,
+      filteredProducts,
+      highlightedIndex,
       posSearchResults,
       posRecents,
       posLookupByBarcode,
       posLookupByCode,
       posSearchSetQuery,
       handleAddToCart,
-      filteredProducts,
       toast,
       isOnline,
+      products,
     ]
   )
 
-  // ★ اسکنر بارکد کیبورد (با پشتیبانی آفلاین)
-  useEffect(() => {
-    let buffer = ''
-    let lastTime = Date.now()
-    let active = true
-
-    const handler = async (e: KeyboardEvent) => {
-      if (!active) return
-
-      const target = e.target as HTMLElement
-      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-
-      const now = Date.now()
-      const delta = now - lastTime
-
-      if (delta > 100) buffer = ''
-
-      lastTime = now
-
-      if (e.key === 'Enter' && buffer.length >= 4) {
-        const barcode = buffer
-        buffer = ''
-
-        if (!isInput || target !== searchInputRef.current) {
-          e.preventDefault()
-
-          // ★ OFFLINE: جستجو در cache
-          if (!navigator.onLine) {
-            const cachedProduct = posRecents.find(
-              (p) => p.isActive !== false && p.barcode === barcode
-            )
-            if (cachedProduct) {
-              handleAddToCart(cachedProduct)
-              toast({ title: '✓ افزودن به سبد (آفلاین)', description: cachedProduct.name })
-            } else {
-              toast({
-                title: '📡 آفلاین — یافت نشد',
-                description: `بارکد ${barcode} در حافظه محلی ثبت نشده`,
-                variant: 'destructive',
-              })
-            }
-            return
-          }
-
-          // ★ ONLINE: جستجو در سرور
-          const product = await posLookupByBarcode(barcode)
-          if (product) {
-            handleAddToCart(product)
-            toast({ title: '✓ افزودن به سبد', description: product.name })
-          } else {
-            toast({
-              title: 'یافت نشد',
-              description: `بارکد ${barcode} در سیستم ثبت نشده`,
-              variant: 'destructive',
-            })
-          }
-          return
-        }
-      }
-
-      if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
-        buffer += e.key
-      }
-    }
-
-    window.addEventListener('keydown', handler)
-    return () => {
-      active = false
-      window.removeEventListener('keydown', handler)
-    }
-  }, [posLookupByBarcode, handleAddToCart, toast, posRecents])
-
   const handleBarcodeDetected = useCallback(
     async (barcode: string) => {
-      // ★ OFFLINE: جستجو در cache
       if (!navigator.onLine) {
         const cachedProduct = posRecents.find(
           (p) => p.isActive !== false && p.barcode === barcode
@@ -1587,7 +2041,6 @@ export default function PosPage() {
         return
       }
 
-      // ★ ONLINE: جستجو در سرور
       const product = await posLookupByBarcode(barcode)
       if (product) {
         handleAddToCart(product)
@@ -1640,6 +2093,16 @@ export default function PosPage() {
       return
     }
 
+    if (pt === 'check') {
+      setCheckNumber('')
+      setCheckBank('')
+      setCheckDueDate('')
+      setCheckPayee('')
+      setCheckDialogOpen(true)
+      console.log('[POS] Check dialog opened')
+      return
+    }
+
     if (pt === 'card') {
       if (openCardPaymentDialogRef.current) {
         openCardPaymentDialogRef.current()
@@ -1689,7 +2152,123 @@ export default function PosPage() {
     }
 
     setActivePosDevice(device)
-    console.log('[POS] Active POS device:', { id: device.id, name: device.name, type: device.terminalType })
+    console.log('[POS] Active POS device:', {
+      id: device.id,
+      name: device.name,
+      type: device.terminalType,
+      config: device.config
+    })
+
+    let isSimulatorDevice = false
+
+    try {
+      if (device.config) {
+        const deviceConfig = typeof device.config === 'string'
+          ? JSON.parse(device.config)
+          : device.config
+        if (deviceConfig?.isSimulator === true) {
+          isSimulatorDevice = true
+        }
+      }
+    } catch (e) {
+      console.warn('[POS] Failed to parse device config:', e)
+    }
+
+    if (!isSimulatorDevice && device.name) {
+      const nameLower = device.name.toLowerCase()
+      if (nameLower.includes('شبیه‌ساز') || nameLower.includes('simulator') || nameLower.includes('🧪')) {
+        isSimulatorDevice = true
+      }
+    }
+
+    console.log('[POS] isSimulatorDevice:', isSimulatorDevice)
+
+    if (isSimulatorDevice) {
+      console.log('[POS] 🧪 حالت شبیه‌سازی فعال است — بدون نیاز به دستگاه واقعی')
+
+      try {
+        setCardPaymentStatus('connecting')
+        setCardPaymentMessage('🧪 در حال اتصال به شبیه‌ساز کارتخوان...')
+        await new Promise(resolve => setTimeout(resolve, 800))
+
+        setCardPaymentStatus('connecting')
+        setCardPaymentMessage(`🧪 مبلغ ${formatPrice(cartTotals.totalAmount)} ریال به شبیه‌ساز ارسال شد`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
+        setCardPaymentStatus('waiting_card')
+        setCardPaymentMessage('🧪 شبیه‌سازی: کارت را بکشید و رمز را وارد کنید... (۲ ثانیه صبر کنید)')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        setCardPaymentStatus('verifying')
+        setCardPaymentMessage('🧪 در حال پردازش تراکنش...')
+        await new Promise(resolve => setTimeout(resolve, 1500))
+
+        const isSuccess = Math.random() * 100 < 90
+
+        if (isSuccess) {
+          const referenceNumber = String(Math.floor(100000 + Math.random() * 900000))
+          const traceNumber = String(Math.floor(100000 + Math.random() * 900000))
+          const cardPrefixes = ['6037', '6221', '6274', '6279', '5022']
+          const cardPrefix = cardPrefixes[Math.floor(Math.random() * cardPrefixes.length)]
+          const cardLast4 = String(Math.floor(1000 + Math.random() * 9000))
+          const bankNames: Record<string, string> = {
+            '6037': 'بانک ملی',
+            '6221': 'بانک سپه',
+            '6274': 'بانک صادرات',
+            '6279': 'بانک ملت',
+            '5022': 'بانک پاسارگاد',
+          }
+          const cardType = bankNames[cardPrefix] || 'بانک نامشخص'
+
+          setCardPaymentStatus('success')
+          setCardPaymentMessage(
+            `🧪 شبیه‌سازی موفق!\nشماره پیرو: ${referenceNumber}\nکارت: ****${cardLast4} (${cardType})`
+          )
+
+          const tid = getTenantIdFromStore()
+          try {
+            await fetch(`/api/payments/card?tenantId=${tid}`, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                amount: cartTotals.totalAmount,
+                referenceNumber: referenceNumber,
+                referenceType: 'rrn',
+                traceNumber: traceNumber,
+                cardNumber: cardLast4,
+                cardType: cardType,
+                status: 'successful',
+                posDeviceId: device.id,
+                description: '🧪 تراکنش شبیه‌سازی شده (تست)',
+              }),
+            })
+            console.log('[POS Simulator] ✅ Transaction recorded in database')
+          } catch (err) {
+            console.warn('[POS Simulator] Failed to record transaction:', err)
+          }
+
+          setTimeout(() => {
+            setCardPaymentDialogOpen(false)
+            setConfirmDialogOpen(true)
+          }, 2000)
+        } else {
+          const errors = [
+            'عدم موجودی کافی',
+            'رمز اشتباه است',
+            'کارت منقضی شده است',
+            'خطا در ارتباط با بانک',
+          ]
+          const randomError = errors[Math.floor(Math.random() * errors.length)]
+          setCardPaymentStatus('failed')
+          setCardPaymentMessage(`🧪 شبیه‌سازی ناموفق: ${randomError}`)
+        }
+      } catch (err: any) {
+        console.error('[POS Simulator] Error:', err)
+        setCardPaymentStatus('failed')
+        setCardPaymentMessage('خطا در شبیه‌سازی: ' + (err?.message || 'خطای ناشناخته'))
+      }
+      return
+    }
 
     const support = checkBrowserSupport(device.terminalType)
     if (!support.supported) {
@@ -1870,16 +2449,19 @@ export default function PosPage() {
     return config?.label ?? type
   }, [])
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.7: handleConfirmInvoiceFinal — useCallback کامل داخل کامپوننت
+  // ═══════════════════════════════════════════════════════════════
   const handleConfirmInvoiceFinal = useCallback(async () => {
+    // ═══════════════════════════════════════════════════════════
     // ★ OFFLINE: ذخیره در صف
+    // ═══════════════════════════════════════════════════════════
     if (!navigator.onLine) {
       console.log('[POS] 🔴 آفلاین — فاکتور به صف اضافه می‌شود')
-
       useStore.getState().setOnline(false)
 
       try {
         const { addToSyncQueue, getSyncQueueCount } = await import('@/lib/offline-db')
-
         const offlineNumber = `OFF-${Date.now()}`
 
         const invoiceItems = cart.map((item) => ({
@@ -1896,23 +2478,69 @@ export default function PosPage() {
         const ptFinal = (paymentType || '').toLowerCase()
         const isCreditOrInstallment =
           ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-        const paidAmount = isCreditOrInstallment ? 0 : cartTotals.totalAmount
+
+        const currentInstPlanOffline = useStore.getState().installmentPlan
+        const downPaymentAmountOffline = installmentDownPayment || currentInstPlanOffline?.downPayment || 0
+        const paidAmountOffline = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmountOffline : 0) : cartTotals.totalAmount
+        const remainingAmountOffline = cartTotals.totalAmount - paidAmountOffline
+
+        const installmentDataOffline: any = (ptFinal === 'installment' && (installmentCalc || currentInstPlanOffline)) ? {
+          downPayment: downPaymentAmountOffline,
+          numberOfInstallments: installmentCount || currentInstPlanOffline?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanOffline?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanOffline?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanOffline?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanOffline?.installmentAmount || 0,
+          remainingAmount: remainingAmountOffline,
+          schedules: installmentCalc?.schedule || [],
+        } : undefined
+
+        const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
 
         await addToSyncQueue('invoice', {
           method: 'POST',
           url: '/api/invoices',
           body: {
             tenantId: getTenantIdFromStore(),
-            customerId: selectedCustomerId || undefined,
+            branchId: branchId || undefined,
+            customerId: finalCustomerId,
             paymentType: ptFinal,
             items: invoiceItems,
             discountAmount: cartTotals.discountAmount + (cartTotals.invoiceDiscountAmount || 0),
             taxAmount: cartTotals.taxAmount,
-            paidAmount,
-            remainingAmount: isCreditOrInstallment ? cartTotals.totalAmount : 0,
+            paidAmount: paidAmountOffline,
+            remainingAmount: remainingAmountOffline,
             warehouseId: selectedWarehouseId || undefined,
+            ...(installmentDataOffline ? { installmentData: installmentDataOffline } : {}),
+            ...(ptFinal === 'check' && {
+              checkNumber: checkNumber.trim(),
+              checkBankName: checkBank.trim(),
+              checkDueDate: checkDueDate,
+              checkPayee: checkPayee.trim() || null,
+            }),
           },
         })
+
+        try {
+          const { updateCachedProductStock } = await import('@/lib/offline-db')
+          for (const item of cart) {
+            setProducts((prev) =>
+              prev.map((p) =>
+                p.id === item.productId
+                  ? { ...p, currentStock: Math.max(0, p.currentStock - item.quantity) }
+                  : p
+              )
+            )
+            const product = products.find((p) => p.id === item.productId)
+            if (product) {
+              const newStock = Math.max(0, product.currentStock - item.quantity)
+              await updateCachedProductStock(item.productId, newStock)
+            }
+          }
+          console.log('[POS] ✅ موجودی cache آفلاین بروزرسانی شد')
+        } catch (stockErr) {
+          console.warn('[POS] ⚠️ خطا در بروزرسانی موجودی cache:', stockErr)
+        }
 
         const count = await getSyncQueueCount()
         useStore.getState().setPendingSyncCount(count)
@@ -1922,6 +2550,14 @@ export default function PosPage() {
           description: `شماره آفلاین: ${offlineNumber} — پس از اتصال ثبت خواهد شد`,
           duration: 5000,
         })
+
+        setCheckNumber('')
+        setCheckBank('')
+        setCheckDueDate('')
+        setCheckPayee('')
+        setCheckCustomerSearch('')
+        setCheckSelectedCustomerId(null)
+        setCheckSelectedCustomerName('')
 
         clearCart()
         posSearchSetQuery('')
@@ -1945,7 +2581,9 @@ export default function PosPage() {
       }
     }
 
+    // ═══════════════════════════════════════════════════════════
     // ★ ONLINE: ارسال به سرور
+    // ═══════════════════════════════════════════════════════════
     setSubmitting(true)
     setConfirmDialogOpen(false)
 
@@ -1962,13 +2600,14 @@ export default function PosPage() {
           item.quantity * item.unitPrice * (1 - item.discount / 100) * (item.taxRate / 100)
         ),
       }))
-
       const ptFinal = (paymentType || '').toLowerCase()
       const isCreditOrInstallment =
         ptFinal === 'credit' || ptFinal === 'installment' || ptFinal === 'check'
-      const paidAmount = isCreditOrInstallment ? 0 : cartTotals.totalAmount
-      const remainingAmount = isCreditOrInstallment ? cartTotals.totalAmount : 0
 
+      const currentInstPlan = useStore.getState().installmentPlan
+      const downPaymentAmount = installmentDownPayment || currentInstPlan?.downPayment || 0
+      const paidAmount = isCreditOrInstallment ? (ptFinal === 'installment' ? downPaymentAmount : 0) : cartTotals.totalAmount
+      const remainingAmount = cartTotals.totalAmount - paidAmount
       const payments =
         cartTotals.totalAmount > 0
           ? [
@@ -1986,9 +2625,12 @@ export default function PosPage() {
             ]
           : []
 
+      const finalCustomerId = checkSelectedCustomerId || selectedCustomerId || undefined
+
       const requestBody: any = {
         tenantId,
-        customerId: selectedCustomerId || undefined,
+        branchId: branchId || undefined,
+        customerId: finalCustomerId,
         paymentType: (paymentType || 'cash').toLowerCase(),
         items: invoiceItems,
         payments,
@@ -1999,30 +2641,36 @@ export default function PosPage() {
         warehouseId: selectedWarehouseId || undefined,
       }
 
-      const currentInstallmentPlan = useStore.getState().installmentPlan
-      if (ptFinal === 'installment' && (installmentCalc || currentInstallmentPlan)) {
-        const planData: InstallmentPlanData = {
-          downPayment: installmentDownPayment || currentInstallmentPlan?.downPayment || 0,
-          numberOfInstallments:
-            installmentCount || currentInstallmentPlan?.numberOfInstallments || 1,
-          interestRate: installmentInterestRate || currentInstallmentPlan?.interestRate || 0,
-          installmentPeriod:
-            installmentPeriod || currentInstallmentPlan?.installmentPeriod || 'monthly',
-          totalWithInterest:
-            installmentCalc?.totalWithInterest ||
-            currentInstallmentPlan?.totalWithInterest ||
-            0,
-          installmentAmount:
-            installmentCalc?.installmentAmount ||
-            currentInstallmentPlan?.installmentAmount ||
-            0,
-          remainingAmount:
-            installmentCalc?.remainingAmount || currentInstallmentPlan?.remainingAmount || 0,
+      const currentInstPlanReq = useStore.getState().installmentPlan
+      if (ptFinal === 'installment' && (installmentCalc || currentInstPlanReq)) {
+        const planData = {
+          downPayment: installmentDownPayment || currentInstPlanReq?.downPayment || 0,
+          numberOfInstallments: installmentCount || currentInstPlanReq?.numberOfInstallments || 1,
+          interestRate: installmentInterestRate || currentInstPlanReq?.interestRate || 0,
+          installmentPeriod: installmentPeriod || currentInstPlanReq?.installmentPeriod || 'monthly',
+          totalWithInterest: installmentCalc?.totalWithInterest || currentInstPlanReq?.totalWithInterest || 0,
+          installmentAmount: installmentCalc?.installmentAmount || currentInstPlanReq?.installmentAmount || 0,
+          remainingAmount: installmentCalc?.remainingAmount || currentInstPlanReq?.remainingAmount || 0,
         }
-        requestBody.installmentPlanData = {
-          ...planData,
+
+        requestBody.installmentData = {
+          downPayment: planData.downPayment,
+          numberOfInstallments: planData.numberOfInstallments,
+          interestRate: planData.interestRate,
+          installmentPeriod: planData.installmentPeriod,
+          totalWithInterest: planData.totalWithInterest,
+          installmentAmount: planData.installmentAmount,
+          remainingAmount: planData.remainingAmount,
           schedules: installmentCalc?.schedule || [],
         }
+
+        requestBody.downPayment = planData.downPayment
+        requestBody.numberOfInstallments = planData.numberOfInstallments
+        requestBody.interestRate = planData.interestRate
+        requestBody.installmentPeriod = planData.installmentPeriod
+        requestBody.totalWithInterest = planData.totalWithInterest
+        requestBody.installmentAmount = planData.installmentAmount
+        requestBody.remainingAmount = planData.remainingAmount
       }
 
       if (ptFinal === 'credit') {
@@ -2030,6 +2678,13 @@ export default function PosPage() {
           dueDate: creditDueDate || undefined,
           description: creditDescription || undefined,
         }
+      }
+
+      if (ptFinal === 'check') {
+        requestBody.checkNumber = checkNumber.trim()
+        requestBody.checkBankName = checkBank.trim()
+        requestBody.checkDueDate = checkDueDate
+        requestBody.checkPayee = checkPayee.trim() || null
       }
 
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
@@ -2100,13 +2755,29 @@ export default function PosPage() {
         status: res.status,
         success: result.success,
         error: result.error,
+        invoiceId: result.data?.id,
+        invoiceNumber: result.data?.number,
       })
 
-      if (res.ok && result.success) {
-        const isInstallment = ptFinal === 'installment'
-        const isCredit = ptFinal === 'credit'
+   if (res.ok && result.success) {
+  // ★ v11.9.0: لاگ ثبت فاکتور فروش (همه روش‌های پرداخت)
+  logger.info('فاکتور فروش ثبت شد', {
+    invoiceId: result.data?.id,
+    invoiceNumber: result.data?.number,
+    totalAmount: cartTotals?.totalAmount,
+    paymentType: (paymentType || 'cash').toLowerCase(),
+    customerId: finalCustomerId,
+    warehouseId: selectedWarehouseId || undefined,
+    itemsCount: cart?.length,
+    paidAmount: paidAmount,
+    remainingAmount: remainingAmount,
+  })
 
-        if (isInstallment && result.data?.installmentPlan) {
+  const isInstallment = ptFinal === 'installment'
+  const isCredit = ptFinal === 'credit'
+  const isCheck = ptFinal === 'check'
+
+  if (isInstallment && result.data?.installmentPlan) {
           const plan = result.data.installmentPlan
           toast({
             title: 'فاکتور قسطی ثبت شد',
@@ -2122,35 +2793,40 @@ export default function PosPage() {
             title: 'فاکتور نسیه ثبت شد',
             description: `فاکتور نسیه با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد.`,
           })
-        } else {
+        } else if (!isCheck) {
           toast({
             title: 'فاکتور تأیید شد',
             description: `فاکتور با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال ثبت شد`,
           })
         }
 
-        if (ptFinal === 'check' && selectedCustomerId) {
-          try {
-            await fetch('/api/checks', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              },
-              body: JSON.stringify({
-                type: 'receivable',
-                checkNumber: `CHK-${Date.now().toString().slice(-6)}`,
-                bankName: 'نامشخص (ثبت از POS)',
-                amount: cartTotals.totalAmount,
-                dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-                  .toISOString()
-                  .split('T')[0],
-                customerId: selectedCustomerId,
-                description: `چک فاکتور`,
-              }),
+        if (isCheck) {
+          const invoiceNumber = result.data?.number || ''
+          const createdCheck = (result.data as any)?.createdCheck || null
+
+          if (createdCheck && !createdCheck.error) {
+            toast({
+              title: '✓ فاکتور و چک ثبت شد',
+              description: `فاکتور ${invoiceNumber} + چک شماره ${createdCheck.checkNumber} (${createdCheck.bankName})`,
+              duration: 5000,
             })
-            toast({ title: 'چک ثبت شد', description: 'چک دریافتنی برای این فاکتور ثبت شد' })
-          } catch {}
+          } else if (createdCheck && createdCheck.error) {
+            toast({
+              title: '❌ خطا در ثبت چک (فاکتور ثبت شد)',
+              description: `پیام: ${createdCheck.errorMessage || 'نامشخص'}`,
+              variant: 'destructive',
+              duration: 10000,
+            })
+          } else {
+            toast({
+              title: '✓ فاکتور ثبت شد',
+              description: `فاکتور ${invoiceNumber} با مبلغ ${formatPrice(cartTotals.totalAmount)} ریال`,
+              duration: 5000,
+            })
+          }
+          window.dispatchEvent(new Event('checks-updated'))
+          // ★ v11.6.5: اطلاع‌رسانی به نوار وضعیت برای رفرش
+
         }
 
         setInstallmentPlan(null)
@@ -2159,6 +2835,14 @@ export default function PosPage() {
         setPaymentType(null as any)
         setTaxOverrideAmount(null)
         setInvoiceDiscountPercent('')
+
+        setCheckNumber('')
+        setCheckBank('')
+        setCheckDueDate('')
+        setCheckPayee('')
+        setCheckCustomerSearch('')
+        setCheckSelectedCustomerId(null)
+        setCheckSelectedCustomerName('')
 
         const printSettings =
           typeof window !== 'undefined'
@@ -2172,7 +2856,7 @@ export default function PosPage() {
               if (ps.paymentTypes.includes(currentPaymentType)) {
                 const cartCopy = [...cart]
                 const totalsCopy = { ...cartTotals }
-                const customerCopy = customers.find((c) => c.id === selectedCustomerId)
+                const customerCopy = customers.find((c) => c.id === finalCustomerId)
                 const paymentTypeCopy = paymentType
 
                 const savedTemplate = ps.template || '8cm'
@@ -2310,7 +2994,33 @@ export default function PosPage() {
     customers,
     storeName,
     user,
+    branchId,
+    products,
+    checkNumber,
+    checkBank,
+    checkDueDate,
+    checkPayee,
+    checkSelectedCustomerId,
+    checkCustomerSearch,
   ])
+
+  const handleConfirmCheck = useCallback(() => {
+    if (!checkNumber.trim()) {
+      toast({ title: 'خطا', description: 'شماره چک الزامی است', variant: 'destructive' })
+      return
+    }
+    if (!checkBank.trim()) {
+      toast({ title: 'خطا', description: 'نام بانک الزامی است', variant: 'destructive' })
+      return
+    }
+    if (!checkDueDate) {
+      toast({ title: 'خطا', description: 'تاریخ سررسید الزامی است', variant: 'destructive' })
+      return
+    }
+
+    setCheckDialogOpen(false)
+    setConfirmDialogOpen(true)
+  }, [checkNumber, checkBank, checkDueDate, toast])
 
   const handlePrintInvoice = useCallback(() => {
     if (cart.length === 0) {
@@ -2321,6 +3031,8 @@ export default function PosPage() {
     setAutoPrintMode(false)
     setThermalPrintOpen(true)
   }, [cart.length, toast])
+
+
 
   const receiptData: PrintReceiptData = useMemo(() => {
     const settings: any = (() => {
@@ -2407,7 +3119,7 @@ export default function PosPage() {
     } finally {
       setPrintSubmitting(false)
     }
-  }, [autoPrintMode, pendingAutoPrintDataRef, receiptData, selectedPrintTemplate, toast])
+  }, [autoPrintMode, receiptData, selectedPrintTemplate, toast])
 
   const previewWidth = selectedPrintTemplate === 'thermal-58mm' ? 220 : selectedPrintTemplate === 'thermal-80mm' ? 300 : 460
 
@@ -2418,7 +3130,7 @@ export default function PosPage() {
       : receiptData
     if (!currentData) return ''
     return generatePrintHtml(selectedPrintTemplate, currentData)
-  }, [thermalPrintOpen, autoPrintMode, pendingAutoPrintDataRef, receiptData, selectedPrintTemplate])
+  }, [thermalPrintOpen, autoPrintMode, receiptData, selectedPrintTemplate])
 
   const handleInstallmentConfirm = useCallback(() => {
     if (!installmentCalc) return
@@ -2492,17 +3204,7 @@ export default function PosPage() {
   }, [handleConfirmInvoice, posSearchSetQuery])
 
   // ============ Render ============
-
-  if (!hasHydrated) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 gap-3">
-        <div className="animate-spin rounded-full h-10 w-10 border-3 border-emerald-200 border-t-emerald-600" />
-        <p className="text-slate-400 text-xs">در حال بارگذاری صندوق فروش...</p>
-      </div>
-    )
-  }
-
-   // ============ Render ============
+  // ============ Render ============
 
   if (!hasHydrated) {
     return (
@@ -2546,25 +3248,22 @@ export default function PosPage() {
               آفلاین
             </Badge>
           )}
-          <div className="hidden md:flex items-center">
-            <Badge variant="outline" className="gap-1 text-[9px] font-normal border-slate-200 text-slate-400 px-1.5 py-0">
-              <Keyboard className="w-2.5 h-2.5" />
-              F2|F4|Esc
-            </Badge>
-          </div>
+          {/* ★ v11.6: نشانگر میانبرهای F2|F4|Esc حذف شد — میانبرها همچنان فعال هستند */}
         </div>
       </header>
+{/* ★ v11.6.3: پنل صندوق‌دار */}
+<CashierPanel />
+      
 
       {/* ==================== SEARCH BAR ==================== */}
       <div className="bg-white border-b border-slate-200 px-2 sm:px-3 py-2 sm:py-2.5 shrink-0 relative z-30">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          {/* جستجو */}
           <div className="relative flex-1 order-1 sm:order-none">
             <Search className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 pointer-events-none" />
             <Input
               ref={searchInputRef}
               type="text"
-              placeholder="جستجو / بارکد [F2]"
+              placeholder="جستجو / بارکد"
               value={posSearchQuery}
               onChange={(e) => posSearchSetQuery(e.target.value)}
               onKeyDown={handleSearchKeyDown}
@@ -2575,54 +3274,158 @@ export default function PosPage() {
                 focus:bg-white focus:border-emerald-400 focus:ring-emerald-400/20 
                 font-medium"
             />
-            {/* وضعیت جستجو */}
             <div className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {posSearchStatus === 'searching' ? (
+              {(!isOnline || !navigator.onLine) && posSearchQuery.trim().length >= 2 ? (
+                <span className="text-[9px] text-amber-600 font-medium bg-amber-50 px-1.5 py-0.5 rounded hidden sm:block flex items-center gap-0.5">
+                  <WifiOff className="w-2.5 h-2.5" />
+                  {toFaNum(filteredProducts.length)} نتیجه
+                </span>
+              ) : posSearchStatus === 'searching' ? (
                 <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
               ) : posSearchQuery.trim().length >= 2 && posSearchStatus === 'success' ? (
                 <span className="text-[9px] text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded hidden sm:block">
-                  {toFaNum(posSearchResults.length)} نتیجه
+                  {toFaNum(filteredProducts.length)} نتیجه
                 </span>
               ) : (
                 <Barcode className="w-3.5 h-3.5 text-slate-300" />
               )}
             </div>
 
-            {/* Lookup Dropdown */}
             {posSearchQuery.trim().length >= 2 && filteredProducts.length > 0 && (
               <div
-                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-[60vh] overflow-y-auto"
+                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl"
                 style={{ top: '100%', right: 0 }}
               >
-                <div className="sticky top-0 bg-slate-50 px-2.5 py-1.5 text-[10px] text-slate-600 border-b border-slate-100 flex items-center justify-between">
-                  <span className="flex items-center gap-1 font-medium">
+                <div className="sticky top-0 bg-gradient-to-l from-emerald-50 via-emerald-50/50 to-white border-b border-slate-100 flex items-center justify-between px-3 py-2 z-10">
+                  <div className="flex items-center gap-1.5">
                     <Search className="w-3 h-3 text-emerald-500" />
-                    {toFaNum(filteredProducts.length)} نتیجه
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => posSearchSetQuery('')}
-                    className="text-slate-400 hover:text-red-500 flex items-center gap-0.5"
-                    title="بستن نتایج"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                    <span className="text-[10px] text-emerald-700 font-bold">
+                      {toFaNum(filteredProducts.length)} نتیجه یافت شد
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] text-slate-400 hidden sm:inline">
+                      ↑↓ ناوبری • Enter انتخاب • Esc بستن
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        posSearchSetQuery('')
+                        setHighlightedIndex(-1)
+                      }}
+                      className="text-slate-400 hover:text-red-500 flex items-center gap-0.5"
+                      title="بستن نتایج"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
-                {filteredProducts.map((product) => (
-                  <ProductLookupItem
-                    key={product.id}
-                    product={product}
-                    cartQuantity={cart.find((c) => c.productId === product.id)?.quantity || 0}
-                    onAdd={(p) => {
-                      handleAddToCart(p)
-                    }}
-                  />
-                ))}
+
+                <div className="max-h-[60vh] overflow-y-auto">
+                  {filteredProducts.map((product, idx) => {
+                    const isHighlighted = idx === highlightedIndex
+                    const hasStock = (product.currentStock || 0) > 0
+                    const isLowStock = hasStock && (product.currentStock || 0) < 5
+                    const unitLabel = getUnitLabel(product)
+                    const cartQuantity = cart.find((c) => c.productId === product.id)?.quantity || 0
+
+                    return (
+                      <button
+                        key={product.id}
+                        id={`pos-product-item-${idx}`}
+                        type="button"
+                        disabled={!hasStock}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
+                        onClick={() => {
+                          if (!hasStock) return
+                          handleAddToCart(product)
+                          toast({ title: '✓ افزودن به سبد', description: product.name })
+                          posSearchSetQuery('')
+                          setHighlightedIndex(-1)
+                          searchInputRef.current?.focus()
+                        }}
+                        className={`w-full text-right px-3 py-2.5 border-b border-slate-50 last:border-0 transition-all duration-100 ${
+                          !hasStock
+                            ? 'opacity-40 cursor-not-allowed'
+                            : isHighlighted
+                              ? 'bg-gradient-to-l from-emerald-50 via-emerald-50/50 to-purple-50 border-r-4 border-r-emerald-500'
+                              : 'hover:bg-slate-50/70 border-r-4 border-r-transparent'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                            {cartQuantity > 0 && (
+                              <span className="bg-emerald-600 text-white text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                                {toFaNum(cartQuantity)}
+                              </span>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                                <span className={`font-semibold text-xs truncate ${isHighlighted ? 'text-slate-900' : 'text-slate-700'}`}>
+                                  {highlightText(product.name, posSearchQuery)}
+                                </span>
+                                {!hasStock && (
+                                  <span className="text-[8px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded border border-red-200 shrink-0 font-bold">
+                                    ناموجود
+                                  </span>
+                                )}
+                                {isLowStock && (
+                                  <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200 shrink-0 font-bold">
+                                    کم‌موجود
+                                  </span>
+                                )}
+                                {hasStock && !isLowStock && (
+                                  <span className="text-[8px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-100 shrink-0">
+                                    ✓ موجود
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <span className="font-mono font-medium bg-slate-100 px-1 rounded" dir="ltr">
+                                  {product.code}
+                                </span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-slate-600">{unitLabel}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className={hasStock ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                                  موجودی: {toFaNum(product.currentStock || 0)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-left shrink-0">
+                            <div className="text-[9px] text-slate-400 mb-0.5">قیمت فروش</div>
+                            <div className="text-xs font-bold text-emerald-700" dir="rtl">
+                              {formatPrice(product.salePrice || 0)}
+                            </div>
+                          </div>
+
+                          {isHighlighted && hasStock && (
+                            <div className="shrink-0 self-center">
+                              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[9px] text-slate-500 text-center flex items-center justify-center gap-1">
+                  <span>💡</span>
+                  <span>با ↑↓ کالا را انتخاب و Enter بزنید تا به سبد اضافه شود</span>
+                </div>
               </div>
             )}
+
             {posSearchQuery.trim().length >= 2 && filteredProducts.length === 0 && posSearchStatus !== 'searching' && (
               <div
-                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl p-4 text-center"
+                className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl p-4 text-center"
                 style={{ top: '100%', right: 0 }}
               >
                 <Package className="w-6 h-6 mx-auto text-slate-300 mb-1.5" />
@@ -2632,7 +3435,6 @@ export default function PosPage() {
             )}
           </div>
 
-          {/* دکمه دوربین */}
           <button
             type="button"
             onClick={() => setScannerOpen(true)}
@@ -2643,7 +3445,6 @@ export default function PosPage() {
           </button>
         </div>
 
-        {/* فیلتر دسته */}
         <div className="flex items-center gap-1.5 sm:gap-2 mt-2">
           <span className="text-[9px] text-slate-400 shrink-0 flex items-center gap-0.5">
             <Package className="w-2.5 h-2.5" />
@@ -2677,6 +3478,60 @@ export default function PosPage() {
         </div>
       </div>
 
+      {/* ★★★ نوار اطلاعات شعبه و انبار فعال ★★★ */}
+      <div className="bg-gradient-to-l from-emerald-50 via-teal-50 to-cyan-50 border-b border-emerald-200 px-2 sm:px-3 py-1.5 sm:py-2">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center shrink-0">
+              <Store className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="text-[10px] sm:text-xs font-bold text-emerald-900">
+              {storeName || 'فروشگاه'}
+            </span>
+          </div>
+
+          <div className="w-px h-4 bg-emerald-300" />
+
+          <div className="flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+            <span className="text-[10px] sm:text-xs text-slate-600">شعبه:</span>
+            {currentBranch ? (
+              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                {currentBranch.name}
+              </Badge>
+            ) : (
+              <Badge className="bg-slate-100 text-slate-500 border-slate-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                مرکزی
+              </Badge>
+            )}
+          </div>
+
+          <div className="w-px h-4 bg-emerald-300" />
+
+          <div className="flex items-center gap-1.5">
+            <Package className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span className="text-[10px] sm:text-xs text-slate-600">انبار:</span>
+            {currentWarehouse ? (
+              <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                {currentWarehouse.name}
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[9px] sm:text-[10px] px-1.5 h-5">
+                انتخاب نشده
+              </Badge>
+            )}
+          </div>
+
+          <div className="flex-1" />
+          <div className="flex items-center gap-1">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[9px] text-slate-500">
+              {isOnline ? 'آنلاین' : 'آفلاین'}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* ==================== MAIN CONTENT ==================== */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
@@ -2698,7 +3553,7 @@ export default function PosPage() {
                   size="sm"
                   className="h-7 sm:h-8 px-1.5 sm:px-2 text-[10px] sm:text-xs border-emerald-300 text-emerald-600 hover:bg-emerald-50"
                   onClick={() => searchInputRef.current?.focus()}
-                  title="جستجو (F2)"
+                  title="جستجو"
                 >
                   <Search className="w-3 h-3 ml-0.5" />
                   جستجو
@@ -2733,16 +3588,29 @@ export default function PosPage() {
               </div>
             ) : (
               <div className="p-1 sm:p-1.5 space-y-px">
+                {/* ★ v11.6: هدر ستون‌های سبد خرید - نمایش فقط در دسکتاپ */}
+                <div className="hidden sm:grid grid-cols-[20px_1fr_105px_85px_55px_75px] items-center gap-1 px-2 py-1.5 bg-gradient-to-l from-slate-700 to-slate-800 text-white rounded-t-md text-[10px] font-bold sticky top-0 z-10 shadow-sm">
+                  <span></span>
+                  <span className="text-right pr-1">نام کالا</span>
+                  <span className="text-center">تعداد / واحد</span>
+                  <span className="text-center">قیمت</span>
+                  <span className="text-center">تخفیف</span>
+                  <span className="text-center">جمع</span>
+                </div>
                 {cart.map((item) => {
                   const product = products.find((p) => p.id === item.productId)
+                  const unitLabel = product ? getUnitLabel(product) : (item.unitLabel || 'عدد')
+                  const isDecimal = product ? isDecimalUnitProduct(product) : isDecimalUnitLabel(item.unitLabel)
                   return (
                     <CompactCartItemRow
                       key={item.productId}
                       item={item}
-                      unitLabel={product ? getUnitLabel(product) : 'عدد'}
+                      unitLabel={unitLabel}
+                      isDecimal={isDecimal}
                       onIncrease={handleIncreaseQuantity}
                       onDecrease={handleDecreaseQuantity}
                       onRemove={removeFromCart}
+                      onQuantityChange={handleQuantityChange}
                       onUnitPriceChange={handleUnitPriceChange}
                       onDiscountChange={handleDiscountChange}
                     />
@@ -2752,22 +3620,27 @@ export default function PosPage() {
             )}
           </ScrollArea>
 
-          {/* CART SUMMARY */}
+                  {/* CART SUMMARY — ★ v11.8: عناوین و مقادیر پررنگ */}
           {cart.length > 0 && (
-            <div className="border-t border-slate-200 shrink-0 bg-white">
+            <div className="border-t-2 border-slate-300 shrink-0 bg-white">
               <div className="px-2 sm:px-3 py-1.5 sm:py-2 space-y-1 text-[10px] sm:text-xs">
+                {/* جمع کل */}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">جمع کل</span>
-                  <span className="font-bold text-slate-700">{formatPrice(cartTotals.subTotal)} <span className="text-[8px] text-slate-400">ریال</span></span>
+                  <span className="text-slate-700 font-bold text-[11px] sm:text-xs">جمع کل</span>
+                  <span className="font-black text-slate-900">{formatPrice(cartTotals.subTotal)} <span className="text-[8px] text-slate-500 font-semibold">ریال</span></span>
                 </div>
+                
+                {/* تخفیف اقلام */}
                 {cartTotals.discountAmount > 0 && (
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400">تخفیف</span>
-                    <span className="font-bold text-red-500">-{formatPrice(cartTotals.discountAmount)} <span className="text-[8px] text-slate-400">ریال</span></span>
+                    <span className="text-slate-700 font-bold text-[11px] sm:text-xs">تخفیف</span>
+                    <span className="font-black text-red-600">-{formatPrice(cartTotals.discountAmount)} <span className="text-[8px] text-slate-500 font-semibold">ریال</span></span>
                   </div>
                 )}
+                
+                {/* تخفیف فاکتور */}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">تخفیف فاکتور</span>
+                  <span className="text-slate-700 font-bold text-[11px] sm:text-xs">تخفیف فاکتور</span>
                   <div className="flex items-center gap-1">
                     <Input
                       type="text"
@@ -2780,18 +3653,20 @@ export default function PosPage() {
                         }
                       }}
                       placeholder="۰"
-                      className="w-12 h-7 sm:h-8 text-[10px] px-1 py-0 bg-slate-50 border-slate-200 focus:border-blue-400 text-center font-bold text-slate-600"
+                      className="w-12 h-7 sm:h-8 text-[10px] px-1 py-0 bg-slate-50 border-slate-200 focus:border-blue-400 text-center font-bold text-slate-700"
                     />
-                    <span className="text-[9px] text-slate-400">٪</span>
+                    <span className="text-[9px] text-slate-600 font-semibold">٪</span>
                     {cartTotals.invoiceDiscountAmount > 0 && (
-                      <span className="text-[9px] text-red-500 font-medium">
+                      <span className="text-[9px] text-red-600 font-black">
                         ({formatPrice(cartTotals.invoiceDiscountAmount)})
                       </span>
                     )}
                   </div>
                 </div>
+                
+                {/* مالیات */}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">مالیات</span>
+                  <span className="text-slate-700 font-bold text-[11px] sm:text-xs">مالیات</span>
                   <div className="flex items-center gap-0.5">
                     {planFeatures.canEditTax ? (
                       <Input
@@ -2812,20 +3687,22 @@ export default function PosPage() {
                             setTaxOverrideAmount(null)
                           }
                         }}
-                        className="w-20 sm:w-24 h-7 sm:h-8 text-[10px] px-1 py-0 bg-slate-50 border-slate-200 focus:border-blue-400 text-center font-bold text-slate-600"
+                        className="w-20 sm:w-24 h-7 sm:h-8 text-[10px] px-1 py-0 bg-slate-50 border-slate-200 focus:border-blue-400 text-center font-bold text-slate-700"
                       />
                     ) : (
-                      <span className="text-[11px] sm:text-xs font-bold text-slate-500">
+                      <span className="text-[11px] sm:text-xs font-black text-slate-900">
                         +{formatPrice(cartTotals.taxAmount)}
                       </span>
                     )}
-                    <span className="text-[8px] sm:text-[9px] text-slate-400">ریال</span>
+                    <span className="text-[8px] sm:text-[9px] text-slate-500 font-semibold">ریال</span>
                   </div>
                 </div>
-                <div className="flex items-center justify-between pt-1 sm:pt-1.5 border-t border-dashed border-slate-200">
-                  <span className="font-bold text-slate-800 text-[11px] sm:text-xs">مبلغ نهایی</span>
-                  <span className="font-black text-base sm:text-lg text-emerald-600">
-                    {formatPrice(cartTotals.totalAmount)} <span className="text-[8px] sm:text-[9px] font-bold">ریال</span>
+                
+                {/* مبلغ نهایی — ★ v11.8: پررنگ و بزرگ‌تر */}
+                <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t-2 border-slate-300 bg-gradient-to-l from-emerald-50/50 to-transparent rounded-b-md px-2 py-2">
+                  <span className="font-black text-slate-900 text-xs sm:text-sm">مبلغ نهایی</span>
+                  <span className="font-black text-lg sm:text-2xl text-emerald-700 drop-shadow-sm tracking-tight">
+                    {formatPrice(cartTotals.totalAmount)} <span className="text-[9px] sm:text-[10px] font-bold text-emerald-600">ریال</span>
                   </span>
                 </div>
               </div>
@@ -2836,19 +3713,31 @@ export default function PosPage() {
 
       {/* ==================== BOTTOM BAR ==================== */}
       <div className="bg-white border-t border-slate-200 shrink-0 shadow-[0_-2px_6px_rgba(0,0,0,0.05)]">
-              {/* نوع پرداخت */}
+        {/* نوع پرداخت */}
         <div className="px-2 sm:px-3 pt-2 pb-1.5 sm:pt-2.5 sm:pb-2">
-          {/* Label */}
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] sm:text-xs font-bold text-slate-700">نوع پرداخت <span className="text-red-500">*</span></span>
           </div>
 
-          {/* Radio Buttons */}
+          {!posIntegrationEnabled && (
+            <div className="mb-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-[10px] text-amber-800 leading-relaxed">
+                <strong>پرداخت با کارتخوان غیرفعال است.</strong> برای فعال کردن، به تنظیمات → کارتخوان مراجعه کنید.
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap flex-1">
             {paymentTypeConfig.map((pt) => {
               const Icon = pt.icon
               const isActive = paymentType === pt.value
-              const isAllowed = planFeatures.posPaymentTypes.includes(pt.value.toLowerCase() as any)
+              const isAllowedByPlan = planFeatures.posPaymentTypes.includes(pt.value.toLowerCase() as any)
+              const isAllowedByIntegration = pt.value.toLowerCase() === 'card' ? posIntegrationEnabled : true
+              const isAllowed = isAllowedByPlan && isAllowedByIntegration
+
+              if (!isAllowed) return null
+
               return (
                 <label
                   key={pt.value}
@@ -2860,9 +3749,12 @@ export default function PosPage() {
                         ? `${pt.activeBg} ${pt.activeBorder} ${pt.activeText} shadow-sm cursor-pointer`
                         : `${pt.inactiveBg} ${pt.inactiveBorder} ${pt.inactiveText} ${pt.hoverBg} cursor-pointer`
                   }`}
-                  title={pt.label}
+                  title={
+                    !isAllowedByIntegration
+                      ? 'کارتخوان غیرفعال است - از تنظیمات فعال کنید'
+                      : pt.label
+                  }
                 >
-                  {/* Radio Circle */}
                   {!isAllowed ? (
                     <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-amber-400" />
                   ) : (
@@ -2879,10 +3771,8 @@ export default function PosPage() {
                     </span>
                   )}
 
-                  {/* Icon */}
                   <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${!isAllowed ? 'text-gray-300' : ''}`} />
 
-                  {/* Label Text */}
                   <span className={`font-bold whitespace-nowrap ${!isAllowed ? 'line-through' : ''}`}>
                     {pt.label}
                   </span>
@@ -2903,7 +3793,6 @@ export default function PosPage() {
               onChange={(e) => setCustomerSearch(e.target.value)}
               className="h-9 sm:h-8 text-sm sm:text-xs pr-7 border-slate-200 bg-slate-50/80 focus:bg-white"
             />
-            {/* Customer dropdown */}
             {customerSearch.trim().length >= 2 && (
               <div
                 className="absolute z-[100] w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto"
@@ -2919,12 +3808,12 @@ export default function PosPage() {
                 ) : (
                   <>
                     {selectedCustomerId && (
-                     <button 
-  onClick={() => { setCustomer(null, null); setCustomerSearch('') }} 
-  className="w-full text-right p-2 hover:bg-gray-50 border-b"
->
-  <span className="text-[10px] text-gray-400">حذف انتخاب</span>
-</button>
+                      <button
+                        onClick={() => { setCustomer(null, null); setCustomerSearch('') }}
+                        className="w-full text-right p-2 hover:bg-gray-50 border-b"
+                      >
+                        <span className="text-[10px] text-gray-400">حذف انتخاب</span>
+                      </button>
                     )}
                     {customerSearchResults.filter((c: any) => !c.isBlacklisted).map((c: any) => {
                       const displayName = c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'بدون نام'
@@ -2946,7 +3835,6 @@ export default function PosPage() {
             )}
           </div>
 
-          {/* جداکننده */}
           <div className="hidden sm:block w-px h-6 bg-slate-200"></div>
 
           {/* جمع */}
@@ -2957,7 +3845,6 @@ export default function PosPage() {
             <span className="text-[8px] sm:text-[9px] text-slate-400">ریال</span>
           </div>
 
-          {/* جداکننده */}
           <div className="hidden sm:block w-px h-6 bg-slate-200"></div>
 
           {/* دکمه‌ها */}
@@ -3393,6 +4280,141 @@ export default function PosPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ★ v11.2: مودال ثبت چک */}
+      <Dialog open={checkDialogOpen} onOpenChange={setCheckDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] w-[calc(100%-2rem)] max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-cyan-700 text-sm sm:text-base">
+              <Landmark className="w-4 h-4" />
+              ثبت چک دریافتنی
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              اطلاعات چک مشتری را وارد کنید
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-3 text-[11px] sm:text-xs">
+            <div className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-cyan-50 border border-cyan-200">
+              <span className="text-cyan-700 font-medium">مبلغ چک:</span>
+              <span className="font-black text-sm text-cyan-900">
+                {formatPrice(cartTotals.totalAmount)} ریال
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5 mt-2">
+              <button
+                type="button"
+                className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-cyan-50 border-cyan-500 shadow-sm"
+              >
+                <Landmark className="w-5 h-5 text-cyan-600 shrink-0" />
+                <div className="text-right">
+                  <span className="text-[11px] font-bold block leading-tight text-cyan-700">
+                    دریافتنی
+                  </span>
+                  <span className="text-[9px] text-cyan-500 leading-tight block">
+                    از مشتری
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                disabled
+                className="relative flex items-center gap-2 px-2.5 py-2 rounded-md border-2 bg-gray-50 border-gray-200 opacity-50 cursor-not-allowed"
+              >
+                <CreditCardIcon className="w-5 h-5 text-gray-400 shrink-0" />
+                <div className="text-right">
+                  <span className="text-[11px] font-bold block leading-tight text-gray-400">
+                    پرداختنی
+                  </span>
+                  <span className="text-[9px] text-gray-400 leading-tight block">
+                    به تامین‌کننده
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                شماره چک <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="text"
+                value={checkNumber}
+                onChange={(e) => setCheckNumber(e.target.value)}
+                placeholder="مثلاً: 123456"
+                className="h-8 sm:h-9 text-xs"
+                dir="ltr"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                نام بانک <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="text"
+                value={checkBank}
+                onChange={(e) => setCheckBank(e.target.value)}
+                placeholder="مثلاً: بانک ملت"
+                className="h-8 sm:h-9 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                تاریخ سررسید <span className="text-red-500">*</span>
+              </Label>
+              <ShamsiDatePicker
+                value={checkDueDate}
+                onChange={setCheckDueDate}
+                placeholder="انتخاب تاریخ سررسید"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-slate-600 font-medium">
+                در وجه (اختیاری)
+              </Label>
+              <Input
+                type="text"
+                value={checkPayee}
+                onChange={(e) => setCheckPayee(e.target.value)}
+                placeholder="نام شخص یا شرکت"
+                className="h-8 sm:h-9 text-xs"
+              />
+            </div>
+
+            {selectedCustomer && (
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-2 text-[10px] text-blue-700">
+                <div className="flex items-center gap-1.5">
+                  <User className="w-3 h-3" />
+                  <span className="font-medium">مشتری: </span>
+                  <span className="font-bold">{selectedCustomerName}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setCheckDialogOpen(false)}
+              className="border-slate-300 text-xs sm:text-sm h-8 sm:h-9"
+            >
+              انصراف
+            </Button>
+            <Button
+              onClick={handleConfirmCheck}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs sm:text-sm h-8 sm:h-9"
+            >
+              <Landmark className="w-3.5 h-3.5 ml-1" />
+              تأیید و ادامه
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* اسکن دوربین */}
       <BarcodeScannerModal
         open={scannerOpen}
@@ -3801,15 +4823,20 @@ function ShamsiDatePicker({ value, onChange, placeholder = 'انتخاب تار�
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ★ Compact Cart Item Row
+// ★ v11.6: CompactCartItemRow — نسخه بهبود یافته
+//   ★ پس‌زمینه تیره‌تر (bg-slate-200/70) برای خوانایی بهتر
+//   ★ فیلد قیمت عریض‌تر (w-[85px]) برای نمایش کامل مبلغ
+//   ★ فونت خوانا‌تر و سایه ظریف
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface CompactCartItemRowProps {
   item: CartItem
   unitLabel: string
+  isDecimal: boolean
   onIncrease: (productId: string) => void
   onDecrease: (productId: string) => void
   onRemove: (productId: string) => void
+  onQuantityChange: (productId: string, newQuantity: number) => void
   onUnitPriceChange: (productId: string, newPrice: number) => void
   onDiscountChange: (productId: string, newDiscount: number) => void
 }
@@ -3817,20 +4844,23 @@ interface CompactCartItemRowProps {
 function CompactCartItemRow({
   item,
   unitLabel,
+  isDecimal,
   onIncrease,
   onDecrease,
   onRemove,
+  onQuantityChange,
   onUnitPriceChange,
   onDiscountChange,
 }: CompactCartItemRowProps) {
   const [localPrice, setLocalPrice] = useState(toFaNum(item.unitPrice))
   const [localDiscount, setLocalDiscount] = useState(toFaNum(item.discount))
+  const [localQty, setLocalQty] = useState(toFaNum(item.quantity))
   const priceInputRef = useRef<HTMLInputElement>(null)
   const discountInputRef = useRef<HTMLInputElement>(null)
-
+  const qtyInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => { setLocalPrice(toFaNum(item.unitPrice)) }, [item.unitPrice])
   useEffect(() => { setLocalDiscount(toFaNum(item.discount)) }, [item.discount])
-
+  useEffect(() => { setLocalQty(toFaNum(item.quantity)) }, [item.quantity])
   const handlePriceBlur = useCallback(() => {
     const enVal = toEnNum(localPrice)
     const newPrice = parseFloat(enVal)
@@ -3840,7 +4870,6 @@ function CompactCartItemRow({
       setLocalPrice(toFaNum(item.unitPrice))
     }
   }, [localPrice, item.unitPrice, item.productId, onUnitPriceChange])
-
   const handleDiscountBlur = useCallback(() => {
     const enVal = toEnNum(localDiscount)
     const newDiscount = parseFloat(enVal)
@@ -3850,47 +4879,67 @@ function CompactCartItemRow({
       setLocalDiscount(toFaNum(item.discount))
     }
   }, [localDiscount, item.discount, item.productId, onDiscountChange])
-
+  const handleQtyBlur = useCallback(() => {
+    const newQty = parseQuantityInput(localQty)
+    if (!isNaN(newQty) && newQty > 0 && newQty !== item.quantity) {
+      onQuantityChange(item.productId, newQty)
+    } else {
+      setLocalQty(toFaNum(item.quantity))
+    }
+  }, [localQty, item.quantity, item.productId, onQuantityChange])
   return (
-    <div className="flex items-center gap-1 px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md bg-slate-50/80 hover:bg-slate-100/60 border border-slate-100 group transition-colors text-[10px] sm:text-xs">
+    <div className="flex flex-wrap items-center gap-1 px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-md bg-slate-200/70 hover:bg-slate-300/60 border border-slate-200 group transition-colors text-[10px] sm:text-xs shadow-sm">
       {/* حذف */}
       <button
         type="button"
-        className="shrink-0 w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center text-slate-300 hover:text-red-500 transition-colors"
+        className="shrink-0 w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center text-slate-400 hover:text-red-500 transition-colors"
         onClick={() => onRemove(item.productId)}
         title="حذف"
       >
         <X className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
       </button>
-
       {/* نام */}
-      <div className="flex-1 min-w-0 truncate font-semibold text-slate-800">
-        {item.productName}
+      <div className="flex-1 min-w-[90px] sm:min-w-0">
+        <div className="truncate font-semibold text-slate-800">
+          {item.productName}
+        </div>
       </div>
-
-      {/* تعداد +/- */}
+      {/* تعداد قابل ویرایش + واحد */}
       <div className="flex items-center gap-1 shrink-0">
         <button
           type="button"
-          className="w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          className="w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center rounded text-slate-500 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={() => onDecrease(item.productId)}
-          disabled={item.quantity <= 1}
+          disabled={item.quantity <= getMinQuantity(isDecimal)}
         >
           <Minus className="w-3 h-3" />
         </button>
-        <span className="w-6 text-center font-bold text-slate-800">
-          {toFaNum(item.quantity)}
+        <Input
+          ref={qtyInputRef}
+          type="text"
+          inputMode="decimal"
+          value={localQty}
+          onChange={(e) => setLocalQty(toFaNum(toEnNum(e.target.value)))}
+          onBlur={handleQtyBlur}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+          className="shrink-0 w-12 sm:w-11 h-8 sm:h-6 text-[10px] sm:text-[10px] px-1 py-0 bg-white border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200 text-center font-bold shadow-inner"
+          title={isDecimal ? 'مقدار اعشاری مجاز است (مثلاً 0.5)' : 'فقط عدد صحیح'}
+        />
+        <span
+          className="shrink-0 w-6 text-center text-[8px] sm:text-[9px] text-slate-500 font-medium"
+          title={unitLabel}
+        >
+          {unitLabel}
         </span>
         <button
           type="button"
-          className="w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center rounded text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+          className="w-8 h-8 sm:w-5 sm:h-5 flex items-center justify-center rounded text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
           onClick={() => onIncrease(item.productId)}
         >
           <Plus className="w-3 h-3" />
         </button>
       </div>
-
-      {/* قیمت */}
+      {/* ★ v11.6: فیلد قیمت عریض‌تر برای نمایش کامل مبلغ */}
       <Input
         ref={priceInputRef}
         type="text"
@@ -3898,9 +4947,9 @@ function CompactCartItemRow({
         value={localPrice}
         onChange={(e) => setLocalPrice(toFaNum(toEnNum(e.target.value)))}
         onBlur={handlePriceBlur}
-        className="shrink-0 w-14 sm:w-12 h-8 sm:h-5 text-[10px] sm:text-[9px] px-1 py-0 bg-white border-slate-200 focus:border-emerald-400 text-center"
+        className="shrink-0 w-[85px] sm:w-[80px] h-8 sm:h-6 text-[10px] sm:text-[10px] px-1 py-0 bg-white border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200 text-center font-medium shadow-inner"
+        title="قیمت واحد (قابل ویرایش)"
       />
-
       {/* تخفیف % */}
       <div className="relative shrink-0">
         <Input
@@ -3910,78 +4959,15 @@ function CompactCartItemRow({
           value={localDiscount}
           onChange={(e) => setLocalDiscount(toFaNum(toEnNum(e.target.value)))}
           onBlur={handleDiscountBlur}
-          className="w-10 sm:w-9 h-8 sm:h-5 text-[10px] sm:text-[9px] px-1 py-0 bg-white border-slate-200 focus:border-orange-400 text-center pr-3"
+          className="w-11 sm:w-10 h-8 sm:h-6 text-[10px] sm:text-[10px] px-1 py-0 bg-white border-slate-300 focus:border-orange-500 focus:ring-1 focus:ring-orange-200 text-center pr-3 shadow-inner font-medium"
         />
-        <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[7px] text-slate-300">%</span>
+        <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[7px] text-slate-400">%</span>
       </div>
-
       {/* جمع */}
-      <span className="shrink-0 text-[10px] sm:text-[9px] font-bold text-slate-800 min-w-[50px] sm:min-w-[45px] text-left">
+      <span className="shrink-0 text-[10px] sm:text-[10px] font-bold text-slate-900 min-w-[75px] sm:min-w-[65px] text-left bg-white/60 px-1.5 py-0.5 rounded border border-slate-200">
         {formatPrice(item.lineTotal)}
       </span>
+
     </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ★ Product Lookup Item
-// ══════════════════════════════════════════════════════════════════════════════
-
-interface ProductLookupItemProps {
-  product: Product
-  cartQuantity: number
-  onAdd: (product: Product) => void
-}
-
-function ProductLookupItem({ product, cartQuantity, onAdd }: ProductLookupItemProps) {
-  const isOutOfStock = product.currentStock <= 0
-  const dotColor = getStockDot(product.currentStock, product.minStock)
-  const unitLabel = getUnitLabel(product)
-
-  return (
-    <button
-      type="button"
-      onClick={() => !isOutOfStock && onAdd(product)}
-      disabled={isOutOfStock}
-      className={`w-full flex items-center justify-between gap-2 px-2 sm:px-2.5 py-2.5 text-right transition-colors border-b border-slate-50 last:border-0 text-[11px] sm:text-xs ${
-        isOutOfStock
-          ? 'opacity-40 cursor-not-allowed'
-          : cartQuantity > 0
-            ? 'bg-emerald-50/70 hover:bg-emerald-50'
-            : 'hover:bg-slate-50'
-      }`}
-    >
-      {/* نام + موجودی */}
-      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-        {cartQuantity > 0 && (
-          <span className="bg-emerald-600 text-white text-[9px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0">
-            {cartQuantity}
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <span className="text-[12px] sm:text-xs font-semibold text-slate-800 truncate block">
-            {product.name}
-          </span>
-          <span className="text-[9px] text-slate-400 block mt-0.5">
-            <span className={`w-1.5 h-1.5 rounded-full inline-block mr-1 ${dotColor}`}></span>
-            {toFaNum(formatPrice(product.currentStock))} {unitLabel}
-          </span>
-        </div>
-      </div>
-
-      {/* قیمت + دکمه */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className="font-bold text-emerald-600 text-[13px] whitespace-nowrap">
-          {formatPrice(product.salePrice)}
-        </span>
-        {isOutOfStock ? (
-          <AlertTriangle className="w-4 h-4 text-red-300" />
-        ) : (
-          <div className="w-6 h-6 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center transition-colors shadow-sm">
-            <Plus className="w-4 h-4 text-white font-bold" strokeWidth={3} />
-          </div>
-        )}
-      </div>
-    </button>
   )
 }

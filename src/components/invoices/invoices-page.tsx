@@ -1,18 +1,19 @@
 'use client'
 
 // ============================================================================
-// src/components/invoices/invoices-page.tsx — v8.8.10 (Offline Support)
-// ★ اضافه شدن پشتیبانی کامل آفلاین با IndexedDB cache
+// src/components/invoices/invoices-page.tsx — v9.2.0
+// ★ v9.2.0: حذف دکمه‌های پرداخت از مودال جزئیات + رفع باگ برگشتی
+// ★ v9.1.0: دکمه پرداخت الکترونیک فقط برای پلن‌های دارای درگاه
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { OnlinePaymentButton } from '@/components/invoices/online-payment-button'
 import {
   FileText, Search, Trash2, Eye, RefreshCw, Loader2, Lock, Crown,
   ChevronLeft, ShoppingCart, CreditCard, Banknote, CalendarDays, Plus, X,
   AlertTriangle, CheckCircle2, Wallet, Calendar as CalendarIcon, Info,
-  Wrench, RotateCcw, WifiOff,
+  Wrench, RotateCcw, WifiOff, TrendingUp, Package, Filter,
+  ChevronRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -24,26 +25,61 @@ import {
 } from '@/components/ui/table'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
+  DialogHeader, DialogTitle, DialogClose,
 } from '@/components/ui/dialog'
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { InvoicePDFButton } from '@/components/invoices/invoice-pdf-button'
 import { PortalLinkButton } from '@/components/invoices/portal-link-button'
 import { Label } from '@/components/ui/label'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
-
-// ★ آفلاین
-import {
   getCachedInvoicesPage,
   cacheInvoicesPage,
+  addToSyncQueue,
 } from '@/lib/offline-db'
+
+// ═══════════════════════════════════════════════════════════════
+// KPI Card
+// ═══════════════════════════════════════════════════════════════
+
+interface KpiCardProps {
+  label: string
+  value: string
+  sublabel: string
+  gradient: string
+  icon: React.ReactNode
+  onClick?: () => void
+}
+
+function KpiCard({ label, value, sublabel, gradient, icon, onClick }: KpiCardProps) {
+  return (
+    <div
+      onClick={onClick}
+      className={`${gradient} rounded-xl p-2.5 sm:p-3 text-white shadow-sm hover:shadow-md transition-all ${onClick ? 'cursor-pointer' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] sm:text-xs text-white/80 leading-tight truncate">{label}</p>
+          <p className="text-xs sm:text-sm font-bold leading-tight mt-0.5 truncate" dir="ltr">
+            {value}
+          </p>
+          <p className="text-[9px] sm:text-[10px] text-white/70 leading-tight mt-0.5 truncate">
+            {sublabel}
+          </p>
+        </div>
+        {icon}
+      </div>
+    </div>
+  )
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Types
@@ -98,6 +134,11 @@ interface Invoice {
   payments: InvoicePayment[]
   installmentPlan?: any | null
   customerPortalToken?: string | null
+  checkStatus?: string | null
+  checkInfo?: { id: string; status: string; checkNumber: string; bankName: string; dueDate: string } | null
+  _isOffline?: boolean
+  _offlineAction?: 'create' | 'update' | 'delete'
+  invoiceType?: string
 }
 
 interface InstallmentScheduleItem {
@@ -118,8 +159,13 @@ interface InstallmentScheduleItem {
 // ═══════════════════════════════════════════════════════════════
 
 function formatCurrency(num: number | undefined | null): string {
-  if (num === undefined || num === null || isNaN(num)) return '۰ تومان'
-  return `${num.toLocaleString('fa-IR')} تومان`
+  if (num === undefined || num === null || isNaN(num)) return '۰ ریال'
+  return `${num.toLocaleString('fa-IR')} ریال`
+}
+
+function formatCurrencyShort(num: number | undefined | null): string {
+  if (num === undefined || num === null || isNaN(num)) return '۰'
+  return num.toLocaleString('fa-IR')
 }
 
 function formatNumber(num: number | undefined | null): string {
@@ -179,16 +225,6 @@ function formatDateShort(dateStr: string | null | undefined): string {
   } catch { return '---' }
 }
 
-function formatDateLong(dateStr: string | null | undefined): string {
-  if (!dateStr) return '---'
-  try {
-    const date = new Date(dateStr)
-    if (isNaN(date.getTime())) return '---'
-    const [jy, jm, jd] = gregorianToJalali(date.getFullYear(), date.getMonth() + 1, date.getDate())
-    return `${toFaNum(jd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}`
-  } catch { return '---' }
-}
-
 function getStatusBadge(status: string, paymentStatus?: string, invoiceType?: string) {
   if (invoiceType === 'sale_return')
     return <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100 text-[10px]">برگشتی فروش</Badge>
@@ -222,23 +258,30 @@ function getPaymentTypeBadge(paymentType: string) {
     return <Badge className="bg-purple-50 text-purple-600 hover:bg-purple-50 text-[10px] gap-1"><CalendarDays className="w-3 h-3" />نسیه</Badge>
   if (pt === 'installment')
     return <Badge className="bg-orange-50 text-orange-600 hover:bg-orange-50 text-[10px] gap-1"><CreditCard className="w-3 h-3" />قسطی</Badge>
+  if (pt === 'check')
+    return <Badge className="bg-cyan-50 text-cyan-600 hover:bg-cyan-50 text-[10px] gap-1"><FileText className="w-3 h-3" />چک</Badge>
   return <Badge className="bg-gray-50 text-gray-600 hover:bg-gray-50 text-[10px]">{paymentType}</Badge>
 }
 
+function getCheckStatusBadge(checkStatus: string | null | undefined) {
+  if (!checkStatus) return null
+  const map: Record<string, { label: string; className: string }> = {
+    pending: { label: 'در جریان', className: 'bg-amber-50 text-amber-600 border border-amber-200' },
+    deposited: { label: 'نزد بانک', className: 'bg-blue-50 text-blue-600 border border-blue-200' },
+    cleared: { label: 'وصول شد', className: 'bg-emerald-50 text-emerald-600 border border-emerald-200' },
+    bounced: { label: 'برگشت خورد', className: 'bg-red-50 text-red-600 border border-red-200' },
+    returned: { label: 'پس داده شد', className: 'bg-gray-100 text-gray-600 border border-gray-200' },
+  }
+  const info = map[checkStatus] || { label: checkStatus, className: 'bg-gray-50 text-gray-500' }
+  return <Badge className={`${info.className} text-[10px] gap-1`}>{info.label}</Badge>
+}
+
 // ═══════════════════════════════════════════════════════════════
-// Status Filter Tabs
+// Filter Constants
 // ═══════════════════════════════════════════════════════════════
 
-const STATUS_TABS = [
-  { key: 'ALL', label: 'همه' },
-  { key: 'PAID', label: 'پرداخت شده' },
-  { key: 'PENDING', label: 'در انتظار' },
-  { key: 'PARTIAL', label: 'پرداخت جزئی' },
-  { key: 'DRAFT', label: 'پیش‌نویس' },
-  { key: 'CANCELLED', label: 'لغو شده' },
-] as const
-
-type StatusTabKey = typeof STATUS_TABS[number]['key']
+type StatusFilterKey = 'ALL' | 'PAID' | 'PENDING' | 'PARTIAL' | 'DRAFT' | 'CANCELLED'
+type PaymentTypeFilterKey = 'ALL' | 'cash' | 'card' | 'credit' | 'installment'
 
 // ═══════════════════════════════════════════════════════════════
 // ShamsiDatePicker
@@ -479,6 +522,7 @@ function ShamsiDatePicker({ value, onChange, placeholder = 'انتخاب تار�
     </div>
   )
 }
+
 // ═══════════════════════════════════════════════════════════════
 // MobileInvoiceCard
 // ═══════════════════════════════════════════════════════════════
@@ -497,45 +541,58 @@ function MobileInvoiceCard({
   const invNumber = inv.invoiceNumber || inv.number || '---'
   const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
   const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
-  const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
+  const isReturn = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
   const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
   const hasCreditRemaining = (inv.paymentType || '').toLowerCase() === 'credit' && !isPaid && !isCancelled && remaining > 0
 
   return (
     <Card
-      className={`border shadow-none cursor-pointer transition-colors active:bg-gray-50 ${isCancelled ? 'opacity-60' : ''} ${(inv as any)._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200 bg-white'}`}
+      className={`border shadow-none cursor-pointer transition-colors active:bg-gray-50 ${isCancelled ? 'opacity-60' : ''} ${inv._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200 bg-white'}`}
       onClick={() => onView(inv)}
     >
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-mono font-bold text-sm text-gray-900 truncate">{invNumber}</span>
-            {(inv as any)._isOffline && (
-              <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 px-1 h-4 shrink-0">کش</Badge>
+            <span className={`font-mono font-bold text-sm truncate ${inv._offlineAction === 'delete' ? 'text-red-600 line-through' : 'text-gray-900'}`}>
+              {invNumber}
+            </span>
+            {inv._isOffline && (
+              <Badge variant="outline" className={`text-[9px] px-1 h-4 shrink-0 ${inv._offlineAction === 'delete' ? 'border-red-300 text-red-600' : 'border-amber-300 text-amber-600'}`}>
+                {inv._offlineAction === 'delete' ? 'حذف در صف' : 'آفلاین'}
+              </Badge>
             )}
           </div>
-          {getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}
+          {getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}
         </div>
 
         <div className="flex items-center justify-between gap-2 mb-2">
           <span className="text-xs text-gray-600 truncate flex-1">
             {inv.customerName || <span className="text-gray-400">فروش عمومی</span>}
           </span>
-          {getPaymentTypeBadge(inv.paymentType)}
+          <div className="flex items-center gap-1">
+            {getPaymentTypeBadge(inv.paymentType)}
+            {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-1.5 mb-2.5">
           <div className="bg-gray-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">کل</p>
-            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">{formatNumber(inv.totalAmount)}</p>
+            <p className="text-[10px] font-bold text-gray-700 leading-tight mt-0.5">
+              {formatNumber(inv.totalAmount)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
           <div className="bg-emerald-50 rounded p-1.5 text-center">
             <p className="text-[9px] text-gray-400 leading-tight">پرداخت</p>
-            <p className="text-[10px] font-bold text-emerald-600 leading-tight mt-0.5">{formatNumber(inv.paidAmount)}</p>
+            <p className="text-[10px] font-bold text-emerald-600 leading-tight mt-0.5">
+              {formatNumber(inv.paidAmount)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
           <div className={`rounded p-1.5 text-center ${remaining > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
             <p className="text-[9px] text-gray-400 leading-tight">باقی</p>
-            <p className={`text-[10px] font-bold leading-tight mt-0.5 ${remaining > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{formatNumber(remaining)}</p>
+            <p className={`text-[10px] font-bold leading-tight mt-0.5 ${remaining > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+              {formatNumber(remaining)} <span className="text-[9px] text-gray-500 font-normal">ریال</span>
+            </p>
           </div>
         </div>
 
@@ -550,18 +607,14 @@ function MobileInvoiceCard({
                 <Wallet className="w-3.5 h-3.5" />
               </Button>
             )}
-            {(inv as any).invoiceType !== 'service' && !isReturn && !isCancelled && (
+            {inv.invoiceType !== 'service' && !isReturn && !isCancelled && (
               <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600" onClick={() => onReturn(inv)}>
                 <RotateCcw className="w-3.5 h-3.5" />
               </Button>
             )}
             {(planFeatures.canDeleteInvoice || isReturn) ? (
-              <Button
-                variant="ghost" size="icon"
-                className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
-                onClick={() => onDelete(inv)}
-                disabled={(isPaid && !isReturn) || isCancelled}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-600" onClick={() => onDelete(inv)}
+                disabled={(isPaid && !isReturn) || isCancelled || inv._offlineAction === 'delete'}>
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>
             ) : (
@@ -582,12 +635,12 @@ function MobileInvoiceCard({
 // ═══════════════════════════════════════════════════════════════
 
 export default function InvoicesPage() {
-  // ─── State ────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<StatusTabKey>('ALL')
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>('ALL')
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<PaymentTypeFilterKey>('ALL')
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
   const router = useRouter()
   const [detailOpen, setDetailOpen] = useState(false)
@@ -597,9 +650,6 @@ export default function InvoicesPage() {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
-
-  // ★ آفلاین
   const [isOfflineData, setIsOfflineData] = useState(false)
 
   // Credit Payment
@@ -622,7 +672,7 @@ export default function InvoicesPage() {
   const [installmentPayNotes, setInstallmentPayNotes] = useState('')
   const [submittingInstallmentPay, setSubmittingInstallmentPay] = useState(false)
 
-  // Receive Payment (Universal)
+  // Receive Payment
   const [receivePayDialogOpen, setReceivePayDialogOpen] = useState(false)
   const [receivePayInvoice, setReceivePayInvoice] = useState<Invoice | null>(null)
   const [receivePayInstallment, setReceivePayInstallment] = useState<InstallmentScheduleItem | null>(null)
@@ -632,24 +682,22 @@ export default function InvoicesPage() {
   const [receivePayNotes, setReceivePayNotes] = useState('')
   const [receivePaySubmitting, setReceivePaySubmitting] = useState(false)
 
-  // Service Invoice
-  const [serviceDialogOpen, setServiceDialogOpen] = useState(false)
-  const [serviceSubmitting, setServiceSubmitting] = useState(false)
-  const [serviceForm, setServiceForm] = useState({
-    customerId: '', serviceDevice: '', serviceWarranty: false, paymentType: 'cash', description: '',
-  })
-  const [serviceItems, setServiceItems] = useState<Array<{
-    serviceName: string; description: string; quantity: number; unitLabel: string
-    unitPrice: number; discountAmount: number; taxAmount: number
-  }>>([{ serviceName: '', description: '', quantity: 1, unitLabel: 'عدد', unitPrice: 0, discountAmount: 0, taxAmount: 0 }])
-
   // Return Invoice
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnSubmitting, setReturnSubmitting] = useState(false)
   const [invoiceToReturn, setInvoiceToReturn] = useState<Invoice | null>(null)
-  const [returnItems, setReturnItems] = useState<Array<{
-    invoiceItemId: string; productName: string; maxQuantity: number; quantity: number; returnReason: string
-  }>>([])
+const [returnItems, setReturnItems] = useState<Array<{
+  invoiceItemId: string
+  productName: string
+  maxQuantity: number
+  quantity: number
+  returnReason: string
+  // ★ فیلدهای جدید اضافه شوند
+  unitPrice: number
+  lineTotal: number
+  returnAmount: number
+  unitLabel?: string
+}>>([])
   const [returnPaymentType, setReturnPaymentType] = useState<'cash' | 'credit'>('cash')
   const [returnDescription, setReturnDescription] = useState('')
 
@@ -657,156 +705,123 @@ export default function InvoicesPage() {
   const tenantId = useAppStore((s) => s.tenantId)
   const isOnline = useAppStore((s) => s.isOnline)
   const setCurrentView = useAppStore((s) => s.setCurrentView)
-
   const planName = useAppStore((s) => s.planName)
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
 
   // ═══════════════════════════════════════════════════════════════
-  // ★ loadInvoices — با پشتیبانی کامل آفلاین
+  // loadInvoices
   // ═══════════════════════════════════════════════════════════════
 
   const loadInvoices = useCallback(async () => {
-    if (!tenantId) {
-      setLoading(false)
-      setError('tenantId یافت نشد')
-      setInvoices([])
-      return
-    }
-
-    // ★ فقط اگه لیست خالیه spinner نشون بده
+    if (!tenantId) { setLoading(false); setError('tenantId یافت نشد'); setInvoices([]); return }
     if (invoices.length === 0) setLoading(true)
     setError(null)
 
-    // ★ اگه آفلاین هستیم، مستقیم از cache بخون
     if (!isOnline) {
       try {
-        const statusKey = activeTab === 'ALL' ? 'all' : activeTab.toLowerCase()
+        const statusKey = statusFilter === 'ALL' ? 'all' : statusFilter.toLowerCase()
         const cached = await getCachedInvoicesPage(statusKey, page)
         if (cached && cached.invoices.length > 0) {
-          const markedInvoices = cached.invoices.map((inv: any) => ({ ...inv, _isOffline: true }))
-          setInvoices(markedInvoices)
+          const marked = cached.invoices.map((inv: any) => ({ ...inv, _isOffline: true }))
+          setInvoices(marked)
           setTotalPages(cached.totalPages || 1)
-          setTotalCount(cached.total || markedInvoices.length)
+          setTotalCount(cached.total || marked.length)
           setIsOfflineData(true)
-          setError(null)
         } else {
-          // ★ fallback: بدون cache
           setInvoices([])
           setError('داده‌ای در حافظه یافت نشد. پس از اتصال به اینترنت، صفحه را بروز کنید.')
         }
-      } catch (cacheErr) {
-        console.warn('[InvoicesPage] Cache read error:', cacheErr)
-        setInvoices([])
-        setError('خطا در خواندن داده‌های ذخیره‌شده')
-      } finally {
-        setLoading(false)
-      }
+      } catch (e) {
+        setInvoices([]); setError('خطا در خواندن داده‌های ذخیره‌شده')
+      } finally { setLoading(false) }
       return
     }
 
-    // ★ آنلاین: از API بخون
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const params = new URLSearchParams()
       params.set('page', String(page))
-      params.set('limit', '50')
+      params.set('limit', '10')
       params.set('tenantId', tenantId)
-      if (activeTab !== 'ALL') params.set('status', activeTab)
+      if (statusFilter !== 'ALL') params.set('status', statusFilter)
 
       const res = await fetch(`/api/invoices?${params.toString()}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       })
-
       const result = await res.json()
 
       if (result.success) {
         const data = result.data || []
-        const pages = result.pagination?.totalPages || 1
-        const total = result.pagination?.total || data.length
-
         setInvoices(data)
-        setTotalPages(pages)
-        setTotalCount(total)
+        setTotalPages(result.pagination?.totalPages || 1)
+        setTotalCount(result.pagination?.total || data.length)
         setIsOfflineData(false)
         setError(null)
-
-        // ★ ذخیره در cache برای استفاده آفلاین
         try {
-          const statusKey = activeTab === 'ALL' ? 'all' : activeTab.toLowerCase()
-          await cacheInvoicesPage(data, pages, total, statusKey, page)
-          console.log(`[InvoicesPage] ✅ ${data.length} فاکتور در cache ذخیره شد`)
-        } catch (cacheErr) {
-          console.warn('[InvoicesPage] Cache write error:', cacheErr)
-        }
-
+          const statusKey = statusFilter === 'ALL' ? 'all' : statusFilter.toLowerCase()
+          await cacheInvoicesPage(data, result.pagination?.totalPages || 1, result.pagination?.total || data.length, statusKey, page)
+        } catch (e) { }
         setLoading(false)
         return
       }
-
       throw new Error(result.error || 'خطای ناشناخته')
-
     } catch (err: any) {
-      console.error('[InvoicesPage] loadInvoices error:', err.message)
-
-      // ★ اگه fetch خطا داد، از cache بخون (fallback)
       try {
-        const statusKey = activeTab === 'ALL' ? 'all' : activeTab.toLowerCase()
+        const statusKey = statusFilter === 'ALL' ? 'all' : statusFilter.toLowerCase()
         const cached = await getCachedInvoicesPage(statusKey, page)
         if (cached && cached.invoices.length > 0) {
-          const markedInvoices = cached.invoices.map((inv: any) => ({ ...inv, _isOffline: true }))
-          setInvoices(markedInvoices)
+          const marked = cached.invoices.map((inv: any) => ({ ...inv, _isOffline: true }))
+          setInvoices(marked)
           setTotalPages(cached.totalPages || 1)
-          setTotalCount(cached.total || markedInvoices.length)
+          setTotalCount(cached.total || marked.length)
           setIsOfflineData(true)
-          setError(null)
-          console.log('[InvoicesPage] ✅ Fallback به cache موفق')
         } else {
-          setInvoices([])
-          setError(err?.message || 'خطا در بارگذاری فاکتورها')
+          setInvoices([]); setError(err?.message || 'خطا در بارگذاری فاکتورها')
         }
-      } catch (cacheErr) {
-        setInvoices([])
-        setError(err?.message || 'خطا در بارگذاری فاکتورها')
+      } catch (e) {
+        setInvoices([]); setError(err?.message || 'خطا در بارگذاری فاکتورها')
       }
-
       setLoading(false)
     }
-  }, [page, activeTab, tenantId, isOnline, invoices.length])
+  }, [page, statusFilter, tenantId, isOnline, invoices.length])
 
-  // ★ بارگذاری اولیه
-  useEffect(() => {
-    loadInvoices()
-  }, [loadInvoices])
+  useEffect(() => { loadInvoices() }, [loadInvoices])
 
-  // ★ بارگذاری مجدد وقتی آنلاین میشه
   useEffect(() => {
-    if (isOnline && isOfflineData) {
-      console.log('[InvoicesPage] آنلاین شد — بارگذاری مجدد از سرور')
-      loadInvoices()
-    }
+    if (isOnline && isOfflineData) loadInvoices()
   }, [isOnline])
 
-  // ★ بروزرسانی خودکار هر ۶۰ ثانیه (فقط آنلاین)
   useEffect(() => {
     if (!isOnline) return
     const interval = setInterval(() => { loadInvoices() }, 60000)
     return () => clearInterval(interval)
   }, [loadInvoices, isOnline])
 
-    // ═══════════════════════════════════════════════════════════════
-  // فیلتر و جستجو
+  useEffect(() => { setPage(1) }, [statusFilter, paymentTypeFilter])
+
+  // ═══════════════════════════════════════════════════════════════
+  // فیلتر کلاینت‌ساید
   // ═══════════════════════════════════════════════════════════════
 
-  const filteredInvoices = invoices.filter((inv) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    const number = (inv.invoiceNumber || inv.number || '').toLowerCase()
-    const customer = (inv.customerName || '').toLowerCase()
-    return number.includes(q) || customer.includes(q)
-  })
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter((inv) => {
+      if (search) {
+        const q = search.toLowerCase()
+        const number = (inv.invoiceNumber || inv.number || '').toLowerCase()
+        const customer = (inv.customerName || '').toLowerCase()
+        if (!number.includes(q) && !customer.includes(q)) return false
+      }
+      if (statusFilter !== 'ALL') {
+        const s = (inv.paymentStatus || inv.status || '').toUpperCase()
+        if (s !== statusFilter) return false
+      }
+      if (paymentTypeFilter !== 'ALL') {
+        const pt = (inv.paymentType || '').toLowerCase()
+        if (pt !== paymentTypeFilter) return false
+      }
+      return true
+    })
+  }, [invoices, search, statusFilter, paymentTypeFilter])
 
   const summaryStats = useMemo(() => {
     const total = invoices.length
@@ -848,6 +863,10 @@ export default function InvoicesPage() {
   }
 
   const handlePayConfirm = async () => {
+    if (!isOnline) {
+      toast({ title: 'عدم دسترسی', description: 'ثبت پرداخت نیاز به اتصال اینترنت برای صدور سند حسابداری دارد.', variant: 'destructive' })
+      return
+    }
     if (!invoiceToPay) return
     const amount = Number(paymentAmount)
     if (!amount || amount <= 0) {
@@ -912,6 +931,10 @@ export default function InvoicesPage() {
   }
 
   const handleInstallmentPayConfirm = async () => {
+    if (!isOnline) {
+      toast({ title: 'عدم دسترسی', description: 'ثبت پرداخت قسط نیاز به اتصال اینترنت دارد.', variant: 'destructive' })
+      return
+    }
     if (!installmentToPay || !installmentPayInvoice) return
     const amount = Number(installmentPayAmount)
     if (!amount || amount <= 0) {
@@ -982,6 +1005,10 @@ export default function InvoicesPage() {
   }
 
   const submitReceivePayment = async () => {
+    if (!isOnline) {
+      toast({ title: 'عدم دسترسی', description: 'ثبت دریافت وجه نیاز به اتصال اینترنت دارد.', variant: 'destructive' })
+      return
+    }
     if (!receivePayInvoice) return
     const amount = Number(receivePayAmount)
     if (!amount || amount <= 0) {
@@ -1005,11 +1032,21 @@ export default function InvoicesPage() {
           installmentId: receivePayInstallment?.id || undefined,
         }),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'دریافت وجه ثبت شد', description: `${amount.toLocaleString('fa-IR')} تومان دریافت شد` })
-        setReceivePayDialogOpen(false)
-        setReceivePayInvoice(null)
+  
+   const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاغ دریافت پرداخت
+  logger.info('دریافت پرداخت ثبت شد', {
+    invoiceId: receivePayInvoice.id,
+    invoiceNumber: receivePayInvoice.invoiceNumber || receivePayInvoice.number,
+    amount: amount,
+    paymentMethod: receivePayMethod,
+    paymentRef: receivePayRef || null,
+    installmentId: receivePayInstallment?.id || null,
+  })
+  
+  toast({ title: 'دریافت وجه ثبت شد', description: `${amount.toLocaleString('fa-IR')} تومان دریافت شد` })
+  setReceivePayDialogOpen(false)
         setReceivePayInstallment(null)
         loadInvoices()
       } else {
@@ -1023,7 +1060,7 @@ export default function InvoicesPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // View Detail
+  // View Detail / Delete
   // ═══════════════════════════════════════════════════════════════
 
   const handleViewDetail = (invoice: Invoice) => {
@@ -1031,12 +1068,8 @@ export default function InvoicesPage() {
     setDetailOpen(true)
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // Delete Handler
-  // ═══════════════════════════════════════════════════════════════
-
   const handleDeleteClick = (invoice: Invoice) => {
-    const isReturn = (invoice as any).invoiceType === 'sale_return' || (invoice as any).invoiceType === 'purchase_return'
+    const isReturn = invoice.invoiceType === 'sale_return' || invoice.invoiceType === 'purchase_return'
     if (!planFeatures.canDeleteInvoice && !isReturn) return
     setInvoiceToDelete(invoice)
     setDeleteDialogOpen(true)
@@ -1045,17 +1078,48 @@ export default function InvoicesPage() {
   const handleDeleteConfirm = async () => {
     if (!invoiceToDelete) return
     setDeleting(true)
+
+    if (!isOnline) {
+      const updated = invoices.map(inv =>
+        inv.id === invoiceToDelete.id ? { ...inv, _isOffline: true, _offlineAction: 'delete' as const } : inv
+      )
+      setInvoices(updated)
+      try {
+        await addToSyncQueue('invoice_delete', {
+          method: 'DELETE',
+          url: `/api/invoices?id=${invoiceToDelete.id}`,
+          body: { id: invoiceToDelete.id }
+        })
+        toast({ title: 'حذف در صف', description: 'فاکتور پس از اتصال به اینترنت حذف خواهد شد.' })
+      } catch (err) {
+        toast({ title: 'خطا', description: 'خطا در ذخیره عملیات حذف', variant: 'destructive' })
+      }
+      setDeleting(false)
+      setDeleteDialogOpen(false)
+      setInvoiceToDelete(null)
+      return
+    }
+
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch(`/api/invoices?id=${invoiceToDelete.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       })
-      const result = await res.json()
-      if (result.success) {
-        toast({ title: 'حذف موفق', description: `فاکتور ${invoiceToDelete.invoiceNumber || invoiceToDelete.number} حذف شد` })
-        await loadInvoices()
-      } else {
+   
+   const result = await res.json()
+if (result.success) {
+  // ★ v11.9.0: لاگ حذف فاکتور (قبل از null شدن invoiceToDelete)
+  logger.info('فاکتور حذف شد', {
+    invoiceId: invoiceToDelete.id,
+    invoiceNumber: invoiceToDelete.invoiceNumber || invoiceToDelete.number,
+    invoiceType: invoiceToDelete.invoiceType,
+    totalAmount: invoiceToDelete.totalAmount,
+  })
+  
+  toast({ title: 'حذف موفق', description: `فاکتور ${invoiceToDelete.invoiceNumber || invoiceToDelete.number} حذف شد` })
+  await loadInvoices()
+} else {
         toast({ title: 'خطا در حذف', description: result.error || 'خطای ناشناخته' })
       }
     } catch (err: any) {
@@ -1068,118 +1132,99 @@ export default function InvoicesPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Service Invoice Handlers
+  // ★ v9.2.0: Return Invoice Handlers — رفع باگ ذخیره items
   // ═══════════════════════════════════════════════════════════════
 
-  const handleAddServiceItem = () => {
-    setServiceItems([...serviceItems, { serviceName: '', description: '', quantity: 1, unitLabel: 'عدد', unitPrice: 0, discountAmount: 0, taxAmount: 0 }])
+const handleReturnClick = async (invoice: Invoice) => {
+  const invoiceType = (invoice.invoiceType || 'sale').toLowerCase()
+  if (invoiceType === 'service') {
+    toast({ title: 'خطا', description: 'فاکتور خدماتی قابل برگشت نیست', variant: 'destructive' })
+    return
+  }
+  if (invoiceType === 'sale_return') {
+    toast({ title: 'خطا', description: 'این فاکتور خودش برگشتی است', variant: 'destructive' })
+    return
+  }
+  if (invoice._isOffline) {
+    toast({ title: 'خطا', description: 'فاکتور آفلاین قابل برگشت نیست. ابتدا همگام‌سازی کنید.', variant: 'destructive' })
+    return
+  }
+  const status = (invoice.paymentStatus || invoice.status || '').toUpperCase()
+  if (status === 'CANCELLED') {
+    toast({ title: 'خطا', description: 'فاکتور لغو شده قابل برگشت نیست', variant: 'destructive' })
+    return
   }
 
-  const handleRemoveServiceItem = (index: number) => {
-    if (serviceItems.length === 1) return
-    setServiceItems(serviceItems.filter((_, i) => i !== index))
-  }
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const res = await fetch(`/api/invoices/${invoice.id}`, {
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    const data = await res.json()
+    if (data.success && data.data?.items && Array.isArray(data.data.items) && data.data.items.length > 0) {
+      // ★ v9.3.1: اصلاح fallback برای lineTotal صفر/خراب (فاکتورهای قدیمی)
+      const formattedItems = data.data.items.map((item: any) => {
+        const qty = Number(item.quantity) || 0
+        const unitPrice = Number(item.unitPrice) || 0
+        const discount = Number(item.discountAmount) || 0
+        const tax = Number(item.taxAmount) || 0
 
-  const handleServiceItemChange = (index: number, field: string, value: any) => {
-    const updated = [...serviceItems];
-    (updated[index] as any)[field] = value
-    setServiceItems(updated)
-  }
+        const storedLineTotal = Number(item.lineTotal || item.totalAmount) || 0
+        // ★ اگه lineTotal ذخیره‌شده صفر/نامعتبر بود ولی unitPrice و quantity معتبرن،
+        //   از روی unitPrice محاسبه‌ش می‌کنیم (برای فاکتورهای قدیمی با دیتای خراب)
+        const fallbackLineTotal = qty * unitPrice - discount + tax
+        const lineTotal = storedLineTotal > 0 ? storedLineTotal : fallbackLineTotal
 
-  const handleServiceSubmit = async () => {
-    const validItems = serviceItems.filter(i => i.serviceName.trim().length >= 2)
-    if (validItems.length === 0) {
-      toast({ title: 'خطا', description: 'حداقل یک خدمت با نام معتبر الزامی است', variant: 'destructive' })
-      return
-    }
-    const totalAmount = validItems.reduce((sum, i) => sum + (i.quantity * i.unitPrice - i.discountAmount + i.taxAmount), 0)
-    if (totalAmount <= 0) {
-      toast({ title: 'خطا', description: 'مبلغ کل فاکتور باید بزرگتر از صفر باشد', variant: 'destructive' })
-      return
-    }
-    if (serviceForm.paymentType === 'credit' && !serviceForm.customerId) {
-      toast({ title: 'خطا', description: 'برای فروش نسیه، انتخاب مشتری الزامی است', variant: 'destructive' })
-      return
-    }
-    setServiceSubmitting(true)
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch('/api/invoices/service', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ customerId: serviceForm.customerId || undefined, serviceDevice: serviceForm.serviceDevice || undefined, serviceWarranty: serviceForm.serviceWarranty, paymentType: serviceForm.paymentType, description: serviceForm.description || undefined, items: validItems }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'فاکتور صادر شد ✓', description: data.message })
-        setServiceDialogOpen(false)
-        setServiceForm({ customerId: '', serviceDevice: '', serviceWarranty: false, paymentType: 'cash', description: '' })
-        setServiceItems([{ serviceName: '', description: '', quantity: 1, unitLabel: 'عدد', unitPrice: 0, discountAmount: 0, taxAmount: 0 }])
-        loadInvoices()
-      } else {
-        toast({ title: 'خطا', description: data.error || 'صدور فاکتور ناموفق بود', variant: 'destructive' })
-      }
-    } catch (err) {
-      toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
-    } finally {
-      setServiceSubmitting(false)
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // Return Invoice Handlers
-  // ═══════════════════════════════════════════════════════════════
-
-  const handleReturnClick = async (invoice: Invoice) => {
-    const invoiceType = (invoice as any).invoiceType?.toLowerCase() || 'sale'
-    if (invoiceType === 'service') {
-      toast({ title: 'خطا', description: 'فاکتور خدماتی قابل برگشت نیست', variant: 'destructive' })
-      return
-    }
-    if (invoiceType === 'sale_return') {
-      toast({ title: 'خطا', description: 'این فاکتور خودش برگشتی است', variant: 'destructive' })
-      return
-    }
-    setInvoiceToReturn(invoice)
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch(`/api/invoices/${invoice.id}`, {
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-      const data = await res.json()
-      if (data.success && data.data?.items && Array.isArray(data.data.items) && data.data.items.length > 0) {
-        const formattedItems = data.data.items.map((item: any) => ({
+        return {
           invoiceItemId: item.id || '',
-          productName: item.productName || 'محصول نامشخص',
-          maxQuantity: item.quantity || 0,
+          productName: item.productName || 'کالا نامشخص',
+          maxQuantity: qty,
           quantity: 0,
           returnReason: '',
-        }))
-        setReturnItems(formattedItems)
-      } else {
-        toast({ title: 'هشدار', description: 'این فاکتور آیتمی برای برگشت ندارد', variant: 'destructive' })
-        return
-      }
-    } catch (err: any) {
-      toast({ title: 'خطا', description: `بارگذاری آیتم‌های فاکتور ناموفق بود: ${err.message}`, variant: 'destructive' })
+          unitPrice,
+          lineTotal,
+          returnAmount: 0,
+          unitLabel: item.unitLabel || 'عدد',
+        }
+      })
+      setReturnItems(formattedItems)
+      setInvoiceToReturn({ ...invoice, items: data.data.items })
+      setReturnDialogOpen(true)
+    } else {
+      toast({ title: 'هشدار', description: 'این فاکتور آیتمی برای برگشت ندارد', variant: 'destructive' })
       return
     }
-    setReturnDialogOpen(true)
+  } catch (err: any) {
+    toast({ title: 'خطا', description: `بارگذاری آیتم‌های فاکتور ناموفق بود: ${err.message}`, variant: 'destructive' })
+    return
   }
+}
 
-  const handleReturnItemChange = (index: number, field: string, value: any) => {
-    const updated = [...returnItems]
-    if (field === 'quantity') {
-      const num = Number(value)
-      updated[index].quantity = Math.min(Math.max(0, num), updated[index].maxQuantity)
-    } else {
-      (updated[index] as any)[field] = value
-    }
-    setReturnItems(updated)
+ const handleReturnItemChange = (index: number, field: string, value: any) => {
+  console.log('🔍 onChange:', { field, typedValue: value, maxQuantity: returnItems[index]?.maxQuantity })
+  const updated = [...returnItems]
+  if (field === 'quantity') {
+    const num = Number(value)
+    const newQty = Math.min(Math.max(0, num), updated[index].maxQuantity)
+    updated[index].quantity = newQty
+    
+    // ★ محاسبه returnAmount بر اساس نسبت
+    const origQty = updated[index].maxQuantity
+    const ratio = origQty > 0 ? newQty / origQty : 0
+    updated[index].returnAmount = updated[index].lineTotal * ratio
+  } else {
+    (updated[index] as any)[field] = value
   }
+  console.log('🔍 about to setReturnItems:', updated)
+  setReturnItems(updated)
+}
 
   const handleReturnSubmit = async () => {
+    if (!isOnline) {
+      toast({ title: 'عدم دسترسی', description: 'ثبت برگشتی نیاز به اتصال اینترنت برای به‌روزرسانی موجودی انبار دارد.', variant: 'destructive' })
+      return
+    }
     if (!invoiceToReturn) return
     const selectedItems = returnItems.filter(i => i.quantity > 0)
     if (selectedItems.length === 0) {
@@ -1199,10 +1244,20 @@ export default function InvoicesPage() {
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(requestBody),
       })
-      const data = await res.json()
-      if (data.success) {
-        toast({ title: 'برگشتی ثبت شد ✓', description: data.message || `فاکتور برگشتی ${data.data?.number} ثبت شد` })
-        setReturnDialogOpen(false)
+const data = await res.json()
+if (data.success) {
+  // ★ v11.9.0: لاگ برگشت فاکتور
+  logger.info('برگشت فاکتور ثبت شد', {
+    originalInvoiceId: invoiceToReturn.id,
+    originalInvoiceNumber: invoiceToReturn.invoiceNumber || invoiceToReturn.number,
+    returnInvoiceNumber: data.data?.number,
+    itemsCount: selectedItems.length,
+    paymentType: returnPaymentType,
+    description: returnDescription || null,
+  })
+  
+  toast({ title: 'برگشتی ثبت شد ✓', description: data.message || `فاکتور برگشتی ${data.data?.number} ثبت شد` })
+  setReturnDialogOpen(false)
         setReturnDescription('')
         setReturnItems([])
         setInvoiceToReturn(null)
@@ -1216,8 +1271,9 @@ export default function InvoicesPage() {
       setReturnSubmitting(false)
     }
   }
-    // ═══════════════════════════════════════════════════════════════
-  // Render: Detail Dialog
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v9.2.0: Render: Detail Dialog — حذف دکمه‌های پرداخت
   // ═══════════════════════════════════════════════════════════════
 
   const renderDetailDialog = () => {
@@ -1229,114 +1285,150 @@ export default function InvoicesPage() {
 
     return (
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto rounded-xl" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
-              <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
-              <span className="truncate">جزئیات فاکتور {inv.invoiceNumber || inv.number}</span>
+        <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-xl max-h-[90vh] overflow-y-auto rounded-xl p-0 gap-0" dir="rtl">
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base m-0">
+              <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                <FileText className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <div className="min-w-0">
+                <span className="font-bold block truncate">فاکتور {inv.invoiceNumber || inv.number}</span>
+                <span className="text-[10px] text-gray-500 block leading-tight">{formatDate(inv.createdAt)}</span>
+              </div>
             </DialogTitle>
-            <DialogDescription className="text-xs sm:text-sm">مشاهده کامل اطلاعات فاکتور</DialogDescription>
-          </DialogHeader>
+            <DialogClose className="rounded-full h-7 w-7 flex items-center justify-center hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors shrink-0">
+              <X className="h-4 w-4" />
+            </DialogClose>
+          </div>
 
-          <div className="space-y-3 mt-2">
+          <div className="p-4 space-y-3">
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: 'شماره فاکتور', value: <span className="font-mono text-sm font-bold">{inv.invoiceNumber || inv.number}</span> },
-                { label: 'مشتری', value: <span className="text-sm font-bold">{inv.customerName || 'فروش عمومی'}</span> },
-                { label: 'وضعیت', value: getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType) },
-                { label: 'نوع پرداخت', value: getPaymentTypeBadge(inv.paymentType) },
+                { label: 'مشتری', value: <span className="text-xs font-medium truncate block">{inv.customerName || 'فروش عمومی'}</span> },
+                { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}</div> },
               ].map((item, i) => (
-                <Card key={i}><CardContent className="p-2.5"><p className="text-[10px] text-gray-500 mb-1">{item.label}</p><div>{item.value}</div></CardContent></Card>
+                <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
+                  <p className="text-[9px] text-gray-400 mb-0.5">{item.label}</p>
+                  {item.value}
+                </div>
               ))}
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <Card className="border-emerald-200"><CardContent className="p-2.5 text-center"><p className="text-[10px] text-gray-500">مبلغ کل</p><p className="text-xs sm:text-sm font-bold text-emerald-600">{formatCurrency(inv.totalAmount)}</p></CardContent></Card>
-              <Card className="border-sky-200"><CardContent className="p-2.5 text-center"><p className="text-[10px] text-gray-500">پرداخت شده</p><p className="text-xs sm:text-sm font-bold text-sky-600">{formatCurrency(inv.paidAmount)}</p></CardContent></Card>
-              <Card className={remaining > 0 ? 'border-amber-200' : 'border-emerald-200'}><CardContent className="p-2.5 text-center"><p className="text-[10px] text-gray-500">باقیمانده</p><p className={`text-xs sm:text-sm font-bold ${remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(remaining)}</p></CardContent></Card>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
+                <p className="text-[9px] text-emerald-700 font-medium">مبلغ کل</p>
+                <p className="text-xs font-bold text-emerald-700 mt-0.5">{formatCurrencyShort(inv.totalAmount)}</p>
+                <p className="text-[9px] text-emerald-600">ریال</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-2 text-center border border-sky-100">
+                <p className="text-[9px] text-sky-700 font-medium">پرداخت</p>
+                <p className="text-xs font-bold text-sky-700 mt-0.5">{formatCurrencyShort(inv.paidAmount)}</p>
+                <p className="text-[9px] text-sky-600">ریال</p>
+              </div>
+              <div className={`rounded-lg p-2 text-center border ${remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-emerald-50 border-emerald-100'}`}>
+                <p className={`text-[9px] font-medium ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>باقی</p>
+                <p className={`text-xs font-bold mt-0.5 ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatCurrencyShort(remaining)}</p>
+                <p className={`text-[9px] ${remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>ریال</p>
+              </div>
             </div>
 
             {items.length > 0 && (
-              <Card>
-                <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs sm:text-sm">آیتم‌های فاکتور</CardTitle></CardHeader>
-                <CardContent className="p-0 pb-2 overflow-x-auto">
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200">
+                  <p className="text-[10px] font-semibold text-gray-600">آیتم‌های فاکتور ({toFaNum(items.length)})</p>
+                </div>
+                <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-[10px] sm:text-xs">محصول</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs text-right">تعداد</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs text-right hidden sm:table-cell">قیمت واحد</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs text-right">مبلغ کل</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
+                        <TableHead className="text-[10px] h-7 py-1">کالا</TableHead>
+                        <TableHead className="text-[10px] h-7 py-1 text-right">تعداد</TableHead>
+                        <TableHead className="text-[10px] h-7 py-1 text-right hidden sm:table-cell">قیمت</TableHead>
+                        <TableHead className="text-[10px] h-7 py-1 text-right">جمع</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {items.map((item, idx) => (
                         <TableRow key={item.id || idx}>
-                          <TableCell className="text-[10px] sm:text-xs">{item.productName}</TableCell>
-                          <TableCell className="text-[10px] sm:text-xs text-right font-mono">{formatNumber(item.quantity)} {item.unitLabel || ''}</TableCell>
-                          <TableCell className="text-[10px] sm:text-xs text-right font-mono hidden sm:table-cell">{formatCurrency(item.unitPrice)}</TableCell>
-                          <TableCell className="text-[10px] sm:text-xs text-right font-mono font-bold">{formatCurrency(item.totalAmount || item.lineTotal)}</TableCell>
+                          <TableCell className="text-[10px] py-1.5">{item.productName}</TableCell>
+                          <TableCell className="text-[10px] py-1.5 text-right font-mono">{formatNumber(item.quantity)} {item.unitLabel || ''}</TableCell>
+                          <TableCell className="text-[10px] py-1.5 text-right font-mono hidden sm:table-cell">{formatCurrencyShort(item.unitPrice)}</TableCell>
+                          <TableCell className="text-[10px] py-1.5 text-right font-mono font-bold">{formatCurrencyShort(item.totalAmount || item.lineTotal)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
 
             {payments.length > 0 && (
-              <Card>
-                <CardHeader className="pb-1 pt-3 px-3"><CardTitle className="text-xs sm:text-sm">پرداخت‌ها</CardTitle></CardHeader>
-                <CardContent className="p-0 pb-2 overflow-x-auto">
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200">
+                  <p className="text-[10px] font-semibold text-gray-600">پرداخت‌ها ({toFaNum(payments.length)})</p>
+                </div>
+                <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-[10px] sm:text-xs">مبلغ</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs">روش</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs">تاریخ</TableHead>
-                        <TableHead className="text-[10px] sm:text-xs hidden sm:table-cell">مرجع</TableHead>
+                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
+                        <TableHead className="text-[10px] h-7 py-1">مبلغ</TableHead>
+                        <TableHead className="text-[10px] h-7 py-1">روش</TableHead>
+                        <TableHead className="text-[10px] h-7 py-1">تاریخ</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {payments.map((pay, idx) => {
-                        const method = pay.paymentType || pay.method || 'نقدی'
+                        const method = pay.paymentType || pay.method || 'cash'
                         const methodLabel = method === 'cash' ? 'نقدی' : method === 'card' || method === 'pos' ? 'کارتخوان' : method === 'bank' ? 'بانکی' : method === 'credit' ? 'نسیه' : method === 'installment' ? 'قسطی' : method
                         return (
                           <TableRow key={pay.id || idx}>
-                            <TableCell className="text-[10px] sm:text-xs font-mono">{formatCurrency(pay.amount)}</TableCell>
-                            <TableCell className="text-[10px] sm:text-xs">{methodLabel}</TableCell>
-                            <TableCell className="text-[10px] sm:text-xs">{formatDate(pay.paidAt)}</TableCell>
-                            <TableCell className="text-[10px] sm:text-xs hidden sm:table-cell">{pay.paymentRef || pay.reference || '---'}</TableCell>
+                            <TableCell className="text-[10px] py-1.5 font-mono">{formatCurrencyShort(pay.amount)}</TableCell>
+                            <TableCell className="text-[10px] py-1.5">{methodLabel}</TableCell>
+                            <TableCell className="text-[10px] py-1.5">{formatDateShort(pay.paidAt)}</TableCell>
                           </TableRow>
                         )
                       })}
                     </TableBody>
                   </Table>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-[10px] sm:text-xs text-gray-500 pt-2 border-t gap-1">
-              <span>ایجاد: {formatDate(inv.createdAt)}</span>
-              <span>بروزرسانی: {formatDate(inv.updatedAt)}</span>
-            </div>
+            {inv.installmentPlan && Array.isArray((inv as any).installmentPlan?.schedule) && (inv as any).installmentPlan.schedule.length > 0 && (
+              <div className="border border-purple-200 rounded-lg overflow-hidden">
+                <div className="bg-purple-50 px-3 py-1.5 border-b border-purple-200">
+                  <p className="text-[10px] font-semibold text-purple-700">برنامه اقساط</p>
+                </div>
+                <div className="divide-y divide-purple-100 max-h-40 overflow-y-auto">
+                  {(inv as any).installmentPlan.schedule.map((s: InstallmentScheduleItem) => (
+                    <div key={s.id} className="px-3 py-2 flex items-center justify-between gap-2 text-[10px]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-purple-700">قسط {toFaNum(s.installmentNumber)}</span>
+                        <span className="text-gray-500">{formatDateShort(s.dueDate)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-medium">{formatCurrencyShort(s.amount)}</span>
+                        <Badge className={`text-[8px] px-1 h-4 ${s.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {s.status === 'paid' ? 'پرداخت' : 'معوق'}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 pt-2 border-t flex-wrap">
-            {inv.customerId && planFeatures.canOnlinePayment && (() => {
-              const pt = (inv.paymentType || '').toLowerCase()
-              if (pt === 'credit' || pt === 'installment') return (
-                <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="لینک پورتال" />
-              )
-              return null
-            })()}
+          {/* ★ v9.2.0: دکمه‌های "ثبت پرداخت" و "پرداخت آنلاین" حذف شدند */}
+          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+            {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
+              <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
+            )}
             <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
-            {(() => {
-              const rem = (inv.totalAmount || 0) - (inv.paidAmount || 0)
-              return rem > 0 ? <OnlinePaymentButton invoiceId={inv.id} amount={rem} /> : null
-            })()}
-            <Button variant="outline" onClick={() => setDetailOpen(false)} className="w-full sm:w-auto">بستن</Button>
-          </DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
+              بستن
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     )
@@ -1422,11 +1514,6 @@ export default function InvoicesPage() {
                 )}
               </div>
             )}
-
-            <div className="flex items-start gap-2 p-2.5 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-700">
-              <CreditCard className="w-4 h-4 shrink-0 mt-0.5" />
-              <p>با ثبت پرداخت، سند حسابداری خودکار ایجاد می‌شود و بدهی مشتری کاهش می‌یابد.</p>
-            </div>
           </div>
 
           <DialogFooter className="flex-row gap-2">
@@ -1550,7 +1637,7 @@ export default function InvoicesPage() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Render: Receive Payment Dialog (Universal)
+  // Render: Receive Payment Dialog
   // ═══════════════════════════════════════════════════════════════
 
   const renderReceivePaymentDialog = () => {
@@ -1616,14 +1703,6 @@ export default function InvoicesPage() {
               <Label className="text-xs font-medium">توضیحات (اختیاری)</Label>
               <Input type="text" value={receivePayNotes} onChange={e => setReceivePayNotes(e.target.value)} placeholder="توضیحات..." className="text-sm" />
             </div>
-
-            <div className="bg-blue-50 rounded-lg p-2 text-[10px] text-blue-700 flex items-start gap-1.5">
-              <Info className="w-3 h-3 mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">سند حسابداری خودکار:</p>
-                <p>بدهکار: {receivePayMethod === 'cash' ? 'صندوق' : 'بانک'} — بستانکار: حساب‌های دریافتنی</p>
-              </div>
-            </div>
           </div>
 
           <DialogFooter className="flex-row gap-2">
@@ -1637,62 +1716,131 @@ export default function InvoicesPage() {
     )
   }
 
+   // ═══════════════════════════════════════════════════════════════
+  // ★ v11.7.0: مودال لغو/حذف فاکتور
+  // - عنوان و متن بر اساس وضعیت فاکتور تغییر می‌کند
+  // - لیست عملیات انجام‌شده نمایش داده می‌شود
   // ═══════════════════════════════════════════════════════════════
-  // Render: Delete Dialog
-  // ═══════════════════════════════════════════════════════════════
+  const renderDeleteDialog = () => {
+    const inv = invoiceToDelete
+    if (!inv) return null
 
-  const renderDeleteDialog = () => (
-    <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-      <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl" dir="rtl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm sm:text-base text-red-600">
-            <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />تایید حذف فاکتور
-          </DialogTitle>
-          <DialogDescription className="text-xs sm:text-sm">آیا از حذف این فاکتور اطمینان دارید؟ این عمل قابل بازگشت نیست.</DialogDescription>
-        </DialogHeader>
+    const isPaidInvoice = Number(inv.paidAmount || 0) > 0
+    const isReturnInvoice = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
+    const willHardDelete = isReturnInvoice || !isPaidInvoice
 
-        {invoiceToDelete && (
+    return (
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-md rounded-xl" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base text-red-600">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
+              {inv._isOffline
+                ? 'حذف فاکتور آفلاین'
+                : willHardDelete
+                  ? 'تایید لغو/حذف فاکتور'
+                  : 'تایید لغو فاکتور'}
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {inv._isOffline
+                ? 'این فاکتور آفلاین است. با تأیید، از حافظه محلی حذف و از صف همگام‌سازی خارج می‌شود.'
+                : !isOnline
+                  ? 'شما آفلاین هستید. این فاکتور برای لغو/حذف در صف قرار می‌گیرد و پس از اتصال به اینترنت عملیات واقعی انجام می‌شود.'
+                  : willHardDelete
+                    ? 'با تأیید، فاکتور لغو و از لیست حذف می‌شود. موجودی، تراکنش صندوق و اسناد حسابداری به‌صورت خودکار برگشت می‌خورند.'
+                    : 'این فاکتور پرداخت‌شده است و برای حفظ حسابرسی، حذف فیزیکی نمی‌شود. با تأیید، فاکتور لغو شده و موجودی، تراکنش صندوق و چک‌ها برگشت می‌خورند.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* ═══ جزئیات فاکتور ═══ */}
           <div className="space-y-3 mt-2">
             <Card>
               <CardContent className="p-3 space-y-2">
                 {[
-                  { label: 'شماره فاکتور', value: <span className="font-mono font-bold">{invoiceToDelete.invoiceNumber || invoiceToDelete.number}</span> },
-                  { label: 'مشتری', value: invoiceToDelete.customerName || 'فروش عمومی' },
-                  { label: 'مبلغ', value: <span className="font-bold text-red-600">{formatCurrency(invoiceToDelete.totalAmount)}</span> },
+                  { label: 'شماره فاکتور', value: <span className="font-mono font-bold">{inv.invoiceNumber || inv.number}</span> },
+                  { label: 'مشتری', value: inv.customerName || 'فروش عمومی' },
+                  { label: 'مبلغ', value: <span className="font-bold text-red-600">{formatCurrency(inv.totalAmount)}</span> },
+                  { label: 'پرداخت شده', value: <span className={isPaidInvoice ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(inv.paidAmount || 0)}</span> },
                 ].map((item, i) => (
-                  <div key={i} className="flex justify-between text-xs sm:text-sm"><span className="text-gray-500">{item.label}</span><span>{item.value}</span></div>
+                  <div key={i} className="flex justify-between text-xs sm:text-sm">
+                    <span className="text-gray-500">{item.label}</span>
+                    <span>{item.value}</span>
+                  </div>
                 ))}
               </CardContent>
             </Card>
-            <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-100">
-              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
-              <p className="text-xs text-red-600">حذف فاکتور ممکن است بر اسناد حسابداری مرتبط تأثیر بگذارد.</p>
-            </div>
+
+            {/* ═══ لیست عملیات انجام‌شده ═══ */}
+            {!inv._isOffline && isOnline && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 space-y-1">
+                <p className="font-bold">عملیات انجام‌شده:</p>
+                <ul className="list-disc list-inside space-y-0.5 mr-2">
+                  {willHardDelete ? (
+                    <>
+                      <li>فاکتور به طور کامل حذف می‌شود</li>
+                      <li>سند حسابداری حذف می‌شود</li>
+                      <li>تراکنش صندوق حذف می‌شود</li>
+                      {isReturnInvoice && <li>چک‌های مرتبط حذف می‌شوند</li>}
+                      {(inv.paymentType === 'credit' || inv.paymentType === 'installment' || inv.paymentType === 'check') && (
+                        <li>مانده مشتری به‌روزرسانی می‌شود</li>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <li>فاکتور لغو می‌شود (در لیست باقی می‌ماند)</li>
+                      <li>موجودی کالا برگشت می‌خورد</li>
+                      <li>تراکنش صندوق حذف می‌شود</li>
+                      <li>سند حسابداری باطل می‌شود</li>
+                      {inv.paymentType === 'check' && <li>چک‌های دریافتنی باطل می‌شوند</li>}
+                    </>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
-        )}
 
-        <DialogFooter className="flex-row gap-2">
-          <Button variant="outline" className="flex-1" onClick={() => { setDeleteDialogOpen(false); setInvoiceToDelete(null) }} disabled={deleting}>انصراف</Button>
-          <Button className="flex-1 bg-red-600 hover:bg-red-700 gap-1.5" onClick={handleDeleteConfirm} disabled={deleting}>
-            {deleting ? <><Loader2 className="w-4 h-4 animate-spin" />در حال حذف...</> : <><Trash2 className="w-4 h-4" />حذف فاکتور</>}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-
+          <DialogFooter className="flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => { setDeleteDialogOpen(false); setInvoiceToDelete(null) }}
+              disabled={deleting}
+            >
+              انصراف
+            </Button>
+            <Button
+              className="flex-1 bg-red-600 hover:bg-red-700 gap-1.5"
+              onClick={handleDeleteConfirm}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />در حال پردازش...</>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  {!isOnline && !inv._isOffline
+                    ? 'ثبت در صف حذف'
+                    : willHardDelete
+                      ? 'حذف فاکتور'
+                      : 'بله، لغو کن'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
   // ═══════════════════════════════════════════════════════════════
-  // Render: Return Dialog
+  // ★ v9.2.0: Render: Return Dialog — رفع باگ محاسبه مبلغ
   // ═══════════════════════════════════════════════════════════════
 
   const renderReturnDialog = () => {
-    const totalReturn = returnItems.reduce((sum, retItem) => {
-      const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
-      if (!origItem) return sum
-      const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-      return sum + (Number(origItem.lineTotal) || 0) * ratio
-    }, 0)
-    const hasSelectedItems = returnItems.some(item => item.quantity > 0)
+    // ★ v9.2.0: محاسبه بهبود یافته مبلغ برگشتی
+   // ★ v9.3.0: محاسبه ساده‌تر و قابل اعتمادتر
+   console.log('🔍 renderReturnDialog called, returnItems:', returnItems)
+const totalReturn = returnItems.reduce((sum, item) => sum + (item.returnAmount || 0), 0)
+const hasSelectedItems = returnItems.some(item => item.quantity > 0)
 
     return (
       <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
@@ -1714,24 +1862,26 @@ export default function InvoicesPage() {
               </div>
             ) : (
               <>
-                {/* موبایل - کارت */}
+                {/* ★ v9.2.0: کارت‌های موبایل با عنوان درست */}
                 <div className="sm:hidden space-y-2">
                   {returnItems.map((retItem, index) => {
-                    const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
+                    const origItem = invoiceToReturn?.items?.find((it: any) => it.id === retItem.invoiceItemId)
                     if (!origItem) return null
-                    const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-                    const itemReturnAmount = (Number(origItem.lineTotal) || 0) * ratio
+                    const origQty = origItem.quantity || 0
+                    const ratio = origQty > 0 ? retItem.quantity / origQty : 0
+                  const itemReturnAmount = retItem.returnAmount || 0
                     return (
                       <Card key={index} className={`border ${retItem.quantity > 0 ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200'}`}>
                         <CardContent className="p-3 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium text-sm text-gray-900">{retItem.productName}</span>
-                            <span className="text-xs text-gray-500">موجودی: {(origItem.quantity || 0).toLocaleString('fa-IR')}</span>
+                            {/* ★ v9.2.0: عنوان "تعداد خرید" به جای "موجودی" */}
+                            <span className="text-xs text-gray-500">تعداد خرید: {origQty.toLocaleString('fa-IR')}</span>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1">
                               <Label className="text-[10px]">مقدار برگشتی</Label>
-                              <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origItem.quantity || 0} className="h-8 text-xs text-center" />
+                              <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origQty} className="h-8 text-xs text-center" />
                             </div>
                             <div className="space-y-1">
                               <Label className="text-[10px]">دلیل برگشت</Label>
@@ -1745,14 +1895,15 @@ export default function InvoicesPage() {
                   })}
                 </div>
 
-                {/* دسکتاپ - جدول */}
+                {/* ★ v9.2.0: جدول دسکتاپ با عنوان درست */}
                 <div className="hidden sm:block border border-gray-200 rounded-lg overflow-hidden bg-white">
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-purple-50 border-b border-gray-200">
                         <tr>
                           <th className="text-right p-3 font-medium">نام کالا</th>
-                          <th className="text-center p-3 font-medium">موجودی</th>
+                          {/* ★ v9.2.0: عنوان "تعداد خرید" به جای "موجودی" */}
+                          <th className="text-center p-3 font-medium">تعداد خرید</th>
                           <th className="text-center p-3 font-medium min-w-[100px]">مقدار برگشتی</th>
                           <th className="text-center p-3 font-medium">قیمت واحد</th>
                           <th className="text-center p-3 font-medium">مبلغ برگشتی</th>
@@ -1761,20 +1912,21 @@ export default function InvoicesPage() {
                       </thead>
                       <tbody>
                         {returnItems.map((retItem, index) => {
-                          const origItem = (invoiceToReturn as any)?.items?.find((it: any) => it.id === retItem.invoiceItemId)
+                          const origItem = invoiceToReturn?.items?.find((it: any) => it.id === retItem.invoiceItemId)
                           if (!origItem) return (
                             <tr key={index} className="border-t border-gray-100 bg-red-50">
                               <td colSpan={6} className="p-3 text-center text-red-600 text-xs">آیتم یافت نشد</td>
                             </tr>
                           )
-                          const ratio = (origItem.quantity || 0) > 0 ? retItem.quantity / origItem.quantity : 0
-                          const itemReturnAmount = (Number(origItem.lineTotal) || 0) * ratio
+                          const origQty = origItem.quantity || 0
+                          const ratio = origQty > 0 ? retItem.quantity / origQty : 0
+                   const itemReturnAmount = retItem.returnAmount || 0
                           return (
                             <tr key={index} className={`border-t border-gray-100 hover:bg-gray-50 ${retItem.quantity > 0 ? 'bg-amber-50/30' : ''}`}>
                               <td className="p-3 font-medium text-gray-900">{retItem.productName}</td>
-                              <td className="p-3 text-center text-gray-600">{(origItem.quantity || 0).toLocaleString('fa-IR')}</td>
+                              <td className="p-3 text-center text-gray-600">{origQty.toLocaleString('fa-IR')}</td>
                               <td className="p-3">
-                                <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origItem.quantity || 0} className="h-8 text-xs w-full text-center" placeholder="0" />
+                                <Input type="number" value={retItem.quantity} onChange={e => handleReturnItemChange(index, 'quantity', e.target.value)} min={0} max={origQty} className="h-8 text-xs w-full text-center" placeholder="0" />
                               </td>
                               <td className="p-3 text-center font-mono text-gray-600">{(origItem.unitPrice || 0).toLocaleString('fa-IR')}</td>
                               <td className={`p-3 text-center font-bold font-mono ${itemReturnAmount > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{itemReturnAmount > 0 ? itemReturnAmount.toLocaleString('fa-IR') : '—'}</td>
@@ -1807,11 +1959,6 @@ export default function InvoicesPage() {
                     <span className="text-xs font-medium text-amber-900">مبلغ کل برگشتی:</span>
                     <span className="text-sm font-bold text-amber-700">{totalReturn.toLocaleString('fa-IR')} ریال</span>
                   </div>
-                  <p className="text-[10px] text-amber-700">
-                    {returnItems.filter(i => i.quantity > 0).length} آیتم انتخاب شده
-                    {returnPaymentType === 'cash' && ' — وجه به صورت نقدی برگردانده می‌شود'}
-                    {returnPaymentType === 'credit' && ' — از طلب مشتری کاهش پیدا می‌کند'}
-                  </p>
                 </div>
               </>
             )}
@@ -1825,14 +1972,15 @@ export default function InvoicesPage() {
               onClick={handleReturnSubmit}
               disabled={returnSubmitting || returnItems.length === 0 || !hasSelectedItems || totalReturn <= 0}
               className="flex-1 bg-amber-600 hover:bg-amber-700 gap-1.5">
-              {returnSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />در حال ثبت...</> : <><RotateCcw className="w-4 h-4" />ثبت برگشتی {totalReturn > 0 && `(${totalReturn.toLocaleString('fa-IR')} ت)`}</>}
+              {returnSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />در حال ثبت...</> : <><RotateCcw className="w-4 h-4" />ثبت برگشتی</>}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     )
   }
-    // ═══════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════
   // Main Render
   // ═══════════════════════════════════════════════════════════════
 
@@ -1863,77 +2011,115 @@ export default function InvoicesPage() {
                   <span className="hidden sm:inline">آفلاین</span>
                 </Badge>
               )}
-              <Button variant="outline" size="icon" className="h-8 w-8 sm:hidden border-gray-200" onClick={() => setMobileSearchOpen(v => !v)}>
-                <Search className="w-3.5 h-3.5" />
-              </Button>
               <Button variant="outline" size="sm" onClick={loadInvoices} disabled={loading} className="h-8 sm:h-9 px-2 sm:px-3 gap-1 text-xs sm:text-sm">
                 <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${loading ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">بروزرسانی</span>
               </Button>
-              <Button className="bg-emerald-600 hover:bg-emerald-700 gap-1 h-8 sm:h-9 px-2 sm:px-3 lg:px-4 text-xs sm:text-sm" size="sm" onClick={() => setCurrentView('pos')} disabled={!isOnline}>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 gap-1 h-8 sm:h-9 px-2 sm:px-3 lg:px-4 text-xs sm:text-sm"
+                size="sm"
+                onClick={() => setCurrentView('pos')}
+              >
                 <Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 <span className="hidden sm:inline">فاکتور جدید</span>
                 <span className="sm:hidden">جدید</span>
               </Button>
             </div>
           </div>
-
-          {mobileSearchOpen && (
-            <div className="mt-2 sm:hidden">
-              <div className="relative">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <Input autoFocus type="text" placeholder="جستجو..." value={search} onChange={e => setSearch(e.target.value)} className="pr-9 pl-9 h-8 bg-gray-50 border-gray-200 text-xs" />
-                {search && <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2"><X className="w-3.5 h-3.5 text-gray-400" /></button>}
-              </div>
-            </div>
-          )}
         </header>
 
-        {/* ─── Summary Cards ──────────────────────────────────── */}
+        {/* ─── Summary KPI Cards ─────────────────────── */}
         <div className="px-3 sm:px-5 lg:px-6 pt-2 shrink-0">
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 lg:gap-3">
-            {[
-              { label: 'فاکتورها', value: formatNumber(summaryStats.total), color: 'text-gray-900' },
-              { label: 'مبلغ کل', value: formatCurrency(summaryStats.totalAmount), color: 'text-emerald-600' },
-              { label: 'پرداخت شده', value: formatCurrency(summaryStats.paidAmount), color: 'text-sky-600' },
-              { label: 'در انتظار', value: formatCurrency(summaryStats.totalAmount - summaryStats.paidAmount), color: 'text-amber-600' },
-            ].map((item, i) => (
-              <div key={i} className="bg-white rounded-md border border-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
-                <p className="text-[9px] sm:text-[10px] text-gray-500 leading-tight truncate">{item.label}</p>
-                <p className={`text-[10px] sm:text-xs lg:text-sm font-bold leading-tight mt-0.5 truncate ${item.color}`}>{item.value}</p>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2">
+            <KpiCard
+              label="کل فاکتورها"
+              value={toFaNum(summaryStats.total)}
+              sublabel="مورد"
+              gradient="bg-gradient-to-br from-gray-500 to-gray-600"
+              icon={<div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center"><FileText className="w-3.5 h-3.5 text-white" /></div>}
+              onClick={() => setStatusFilter('ALL')}
+            />
+            <KpiCard
+              label="مبلغ کل"
+              value={formatCurrencyShort(summaryStats.totalAmount)}
+              sublabel="ریال"
+              gradient="bg-gradient-to-br from-emerald-500 to-emerald-600"
+              icon={<div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center"><Wallet className="w-3.5 h-3.5 text-white" /></div>}
+            />
+            <KpiCard
+              label="پرداخت شده"
+              value={formatCurrencyShort(summaryStats.paidAmount)}
+              sublabel={`${toFaNum(summaryStats.paid)} فاکتور`}
+              gradient="bg-gradient-to-br from-sky-500 to-sky-600"
+              icon={<div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center"><CheckCircle2 className="w-3.5 h-3.5 text-white" /></div>}
+              onClick={() => setStatusFilter('PAID')}
+            />
+            <KpiCard
+              label="در انتظار"
+              value={formatCurrencyShort(summaryStats.totalAmount - summaryStats.paidAmount)}
+              sublabel={`${toFaNum(summaryStats.pending + summaryStats.partial)} فاکتور`}
+              gradient="bg-gradient-to-br from-amber-500 to-amber-600"
+              icon={<div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center"><CalendarDays className="w-3.5 h-3.5 text-white" /></div>}
+              onClick={() => setStatusFilter('PENDING')}
+            />
           </div>
         </div>
 
-        {/* ─── Tabs & Search ──────────────────────────────────── */}
-        <div className="px-3 sm:px-5 lg:px-6 pt-3 shrink-0 space-y-2 sm:space-y-3">
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
-            {STATUS_TABS.map((tab) => {
-              const isActive = activeTab === tab.key
-              return (
-                <button key={tab.key} onClick={() => { setActiveTab(tab.key); setPage(1) }}
-                  className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap shrink-0 text-[10px] sm:text-xs ${isActive ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}>
-                  <span className="sm:hidden">
-                    {tab.key === 'ALL' ? 'همه' : tab.key === 'PAID' ? 'پرداخت' : tab.key === 'PENDING' ? 'انتظار' : tab.key === 'PARTIAL' ? 'جزئی' : tab.key === 'DRAFT' ? 'پیش‌نویس' : 'لغو'}
-                  </span>
-                  <span className="hidden sm:inline">{tab.label}</span>
+        {/* ─── Search + Filter ComboBoxes ─────────────── */}
+        <div className="px-3 sm:px-5 lg:px-6 pt-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400" />
+              <Input
+                placeholder="جستجو..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pr-9 pl-8 h-9 text-xs sm:text-sm bg-white"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              )
-            })}
-          </div>
+              )}
+            </div>
 
-          <div className="relative hidden sm:block">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input placeholder="جستجو بر اساس شماره فاکتور یا نام مشتری..." value={search} onChange={e => setSearch(e.target.value)} className="pr-9 pl-9 h-9 text-sm bg-white" />
-            {search && <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>}
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilterKey)}>
+              <SelectTrigger className="w-[100px] sm:w-[130px] h-9 text-[10px] sm:text-xs shrink-0 bg-white">
+                <div className="flex items-center gap-1">
+                  <Filter className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-gray-400 shrink-0" />
+                  <SelectValue placeholder="وضعیت" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">همه</SelectItem>
+                <SelectItem value="PAID">پرداخت شده</SelectItem>
+                <SelectItem value="PENDING">در انتظار</SelectItem>
+                <SelectItem value="PARTIAL">پرداخت جزئی</SelectItem>
+                <SelectItem value="DRAFT">پیش‌نویس</SelectItem>
+                <SelectItem value="CANCELLED">لغو شده</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={paymentTypeFilter} onValueChange={(v) => setPaymentTypeFilter(v as PaymentTypeFilterKey)}>
+              <SelectTrigger className="w-[100px] sm:w-[130px] h-9 text-[10px] sm:text-xs shrink-0 bg-white">
+                <div className="flex items-center gap-1">
+                  <CreditCard className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-gray-400 shrink-0" />
+                  <SelectValue placeholder="روش پرداخت" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">همه روش‌ها</SelectItem>
+                <SelectItem value="cash">نقدی</SelectItem>
+                <SelectItem value="card">کارتخوان</SelectItem>
+                <SelectItem value="credit">نسیه</SelectItem>
+                <SelectItem value="installment">قسطی</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
         {/* ─── Content ────────────────────────────────────────── */}
         <div className="flex-1 overflow-auto px-3 sm:px-5 lg:px-6 py-3">
-
-          {/* ★ بنر آفلاین/کش */}
           {(!isOnline || isOfflineData) && (
             <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg mb-3 text-xs border ${!isOnline ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
               <WifiOff className={`w-4 h-4 shrink-0 ${!isOnline ? 'text-amber-600' : 'text-blue-500'}`} />
@@ -1941,13 +2127,12 @@ export default function InvoicesPage() {
                 {!isOnline ? (
                   <><span className="font-bold">حالت آفلاین — </span>{invoices.length > 0 ? `نمایش ${formatNumber(invoices.length)} فاکتور از حافظه دستگاه` : 'اتصال به اینترنت برقرار نیست'}</>
                 ) : (
-                  <><span className="font-bold">داده‌های ذخیره‌شده — </span>نمایش فاکتورهای کش‌شده (برای به‌روزرسانی، بروزرسانی کنید)</>
+                  <><span className="font-bold">داده‌های ذخیره‌شده — </span>نمایش فاکتورهای کش‌شده</>
                 )}
               </div>
             </div>
           )}
 
-          {/* Loading */}
           {loading && invoices.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
@@ -1955,7 +2140,6 @@ export default function InvoicesPage() {
             </div>
           )}
 
-          {/* Error */}
           {error && invoices.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20">
               <AlertTriangle className="w-8 h-8 text-red-400 mb-3" />
@@ -1966,7 +2150,6 @@ export default function InvoicesPage() {
             </div>
           )}
 
-          {/* Empty */}
           {!loading && !error && filteredInvoices.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20">
               <FileText className="w-12 h-12 text-gray-300 mb-3" />
@@ -1975,10 +2158,8 @@ export default function InvoicesPage() {
             </div>
           )}
 
-          {/* Invoice List */}
           {!loading && filteredInvoices.length > 0 && (
             <>
-              {/* موبایل - کارت */}
               <div className="md:hidden space-y-2">
                 {filteredInvoices.map((inv) => (
                   <MobileInvoiceCard
@@ -1990,58 +2171,69 @@ export default function InvoicesPage() {
                 ))}
               </div>
 
-              {/* دسکتاپ - جدول */}
-              <div className="hidden md:block">
+                       <div className="hidden md:block">
                 <Card>
                   <CardContent className="p-0">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto" dir="rtl">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-gray-50/80">
-                            <TableHead className="text-xs font-semibold">شماره</TableHead>
-                            <TableHead className="text-xs font-semibold">مشتری</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">شماره</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">مشتری</TableHead>
                             <TableHead className="text-xs font-semibold text-right">مبلغ کل</TableHead>
                             <TableHead className="text-xs font-semibold text-right hidden lg:table-cell">پرداخت شده</TableHead>
-                            <TableHead className="text-xs font-semibold hidden xl:table-cell">نوع پرداخت</TableHead>
-                            <TableHead className="text-xs font-semibold">وضعیت</TableHead>
-                            <TableHead className="text-xs font-semibold hidden lg:table-cell">تاریخ</TableHead>
-                            <TableHead className="text-xs font-semibold text-center">عملیات</TableHead>
+                            <TableHead className="text-right text-xs font-semibold hidden xl:table-cell">نوع پرداخت</TableHead>
+                            <TableHead className="text-right text-xs font-semibold">وضعیت</TableHead>
+                            <TableHead className="text-right text-xs font-semibold hidden lg:table-cell">تاریخ</TableHead>
+                            <TableHead className="text-right text-xs font-semibold text-center">عملیات</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {filteredInvoices.map((inv) => {
-                            const invNumber = inv.invoiceNumber || inv.number || '---'
+                            const invNumber = toFaNum(inv.invoiceNumber || inv.number || '---')
                             const isPaid = (inv.paymentStatus || inv.status)?.toUpperCase() === 'PAID'
                             const isCancelled = (inv.paymentStatus || inv.status)?.toUpperCase() === 'CANCELLED'
-                            const isReturn = (inv as any).invoiceType === 'sale_return' || (inv as any).invoiceType === 'purchase_return'
+                            const isReturn = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
                             const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
 
                             return (
                               <TableRow
                                 key={inv.id}
-                                className={`cursor-pointer hover:bg-gray-50 transition-colors ${isCancelled ? 'opacity-50' : ''} ${(inv as any)._isOffline ? 'bg-amber-50/30' : ''}`}
+                                className={`cursor-pointer hover:bg-gray-50 transition-colors ${isCancelled ? 'opacity-50' : ''} ${inv._isOffline ? (inv._offlineAction === 'delete' ? 'bg-red-50/20 border-red-200' : 'bg-amber-50/20 border-amber-200') : ''}`}
                                 onClick={() => handleViewDetail(inv)}
                               >
                                 <TableCell className="text-xs font-mono font-medium">
                                   <div className="flex items-center gap-1">
-                                    {invNumber}
-                                    {(inv as any)._isOffline && (
-                                      <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-600 px-1 h-4">کش</Badge>
+                                    <span className={inv._offlineAction === 'delete' ? 'text-red-600 line-through' : ''}>{invNumber}</span>
+                                    {inv._isOffline && (
+                                      <Badge variant="outline" className={`text-[9px] px-1 h-4 ${inv._offlineAction === 'delete' ? 'border-red-300 text-red-600' : 'border-amber-300 text-amber-600'}`}>
+                                        {inv._offlineAction === 'delete' ? 'حذف در صف' : 'آفلاین'}
+                                      </Badge>
                                     )}
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-xs max-w-[120px] lg:max-w-none">
                                   <span className="truncate block">{inv.customerName || <span className="text-gray-400">فروش عمومی</span>}</span>
                                 </TableCell>
-                                <TableCell className="text-xs text-right font-mono">{formatCurrency(inv.totalAmount)}</TableCell>
-                                <TableCell className="text-xs text-right font-mono hidden lg:table-cell">
-                                  <span className={isPaid ? 'text-emerald-600' : 'text-amber-600'}>{formatCurrency(inv.paidAmount)}</span>
+                                <TableCell className="text-xs text-right font-mono">
+                                  {formatNumber(inv.totalAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
                                 </TableCell>
-                                <TableCell className="hidden xl:table-cell">{getPaymentTypeBadge(inv.paymentType)}</TableCell>
-                                <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, (inv as any).invoiceType)}</TableCell>
+                                <TableCell className="text-xs text-right font-mono hidden lg:table-cell">
+                                  <span className={isPaid ? 'text-emerald-600' : 'text-amber-600'}>
+                                    {formatNumber(inv.paidAmount)} <span className="text-[10px] text-gray-500 font-normal">ریال</span>
+                                  </span>
+                                </TableCell>
+                                <TableCell className="hidden xl:table-cell">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {getPaymentTypeBadge(inv.paymentType)}
+                                    {inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}
+                                  </div>
+                                </TableCell>
+                                <TableCell>{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}</TableCell>
                                 <TableCell className="text-xs hidden lg:table-cell">{formatDateShort(inv.createdAt)}</TableCell>
                                 <TableCell>
                                   <div className="flex items-center justify-center gap-0.5" onClick={e => e.stopPropagation()}>
+                                    {/* ═══ دکمه مشاهده ═══ */}
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-sky-50 hover:text-sky-600" onClick={() => handleViewDetail(inv)}>
@@ -2051,6 +2243,7 @@ export default function InvoicesPage() {
                                       <TooltipContent side="top">مشاهده جزئیات</TooltipContent>
                                     </Tooltip>
 
+                                    {/* ═══ دکمه پرداخت نسیه ═══ */}
                                     {(inv.paymentType || '').toLowerCase() === 'credit' && !isPaid && !isCancelled && remaining > 0 && (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
@@ -2062,7 +2255,8 @@ export default function InvoicesPage() {
                                       </Tooltip>
                                     )}
 
-                                    {(inv as any).invoiceType !== 'service' && !isReturn && !isCancelled && (
+                                    {/* ═══ دکمه برگشتی ═══ */}
+                                    {inv.invoiceType !== 'service' && !isReturn && !isCancelled && (
                                       <Tooltip>
                                         <TooltipTrigger asChild>
                                           <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-amber-50 hover:text-amber-600" onClick={() => handleReturnClick(inv)}>
@@ -2073,30 +2267,31 @@ export default function InvoicesPage() {
                                       </Tooltip>
                                     )}
 
-                                    {(planFeatures.canDeleteInvoice || isReturn) ? (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
-                                            onClick={() => handleDeleteClick(inv)}
-                                            disabled={(isPaid && !isReturn) || isCancelled}>
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top">
-                                          {isReturn ? 'حذف فاکتور برگشتی' : isPaid ? 'فاکتور پرداخت‌شده قابل حذف نیست' : isCancelled ? 'فاکتور لغو‌شده قابل حذف نیست' : 'حذف فاکتور'}
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    ) : (
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <button className="flex items-center justify-center h-7 w-7 rounded-md text-gray-300 hover:text-amber-500 hover:bg-amber-50 transition-colors"
-                                            onClick={() => toast({ title: 'دسترسی محدود', description: 'حذف فاکتور فقط در پلن حرفه‌ای در دسترس است' })}>
-                                            <Lock className="w-3.5 h-3.5" />
-                                          </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top">ارتقا پلن</TooltipContent>
-                                      </Tooltip>
-                                    )}
+                                    {/* ═══════════════════════════════════════════════════════════════
+                                        ★ v11.7.0: دکمه لغو/حذف فاکتور
+                                        - برای همه فاکتورها فعال است
+                                        - حذف فیزیکی فقط توسط ادمین با پارامتر force
+                                        ═══════════════════════════════════════════════════════════════ */}
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
+                                          onClick={() => handleDeleteClick(inv)}
+                                          disabled={isCancelled || inv._offlineAction === 'delete'}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top">
+                                        {isCancelled
+                                          ? 'فاکتور لغو شده'
+                                          : isPaid && !isReturn
+                                            ? 'لغو فاکتور (پرداخت‌شده)'
+                                            : 'لغو/حذف فاکتور'}
+                                      </TooltipContent>
+                                    </Tooltip>
                                   </div>
                                 </TableCell>
                               </TableRow>
@@ -2106,7 +2301,6 @@ export default function InvoicesPage() {
                       </Table>
                     </div>
 
-                    {/* Pagination - Desktop */}
                     {totalPages > 1 && (
                       <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-gray-100 gap-2">
                         <p className="text-xs text-gray-500 order-2 sm:order-1">
@@ -2114,11 +2308,11 @@ export default function InvoicesPage() {
                         </p>
                         <div className="flex items-center gap-1 order-1 sm:order-2">
                           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-                            <ChevronLeft className="w-3 h-3" />قبلی
+                            <ChevronRight className="w-3 h-3" />قبلی
                           </Button>
                           <span className="text-xs text-gray-400 px-1">{page} / {totalPages}</span>
                           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
-                            بعدی<ChevronLeft className="w-3 h-3 rotate-180" />
+                            بعدی<ChevronRight className="w-3 h-3 rotate-180" />
                           </Button>
                         </div>
                       </div>
@@ -2127,7 +2321,6 @@ export default function InvoicesPage() {
                 </Card>
               </div>
 
-              {/* Pagination - Mobile */}
               {totalPages > 1 && (
                 <div className="md:hidden flex items-center justify-between mt-3 px-1">
                   <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
@@ -2143,7 +2336,6 @@ export default function InvoicesPage() {
           )}
         </div>
 
-        {/* ─── Dialogs ────────────────────────────────────────── */}
         {renderDetailDialog()}
         {renderPaymentDialog()}
         {renderReceivePaymentDialog()}

@@ -118,8 +118,7 @@ exports.Prisma.TransactionIsolationLevel = makeStrictEnum({
   ReadUncommitted: 'ReadUncommitted',
   ReadCommitted: 'ReadCommitted',
   RepeatableRead: 'RepeatableRead',
-  Serializable: 'Serializable',
-  Snapshot: 'Snapshot'
+  Serializable: 'Serializable'
 });
 
 exports.Prisma.TenantScalarFieldEnum = {
@@ -137,6 +136,11 @@ exports.Prisma.TenantScalarFieldEnum = {
   planTierId: 'planTierId',
   billingCycle: 'billingCycle',
   expiresAt: 'expiresAt',
+  trialStartAt: 'trialStartAt',
+  trialEndAt: 'trialEndAt',
+  isPaid: 'isPaid',
+  paidAt: 'paidAt',
+  discountApplied: 'discountApplied',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
   soldAt: 'soldAt',
@@ -259,6 +263,7 @@ exports.Prisma.PlanPriceScalarFieldEnum = {
   billingCycle: 'billingCycle',
   durationDays: 'durationDays',
   price: 'price',
+  earlyBirdPrice: 'earlyBirdPrice',
   discountPercent: 'discountPercent',
   isActive: 'isActive',
   isPopular: 'isPopular',
@@ -359,6 +364,7 @@ exports.Prisma.InvoiceScalarFieldEnum = {
   id: 'id',
   number: 'number',
   customerId: 'customerId',
+  branchId: 'branchId',
   invoiceDate: 'invoiceDate',
   dueDate: 'dueDate',
   status: 'status',
@@ -460,6 +466,7 @@ exports.Prisma.JournalEntryScalarFieldEnum = {
   status: 'status',
   sourceType: 'sourceType',
   sourceId: 'sourceId',
+  branchId: 'branchId',
   totalDebit: 'totalDebit',
   totalCredit: 'totalCredit',
   createdBy: 'createdBy',
@@ -582,6 +589,9 @@ exports.Prisma.CheckScalarFieldEnum = {
   dueDate: 'dueDate',
   status: 'status',
   customerId: 'customerId',
+  supplierId: 'supplierId',
+  invoiceId: 'invoiceId',
+  purchaseInvoiceId: 'purchaseInvoiceId',
   payeeName: 'payeeName',
   description: 'description',
   journalEntryId: 'journalEntryId',
@@ -891,6 +901,17 @@ exports.Prisma.InitialBalanceScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.AdminUserScalarFieldEnum = {
+  id: 'id',
+  username: 'username',
+  password: 'password',
+  role: 'role',
+  isActive: 'isActive',
+  lastLogin: 'lastLogin',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
 exports.Prisma.FixedAssetScalarFieldEnum = {
   id: 'id',
   tenantId: 'tenantId',
@@ -917,9 +938,43 @@ exports.Prisma.FixedAssetScalarFieldEnum = {
   updatedAt: 'updatedAt'
 };
 
+exports.Prisma.CashShiftScalarFieldEnum = {
+  id: 'id',
+  tenantId: 'tenantId',
+  cashierId: 'cashierId',
+  openedAt: 'openedAt',
+  closedAt: 'closedAt',
+  openingAmount: 'openingAmount',
+  expectedClosing: 'expectedClosing',
+  actualClosing: 'actualClosing',
+  difference: 'difference',
+  status: 'status',
+  autoMode: 'autoMode',
+  notes: 'notes',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+};
+
+exports.Prisma.CashMovementScalarFieldEnum = {
+  id: 'id',
+  shiftId: 'shiftId',
+  tenantId: 'tenantId',
+  type: 'type',
+  amount: 'amount',
+  reason: 'reason',
+  reference: 'reference',
+  createdBy: 'createdBy',
+  createdAt: 'createdAt'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
+};
+
+exports.Prisma.QueryMode = {
+  default: 'default',
+  insensitive: 'insensitive'
 };
 
 exports.Prisma.NullsOrder = {
@@ -976,7 +1031,10 @@ exports.Prisma.ModelName = {
   Ticket: 'Ticket',
   TicketMessage: 'TicketMessage',
   InitialBalance: 'InitialBalance',
-  FixedAsset: 'FixedAsset'
+  AdminUser: 'AdminUser',
+  FixedAsset: 'FixedAsset',
+  CashShift: 'CashShift',
+  CashMovement: 'CashMovement'
 };
 
 /**

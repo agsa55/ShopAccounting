@@ -1,7 +1,13 @@
 // ============================================================================
-// src/lib/auto-fiscal-year.ts — Auto Fiscal Year Creation (v3.29 ★★★)
+// src/lib/auto-fiscal-year.ts — Auto Fiscal Year Creation (v3.30 ★★★ FIX)
 // ============================================================================
-// ★★★ v3.29: این helper برای ایجاد خودکار سال مالی هنگام ثبت‌نام Tenant استفاده می‌شود
+// ★★★ v3.30: رفع باگ حیاتی در jalaliToGregorian
+//   قبلاً این تابع بدون احتساب روزهای فروردین/اسفند (۵۹ روز اول سال میلادی)
+//   محاسبه می‌شد و باعث می‌شد startDate/endDate حدود ۶۰ روز اشتباه محاسبه شوند
+//   (مثال واقعی: تاریخ امروز ۲۹ تیر ۱۴۰۵ به‌جای ۲۰۲۶-۰۷-۲۹ به ۲۰۲۶-۰۵-۳۰ تبدیل می‌شد)
+//   که نهایتاً باعث می‌شد endDate از startDate عقب‌تر بیفتد و «مدت سال مالی» منفی شود.
+//   ★ فیکس: استفاده از همان الگوریتم JDN (Julian Day Number) که در gregorianToJalali
+//   استفاده شده، به‌جای محاسبه‌ی دستیِ نادرست بر مبنای آرایه‌ی روزهای ماه میلادی.
 //
 // قواعد:
 //   - پلن سازمانی (enterprise): الزامی است — سال مالی خودکار ساخته می‌شود
@@ -73,44 +79,45 @@ function isJalaliLeapYear(jy: number): boolean {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  ★ توابع پایه‌ی JDN (Julian Day Number) — سطح ماژول
+//  این‌ها دقیقاً همان الگوریتمی هستند که gregorianToJalali استفاده می‌کند
+//  و صحت آن‌ها تایید شده است. جهت جلوگیری از تکرار باگ، jalaliToGregorian
+//  هم از همین توابع استفاده می‌کند (به‌جای محاسبه‌ی دستیِ اشتباه قبلی).
+// ─────────────────────────────────────────────────────────────
+function _g2d(gy: number, gm: number, gd: number): number {
+  let d =
+    _div((gy + _div(gm - 8, 6) + 100100) * 1461, 4) +
+    _div(153 * _rem(gm + 9, 12) + 2, 5) +
+    gd - 34840408
+  d = d - _div(_div(gy + 100100 + _div(gm - 8, 6), 100) * 3, 4) + 752
+  return d
+}
+
+function _d2g(jdn: number): { gy: number; gm: number; gd: number } {
+  let j = 4 * jdn + 139361631
+  j = j + _div(_div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908
+  const i = _div(_rem(j, 1461), 4) * 5 + 308
+  const gd = _div(_rem(i, 153), 5) + 1
+  const gm = _rem(_div(i, 153), 12) + 1
+  const gy = _div(j, 1461) - 100100 + _div(8 - gm, 6)
+  return { gy, gm, gd }
+}
+
+/**
+ * ★ FIXED — تبدیل تاریخ شمسی به میلادی با استفاده از الگوریتم JDN
+ * قبلاً این تابع با جمع ساده‌ی march + days و شمارش از ژانویه محاسبه می‌شد
+ * که باعث می‌شد نتیجه حدود ۶۰ روز (روزهای ژانویه+فوریه) عقب‌تر از واقعیت باشد.
+ */
 function jalaliToGregorian(jy: number, jm: number, jd: number): [number, number, number] {
   const r = _jalCal(jy)
-  const gy = r.gy
-  const march = r.march
-  const days = (jm <= 7 ? (jm - 1) * 31 : (jm - 1) * 30 + 6) + jd - 1
-  let gd = march + days
-  const isLeapG = gy % 4 === 0 && (gy % 100 !== 0 || gy % 400 === 0)
-  const gDaysInMonth = [31, 28 + (isLeapG ? 1 : 0), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  let gm = 1
-  for (let i = 0; i < 12; i++) {
-    if (gd <= gDaysInMonth[i]) {
-      gm = i + 1
-      break
-    }
-    gd -= gDaysInMonth[i]
-  }
-  return [gy, gm, gd]
+  const jdn = _g2d(r.gy, 3, r.march) + (jm - 1) * 31 - _div(jm, 7) * (jm - 7) + jd - 1
+  const g = _d2g(jdn)
+  return [g.gy, g.gm, g.gd]
 }
 
 function gregorianToJalali(gy: number, gm: number, gd: number): [number, number, number] {
-  function _g2d(gy: number, gm: number, gd: number): number {
-    let d =
-      _div((gy + _div(gm - 8, 6) + 100100) * 1461, 4) +
-      _div(153 * _rem(gm + 9, 12) + 2, 5) +
-      gd - 34840408
-    d = d - _div(_div(gy + 100100 + _div(gm - 8, 6), 100) * 3, 4) + 752
-    return d
-  }
   function _d2j(jdn: number): { jy: number; jm: number; jd: number } {
-    function _d2g(jdn: number): { gy: number; gm: number; gd: number } {
-      let j = 4 * jdn + 139361631
-      j = j + _div(_div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908
-      const i = _div(_rem(j, 1461), 4) * 5 + 308
-      const gd = _div(_rem(i, 153), 5) + 1
-      const gm = _rem(_div(i, 153), 12) + 1
-      const gy = _div(j, 1461) - 100100 + _div(8 - gm, 6)
-      return { gy, gm, gd }
-    }
     const r = _d2g(jdn)
     let jy = r.gy - 621
     const r2 = _jalCal(jy)
@@ -201,7 +208,7 @@ export async function ensureFiscalYearForTenant(
   }
 
   // ★ محاسبه تاریخ شروع و پایان سال مالی
-  // استراتژی: شروع از امروز شمسی، پایان = آخرین روز سال شمسی جاری
+  // استراتژی: شروع از تاریخ ثبت‌نام (امروز شمسی)، پایان = دقیقاً یک سال شمسی بعد (منهای یک روز)
   const now = new Date()
   const [currentJy, currentJm, currentJd] = gregorianToJalali(
     now.getFullYear(),
@@ -218,12 +225,15 @@ export async function ensureFiscalYearForTenant(
     Date.UTC(startGy, startGm - 1, startGd, 0, 0, 0, 0)
   )
 
-  // ★ تاریخ پایان: آخرین روز سال شمسی جاری (۲۹ یا ۳۰ اسفند)
-  const lastDayOfEsfand = daysInJalaliMonth(currentJy, 12)
-  const [endGy, endGm, endGd] = jalaliToGregorian(currentJy, 12, lastDayOfEsfand)
-  const endDate = new Date(
-    Date.UTC(endGy, endGm - 1, endGd, 23, 59, 59, 999)
-  )
+  // ★ تاریخ پایان: دقیقاً یک سال شمسی بعد از تاریخ شروع، منهای یک روز
+  // (یعنی از تاریخ ثبت‌نام تا همان روز/ماه در سال شمسی بعدی، به مدت یک سال کامل)
+  const nextJy = currentJy + 1
+  // اگر روز شروع، اسفندِ ۳۰ باشد ولی سال بعد کبیسه نباشد (۲۹ روزه)، به آخرین روز معتبر محدود می‌شود
+  const clampedDay = Math.min(currentJd, daysInJalaliMonth(nextJy, currentJm))
+  const [nextGy, nextGm, nextGd] = jalaliToGregorian(nextJy, currentJm, clampedDay)
+  const oneYearLater = new Date(Date.UTC(nextGy, nextGm - 1, nextGd, 0, 0, 0, 0))
+  const endDate = new Date(oneYearLater.getTime() - 24 * 60 * 60 * 1000) // یک روز قبل
+  endDate.setUTCHours(23, 59, 59, 999)
 
   // ★ بررسی نام تکراری (اگر کاربر قبلاً سالی با همین نام ساخته و حذف نکرده)
   let finalName = yearName

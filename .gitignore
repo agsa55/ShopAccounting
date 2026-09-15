@@ -1,7 +1,133 @@
-node_modules/ 
-.next/ 
-dist/ 
-build/ 
-.env 
-.env.local 
-*.log 
+# ═══════════════════════════════════════════════════════════════
+# ★ رهگشا - .gitignore کامل
+# ★ برای پروژه Next.js + Prisma + PostgreSQL
+# ═══════════════════════════════════════════════════════════════
+
+# ─── Dependencies ─────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ─── Next.js Build Outputs ───────────────────────────────────
+.next/
+out/
+dist/
+build/
+
+# ─── Prisma Generated Files ──────────────────────────────────
+# ★ این فایل‌ها خودکار با `prisma generate` ساخته می‌شوند
+src/generated/
+prisma/migrations/
+*.db
+*.db-journal
+
+# ─── Production Build ────────────────────────────────────────
+# ★ خروجی standalone برای دیپلوی
+.next/standalone/
+
+# ═══════════════════════════════════════════════════════════════
+# 🔒 Environment Variables (حساس‌ترین بخش!)
+# ═══════════════════════════════════════════════════════════════
+# ★ هرگز این فایل‌ها را در Git commit نکنید!
+
+# فایل‌های env محلی و production
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
+
+# ★ فقط این فایل را commit کن (قالب خالی)
+!.env.example
+
+# ─── Logs ─────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs/
+
+# ─── OS Files ─────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── IDE & Editor Files ──────────────────────────────────────
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+*~
+
+# ─── Testing ──────────────────────────────────────────────────
+coverage/
+.nyc_output/
+.jest-cache/
+cypress/videos/
+cypress/screenshots/
+playwright-report/
+test-results/
+
+# ─── Misc ─────────────────────────────────────────────────────
+.cache/
+.parcel-cache/
+.temp/
+.tmp/
+.vercel
+.netlify
+*.tsbuildinfo
+next-env.d.ts
+
+# ─── Uploads & User Content ──────────────────────────────────
+public/uploads/
+public/temp/
+uploads/
+
+# ─── Backup Files ─────────────────────────────────────────────
+*.bak
+*.backup
+*.old
+
+# ─── Secrets & Keys ──────────────────────────────────────────
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# ─── Docker ───────────────────────────────────────────────────
+# ★ Dockerfile و .dockerignore را commit کن
+# فقط volume ها و data را ignore کن
+docker-compose.override.yml
+docker-data/
+
+# ─── Temporary Files ─────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.swp
+*~
+.#*

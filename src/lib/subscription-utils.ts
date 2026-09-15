@@ -1,5 +1,5 @@
 // ============================================================================
-// src/lib/subscription-utils.ts — Subscription Helper Functions (v9.0 ★★★)
+// src/lib/subscription-utils.ts — Subscription Helper Functions (v9.1 ★★★)
 // ShopAccounting — Utilities for renewal, upgrade, and applying payments
 // ----------------------------------------------------------------------------
 // این فایل شامل تمام منطق تجاری سیستم اشتراک است:
@@ -7,6 +7,14 @@
 //   - getOrCreatePlanTier: یافتن/ایجاد PlanTier از روی نام
 //   - createPendingSubscription: ایجاد رکورد Subscriptions و SubscriptionPayments
 //   - applySubscriptionPayment: اعمال پرداخت موفق روی Tenant + Subscriptions
+//
+// ★★★ v9.1: FIX — re-export تایپ‌های BillingCycle و SubscriptionStatusResult
+//   قبلاً این تایپ‌ها فقط از plan-limits.ts import می‌شدند ولی دوباره export
+//   نمی‌شدند. فایل‌هایی مثل checkout/route.ts که می‌نوشتند:
+//     import { type BillingCycle } from '@/lib/subscription-utils'
+//   با این خطا مواجه می‌شدند:
+//     "Module declares 'BillingCycle' locally, but it is not exported"
+//   چون import به‌تنهایی یک type را عمومی (قابل import از بیرون) نمی‌کند.
 //
 // ★★★ v9.0: پشتیبانی از پلن مادام‌العمر (lifetime)
 //   - در applySubscriptionPayment: اگر billingCycle='lifetime' است، expiresAt=null
@@ -25,6 +33,10 @@ import {
   type BillingCycle,
   type SubscriptionStatusResult,
 } from '@/lib/plan-limits'
+
+// ★★★ v9.1: re-export این تایپ‌ها تا فایل‌های دیگر (مثل checkout/route.ts)
+//   بتوانند آن‌ها را مستقیماً از subscription-utils.ts هم import کنند
+export type { BillingCycle, SubscriptionStatusResult }
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -293,7 +305,8 @@ export async function createPendingSubscription(
  */
 export async function applySubscriptionPayment(
   authority: string,
-  refId: string | number
+  refId: string | number,
+  discountPercent: number = 0  // ★★★ v9.3: پارامتر جدید
 ): Promise<ApplyPaymentResult> {
   console.log('[SubscriptionUtils] applySubscriptionPayment start — authority:', authority)
 
@@ -400,20 +413,26 @@ export async function applySubscriptionPayment(
       newExpiresAt: newExpiresAt ? newExpiresAt.toISOString() : 'null (lifetime)',
     })
 
-    // ─── ۵. به‌روزرسانی Tenant ─────────────────────────────────────
-    // ★★★ v5.1.11: status='active' (از pending_payment به active)
-    //   این کار Tenant را پس از پرداخت موفق فعال می‌کند
-    // ★★★ v9.0: برای lifetime، expiresAt = null
+      // ─── ۵. به‌روزرسانی Tenant ─────────────────────────────────────
+    // ★★★ v9.3: اضافه شدن isPaid و paidAt برای سازگاری با trial-utils
+    //   قبلاً این فیلدها آپدیت نمی‌شدند و isLifetime همیشه false محاسبه می‌شد
+    //   که باعث قفل ماندن سیستم پس از پرداخت موفق می‌شد
     await db.client.tenant.update({
       where: { id: payment.tenantId },
       data: {
         planTierId: planTier.id,
         planName: tierName,
         billingCycle,
-        expiresAt: newExpiresAt,  // ★★★ v9.0: null برای lifetime
-        status: 'active',  // ★★★ از 'pending_payment' به 'active'
+        expiresAt: newExpiresAt,
+        status: 'active',
+        // ★★★ v9.3: فیلدهای حیاتی برای تشخیص مادام‌العمر
+        isPaid: true,
+        paidAt: now,
+        discountApplied: discountPercent || 0,
       },
     })
+
+    console.log('[SubscriptionUtils] ✅ Tenant updated with isPaid=true')
 
     // ─── ۶. به‌روزرسانی SubscriptionPayments ──────────────────────
     await db.client.subscriptionPayments.update({
