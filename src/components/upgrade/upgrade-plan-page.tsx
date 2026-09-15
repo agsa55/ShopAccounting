@@ -71,7 +71,7 @@ const PLAN_STYLES: Record<PlanName, {
 const DEFAULT_FEATURES: Record<PlanName, string[]> = {
   simple: [
     'فروش نقدی و صدور فاکتور',
-    'مدیریت محصولات و مشتریان',
+    'مدیریت کالاها و مشتریان',
     'گزارش‌های پایه فروش و سود',
     'پشتیبانی ۲۴/۷',
     'ذخیره‌سازی ابری امن',
@@ -653,7 +653,7 @@ export default function UpgradePlanPage() {
                 <ChevronLeft className="w-4 h-4 transition-transform group-open:rotate-90" />
               </summary>
               <p className="mt-2 text-xs text-gray-600 leading-relaxed">
-                بله، تمام داده‌های شما شامل فاکتورها، مشتریان، محصولات و اسناد حسابداری کاملاً حفظ می‌شوند.
+                بله، تمام داده‌های شما شامل فاکتورها، مشتریان، کالاها و اسناد حسابداری کاملاً حفظ می‌شوند.
               </p>
             </details>
           </CardContent>

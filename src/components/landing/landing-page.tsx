@@ -244,7 +244,7 @@ const features = [
   },
   {
     icon: Package,
-    title: 'مدیریت محصولات',
+    title: 'مدیریت کالاها',
     desc: 'کنترل موجودی، قیمت‌گذاری و دسته‌بندی هوشمند',
     grad: 'from-blue-500 to-indigo-600',
   },

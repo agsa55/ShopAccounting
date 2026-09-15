@@ -82,6 +82,7 @@ export default function CashierPanel() {
   // ═══════════════════════════════════════════════════════════════
   // بارگذاری خلاصه تراکنش‌های امروز
   // ═══════════════════════════════════════════════════════════════
+<<<<<<< HEAD
   const loadSummary = useCallback(async (isRefresh = false) => {
     if (!currentUser?.id || !currentTenantId) return;
 
@@ -105,6 +106,32 @@ export default function CashierPanel() {
       setRefreshing(false);
     }
   }, [currentUser?.id, currentTenantId]);
+=======
+ const loadSummary = useCallback(async (isRefresh = false) => {
+  if (!currentUser?.id || !currentTenantId) return;
+
+  if (isRefresh) setRefreshing(true);
+  else setLoadingSummary(true);
+
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    // ★ v11.9.1: استفاده از API جدید که همه فاکتورها را برمی‌گرداند
+    const res = await fetch(
+      `/api/cashier-dashboard?cashierId=${currentUser.id}&date=${today}&tenantId=${currentTenantId}`
+    );
+    const data = await res.json();
+
+    if (data.success) {
+      setSummary(data.summary);
+    }
+  } catch (err) {
+    console.error('[CashierPanel] Load summary error:', err);
+  } finally {
+    setLoadingSummary(false);
+    setRefreshing(false);
+  }
+}, [currentUser?.id, currentTenantId]);
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 
   useEffect(() => {
     loadSummary();
@@ -309,6 +336,7 @@ export default function CashierPanel() {
               </div>
             </div>
 
+<<<<<<< HEAD
             {/* بخش وسط: آمار سریع */}
             <div className="hidden md:flex items-center gap-3">
               <div className="flex items-center gap-1">
@@ -342,6 +370,88 @@ export default function CashierPanel() {
               </div>
             </div>
 
+=======
+         {/* بخش وسط: آمار فروش با تفکیک نوع */}
+<div className="hidden md:flex items-center gap-3">
+  {/* فروش کل */}
+  <div className="flex items-center gap-1">
+    <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+    <div>
+      <p className="text-[9px] text-slate-500">کل فروش</p>
+      <p className="text-[11px] font-bold text-emerald-700" dir="ltr">
+        {formatPrice(summary?.totalSales || 0)}
+      </p>
+    </div>
+  </div>
+
+  {/* تفکیک بر اساس نوع پرداخت */}
+  <div className="flex items-center gap-1">
+    <div className="flex flex-col gap-0.5">
+      {/* فروش نقدی */}
+      <div className="flex items-center gap-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+        <span className="text-[8px] text-slate-500">نقدی:</span>
+        <span className="text-[9px] font-bold text-emerald-600" dir="ltr">
+          {formatPrice(summary?.cashSales || 0)}
+        </span>
+      </div>
+      
+      {/* فروش نسیه */}
+      {(summary?.creditSales || 0) > 0 && (
+        <div className="flex items-center gap-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div>
+          <span className="text-[8px] text-slate-500">نسیه:</span>
+          <span className="text-[9px] font-bold text-orange-600" dir="ltr">
+            {formatPrice(summary?.creditSales || 0)}
+          </span>
+        </div>
+      )}
+      
+      {/* فروش اقساطی */}
+      {(summary?.installmentSales || 0) > 0 && (
+        <div className="flex items-center gap-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
+          <span className="text-[8px] text-slate-500">اقساطی:</span>
+          <span className="text-[9px] font-bold text-purple-600" dir="ltr">
+            {formatPrice(summary?.installmentSales || 0)}
+          </span>
+        </div>
+      )}
+      
+      {/* فروش چکی */}
+      {(summary?.checkSales || 0) > 0 && (
+        <div className="flex items-center gap-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>
+          <span className="text-[8px] text-slate-500">چکی:</span>
+          <span className="text-[9px] font-bold text-cyan-600" dir="ltr">
+            {formatPrice(summary?.checkSales || 0)}
+          </span>
+        </div>
+      )}
+    </div>
+  </div>
+
+  <div className="flex items-center gap-1">
+    <TrendingDown className="w-3.5 h-3.5 text-red-500" />
+    <div>
+      <p className="text-[9px] text-slate-500">خرید</p>
+      <p className="text-[11px] font-bold text-red-600" dir="ltr">
+        {formatPrice(summary?.totalPurchases || 0)}
+      </p>
+    </div>
+  </div>
+
+  <div className="flex items-center gap-1">
+    <PlusCircle className="w-3.5 h-3.5 text-blue-500" />
+    <div>
+      <p className="text-[9px] text-slate-500">خدمات</p>
+      <p className="text-[11px] font-bold text-blue-600" dir="ltr">
+        {formatPrice(summary?.totalServices || 0)}
+      </p>
+    </div>
+  </div>
+</div>
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
             {/* بخش چپ: دکمه‌ها */}
             <div className="flex items-center gap-1.5">
               <button

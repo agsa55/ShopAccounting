@@ -387,7 +387,7 @@ export default function AutoCleanupPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 text-[10px] text-gray-600">
-                          <span className="bg-gray-100 px-1.5 py-0.5 rounded" title="محصولات">
+                          <span className="bg-gray-100 px-1.5 py-0.5 rounded" title="کالاها">
                             📦 {toFaNum(c._count?.Products || 0)}
                           </span>
                           <span className="bg-gray-100 px-1.5 py-0.5 rounded" title="مشتریان">

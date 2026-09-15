@@ -991,7 +991,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
         return
       }
 
-      // حالت آفلاین: از currentStock کلی محصولات استفاده کن
+      // حالت آفلاین: از currentStock کلی کالاها استفاده کن
       if (!isOnline || !navigator.onLine) {
         if (cancelled) return
         const stockMap: Record<string, number> = {}
@@ -1229,9 +1229,9 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
 
     try {
       await posLoadRecents()
-      console.log('[POS] ✅ محصولات اخیر بارگذاری شد')
+      console.log('[POS] ✅ کالاها اخیر بارگذاری شد')
     } catch (err) {
-      console.error('[POS] خطا در بارگذاری محصولات اخیر:', err)
+      console.error('[POS] خطا در بارگذاری کالاها اخیر:', err)
     }
 
     setLoading(false)
@@ -1664,7 +1664,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
                 } else {
                   toast({
                     title: 'یافت نشد',
-                    description: `محصولی با بارکد/کد "${barcode}" یافت نشد`,
+                    description: `کالایی با بارکد/کد "${barcode}" یافت نشد`,
                     variant: 'destructive',
                   })
                 }
@@ -1955,7 +1955,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
 
             toast({
               title: '📡 آفلاین — یافت نشد',
-              description: `محصولی با "${q}" در حافظه محلی یافت نشد`,
+              description: `کالایی با "${q}" در حافظه محلی یافت نشد`,
               variant: 'destructive',
             })
             return
@@ -1992,7 +1992,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
 
           toast({
             title: 'یافت نشد',
-            description: `محصولی با بارکد/کد "${q}" یافت نشد.`,
+            description: `کالایی با بارکد/کد "${q}" یافت نشد.`,
             variant: 'destructive',
           })
 
@@ -2049,7 +2049,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
         posSearchSetQuery(barcode)
         toast({
           title: 'بارکد یافت نشد',
-          description: `محصولی با بارکد ${barcode} ثبت نشده. می‌توانید جستجو کنید.`,
+          description: `کالایی با بارکد ${barcode} ثبت نشده. می‌توانید جستجو کنید.`,
           variant: 'destructive',
         })
       }

@@ -133,7 +133,7 @@ export async function getUserUsage(tenantId: string) {
 }
 
 /**
- * اطلاعات مصرف محصولات
+ * اطلاعات مصرف کالاها
  */
 export async function getProductUsage(tenantId: string) {
   return checkPlanLimit(tenantId, 'products');

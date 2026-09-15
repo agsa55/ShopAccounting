@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       where: { tenantId: user.tenantId, isActive: true },
     });
 
-    // تعداد محصولات
+    // تعداد کالاها
     const productCount = await sharedDb.product.count({
       where: { tenantId: user.tenantId, isActive: true },
     });

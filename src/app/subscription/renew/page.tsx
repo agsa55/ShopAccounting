@@ -50,7 +50,7 @@ const PLAN_DETAILS = {
     description: 'حسابداری پایه، مناسب خرده‌فروش‌های کوچک',
     features: [
       'فروش نقدی (POS)',
-      'مدیریت محصولات (تا ۲۰۰ کالا)',
+      'مدیریت کالاها (تا ۲۰۰ کالا)',
       'فاکتور فروش نقدی',
       'گزارش درآمد/هزینه',
       'گزارش موجودی کالاها',
@@ -458,7 +458,7 @@ export default function SubscriptionRenewPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-gray-500">محصولات:</span>
+                      <span className="text-gray-500">کالاها:</span>
                       <span className="font-bold text-gray-700">
                         {plan.maxProducts === 0 ? 'نامحدود' : formatPrice(plan.maxProducts)}
                       </span>
@@ -646,7 +646,7 @@ export default function SubscriptionRenewPage() {
               <ul className="space-y-2 text-sm text-gray-700">
                 <li className="flex items-start gap-2">
                   <X className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                  <span>اطلاعات تست دمو شما (محصولات، فاکتورها، مشتریان) <strong>حذف خواهد شد</strong></span>
+                  <span>اطلاعات تست دمو شما (کالاها، فاکتورها، مشتریان) <strong>حذف خواهد شد</strong></span>
                 </li>
                 <li className="flex items-start gap-2">
                   <X className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />

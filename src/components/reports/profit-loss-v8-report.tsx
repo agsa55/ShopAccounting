@@ -138,7 +138,7 @@ export const GET = withTenantAndPermission('dashboard')(
       console.log('[P&L v8.7] ═══ End per-invoice breakdown ═══')
 
       // ═══════════════════════════════════════════════════════════════
-      //  3. محصولات (برای تفکیک دسته‌بندی + نام)
+      //  3. کالاها (برای تفکیک دسته‌بندی + نام)
       // ═══════════════════════════════════════════════════════════════
       const productIds = new Set<string>()
       for (const inv of validInvoices) {

@@ -26,6 +26,10 @@ import {
   RefreshCw, Inbox, Send, WifiOff, CloudOff
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+<<<<<<< HEAD
+=======
+import { logger } from '@/lib/system-logger'
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 import {
   cacheTickets, getCachedTickets, cacheTicketStats, getCachedTicketStats,
   setLastSyncTimestamp, getLastSyncTimestamp
@@ -239,6 +243,7 @@ const [form, setForm] = useState({
   category: 'general',
   priority: 'normal',
 })
+<<<<<<< HEAD
 
 // ★ v11.9.0: مودال لاگ‌ها
 const [showLogModal, setShowLogModal] = useState(false)
@@ -275,6 +280,53 @@ const handleAddLogsToDescription = () => {
     // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op)
     startConnectivityMonitor()
 
+=======
+
+// ★ v11.9.0: مودال لاگ‌ها
+const [showLogModal, setShowLogModal] = useState(false)
+
+const { toast } = useToast()
+
+// ─── ★ v11.9.0: اضافه کردن لاگ‌ها به توضیحات تیکت ─────────
+const handleAddLogsToDescription = () => {
+  const logs = getLogs()
+  if (logs.length === 0) {
+    toast({
+      title: 'توجه',
+      description: 'لاگی برای افزودن وجود ندارد',
+    })
+    return
+  }
+
+  const formattedLogs = formatLogsForCopy(logs)
+  const logSection = `\n\n═══════════════════════════════════════\n📋 لاگ‌های سیستم (۲۴ ساعت اخیر):\n═══════════════════════════════════════\n${formattedLogs}`
+  
+  setForm(prev => ({
+    ...prev,
+    description: prev.description + logSection,
+  }))
+
+ // ★ v11.9.1: لاگ افزودن لاگ‌های سیستم به توضیحات تیکت
+logger.info('لاگ‌های سیستم به توضیحات تیکت اضافه شد', {
+  logsCount: logs.length,
+  errorLogsCount: logs.filter(l => l.level === 'error').length,
+  warnLogsCount: logs.filter(l => l.level === 'warn').length,
+  infoLogsCount: logs.filter(l => l.level === 'info').length,
+  subject: form.subject.trim() || '(هنوز موضوع وارد نشده)',
+})
+
+toast({
+  title: '✅ لاگ‌ها اضافه شدند',
+  description: `${logs.length} لاگ به توضیحات تیکت اضافه شد`,
+})
+}
+
+  // ─── ★ v9.7.0: تشخیص وضعیت آنلاین/آفلاین (هوشمند) ──────────
+  useEffect(() => {
+    // شروع مانیتورینگ (اگر قبلاً شروع نشده، no-op)
+    startConnectivityMonitor()
+
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     // تنظیم اولیه بر اساس وضعیت واقعی API
     setIsOnline(isApiOnline())
 
@@ -401,6 +453,7 @@ const handleAddLogsToDescription = () => {
 
   // ─── باز کردن تیکت ──────────────────────────────────────────
   // ★ v6.4: ذخیره کل داده‌های تیکت در sessionStorage برای دسترسی آنی در حالت آفلاین
+<<<<<<< HEAD
   const handleOpenTicket = useCallback((ticketId: string, ticketData?: Ticket) => {
     useStore.getState().setCurrentView('ticket-detail' as AppView)
     if (typeof window !== 'undefined') {
@@ -411,6 +464,34 @@ const handleAddLogsToDescription = () => {
     }
   }, [])
 
+=======
+ const handleOpenTicket = useCallback((ticketId: string, ticketData?: Ticket) => {
+  // ★ v11.9.1: لاگ باز کردن تیکت (برای آمار استفاده از تیکت‌ها)
+  if (ticketData) {
+    logger.info('تیکت پشتیبانی باز شد', {
+      ticketId: ticketId,
+      ticketNumber: ticketData.ticketNumber,
+      subject: ticketData.subject,
+      category: ticketData.category,
+      categoryLabel: ticketData.categoryLabel,
+      priority: ticketData.priority,
+      priorityLabel: ticketData.priorityLabel,
+      status: ticketData.status,
+      messageCount: ticketData.messageCount,
+      unreadCount: ticketData.unreadCount,
+      isOffline: ticketData._isOffline || false,
+    })
+  }
+  
+  useStore.getState().setCurrentView('ticket-detail' as AppView)
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('currentTicketId', ticketId)
+    if (ticketData) {
+      sessionStorage.setItem('currentTicketData', JSON.stringify(ticketData))
+    }
+  }
+}, [])
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   // ─── ارسال تیکت جدید (با پشتیبانی آفلاین) ───────────────────
   const handleSubmitTicket = async () => {
     if (form.subject.trim().length < 5) {
@@ -472,12 +553,35 @@ const handleAddLogsToDescription = () => {
       setPriorityFilter('all')
       setPage(1)
 
+<<<<<<< HEAD
       toast({
         title: 'ذخیره شد ✓',
         description: 'تیکت به صورت محلی ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.',
       })
       setSubmitting(false)
       return
+=======
+   // ★ v11.9.1: لاگ ایجاد تیکت آفلاین
+logger.info('تیکت جدید به صورت آفلاین ایجاد شد', {
+  ticketId: newTicket.id,
+  subject: form.subject.trim(),
+  category: form.category,
+  categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
+  priority: form.priority,
+  priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
+  descriptionLength: form.description.trim().length,
+  includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
+  savedToIndexedDB: true,
+  mode: 'offline',
+})
+
+toast({
+  title: 'ذخیره شد ✓',
+  description: 'تیکت به صورت محلی ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.',
+})
+setSubmitting(false)
+return
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     }
 
     // ★ ارسال آنلاین
@@ -494,6 +598,7 @@ const handleAddLogsToDescription = () => {
       })
       const data = await res.json()
 
+<<<<<<< HEAD
       if (data.success) {
         const ticketNumber = data.data?.ticketNumber || ''
         toast({
@@ -501,6 +606,30 @@ const handleAddLogsToDescription = () => {
           description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.`,
           duration: 6000,
         })
+=======
+    if (data.success) {
+  const ticketNumber = data.data?.ticketNumber || ''
+  
+  // ★ v11.9.1: لاگ ارسال موفق تیکت (آنلاین)
+  logger.info('تیکت پشتیبانی با موفقیت ارسال شد', {
+    ticketId: data.data?.id || null,
+    ticketNumber: ticketNumber,
+    subject: form.subject.trim(),
+    category: form.category,
+    categoryLabel: CATEGORIES.find(c => c.value === form.category)?.label || form.category,
+    priority: form.priority,
+    priorityLabel: PRIORITY_CONFIG[form.priority]?.label || form.priority,
+    descriptionLength: form.description.trim().length,
+    includesSystemLogs: form.description.includes('لاگ‌های سیستم'),
+    mode: 'online',
+  })
+  
+  toast({
+    title: 'تیکت ارسال شد ✓',
+    description: `تیکت شما با شماره ${ticketNumber} با موفقیت به پشتیبانی ارسال شد.`,
+    duration: 6000,
+  })
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
         setForm({ subject: '', description: '', category: 'general', priority: 'normal' })
         setCreateDialogOpen(false)
         
@@ -509,6 +638,7 @@ const handleAddLogsToDescription = () => {
         setCategoryFilter('all')
         setPriorityFilter('all')
         setPage(1)
+<<<<<<< HEAD
       } else {
         toast({
           title: 'خطا',
@@ -522,6 +652,39 @@ const handleAddLogsToDescription = () => {
     } finally {
       setSubmitting(false)
     }
+=======
+    } else {
+  // ★ v11.9.1: لاگ خطای API در ارسال تیکت
+  logger.error('خطا در ارسال تیکت پشتیبانی', undefined, {
+    subject: form.subject.trim(),
+    category: form.category,
+    priority: form.priority,
+    error: data.error || 'خطای نامشخص',
+    mode: 'online',
+  })
+  
+  toast({
+    title: 'خطا',
+    description: data.error || 'ثبت تیکت ناموفق بود',
+    variant: 'destructive',
+  })
+}
+  } catch (err: any) {
+  console.error('[TicketsPage] submit error:', err)
+  
+  // ★ v11.9.1: لاگ خطای شبکه در ارسال تیکت
+  logger.error('خطای شبکه در ارسال تیکت پشتیبانی', err, {
+    subject: form.subject.trim(),
+    category: form.category,
+    priority: form.priority,
+    mode: 'online',
+  })
+  
+  toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
+} finally {
+  setSubmitting(false)
+}
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   }
 
   // ─── آمار خلاصه در کارت‌های بالا ─────────────────────────────

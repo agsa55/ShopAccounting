@@ -1013,7 +1013,7 @@ useEffect(() => {
                 return;
               }
             }
-            toast({ title: 'یافت نشد', description: `محصولی با بارکد/کد "${barcode}" یافت نشد`, variant: 'destructive' });
+            toast({ title: 'یافت نشد', description: `کالایی با بارکد/کد "${barcode}" یافت نشد`, variant: 'destructive' });
           } catch (err) { console.error('[Purchase] Global barcode scan error:', err); }
           purchaseBarcodeBufferRef.current = '';
           if (purchaseBarcodeTimerRef.current) clearTimeout(purchaseBarcodeTimerRef.current);
@@ -1148,7 +1148,7 @@ const handleProductSearchKeyDown = useCallback(
           }
         }
 
-        toast({ title: 'یافت نشد', description: `محصولی با بارکد/کد "${q}" یافت نشد.`, variant: 'destructive' })
+        toast({ title: 'یافت نشد', description: `کالایی با بارکد/کد "${q}" یافت نشد.`, variant: 'destructive' })
       } catch (error) {
         console.error('Barcode scan error in purchase:', error)
       } finally {
@@ -2683,7 +2683,7 @@ disabled={!isOnline && !productSearch}
 {productSearch.length >= 2 && productSearchResults.length === 0 && !loading && (
   <div className="absolute z-[99999] mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg p-4 text-center">
     <Search className="w-5 h-5 text-gray-300 mx-auto mb-1" />
-    <p className="text-xs text-gray-500">محصولی با این عبارت یافت نشد</p>
+    <p className="text-xs text-gray-500">کالایی با این عبارت یافت نشد</p>
     <p className="text-[10px] text-gray-400 mt-1">
       عبارت دیگری را امتحان کنید یا بارکد محصول را اسکن کنید
     </p>

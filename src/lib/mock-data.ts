@@ -240,32 +240,12 @@ export const mockAccounts: Account[] = [
   { id: 'acc-10', code: '5100', name: 'هزینه‌های اداری', type: 'EXPENSE', parentId: null, isActive: true, balance: 0 },
 ]
 
-// ★★★ v3.18: mockJournalEntries خالی شد — دیگر نباید استفاده بشه
-// ★★★ داده‌های نمونه برای تست حالت آفلاین
-export const mockJournalEntries: JournalEntry[] = [
-  {
-    id: 'mock-offline-1',
-    entryNumber: 'JV-1403-001',
-    number: 'JV-1403-001',
-    date: new Date().toISOString(),
-    entryDate: new Date().toISOString(),
-    description: 'سند نمونه تست حالت آفلاین - پرداخت هزینه',
-    totalDebit: 2500000,
-    totalCredit: 2500000,
-    status: 'POSTED',
-    isPosted: true,
-    sourceType: 'manual',
-    isManual: true,
-    items: [
-      { accountId: 'acc-10', accountName: 'هزینه‌های اداری', accountCode: '5100', debit: 2500000, credit: 0 },
-      { accountId: 'acc-1', accountName: 'صندوق', accountCode: '1000', debit: 0, credit: 2500000 },
-    ],
-    lines: [
-      { accountId: 'acc-10', accountName: 'هزینه‌های اداری', accountCode: '5100', debit: 2500000, credit: 0 },
-      { accountId: 'acc-1', accountName: 'صندوق', accountCode: '1000', debit: 0, credit: 2500000 },
-    ]
-  }
-]
+// ★ v11.9.1: mockJournalEntries کاملاً خالی شد
+// اسناد حسابداری فقط از API واقعی (/api/journal-entries) لود می‌شوند
+// در حالت آفلاین، از کش IndexedDB (offline-db) استفاده می‌شود
+// ⚠️ قبلاً یک سند تستی JV-1403-001 اینجا بود که باعث نمایش اسناد جعلی در production می‌شد
+export const mockJournalEntries: JournalEntry[] = []
+
 export const mockDashboardStats: DashboardStats = {
   todaySales: 0,
   todayInvoices: 0,

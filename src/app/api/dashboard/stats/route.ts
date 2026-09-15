@@ -496,7 +496,7 @@ export async function GET(request: NextRequest) {
       console.warn('[Dashboard] overdueInstallments query failed:', err?.message)
     }
 
-    // ─── ۴. محصولات با موجودی بحرانی ────────────────────────
+    // ─── ۴. کالاها با موجودی بحرانی ────────────────────────
     let lowStockProductsCount = 0
     try {
       const activeProducts = await tenantDb.product.findMany({
@@ -699,7 +699,7 @@ export async function GET(request: NextRequest) {
       tenantDb, tenantId, startOfMonth, now
     )
 
-    // ─── ۹. محصولات کم موجودی (لیست) ────────────────────────
+    // ─── ۹. کالاها کم موجودی (لیست) ────────────────────────
     let lowStockProductsList: any[] = []
     try {
       const categoriesMap = new Map<string, string>()
@@ -809,7 +809,7 @@ export async function GET(request: NextRequest) {
       console.warn('[Dashboard] monthComparison failed:', err?.message)
     }
 
-    // ─── ۱۱. پرفروش‌ترین محصولات ─────────────────────────────
+    // ─── ۱۱. پرفروش‌ترین کالاها ─────────────────────────────
     let topProducts: TopProduct[] = []
     try {
       const categoriesMap = new Map<string, string>()

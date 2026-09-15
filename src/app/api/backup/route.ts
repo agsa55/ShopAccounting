@@ -40,7 +40,7 @@ const TABLES_TO_BACKUP = [
   'Customer',
   'Supplier',
   
-  // محصولات و انبار
+  // کالاها و انبار
   'Product',
   'StockLevel',
   

@@ -2,11 +2,11 @@
 
 // ============================================================================
 // src/components/reports/inventory-advanced-report.tsx
-// ShopAccounting v6.9 — Advanced Inventory Reports (فیلتر هوشمند محصولات بر اساس انبار)
+// ShopAccounting v6.9 — Advanced Inventory Reports (فیلتر هوشمند کالاها بر اساس انبار)
 // ============================================================================
 // ★ v6.9 تغییرات:
-//   ۱. فیلتر هوشمند: نمایش فقط محصولاتی که در انبار انتخاب‌شده تعریف شده‌اند (رفع گمراهی کاربر)
-//   ۲. بازمحاسبه خلاصه آمار (Summary) بر اساس محصولات فیلترشده
+//   ۱. فیلتر هوشمند: نمایش فقط کالاهای که در انبار انتخاب‌شده تعریف شده‌اند (رفع گمراهی کاربر)
+//   ۲. بازمحاسبه خلاصه آمار (Summary) بر اساس کالاها فیلترشده
 //   ۳. حفظ اصلاح باگ DatePicker و فارسی‌سازی اعداد
 // ============================================================================
 
@@ -499,7 +499,7 @@ export function InventoryAdvancedReport() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // ★ ۱. غنی‌سازی محصولات
+  // ★ ۱. غنی‌سازی کالاها
   const enrichedProducts = useMemo(() => {
     if (!data?.products) return []
     return data.products.map((p: any) => ({
@@ -511,15 +511,15 @@ export function InventoryAdvancedReport() {
     }))
   }, [data?.products])
 
-  // ★ ۲. فیلتر هوشمند محصولات بر اساس انبار انتخاب‌شده (رفع گمراهی کاربر)
+  // ★ ۲. فیلتر هوشمند کالاها بر اساس انبار انتخاب‌شده (رفع گمراهی کاربر)
   const filteredProducts = useMemo(() => {
     let result = enrichedProducts
 
-    // اگر انبار خاصی انتخاب شده، فقط محصولاتی را نشان بده که در آن انبار تعریف شده‌اند (رکورد StockLevel دارند)
+    // اگر انبار خاصی انتخاب شده، فقط کالاهای را نشان بده که در آن انبار تعریف شده‌اند (رکورد StockLevel دارند)
     if (warehouseId !== 'all') {
       result = result.filter((p: any) => {
         const stock = p.warehouseStocks?.find((s: any) => s.warehouseId === warehouseId)
-        return stock !== undefined // فقط محصولاتی که رسماً به این انبار واگذار شده‌اند
+        return stock !== undefined // فقط کالاهای که رسماً به این انبار واگذار شده‌اند
       })
     }
 
@@ -531,7 +531,7 @@ export function InventoryAdvancedReport() {
     return result
   }, [enrichedProducts, warehouseId, lowStockOnly])
 
-  // ★ ۳. بازمحاسبه خلاصه آمار بر اساس محصولات فیلترشده
+  // ★ ۳. بازمحاسبه خلاصه آمار بر اساس کالاها فیلترشده
   const enrichedSummary = useMemo(() => {
     if (!data?.summary) return null
     const summary = { ...data.summary }
@@ -588,7 +588,7 @@ export function InventoryAdvancedReport() {
         ])
       })
     } else if (reportType === 'value' && data.warehouseValues) {
-      rows.push(['انبار', 'تعداد محصولات', 'تعداد کل', 'ارزش کل (ریال)'])
+      rows.push(['انبار', 'تعداد کالاها', 'تعداد کل', 'ارزش کل (ریال)'])
       data.warehouseValues.forEach((w: any) => {
         rows.push([w.warehouseName, w.productCount, w.totalQuantity, w.totalValue])
       })
@@ -728,7 +728,7 @@ export function InventoryAdvancedReport() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {reportType === 'stockByWarehouse' && (
                 <>
-                  <StatCard label="تعداد محصولات" value={enrichedSummary.totalProducts || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="محصول" />
+                  <StatCard label="تعداد کالاها" value={enrichedSummary.totalProducts || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="محصول" />
                   <StatCard label="موجودی کل" value={enrichedSummary.totalQty || 0} icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="واحد" />
                   <StatCard label="ارزش انبار" value={formatCurrency(enrichedSummary.totalValue || 0)} icon={<Wallet className="w-3.5 h-3.5 text-white" />} color="amber" />
                   <StatCard label="سود بالقوه" value={formatCurrency(enrichedSummary.totalPotentialProfit || 0)} icon={<TrendingUp className="w-3.5 h-3.5 text-white" />} color="teal" />
@@ -745,7 +745,7 @@ export function InventoryAdvancedReport() {
               {reportType === 'value' && (
                 <>
                   <StatCard label="تعداد انبارها" value={enrichedSummary.totalWarehouses || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="emerald" suffix="انبار" />
-                  <StatCard label="تعداد محصولات" value={enrichedSummary.totalProducts || 0} icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="محصول" />
+                  <StatCard label="تعداد کالاها" value={enrichedSummary.totalProducts || 0} icon={<Coins className="w-3.5 h-3.5 text-white" />} color="blue" suffix="محصول" />
                   <StatCard label="تعداد کل کالا" value={enrichedSummary.totalQuantity || 0} icon={<Package className="w-3.5 h-3.5 text-white" />} color="amber" suffix="واحد" />
                   <StatCard label="ارزش کل انبار" value={formatCurrency(enrichedSummary.totalValue || 0)} icon={<Wallet className="w-3.5 h-3.5 text-white" />} color="teal" />
                 </>
@@ -846,7 +846,7 @@ export function InventoryAdvancedReport() {
 // ============================================================================
 
 function InventoryStockTable({ products, warehouses }: { products: any[]; warehouses: any[] }) {
-  if (products.length === 0) return <EmptyState message="محصولی یافت نشد" />
+  if (products.length === 0) return <EmptyState message="کالایی یافت نشد" />
 
   return (
     <div className="overflow-x-auto">
@@ -979,7 +979,7 @@ function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[
             <TableHeader>
               <TableRow className="bg-gray-50">
                 <TableHead className="text-right text-[10px] py-2 px-2">انبار</TableHead>
-                <TableHead className="text-center text-[10px] py-2 px-2">محصولات</TableHead>
+                <TableHead className="text-center text-[10px] py-2 px-2">کالاها</TableHead>
                 <TableHead className="text-center text-[10px] py-2 px-2">تعداد</TableHead>
                 <TableHead className="text-left text-[10px] py-2 px-2">ارزش</TableHead>
               </TableRow>
@@ -1012,7 +1012,7 @@ function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[
             <TableHeader>
               <TableRow className="bg-gray-50">
                 <TableHead className="text-right text-[10px] py-2 px-2">دسته</TableHead>
-                <TableHead className="text-center text-[10px] py-2 px-2">محصولات</TableHead>
+                <TableHead className="text-center text-[10px] py-2 px-2">کالاها</TableHead>
                 <TableHead className="text-center text-[10px] py-2 px-2">تعداد</TableHead>
                 <TableHead className="text-left text-[10px] py-2 px-2">ارزش</TableHead>
               </TableRow>
@@ -1044,7 +1044,7 @@ function ValueTable({ warehouseValues, categoryValues }: { warehouseValues: any[
 // ============================================================================
 
 function LowStockTable({ products }: { products: any[] }) {
-  if (products.length === 0) return <EmptyState message="همه محصولات موجودی کافی دارند ✓" />
+  if (products.length === 0) return <EmptyState message="همه کالاها موجودی کافی دارند ✓" />
 
   return (
     <div className="overflow-x-auto">

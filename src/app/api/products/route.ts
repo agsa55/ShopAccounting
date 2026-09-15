@@ -90,7 +90,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     })
   } catch (error: any) {
     console.error('[Products GET] Error:', error)
-    return NextResponse.json({ success: false, error: 'خطا در بارگذاری محصولات' }, { status: 500 })
+    return NextResponse.json({ success: false, error: 'خطا در بارگذاری کالاها' }, { status: 500 })
   }
 })
 

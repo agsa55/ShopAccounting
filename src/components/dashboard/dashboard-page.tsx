@@ -651,13 +651,13 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {/* پرفروش‌ترین محصولات */}
+          {/* پرفروش‌ترین کالاها */}
           {topProducts.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-1.5">
                   <Package className="w-4 h-4 text-emerald-600" />
-                  پرفروش‌ترین محصولات
+                  پرفروش‌ترین کالاها
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -732,7 +732,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* ★★★ محصولات کم‌موجود — تمام‌عرض + جدول حرفه‌ای */}
+      {/* ★★★ کالاها کم‌موجود — تمام‌عرض + جدول حرفه‌ای */}
       {lowStockProducts.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
@@ -742,7 +742,7 @@ export default function DashboardPage() {
                 موجودی بحرانی
               </CardTitle>
               <Button variant="ghost" size="sm" className="text-emerald-600 gap-1 text-[10px] h-6" onClick={() => setCurrentView('products')}>
-                همه محصولات <ArrowLeft className="size-3" />
+                همه کالاها <ArrowLeft className="size-3" />
               </Button>
             </div>
           </CardHeader>

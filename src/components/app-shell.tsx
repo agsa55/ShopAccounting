@@ -242,7 +242,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'کالاها و فاکتورها',
     items: [
-      { label: 'محصولات', icon: Package, view: 'products', permKey: 'products' },
+      { label: 'کالاها', icon: Package, view: 'products', permKey: 'products' },
       { label: 'دسته‌بندی‌ها', icon: Grid3x3, view: 'categories', permKey: 'categories' },
         { label: 'فاکتورها', icon: FileText, view: 'invoices-hub' as any, permKey: 'invoices' },
  
@@ -296,7 +296,7 @@ const MANAGER_ONLY_KEYS = ['settings']
 const viewLabels: Record<string, string> = {
   dashboard: 'داشبورد',
   pos: 'صندوق فروش',
-  products: 'محصولات',
+  products: 'کالاها',
   categories: 'دسته‌بندی‌ها',
   customers: 'مشتریان',
   invoices: 'فاکتورها',

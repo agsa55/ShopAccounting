@@ -1,6 +1,6 @@
 // ============================================================================
 // src/app/api/stock-levels/route.ts — v1.0
-// دریافت موجودی محصولات در یک انبار خاص
+// دریافت موجودی کالاها در یک انبار خاص
 // ============================================================================
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'

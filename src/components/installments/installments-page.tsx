@@ -1126,8 +1126,13 @@ export default function InstallmentsPage() {
 
       const result = await res.json()
 
+<<<<<<< HEAD
   if (result.success) {
   // ★ v11.9.0: لاغ پرداخت قسط (قبل از null شدن payingSchedule)
+=======
+ if (result.success) {
+  // ★ v11.9.1: لاغ پرداخت قسط (با اطلاعات کامل)
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   logger.info('پرداخت قسط ثبت شد', {
     scheduleId: payingSchedule.id,
     installmentNumber: payingSchedule.installmentNumber,
@@ -1135,25 +1140,53 @@ export default function InstallmentsPage() {
     paymentMethod: payMethod,
     paymentRef: payRef || null,
     paidAt: payDate || null,
+<<<<<<< HEAD
   })
+=======
+    // اطلاعات تکمیلی از طرح
+    planId: selectedPlan?.id || null,
+    planInvoiceNumber: selectedPlan?.invoiceNumber || null,
+    customerName: selectedPlan?.customerName || null,
+    customerId: selectedPlan?.customerId || null,
+    totalPlanAmount: selectedPlan?.totalAmount || null,
+    previousPaidAmount: selectedPlan?.totalPaidAmount || 0,
+    newPaidAmount: (selectedPlan?.totalPaidAmount || 0) + amount,
+    remainingAmount: selectedPlan?.remainingAmount || null,
+  })
+  
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   toast({
     title: 'پرداخت موفق ✓',
     description: result.message || `قسط شماره ${formatNumber(payingSchedule.installmentNumber)} با مبلغ ${formatCurrency(amount)} پرداخت شد`,
   })
+<<<<<<< HEAD
 
+=======
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   await loadData()
         if (selectedPlan) {
           const res = await fetch(`/api/installment-plans?id=${selectedPlan.id}`)
           const result = await res.json()
           if (result.success && result.data) setSelectedPlan(result.data)
         }
-      } else {
-        toast({
-          title: 'خطا در پرداخت',
-          description: result.error || 'خطای ناشناخته',
-          variant: 'destructive',
-        })
-      }
+  } else {
+  // ★ v11.9.1: لاغ خطای پرداخت قسط
+  logger.error('خطا در پرداخت قسط', undefined, {
+    scheduleId: payingSchedule.id,
+    installmentNumber: payingSchedule.installmentNumber,
+    amount: amount,
+    paymentMethod: payMethod,
+    planInvoiceNumber: selectedPlan?.invoiceNumber || null,
+    customerName: selectedPlan?.customerName || null,
+    error: result.error || 'خطای نامشخص',
+  })
+  
+  toast({
+    title: 'خطا در پرداخت',
+    description: result.error || 'خطای ناشناخته',
+    variant: 'destructive',
+  })
+}
     } catch (err: any) {
       toast({
         title: 'خطا',
@@ -1229,16 +1262,41 @@ export default function InstallmentsPage() {
 
       const result = await res.json()
 
+<<<<<<< HEAD
     if (result.success) {
   // ★ v11.9.0: لاغ پرداخت نسیه (قبل از null شدن creditInvoiceToPay)
   logger.info('پرداخت نسیه ثبت شد', {
     invoiceId: creditInvoiceToPay.id,
     invoiceNumber: creditInvoiceToPay.invoiceNumber || creditInvoiceToPay.number,
     customerName: creditInvoiceToPay.customerName,
+=======
+if (result.success) {
+  // ★ v11.9.1: لاغ پرداخت نسیه (با اطلاعات کامل و مانده)
+  const previousPaid = creditInvoiceToPay.paidAmount || 0
+  const previousRemaining = (creditInvoiceToPay.totalAmount || 0) - previousPaid
+  const newPaid = previousPaid + amount
+  const newRemaining = (creditInvoiceToPay.totalAmount || 0) - newPaid
+  
+  logger.info('پرداخت نسیه ثبت شد', {
+    invoiceId: creditInvoiceToPay.id,
+    invoiceNumber: creditInvoiceToPay.invoiceNumber || creditInvoiceToPay.number,
+    customerName: creditInvoiceToPay.customerName || 'فروش عمومی',
+    customerId: creditInvoiceToPay.customerId || null,
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     amount: amount,
     paymentMethod: creditPayMethod,
     paymentRef: creditPayRef || null,
     paidAt: creditPayDate || null,
+<<<<<<< HEAD
+=======
+    // اطلاعات مالی دقیق
+    totalAmount: creditInvoiceToPay.totalAmount,
+    previousPaidAmount: previousPaid,
+    newPaidAmount: newPaid,
+    previousRemaining: previousRemaining,
+    newRemaining: newRemaining,
+    isFullyPaid: newRemaining <= 0,
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   })
   
   toast({
@@ -1251,6 +1309,7 @@ export default function InstallmentsPage() {
         setCreditPayRef('')
         setCreditPayDate('')
         loadCreditData()
+<<<<<<< HEAD
       } else {
         toast({
           title: 'خطا در ثبت پرداخت',
@@ -1258,6 +1317,25 @@ export default function InstallmentsPage() {
           variant: 'destructive',
         })
       }
+=======
+   } else {
+  // ★ v11.9.1: لاغ خطای پرداخت نسیه
+  logger.error('خطا در پرداخت نسیه', undefined, {
+    invoiceId: creditInvoiceToPay.id,
+    invoiceNumber: creditInvoiceToPay.invoiceNumber || creditInvoiceToPay.number,
+    customerName: creditInvoiceToPay.customerName || 'فروش عمومی',
+    amount: amount,
+    paymentMethod: creditPayMethod,
+    error: result.error || 'خطای نامشخص',
+  })
+  
+  toast({
+    title: 'خطا در ثبت پرداخت',
+    description: result.error || 'خطای ناشناخته',
+    variant: 'destructive',
+  })
+}
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     } catch (err: any) {
       toast({ title: 'خطا', description: 'خطا در ارتباط با سرور', variant: 'destructive' })
     } finally {

@@ -1006,16 +1006,26 @@ const [savingPrice, setSavingPrice] = useState(false)
       return
     }
     // ★ Validation 5: واحد اجباری
-    if (!addForm.unitId || addForm.unitId === 'none') {
-      toast({
-        title: 'خطا',
-        description: 'انتخاب واحد کالا الزامی است',
-        variant: 'destructive',
-      })
-      return
-    }
+  // ★ Validation 5: واحد اجباری
+if (!addForm.unitId || addForm.unitId === 'none') {
+  toast({
+    title: 'خطا',
+    description: 'انتخاب واحد کالا الزامی است',
+    variant: 'destructive',
+  })
+  return
+}
+// ★ v11.9.2: Validation قیمت منفی
+if (parsePersianNumber(addForm.purchasePrice) < 0 || parsePersianNumber(addForm.salePrice) < 0) {
+  toast({
+    title: 'خطا',
+    description: 'قیمت خرید و فروش نمی‌توانند منفی باشند',
+    variant: 'destructive',
+  })
+  return
+}
 
-    const trulyOnline = isOnline && navigator.onLine
+const trulyOnline = isOnline && navigator.onLine
 
     if (!trulyOnline) {
       setSubmitting(true)
@@ -1108,13 +1118,14 @@ const [savingPrice, setSavingPrice] = useState(false)
       })
       const json = await res.json()
       if (json.success) {
-       logger.info('کالای جدید ثبت شد', {
-    productId: json.data?.id,
-    productName: json.data?.name || 'نامشخص',
-    price: json.data?.price,
-    stock: json.data?.stock,
-    categoryId: json.data?.categoryId,
-  })
+     logger.info('کالای جدید ثبت شد', {
+  productId: json.data?.id,
+  productName: json.data?.name || 'نامشخص',
+  purchasePrice: json.data?.purchasePrice,  // ✅ درست
+  salePrice: json.data?.salePrice,          // ✅ درست
+  currentStock: json.data?.currentStock,    // ✅ درست
+  categoryId: json.data?.categoryId,
+})
   
         toast({
           title: '✓ کالا ایجاد شد',
@@ -1175,16 +1186,26 @@ const [savingPrice, setSavingPrice] = useState(false)
       return
     }
     // ★ Validation 4: واحد اجباری
-    if (!editForm.unitId || editForm.unitId === 'none') {
-      toast({
-        title: 'خطا',
-        description: 'انتخاب واحد کالا الزامی است',
-        variant: 'destructive',
-      })
-      return
-    }
+  // ★ Validation 4: واحد اجباری
+if (!editForm.unitId || editForm.unitId === 'none') {
+  toast({
+    title: 'خطا',
+    description: 'انتخاب واحد کالا الزامی است',
+    variant: 'destructive',
+  })
+  return
+}
+// ★ v11.9.2: Validation قیمت منفی
+if (parsePersianNumber(editForm.purchasePrice) < 0 || parsePersianNumber(editForm.salePrice) < 0) {
+  toast({
+    title: 'خطا',
+    description: 'قیمت خرید و فروش نمی‌توانند منفی باشند',
+    variant: 'destructive',
+  })
+  return
+}
 
-    const trulyOnline = isOnline && navigator.onLine
+const trulyOnline = isOnline && navigator.onLine
 
     if (!trulyOnline) {
       setSubmitting(true)
@@ -1268,13 +1289,13 @@ const [savingPrice, setSavingPrice] = useState(false)
       })
       const json = await res.json()
       if (json.success) {
-      logger.info('محصول ویرایش شد', {
-    productId: json.data?.id,
-    productName: json.data?.name || 'نامشخص',
-    price: json.data?.price,
-    stock: json.data?.stock,
-  })
-  
+   logger.info('محصول ویرایش شد', {
+  productId: json.data?.id,
+  productName: json.data?.name || 'نامشخص',
+  purchasePrice: json.data?.purchasePrice,  // ✅ درست
+  salePrice: json.data?.salePrice,          // ✅ درست
+  currentStock: json.data?.currentStock,    // ✅ درست
+})
         toast({ title: '✓ موفق', description: 'کالا به‌روزرسانی شد' })
         // ★ v9.3: در حالت ویرایش، مودال بسته می‌شود
         setEditDialogOpen(false)
@@ -1396,6 +1417,12 @@ const handleSavePrice = async (productId: string, newPrice: number) => {
     })
     const json = await res.json()
     if (json.success) {
+       // ★ v11.9.2: لاگ ویرایش قیمت فروش
+  logger.info('قیمت فروش محصول ویرایش شد', {
+    productId: productId,
+    newSalePrice: newPrice,
+  })
+  
       toast({ title: '✓ موفق', description: 'قیمت فروش به‌روزرسانی شد' })
       // بروزرسانی لیست
       await loadProducts(page, search)
@@ -1498,6 +1525,66 @@ const totalInventoryProfit = useMemo(() => {
       </div>
     </>
   )}
+  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+  <p className="text-xs text-gray-500">{toFaNum(total)} کالا</p>
+  
+  {/* ★ v11.9.2: تعداد کالاهای دارای موجودی */}
+  {productsWithStockCount > 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className="flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+        <Package className="w-3 h-3 text-blue-600" />
+        <p className="text-xs text-blue-700 font-medium">
+          {toFaNum(productsWithStockCount)} کالا دارای موجودی
+        </p>
+      </div>
+    </>
+  )}
+  
+  {/* ★ v11.9.2: تعداد کل اقلام موجود */}
+  {totalInventoryItems > 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className="flex items-center gap-1 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+        <Package className="w-3 h-3 text-purple-600" />
+        <p className="text-xs text-purple-700 font-medium">
+          {toFaNum(totalInventoryItems)} عدد موجودی
+        </p>
+      </div>
+    </>
+  )}
+  
+  {totalInventoryValue > 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className="flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+        <TrendingUp className="w-3 h-3 text-emerald-600" />
+        <p className="text-xs text-emerald-700 font-medium">
+          ارزش کل: {formatPrice(totalInventoryValue)}
+        </p>
+      </div>
+    </>
+  )}
+  {totalInventoryProfit !== 0 && (
+    <>
+      <span className="text-gray-300">•</span>
+      <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md border ${
+        totalInventoryProfit > 0 
+          ? 'bg-green-50 border-green-200' 
+          : 'bg-red-50 border-red-200'
+      }`}>
+        <TrendingUp className={`w-3 h-3 ${
+          totalInventoryProfit > 0 ? 'text-green-600' : 'text-red-600 rotate-180'
+        }`} />
+        <p className={`text-xs font-medium ${
+          totalInventoryProfit > 0 ? 'text-green-700' : 'text-red-700'
+        }`}>
+          سود کل: {formatPrice(Math.abs(totalInventoryProfit))}
+        </p>
+      </div>
+    </>
+  )}
+</div>
   {totalInventoryProfit !== 0 && (
     <>
       <span className="text-gray-300">•</span>
@@ -1683,8 +1770,9 @@ const totalInventoryProfit = useMemo(() => {
   <TableHead className="text-center text-xs">قیمت خرید</TableHead>
   <TableHead className="text-center text-xs">قیمت فروش</TableHead>
 
-  <TableHead className="text-center text-xs bg-blue-50/50">سود فروش</TableHead>
-  <TableHead className="text-center text-xs">واحد</TableHead>
+ <TableHead className="text-center text-xs bg-blue-50/50">سود فروش</TableHead>
+<TableHead className="text-center text-xs bg-emerald-50/50">ارزش موجودی</TableHead>
+<TableHead className="text-center text-xs">واحد</TableHead>
   <TableHead className="text-center text-xs">وضعیت</TableHead>
   <TableHead className="text-center text-xs">عملیات</TableHead>
 </TableRow>
@@ -1767,6 +1855,7 @@ const totalInventoryProfit = useMemo(() => {
 </TableCell>
                      
                       {/* ★ ستون جدید: سود فروش */}
+{/* ★ ستون جدید: سود فروش */}
 <TableCell className="text-center bg-blue-50/30">
   <ProfitBadge
     currentStock={product.currentStock}
@@ -1774,11 +1863,18 @@ const totalInventoryProfit = useMemo(() => {
     salePrice={product.salePrice}
   />
 </TableCell>
-                      <TableCell className="text-center text-xs">
-                        {product.unit
-                          ? getUnitLabel(product.unit)
-                          : product.unitLabel || '—'}
-                      </TableCell>
+{/* ★ v11.9.2: ستون ارزش موجودی (بر اساس قیمت خرید) */}
+<TableCell className="text-center bg-emerald-50/30">
+  <StockValueBadge
+    currentStock={product.currentStock}
+    purchasePrice={product.purchasePrice}
+  />
+</TableCell>
+<TableCell className="text-center text-xs">
+  {product.unit
+    ? getUnitLabel(product.unit)
+    : product.unitLabel || '—'}
+</TableCell>
                       <TableCell className="text-center">
                         <Badge
                           className={

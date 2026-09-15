@@ -34,7 +34,7 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       take: limit,
     })
 
-    // ★ گرفتن نام محصولات و انبارها جداگانه (مطمئن‌تر از include)
+    // ★ گرفتن نام کالاها و انبارها جداگانه (مطمئن‌تر از include)
     const productIds = [...new Set(movements.map((m: any) => m.productId).filter(Boolean))]
     const warehouseIds = [...new Set([
       ...movements.map((m: any) => m.fromWarehouseId).filter(Boolean),

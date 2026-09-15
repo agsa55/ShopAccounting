@@ -719,9 +719,27 @@ await cacheJournalEntries(finalList as any)
       toast({ title: 'خطا', description: 'مرورگر شما پنجره پاپ‌آپ را مسدود کرده است. لطفاً اجازه پاپ‌آپ را فعال کنید.', variant: 'destructive' })
       return
     }
+<<<<<<< HEAD
     printWindow.document.open()
     printWindow.document.write(printContent)
     printWindow.document.close()
+=======
+printWindow.document.open()
+printWindow.document.write(printContent)
+printWindow.document.close()
+
+// ★ v11.9.0: لاگ چاپ گزارش اسناد حسابداری
+logger.info('گزارش اسناد حسابداری چاپ شد', {
+  entriesCount: filteredEntries.length,
+  totalDebit: filteredEntries.reduce((s, r) => s + (r.totalDebit || 0), 0),
+  totalCredit: filteredEntries.reduce((s, r) => s + (r.totalCredit || 0), 0),
+  dateRange: entryDateRange.from && entryDateRange.to 
+    ? { from: entryDateRange.from, to: entryDateRange.to } 
+    : null,
+  searchQuery: searchQuery || null,
+  showCancelled: showCancelled,
+})
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   }
 
   const handleCreateManualEntry = useCallback(async () => {

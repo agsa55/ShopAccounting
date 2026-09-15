@@ -7,6 +7,7 @@
 // ★ v9.7.0: جایگزینی navigator.onLine با isApiOnline()
 // ★ v9.8.0: طراحی حرفه‌ای چت — اسکرولبار سفارشی، حباب‌های مدرن،
 //           پاسخ چسبیده به انتهای چت، هدر گرادیانت، انیمیشن
+// ★ v11.9.1: اضافه شدن لاگ‌های سیستمی
 // ============================================================================
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore, type AppView } from '@/lib/store'
@@ -23,6 +24,7 @@ import {
   WifiOff, CloudOff, User, ShieldCheck
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { logger } from '@/lib/system-logger'
 import { 
   cacheTicketMessages, 
   getCachedTicketMessages,
@@ -469,6 +471,19 @@ export function TicketDetail() {
       setReply('')
       await cacheTicketMessages(ticket.id, updatedTicket.messages)
       
+      // ★ v11.9.1: لاگ ارسال پاسخ آفلاین
+      logger.info('پاسخ تیکت به صورت آفلاین ارسال شد', {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        category: ticket.category,
+        priority: ticket.priority,
+        status: ticket.status,
+        messageLength: reply.trim().length,
+        totalMessages: updatedTicket.messages.length,
+        mode: 'offline',
+      })
+      
       toast({ title: 'ذخیره شد ✓', description: 'پاسخ شما ذخیره شد و پس از اتصال به اینترنت ارسال می‌شود.' })
       scrollToBottom()
       setSubmitting(false)
@@ -483,6 +498,20 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ ارسال موفق پاسخ (آنلاین)
+        logger.info('پاسخ تیکت با موفقیت ارسال شد', {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          category: ticket.category,
+          priority: ticket.priority,
+          newStatus: 'pending',
+          messageId: data.data.id,
+          messageLength: reply.trim().length,
+          totalMessages: (ticket.messages?.length || 0) + 1,
+          mode: 'online',
+        })
+        
         setTicket((prev) =>
           prev ? {
             ...prev, status: 'pending', updatedAt: new Date().toISOString(),
@@ -500,10 +529,27 @@ export function TicketDetail() {
         }])
         scrollToBottom()
       } else {
+        // ★ v11.9.1: لاگ خطای API در ارسال پاسخ
+        logger.error('خطا در ارسال پاسخ تیکت', undefined, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          messageLength: reply.trim().length,
+          error: data.error || 'خطای نامشخص',
+          mode: 'online',
+        })
+        
         toast({ title: 'خطا', description: data.error || 'ارسال پاسخ ناموفق بود', variant: 'destructive' })
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[TicketDetail] reply error:', err)
+      
+      // ★ v11.9.1: لاگ خطای شبکه در ارسال پاسخ
+      logger.error('خطای شبکه در ارسال پاسخ تیکت', err as Error, {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        mode: 'online',
+      })
+      
       toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
     } finally {
       setSubmitting(false)
@@ -516,6 +562,17 @@ export function TicketDetail() {
     const trulyOnline = isApiOnline()
 
     if (!trulyOnline) {
+      // ★ v11.9.1: لاگ بستن تیکت آفلاین
+      logger.info('تیکت به صورت آفلاین بسته شد', {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        previousStatus: ticket.status,
+        newStatus: 'closed',
+        totalMessages: ticket.messages?.length || 0,
+        mode: 'offline',
+      })
+      
       const updated = { ...ticket, status: 'closed', statusLabel: 'بسته شده', closedAt: new Date().toISOString(), _isOffline: true }
       setTicket(updated)
       setCloseDialogOpen(false)
@@ -532,14 +589,40 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ بستن تیکت آنلاین
+        logger.info('تیکت پشتیبانی بسته شد', {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          category: ticket.category,
+          priority: ticket.priority,
+          previousStatus: ticket.status,
+          newStatus: 'closed',
+          totalMessages: ticket.messages?.length || 0,
+          mode: 'online',
+        })
+        
         setTicket((prev) => prev ? { ...prev, status: 'closed', statusLabel: 'بسته شده', closedAt: new Date().toISOString() } : prev)
         setCloseDialogOpen(false)
         toast({ title: 'بسته شد ✓', description: 'تیکت بسته شد' })
         setTimeout(() => setRatingDialogOpen(true), 500)
       } else {
+        // ★ v11.9.1: لاگ خطای بستن تیکت
+        logger.error('خطا در بستن تیکت', undefined, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          error: data.error,
+        })
+        
         toast({ title: 'خطا', description: data.error || 'عملیات ناموفق بود', variant: 'destructive' })
       }
-    } catch (err) {
+    } catch (err: any) {
+      // ★ v11.9.1: لاگ خطای شبکه در بستن تیکت
+      logger.error('خطای شبکه در بستن تیکت', err as Error, {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+      })
+      
       toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
     }
   }
@@ -550,6 +633,17 @@ export function TicketDetail() {
     const trulyOnline = isApiOnline()
 
     if (!trulyOnline) {
+      // ★ v11.9.1: لاگ باز کردن مجدد آفلاین
+      logger.info('تیکت به صورت آفلاین مجدداً باز شد', {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        previousStatus: 'closed',
+        newStatus: 'open',
+        totalMessages: ticket.messages?.length || 0,
+        mode: 'offline',
+      })
+      
       const updated = { ...ticket, status: 'open', statusLabel: 'باز', closedAt: null, _isOffline: true }
       setTicket(updated)
       toast({ title: 'باز شد ✓', description: 'تیکت به صورت محلی مجدداً باز شد.' })
@@ -564,12 +658,35 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ باز کردن مجدد آنلاین
+        logger.info('تیکت پشتیبانی مجدداً باز شد', {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          category: ticket.category,
+          priority: ticket.priority,
+          previousStatus: 'closed',
+          newStatus: 'open',
+          closedAt: ticket.closedAt,
+          totalMessages: ticket.messages?.length || 0,
+          mode: 'online',
+        })
+        
         setTicket((prev) => prev ? { ...prev, status: 'open', statusLabel: 'باز', closedAt: null } : prev)
         toast({ title: 'باز شد ✓', description: 'تیکت مجدداً باز شد' })
       } else {
+        logger.error('خطا در باز کردن مجدد تیکت', undefined, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          error: data.error,
+        })
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
-    } catch (err) {
+    } catch (err: any) {
+      logger.error('خطای شبکه در باز کردن مجدد تیکت', err as Error, {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+      })
       toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
     }
   }
@@ -580,6 +697,16 @@ export function TicketDetail() {
     const trulyOnline = isApiOnline()
 
     if (!trulyOnline) {
+      // ★ v11.9.1: لاگ ثبت امتیاز آفلاین
+      logger.info('امتیاز تیکت به صورت آفلاین ثبت شد', {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        rating: rating,
+        hasComment: !!ratingComment.trim(),
+        commentLength: ratingComment.trim().length,
+        mode: 'offline',
+      })
+      
       const updated = { ...ticket, rating, ratingComment: ratingComment.trim() || null, ratedAt: new Date().toISOString(), _isOffline: true }
       setTicket(updated)
       setRatingDialogOpen(false)
@@ -597,15 +724,40 @@ export function TicketDetail() {
       })
       const data = await res.json()
       if (data.success) {
+        // ★ v11.9.1: لاگ ثبت امتیاز آنلاین (بسیار مهم برای آمار کیفیت پشتیبانی)
+        logger.info('امتیاز به پشتیبانی ثبت شد', {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          subject: ticket.subject,
+          category: ticket.category,
+          rating: rating,
+          ratingLabel: rating >= 4 ? 'عالی' : rating >= 3 ? 'خوب' : rating >= 2 ? 'متوسط' : 'ضعیف',
+          hasComment: !!ratingComment.trim(),
+          commentLength: ratingComment.trim().length,
+          totalMessages: ticket.messages?.length || 0,
+          mode: 'online',
+        })
+        
         setTicket((prev) => prev ? { ...prev, rating, ratingComment: ratingComment.trim() || null, ratedAt: new Date().toISOString() } : prev)
         setRatingDialogOpen(false)
         setRating(0)
         setRatingComment('')
         toast({ title: 'ثبت شد ✓', description: 'از بازخورد شما سپاسگزاریم' })
       } else {
+        logger.error('خطا در ثبت امتیاز تیکت', undefined, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber,
+          rating: rating,
+          error: data.error,
+        })
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
-    } catch (err) {
+    } catch (err: any) {
+      logger.error('خطای شبکه در ثبت امتیاز تیکت', err as Error, {
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        rating: rating,
+      })
       toast({ title: 'خطا', description: 'ارتباط با سرور برقرار نشد', variant: 'destructive' })
     }
   }
@@ -677,12 +829,10 @@ export function TicketDetail() {
     <div className="p-3 sm:p-4 lg:p-6 space-y-3 font-fa max-w-4xl mx-auto" dir="rtl">
       <ChatScrollbarStyles />
 
-      {/* ═══════════════ ★ v9.8.0: هدر حرفه‌ای ═══════════════ */}
-         {/* ═══════════════ هدر یاسی ملایم ═══════════════ */}
-           {/* ═══════════════ هدر فشرده یاسی ═══════════════ */}
+      {/* ═══════════════ هدر فشرده یاسی ═══════════════ */}
       <div className="rounded-xl bg-gradient-to-l from-violet-50 via-purple-50 to-indigo-50 border border-violet-200/60 shadow-sm">
         <div className="px-2.5 py-1.5 sm:px-3 sm:py-2">
-          {/* ردیف اول: بازگشت + شماره + موضوع + بج‌ها — همه در یک خط */}
+          {/* ردیف اول: بازگشت + شماره + موضوع + بج‌ها */}
           <div className="flex items-center gap-1.5">
             <Button
               variant="ghost"
@@ -699,7 +849,6 @@ export function TicketDetail() {
 
             <span className="w-px h-3.5 bg-violet-200 shrink-0" />
 
-            {/* موضوع — در یک خط با truncate */}
             <h1 className="flex-1 min-w-0 text-xs sm:text-sm font-bold text-gray-800 truncate">
               {ticket.subject}
             </h1>
@@ -720,7 +869,7 @@ export function TicketDetail() {
             </div>
           </div>
 
-          {/* ردیف دوم: متادیتا — فقط یک خط کوچک */}
+          {/* ردیف دوم: متادیتا */}
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[9px] text-violet-500/70 mt-1 pr-[30px]">
             <span className="inline-flex items-center gap-0.5">
               <TicketIcon className="w-2.5 h-2.5" />
@@ -744,14 +893,14 @@ export function TicketDetail() {
         </div>
       </div>
 
-      {/* ═══════════════ ★ v9.8.0: کارت چت یکپارچه ═══════════════ */}
+      {/* ═══════════════ کارت چت یکپارچه ═══════════════ */}
       <Card className="overflow-hidden border-gray-200 shadow-md rounded-2xl">
         {/* ── هدر چت ── */}
-      <div className="flex items-center justify-between px-4 py-2 bg-violet-50/60 border-b border-violet-100">
+        <div className="flex items-center justify-between px-4 py-2 bg-violet-50/60 border-b border-violet-100">
           <div className="flex items-center gap-2">
-           <MessageCircle className="w-4 h-4 text-violet-600" />
-<span className="text-xs font-bold text-violet-800">گفتگو</span>
-<span className="text-[10px] text-violet-400 bg-violet-100 px-1.5 py-0.5 rounded-full">
+            <MessageCircle className="w-4 h-4 text-violet-600" />
+            <span className="text-xs font-bold text-violet-800">گفتگو</span>
+            <span className="text-[10px] text-violet-400 bg-violet-100 px-1.5 py-0.5 rounded-full">
               {toFaNum(ticket.messages.length)} پیام
             </span>
           </div>
@@ -776,10 +925,10 @@ export function TicketDetail() {
           </div>
         )}
 
-        {/* ── ★ v9.8.0: محوطه پیام‌ها با اسکرولبار سفارشی ── */}
+        {/* ── محوطه پیام‌ها ── */}
         <div
           ref={chatContainerRef}
- className="chat-scroll overflow-y-auto px-4 py-4 space-y-4 bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100"
+          className="chat-scroll overflow-y-auto px-4 py-4 space-y-4 bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100"
           style={{ height: '420px', maxHeight: '50vh' }}
         >
           {ticket.messages.length === 0 ? (
@@ -798,9 +947,9 @@ export function TicketDetail() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* ── ★ v9.8.0: نوار پاسخ (چسبیده به انتهای چت) ── */}
+        {/* ── نوار پاسخ ── */}
         {!isClosed ? (
-<div className="border-t border-violet-100 bg-violet-50/40 p-3">
+          <div className="border-t border-violet-100 bg-violet-50/40 p-3">
             <div className="flex gap-2 items-end">
               <div className="flex-1 relative">
                 <Textarea
@@ -828,7 +977,6 @@ export function TicketDetail() {
             </p>
           </div>
         ) : (
-          /* ── نوار تیکت بسته ── */
           <div className="border-t border-violet-100 bg-violet-50/40 p-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2 text-xs text-gray-500">

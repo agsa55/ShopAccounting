@@ -25,6 +25,9 @@ import {
   ArrowLeft, ArrowRight, Check, Copy, Eye, EyeOff,
 } from 'lucide-react'
 import { useAppStore } from '@/lib/store'
+import { logger } from '@/lib/system-logger'
+
+// ─── Types ────────────────────────────────────────────────────
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -189,6 +192,7 @@ export function MoidianTab() {
       })
       const data = await res.json()
 
+<<<<<<< HEAD
       if (data.success) {
         setSuccess('✅ تنظیمات با موفقیت ذخیره شد' + (data.testResult?.success ? ' و اتصال برقرار است' : ''))
         await loadData()
@@ -226,6 +230,92 @@ export function MoidianTab() {
     setDeleting(false)
   }
 
+=======
+      if (data.success) {
+         // ★ v11.9.1: لاگ ذخیره تنظیمات سامانه مودیان (بدون اطلاعات حساس)
+  logger.info('تنظیمات سامانه مودیان ذخیره شد', {
+    fiscalId: form.fiscalId,
+    economicCode: form.economicCode || null,
+    environment: form.environment,
+    autoSubmit: form.autoSubmit,
+    isUpdate: !!settings?.isInitialized,
+    testConnectionSuccess: data.testResult?.success || false,
+    testMessage: data.testResult?.message || null,
+    hasClientSecret: !!form.clientSecret,
+    hasPrivateKey: !!form.privateKey && form.privateKey.length > 50,
+  })
+  
+        setSuccess('✅ تنظیمات با موفقیت ذخیره شد' + (data.testResult?.success ? ' و اتصال برقرار است' : ''))
+        await loadData()
+      } else {
+         // ★ v11.9.1: لاگ خطای ذخیره تنظیمات
+  logger.error('خطا در ذخیره تنظیمات سامانه مودیان', undefined, {
+    fiscalId: form.fiscalId,
+    environment: form.environment,
+    error: data.error,
+  })
+        setError(data.error || 'خطا در ذخیره')
+      }
+ } catch (err: any) {
+  // ★ v11.9.1: لاگ خطای شبکه در ذخیره تنظیمات
+  logger.error('خطای شبکه در ذخیره تنظیمات سامانه مودیان', err, {
+    fiscalId: form.fiscalId,
+    environment: form.environment,
+  })
+  
+  setError(err?.message || 'خطا در ارتباط با سرور')
+}
+setSaving(false)
+  }
+
+const handleDelete = async () => {
+  if (!confirm('آیا از حذف تنظیمات مطمئن هستید؟')) return
+  
+  // ذخیره اطلاعات قبلی برای لاگ
+  const previousSettings = {
+    fiscalId: settings?.fiscalId || null,
+    environment: settings?.environment || null,
+    totalSubmitted: settings?.totalSubmitted || 0,
+    totalAccepted: settings?.totalAccepted || 0,
+  }
+  
+  setDeleting(true)
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const res = await fetch('/api/moidian/setup', {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    const data = await res.json()
+    if (data.success) {
+      // ★ v11.9.1: لاگ حذف تنظیمات سامانه مودیان
+      logger.info('تنظیمات سامانه مودیان حذف شد', {
+        previousFiscalId: previousSettings.fiscalId,
+        previousEnvironment: previousSettings.environment,
+        previousTotalSubmitted: previousSettings.totalSubmitted,
+        previousTotalAccepted: previousSettings.totalAccepted,
+      })
+      
+      setSuccess('تنظیمات حذف شد')
+      setForm({
+        fiscalId: '', economicCode: '', clientId: '',
+        clientSecret: '', privateKey: '',
+        environment: 'production', autoSubmit: true,
+      })
+      await loadData()
+    } else {
+      logger.error('خطا در حذف تنظیمات سامانه مودیان', undefined, {
+        error: data.error,
+      })
+    }
+  } catch (err: any) {
+    logger.error('خطای شبکه در حذف تنظیمات سامانه مودیان', err)
+    setError(err?.message || 'خطا در حذف')
+  }
+  setDeleting(false)
+}
+
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   // ─── Render ─────────────────────────────────────────────────
 
   if (loading) {
@@ -647,9 +737,30 @@ function WorkerStatusCard() {
       })
       const data = await res.json()
       if (data.success) {
+<<<<<<< HEAD
         setSuccess(`همگام‌سازی انجام شد: ${formatNumberFa(data.data?.processedInvoices || 0)} فاکتور پردازش شد`)
         await loadStatus()
       } else {
+=======
+         // ★ v11.9.1: لاگ اجرای دستی همگام‌سازی سامانه مودیان
+  logger.info('همگام‌سازی دستی سامانه مودیان انجام شد', {
+    processedInvoices: data.data?.processedInvoices || 0,
+    acceptedCount: data.data?.acceptedCount || 0,
+    rejectedCount: data.data?.rejectedCount || 0,
+    errorsCount: data.data?.errorsCount || 0,
+    duration: data.data?.duration || null,
+    triggerType: 'manual',
+  })
+        setSuccess(`همگام‌سازی انجام شد: ${formatNumberFa(data.data?.processedInvoices || 0)} فاکتور پردازش شد`)
+        await loadStatus()
+      } else {
+          // ★ v11.9.1: لاگ خطای همگام‌سازی
+  logger.error('خطا در همگام‌سازی دستی سامانه مودیان', undefined, {
+    error: data.error,
+    triggerType: 'manual',
+  })
+  
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
         setError(data.error || 'خطا در همگام‌سازی')
       }
     } catch (err: any) {

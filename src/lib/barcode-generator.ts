@@ -4,7 +4,7 @@
 
 /**
  * ★ تولید کد محصول اتوماتیک
- * @param lastProductCount - تعداد محصولات موجود
+ * @param lastProductCount - تعداد کالاها موجود
  * @returns کد محصول جدید (مثلاً PRD-000001)
  */
 export function generateProductCode(lastProductCount: number): string {

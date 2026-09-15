@@ -408,7 +408,7 @@ export const GET = withTenantAndPermission('dashboard')(
       }
 
       // ══════════════════════════════════════════════════════
-      // ۸. واکشی محصولات (جداگانه)
+      // ۸. واکشی کالاها (جداگانه)
       // ══════════════════════════════════════════════════════
       const productIds = new Set<string>()
       for (const inv of validInvoices) {
@@ -432,7 +432,7 @@ export const GET = withTenantAndPermission('dashboard')(
       for (const p of products) productMap.set(p.id, p)
 
       // ══════════════════════════════════════════════════════
-      // ۹. تفکیک دسته‌بندی + محصولات برتر
+      // ۹. تفکیک دسته‌بندی + کالاها برتر
       // ══════════════════════════════════════════════════════
       const categoryStatsMap = new Map<string, {
         categoryId: string; categoryName: string

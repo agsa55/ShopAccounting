@@ -265,7 +265,7 @@ function PlanRealLimitsDisplay({ planName }: { planName: string }) {
             <div className="bg-white p-3 rounded-lg border border-gray-200">
               <div className="flex items-center gap-2 mb-1">
                 <Package className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="text-[10px] text-gray-500">محصولات</span>
+                <span className="text-[10px] text-gray-500">کالاها</span>
               </div>
               <p className="text-sm font-black text-gray-900">
                 {planInfo.maxProducts === 0 ? '♾️ نامحدود' : toFaNum(planInfo.maxProducts)}

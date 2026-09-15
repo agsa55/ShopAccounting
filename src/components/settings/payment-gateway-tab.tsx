@@ -40,9 +40,14 @@ import {
   Wallet,
   Check,
 } from 'lucide-react'
-
+import { logger } from '@/lib/system-logger'
 type GatewayType = 'zarinpal' | 'idpay'
 
+<<<<<<< HEAD
+type GatewayType = 'zarinpal' | 'idpay'
+
+=======
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
 const GATEWAY_INFO = {
   zarinpal: {
     name: 'زرین‌پال',
@@ -152,12 +157,25 @@ export function PaymentGatewayTab() {
             }
           })
         }
+<<<<<<< HEAD
       } catch (err: any) {
         console.error('[PaymentGatewayTab] ❌ Load error:', err)
         setError('خطا در بارگذاری تنظیمات درگاه')
       } finally {
         setLoading(false)
       }
+=======
+    } catch (err: any) {
+  console.error('[PaymentGatewayTab] ❌ Load error:', err)
+  
+  // ★ v11.9.1: لاغ خطای بارگذاری تنظیمات درگاه
+  logger.error('خطا در بارگذاری تنظیمات درگاه پرداخت', err)
+  
+  setError('خطا در بارگذاری تنظیمات درگاه')
+} finally {
+  setLoading(false)
+}
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
     }
 
     loadGateways()
@@ -247,6 +265,7 @@ export function PaymentGatewayTab() {
       const data = await res.json()
       console.log('[PaymentGatewayTab] 💾 Save response:', data)
 
+<<<<<<< HEAD
       if (data.success) {
         setSuccessMessage(
           `✅ درگاه ${GATEWAY_INFO[selectedGateway].name} با موفقیت ذخیره و فعال شد.`
@@ -274,7 +293,144 @@ export function PaymentGatewayTab() {
       setError('خطا در ارتباط با سرور')
     }
     setSaving(false)
+=======
+   if (data.success) {
+  // ★ v11.9.1: لاگ ذخیره و فعال‌سازی درگاه پرداخت (بدون اطلاعات حساس)
+  const merchantIdRaw = isZarinpal ? zarinpalMerchantId : idpayMerchantId
+  logger.info('درگاه پرداخت ذخیره و فعال شد', {
+    gatewayType: selectedGateway,
+    gatewayName: GATEWAY_INFO[selectedGateway].name,
+    gatewayId: data.data?.id || (isZarinpal ? zarinpalId : idpayId),
+    merchantIdMasked: merchantIdRaw.trim().substring(0, 4) + '••••',
+    sandbox: isZarinpal ? zarinpalSandbox : idpaySandbox,
+    bankName: (isZarinpal ? zarinpalBankName : idpayBankName).trim() || null,
+    hasBankIban: !!(isZarinpal ? zarinpalBankIban : idpayBankIban).trim(),
+    hasApiKey: selectedGateway === 'idpay' ? (!!apiKeyToSend || idpayApiKeyExists) : null,
+    callbackUrl: getCallbackUrl(),
+    isUpdate: isZarinpal ? !!zarinpalId : !!idpayId,
+    deactivatedOtherGateway: true,
+  })
+  
+  setSuccessMessage(
+    `✅ درگاه ${GATEWAY_INFO[selectedGateway].name} با موفقیت ذخیره و فعال شد.`
+  )
+  setSaved(true)
+  setTimeout(() => setSaved(false), 4000)
+
+  // به‌روزرسانی state ها
+  if (isZarinpal) {
+    setZarinpalActive(true)
+    setZarinpalId(data.data?.id || zarinpalId)
+    setIdpayActive(false)  // فقط یکی فعال
+  } else {
+    setIdpayActive(true)
+    setIdpayId(data.data?.id || idpayId)
+    setIdpayApiKeyExists(true)  // حالا API Key تنظیم شده
+    setIdpayApiKey('')  // فیلد را پاک کن (دیگر masked نیست)
+    setZarinpalActive(false)  // فقط یکی فعال
+>>>>>>> 19234c0 (تکمیل لاگها در سیستم)
   }
+} else {
+  // ★ v11.9.1: لاگ خطای ذخیره درگاه پرداخت
+  logger.error('خطا در ذخیره درگاه پرداخت', undefined, {
+    gatewayType: selectedGateway,
+    gatewayName: GATEWAY_INFO[selectedGateway].name,
+    sandbox: isZarinpal ? zarinpalSandbox : idpaySandbox,
+    error: data.error,
+  })
+  
+  setError(data.error || 'خطا در ذخیره تنظیمات')
+}
+  } catch (err: any) {
+  console.error('[PaymentGatewayTab] ❌ Save error:', err)
+  
+  // ★ v11.9.1: لاگ خطای شبکه در ذخیره درگاه
+  logger.error('خطای شبکه در ذخیره درگاه پرداخت', err, {
+    gatewayType: selectedGateway,
+    gatewayName: GATEWAY_INFO[selectedGateway].name,
+  })
+  
+  setError('خطا در ارتباط با سرور')
+}
+setSaving(false)
+  }
+
+  // ─── غیرفعال‌سازی درگاه ───────────────────────────────────
+ const handleDeactivate = async () => {
+  if (!confirm(`آیا از غیرفعال‌سازی درگاه ${GATEWAY_INFO[selectedGateway].name} مطمئن هستید؟`)) {
+    return
+  }
+
+  // ذخیره اطلاعات قبلی برای لاگ
+  const previousGatewayInfo = {
+    type: selectedGateway,
+    name: GATEWAY_INFO[selectedGateway].name,
+    merchantIdMasked: selectedGateway === 'zarinpal'
+      ? (zarinpalMerchantId.substring(0, 4) + '••••')
+      : (idpayMerchantId.substring(0, 4) + '••••'),
+    sandbox: selectedGateway === 'zarinpal' ? zarinpalSandbox : idpaySandbox,
+    bankName: selectedGateway === 'zarinpal' ? zarinpalBankName : idpayBankName,
+    gatewayId: selectedGateway === 'zarinpal' ? zarinpalId : idpayId,
+  }
+
+  setError(null)
+  setSuccessMessage(null)
+  setSaving(true)
+
+  try {
+    const res = await fetch(`/api/payment-gateway?type=${selectedGateway}`, {
+      method: 'DELETE',
+    })
+    const data = await res.json()
+
+    if (data.success) {
+      // ★ v11.9.1: لاغ غیرفعال‌سازی درگاه پرداخت
+      logger.info('درگاه پرداخت غیرفعال شد', {
+        gatewayType: previousGatewayInfo.type,
+        gatewayName: previousGatewayInfo.name,
+        gatewayId: previousGatewayInfo.gatewayId,
+        merchantIdMasked: previousGatewayInfo.merchantIdMasked,
+        sandbox: previousGatewayInfo.sandbox,
+        bankName: previousGatewayInfo.bankName || null,
+      })
+      
+      setSuccessMessage(`درگاه ${GATEWAY_INFO[selectedGateway].name} با موفقیت غیرفعال شد.`)
+      if (selectedGateway === 'zarinpal') setZarinpalActive(false)
+      else setIdpayActive(false)
+    } else {
+      // ★ v11.9.1: لاغ خطای غیرفعال‌سازی
+      logger.error('خطا در غیرفعال‌سازی درگاه پرداخت', undefined, {
+        gatewayType: previousGatewayInfo.type,
+        gatewayName: previousGatewayInfo.name,
+        error: data.error,
+      })
+      
+      setError(data.error || 'خطا در غیرفعال‌سازی')
+    }
+  } catch (err: any) {
+    console.error('[PaymentGatewayTab] Deactivate error:', err)
+    
+    // ★ v11.9.1: لاغ خطای شبکه در غیرفعال‌سازی
+    logger.error('خطای شبکه در غیرفعال‌سازی درگاه پرداخت', err, {
+      gatewayType: previousGatewayInfo.type,
+      gatewayName: previousGatewayInfo.name,
+    })
+    
+    setError('خطا در ارتباط با سرور')
+  }
+  setSaving(false)
+}
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text)
+    setSuccessMessage(`${label} کپی شد`)
+    setTimeout(() => setSuccessMessage(null), 2000)
+  }
+
+  const gatewayInfo = GATEWAY_INFO[selectedGateway]
+  const GatewayIcon = gatewayInfo.icon
+  const isActive = selectedGateway === 'zarinpal' ? zarinpalActive : idpayActive
+  const callbackUrl = getCallbackUrl()
 
   // ─── غیرفعال‌سازی درگاه ───────────────────────────────────
   const handleDeactivate = async () => {

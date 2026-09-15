@@ -95,7 +95,7 @@ export function EmployeesTab() {
   const BASE_PERMISSIONS = [
     { key: 'dashboard', label: 'داشبورد', minTier: 'simple' },
     { key: 'pos', label: 'صندوق فروش', minTier: 'simple' },
-    { key: 'products', label: 'محصولات', minTier: 'simple' },
+    { key: 'products', label: 'کالاها', minTier: 'simple' },
     { key: 'categories', label: 'دسته‌بندی‌ها', minTier: 'simple' },
     { key: 'customers', label: 'مشتریان', minTier: 'simple' },
     { key: 'invoices', label: 'فاکتورها', minTier: 'simple' },
