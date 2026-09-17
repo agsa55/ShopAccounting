@@ -35,15 +35,32 @@ export const GET = withTenantAndPermission('accounting')(
       const supplierId = searchParams.get('supplierId')
       const search     = (searchParams.get('search') || '').trim()
 
-      const where: any = { tenantId }
-      if (status)     where.status     = status
-      if (supplierId) where.supplierId = supplierId
-      if (search) {
-        where.OR = [
-          { number:      { contains: search } },
-          { description: { contains: search } },
-        ]
-      }
+     // ★ v8.11.3: پارامترهای جدید فیلتر
+const paymentType   = searchParams.get('paymentType')
+const invoiceType   = searchParams.get('invoiceType')
+
+const where: any = { tenantId }
+if (status)       where.status       = status
+if (supplierId)   where.supplierId   = supplierId
+if (paymentType)  where.paymentType  = paymentType
+if (invoiceType) {
+  if (invoiceType === 'purchase') {
+    // خرید عادی: invoiceType خالی یا purchase
+    where.OR = [
+      { invoiceType: null },
+      { invoiceType: 'purchase' },
+    ]
+  } else {
+    where.invoiceType = invoiceType
+  }
+}
+if (search) {
+  where.OR = [
+    ...(where.OR || []),
+    { number:      { contains: search } },
+    { description: { contains: search } },
+  ]
+}
 
       let invoices: any[] = []
 

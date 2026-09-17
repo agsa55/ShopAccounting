@@ -82,6 +82,8 @@ import {
 } from '@/lib/pos-adapters'
 
 import CashierPanel from './cashier-panel';
+import { CustomerAutocomplete } from './customer-autocomplete'
+import { QuickAddCustomerModal } from './quick-add-customer-modal'
 
 // ═══════════════════════════════════════════════════════════════
 //  ★★★ Print Receipt Types
@@ -828,6 +830,7 @@ export default function PosPage() {
 const [showManualTransactionModal, setShowManualTransactionModal] = useState(false);
 const [showReportModal, setShowReportModal] = useState(false);
 const [cashierStatsRefreshKey, setCashierStatsRefreshKey] = useState(0);
+const [quickAddCustomerOpen, setQuickAddCustomerOpen] = useState(false)
 
   useEffect(() => {
     const handleIntegrationChange = (e: Event) => {
@@ -954,9 +957,7 @@ const [cashierStatsRefreshKey, setCashierStatsRefreshKey] = useState(0);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('')
     // ★ v11.8: موجودی انبار انتخاب‌شده برای فیلتر دقیق جستجو
   const [warehouseStocks, setWarehouseStocks] = useState<Record<string, number>>({})
-  const [customerSearch, setCustomerSearch] = useState('')
-  const [customerSearchResults, setCustomerSearchResults] = useState<any[]>([])
-  const [customerSearchLoading, setCustomerSearchLoading] = useState(false)
+ 
   const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<PrintTemplate>('thermal-80mm')
   const [printSubmitting, setPrintSubmitting] = useState(false)
   const [invoiceDiscountPercent, setInvoiceDiscountPercent] = useState<string>('')
@@ -1055,6 +1056,35 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
       cancelled = true
     }
   }, [selectedWarehouseId, isOnline, products])
+
+
+  const handleCustomerCreated = useCallback((customer: any) => {
+  // Auto-select مشتری جدید
+  setCustomer(customer.id, customer.displayName)
+  
+  // اگر store متد refreshCustomers داشت، فراخوانی کن
+  const refreshCustomers = (useStore as any).getState?.()?.refreshCustomers
+  if (typeof refreshCustomers === 'function') {
+    refreshCustomers()
+  }
+}, [setCustomer])
+
+// کلید میانبر Ctrl+N برای افزودن سریع
+useEffect(() => {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+      // فقط وقتی در POS هستیم
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      if (!isInput) {
+        e.preventDefault()
+        setQuickAddCustomerOpen(true)
+      }
+    }
+  }
+  document.addEventListener('keydown', handleKeyDown)
+  return () => document.removeEventListener('keydown', handleKeyDown)
+}, [])
 
   const currentWarehouse = useMemo(() => {
     return warehouses.find((w: any) => w.id === selectedWarehouseId) || null
@@ -1290,73 +1320,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
     return () => window.removeEventListener('inventory-changed', handleInventoryChanged)
   }, [posLoadRecents])
 
-  useEffect(() => {
-    const term = customerSearch.trim()
-    if (term.length < 2) {
-      setCustomerSearchResults([])
-      setCustomerSearchLoading(false)
-      return
-    }
 
-    const tid = getTenantIdFromStore()
-    if (!tid) {
-      setCustomerSearchResults([])
-      return
-    }
-
-    if (!navigator.onLine) {
-      const termLower = term.toLowerCase()
-      const filtered = customers.filter((c) => {
-        const fullName = `${c.firstName} ${c.lastName}`.toLowerCase()
-        const mobile = c.mobile || ''
-        return fullName.includes(termLower) || mobile.includes(term) || c.code.toLowerCase().includes(termLower)
-      })
-      setCustomerSearchResults(filtered)
-      setCustomerSearchLoading(false)
-      return
-    }
-
-    setCustomerSearchLoading(true)
-    let cancelled = false
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `/api/contacts?type=customer&search=${encodeURIComponent(term)}&tenantId=${encodeURIComponent(tid)}`,
-          { headers: getAuthHeaders() }
-        )
-        if (!res.ok) {
-          const fallbackRes = await fetch(`/api/customers?tenantId=${tid}&search=${encodeURIComponent(term)}&limit=20`)
-          if (!fallbackRes.ok) {
-            if (!cancelled) setCustomerSearchResults([])
-            return
-          }
-          const fallbackData = await fallbackRes.json()
-          if (cancelled) return
-          const list = fallbackData.success ? (Array.isArray(fallbackData.data) ? fallbackData.data : (fallbackData.data?.customers || [])) : []
-          if (!cancelled) setCustomerSearchResults(list)
-          return
-        }
-        const data = await res.json()
-        if (cancelled) return
-        console.log('[POS] /api/contacts response:', { success: data.success, count: data.data?.length })
-        if (data.success) {
-        
-          setCustomerSearchResults(data.data || [])
-        } else {
-          setCustomerSearchResults([])
-        }
-      } catch (err) {
-        console.error('[POS] customer search error:', err)
-        if (!cancelled) setCustomerSearchResults([])
-      } finally {
-        if (!cancelled) setCustomerSearchLoading(false)
-      }
-    }, 300)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [customerSearch, customers])
 
   const didInitRef = useRef(false)
   useEffect(() => {
@@ -2449,7 +2413,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
     return config?.label ?? type
   }, [])
 
-  // ═══════════════════════════════════════════════════════════════
+ // ═══════════════════════════════════════════════════════════════
   // ★ v11.7: handleConfirmInvoiceFinal — useCallback کامل داخل کامپوننت
   // ═══════════════════════════════════════════════════════════════
   const handleConfirmInvoiceFinal = useCallback(async () => {
@@ -2759,25 +2723,25 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
         invoiceNumber: result.data?.number,
       })
 
-   if (res.ok && result.success) {
-  // ★ v11.9.0: لاگ ثبت فاکتور فروش (همه روش‌های پرداخت)
-  logger.info('فاکتور فروش ثبت شد', {
-    invoiceId: result.data?.id,
-    invoiceNumber: result.data?.number,
-    totalAmount: cartTotals?.totalAmount,
-    paymentType: (paymentType || 'cash').toLowerCase(),
-    customerId: finalCustomerId,
-    warehouseId: selectedWarehouseId || undefined,
-    itemsCount: cart?.length,
-    paidAmount: paidAmount,
-    remainingAmount: remainingAmount,
-  })
+      if (res.ok && result.success) {
+        // ★ v11.9.0: لاگ ثبت فاکتور فروش (همه روش‌های پرداخت)
+        logger.info('فاکتور فروش ثبت شد', {
+          invoiceId: result.data?.id,
+          invoiceNumber: result.data?.number,
+          totalAmount: cartTotals?.totalAmount,
+          paymentType: (paymentType || 'cash').toLowerCase(),
+          customerId: finalCustomerId,
+          warehouseId: selectedWarehouseId || undefined,
+          itemsCount: cart?.length,
+          paidAmount: paidAmount,
+          remainingAmount: remainingAmount,
+        })
 
-  const isInstallment = ptFinal === 'installment'
-  const isCredit = ptFinal === 'credit'
-  const isCheck = ptFinal === 'check'
+        const isInstallment = ptFinal === 'installment'
+        const isCredit = ptFinal === 'credit'
+        const isCheck = ptFinal === 'check'
 
-  if (isInstallment && result.data?.installmentPlan) {
+        if (isInstallment && result.data?.installmentPlan) {
           const plan = result.data.installmentPlan
           toast({
             title: 'فاکتور قسطی ثبت شد',
@@ -2825,8 +2789,6 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
             })
           }
           window.dispatchEvent(new Event('checks-updated'))
-          // ★ v11.6.5: اطلاع‌رسانی به نوار وضعیت برای رفرش
-
         }
 
         setInstallmentPlan(null)
@@ -3031,8 +2993,6 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
     setAutoPrintMode(false)
     setThermalPrintOpen(true)
   }, [cart.length, toast])
-
-
 
   const receiptData: PrintReceiptData = useMemo(() => {
     const settings: any = (() => {
@@ -3248,12 +3208,10 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
               آفلاین
             </Badge>
           )}
-          {/* ★ v11.6: نشانگر میانبرهای F2|F4|Esc حذف شد — میانبرها همچنان فعال هستند */}
         </div>
       </header>
-{/* ★ v11.6.3: پنل صندوق‌دار */}
-<CashierPanel />
-      
+      {/* ★ v11.6.3: پنل صندوق‌دار */}
+      <CashierPanel />
 
       {/* ==================== SEARCH BAR ==================== */}
       <div className="bg-white border-b border-slate-200 px-2 sm:px-3 py-2 sm:py-2.5 shrink-0 relative z-30">
@@ -3620,7 +3578,7 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
             )}
           </ScrollArea>
 
-                  {/* CART SUMMARY — ★ v11.8: عناوین و مقادیر پررنگ */}
+          {/* CART SUMMARY — ★ v11.8: عناوین و مقادیر پررنگ */}
           {cart.length > 0 && (
             <div className="border-t-2 border-slate-300 shrink-0 bg-white">
               <div className="px-2 sm:px-3 py-1.5 sm:py-2 space-y-1 text-[10px] sm:text-xs">
@@ -3784,53 +3742,29 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
 
         {/* مشتری + جمع + دکمه‌ها */}
         <div className="px-2 sm:px-3 pb-1.5 sm:pb-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          {/* مشتری */}
-          <div className="relative flex-1 sm:max-w-[200px]">
-            <User className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-300 z-10" />
-            <Input
-              placeholder={selectedCustomerId ? (selectedCustomerName || 'مشتری') : 'مشتری...'}
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-              className="h-9 sm:h-8 text-sm sm:text-xs pr-7 border-slate-200 bg-slate-50/80 focus:bg-white"
+          {/* مشتری - با Live Search حرفه‌ای */}
+          <div className="relative flex-1 sm:max-w-[260px]">
+            <CustomerAutocomplete
+              selectedCustomerId={selectedCustomerId}
+              selectedCustomerName={selectedCustomerName}
+              onSelect={(customer) => {
+                if (customer) {
+                  setCustomer(customer.id, customer.displayName)
+                } else {
+                  setCustomer(null, null)
+                }
+              }}
+              onAddNew={() => setQuickAddCustomerOpen(true)}
+              placeholder="جستجوی مشتری..."
             />
-            {customerSearch.trim().length >= 2 && (
-              <div
-                className="absolute z-[100] w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto"
-                style={{ bottom: '100%', marginBottom: '4px' }}
-              >
-                {customerSearchLoading ? (
-                  <div className="p-2 text-center text-[10px] text-gray-400">در حال جستجو...</div>
-                ) : customerSearchResults.length === 0 ? (
-                  <div className="p-3 text-center text-[10px] text-gray-400">
-                    <Search className="w-3.5 h-3.5 mx-auto mb-1" />
-                    نتیجه‌ای یافت نشد
-                  </div>
-                ) : (
-                  <>
-                    {selectedCustomerId && (
-                      <button
-                        onClick={() => { setCustomer(null, null); setCustomerSearch('') }}
-                        className="w-full text-right p-2 hover:bg-gray-50 border-b"
-                      >
-                        <span className="text-[10px] text-gray-400">حذف انتخاب</span>
-                      </button>
-                    )}
-                    {customerSearchResults.filter((c: any) => !c.isBlacklisted).map((c: any) => {
-                      const displayName = c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'بدون نام'
-                      return (
-                        <button key={c.id} onClick={() => { setCustomer(c.id, displayName); setCustomerSearch(''); setCustomerSearchResults([]) }} className="w-full text-right p-2 hover:bg-emerald-50 border-b text-[11px] last:border-0">
-                          <div className="font-medium">{displayName}</div>
-                          {c.currentBalance > 0 && <span className="text-[9px] text-red-400">بدهی</span>}
-                        </button>
-                      )
-                    })}
-                  </>
-                )}
-              </div>
-            )}
+
+            {/* Badge بدهی برای مشتری انتخاب‌شده */}
             {selectedCustomer && selectedCustomer.currentBalance > 0 && (
-              <Badge variant="outline" className="text-[8px] sm:text-[9px] border-red-200 text-red-500 bg-red-50 px-1 py-0 shrink-0 h-5 absolute -top-2 -left-2">
-                بدهی:{formatPrice(selectedCustomer.currentBalance)}
+              <Badge
+                variant="outline"
+                className="text-[8px] sm:text-[9px] border-red-200 text-red-500 bg-red-50 px-1 py-0 shrink-0 h-5 absolute -top-2 -left-2 z-20"
+              >
+                بدهی: {formatPrice(selectedCustomer.currentBalance)}
               </Badge>
             )}
           </div>
@@ -4503,6 +4437,16 @@ const tenantId = useStore((s) => s.tenantId) ?? '';
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          ★ v11.10: مودال افزودن سریع مشتری — در محل صحیح (سطح اصلی کامپوننت)
+          ═══════════════════════════════════════════════════════════════ */}
+      <QuickAddCustomerModal
+        open={quickAddCustomerOpen}
+        onOpenChange={setQuickAddCustomerOpen}
+        onCreated={handleCustomerCreated}
+        initialName={selectedCustomerName || ''}
+      />
     </div>
   )
 }
@@ -4824,9 +4768,7 @@ function ShamsiDatePicker({ value, onChange, placeholder = 'انتخاب تار�
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ★ v11.6: CompactCartItemRow — نسخه بهبود یافته
-//   ★ پس‌زمینه تیره‌تر (bg-slate-200/70) برای خوانایی بهتر
-//   ★ فیلد قیمت عریض‌تر (w-[85px]) برای نمایش کامل مبلغ
-//   ★ فونت خوانا‌تر و سایه ظریف
+//   ★ v11.10: مودال QuickAddCustomerModal از اینجا خارج شد و به سطح اصلی کامپوننت منتقل شد
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface CompactCartItemRowProps {
@@ -4967,7 +4909,6 @@ function CompactCartItemRow({
       <span className="shrink-0 text-[10px] sm:text-[10px] font-bold text-slate-900 min-w-[75px] sm:min-w-[65px] text-left bg-white/60 px-1.5 py-0.5 rounded border border-slate-200">
         {formatPrice(item.lineTotal)}
       </span>
-
     </div>
   )
 }

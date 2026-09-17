@@ -1,14 +1,42 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
+# robots.txt for rahgooshasf.ir
+# آخرین به‌روزرسانی: 2026
 
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /portal/
+Disallow: /portal-view/
+Disallow: /payment-result/
+Disallow: /subscription/
+Disallow: /dashboard
+Disallow: /_next/
+Disallow: /auth/
+
+# Google Specific
+User-agent: Googlebot
+Allow: /
+
+# Bing
+User-agent: Bingbot
+Allow: /
+
+# Block AI scrapers
+User-agent: GPTBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+# Sitemap
+Sitemap: https://rahgooshasf.ir/sitemap.xml
+Sitemap: https://rahgooshasf.ir/server-sitemap.xml
+
+# Crawl delay
+Crawl-delay: 10
