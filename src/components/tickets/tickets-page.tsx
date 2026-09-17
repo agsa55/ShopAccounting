@@ -939,24 +939,31 @@ export function TicketsPage() {
         </>
       )}
 
-{/* ═══════════════ دیالوگ ایجاد تیکت (مودال دستی) ═══════════════ */}
+{/* ═══════════════ دیالوگ ایجاد تیکت ═══════════════ */}
 {createDialogOpen && (
   <div 
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4"
+    className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm"
     onClick={() => setCreateDialogOpen(false)}
+    style={{ zIndex: 49 }}
   >
     <div 
-      className="w-full max-w-[520px] h-[85vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden"
+      className="relative w-[calc(100%-24px)] sm:w-[calc(100%-40px)] max-w-[880px] h-[calc(100vh-40px)] sm:h-[calc(100vh-60px)] max-h-[720px] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       dir="rtl"
       onClick={(e) => e.stopPropagation()}
+      style={{ 
+        maxWidth: '880px',
+        width: 'calc(100% - 24px)',
+        height: 'calc(100vh - 40px)',
+        maxHeight: '720px'
+      }}
     >
       {/* ═══ Header ثابت ═══ */}
-      <div className="flex items-center gap-2 px-4 sm:px-5 py-3 border-b border-gray-100 shrink-0">
+      <div className="flex items-center gap-2 px-4 sm:px-6 py-3 border-b border-gray-100 shrink-0 bg-white">
         <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
           <TicketIcon className="w-4 h-4 text-emerald-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm sm:text-base font-semibold text-gray-900">
+          <h2 className="text-sm sm:text-base font-bold text-gray-900 truncate">
             ارسال تیکت به پشتیبانی
           </h2>
           <p className="text-[10px] text-gray-500 mt-0.5">
@@ -971,8 +978,8 @@ export function TicketsPage() {
         </button>
       </div>
 
-      {/* ═══ محتوای قابل اسکرول ═══ */}
-      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-5 py-3">
+      {/* ═══ محتوای قابل اسکرول (بدون فضای خالی) ═══ */}
+      <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 py-3 bg-white flex flex-col">
         {!isOnline && (
           <div className="flex items-start gap-2 p-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] text-amber-800 mb-3">
             <WifiOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -980,106 +987,104 @@ export function TicketsPage() {
           </div>
         )}
 
-        <div className="space-y-2.5">
-          {/* موضوع */}
+        {/* موضوع */}
+        <div className="mb-2.5">
+          <Label className="text-xs font-medium">
+            موضوع <span className="text-red-500">*</span>
+          </Label>
+          <Input
+            value={form.subject}
+            onChange={(e) => setForm({ ...form, subject: e.target.value })}
+            className="mt-1 h-9"
+            placeholder="مثلاً: خطا در ثبت فاکتور فروش"
+            maxLength={500}
+          />
+          <p className="text-[9px] text-gray-400 mt-0.5">
+            {toFaNum(form.subject.length)}/500
+          </p>
+        </div>
+
+        {/* دسته‌بندی و اولویت */}
+        <div className="grid grid-cols-2 gap-2 mb-2.5">
           <div>
-            <Label className="text-xs font-medium">
-              موضوع <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              value={form.subject}
-              onChange={(e) => setForm({ ...form, subject: e.target.value })}
-              className="mt-1 h-9"
-              placeholder="مثلاً: خطا در ثبت فاکتور فروش"
-              maxLength={500}
-            />
-            <p className="text-[9px] text-gray-400 mt-0.5">
-              {toFaNum(form.subject.length)}/500
-            </p>
+            <Label className="text-xs font-medium">دسته‌بندی</Label>
+            <Select
+              value={form.category}
+              onValueChange={(v) => setForm({ ...form, category: v })}
+            >
+              <SelectTrigger className="mt-1 h-9 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-
-          {/* دسته‌بندی و اولویت */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs font-medium">دسته‌بندی</Label>
-              <Select
-                value={form.category}
-                onValueChange={(v) => setForm({ ...form, category: v })}
-              >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c.value} value={c.value}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs font-medium">اولویت</Label>
-              <Select
-                value={form.priority}
-                onValueChange={(v) => setForm({ ...form, priority: v })}
-              >
-                <SelectTrigger className="mt-1 h-9 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">کم</SelectItem>
-                  <SelectItem value="normal">عادی</SelectItem>
-                  <SelectItem value="high">بالا</SelectItem>
-                  <SelectItem value="urgent">فوری</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* توضیحات */}
           <div>
-            <Label className="text-xs font-medium">
-              توضیحات کامل <span className="text-red-500">*</span>
-            </Label>
-            <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="mt-1 min-h-[100px] resize-y text-sm"
-              placeholder="مشکل یا درخواست خود را با جزئیات بنویسید..."
-              maxLength={10000}
-            />
-            <p className="text-[9px] text-gray-400 mt-0.5">
-              {toFaNum(form.description.length)}/10000
-            </p>
+            <Label className="text-xs font-medium">اولویت</Label>
+            <Select
+              value={form.priority}
+              onValueChange={(v) => setForm({ ...form, priority: v })}
+            >
+              <SelectTrigger className="mt-1 h-9 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">کم</SelectItem>
+                <SelectItem value="normal">عادی</SelectItem>
+                <SelectItem value="high">بالا</SelectItem>
+                <SelectItem value="urgent">فوری</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+        </div>
 
-          {/* دکمه لاگ‌ها */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowLogModal(true)}
-            className="w-full justify-center gap-2 h-8 text-xs"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            مشاهده و کپی لاگ‌های سیستم
-          </Button>
+        {/* توضیحات کامل - فضای باقی‌مانده را پر می‌کند */}
+        <div className="mb-2.5 flex-1 flex flex-col min-h-0">
+          <Label className="text-xs font-medium shrink-0">
+            توضیحات کامل <span className="text-red-500">*</span>
+          </Label>
+          <Textarea
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            className="mt-1 flex-1 min-h-[120px] resize-none text-sm"
+            placeholder="مشکل یا درخواست خود را با جزئیات بنویسید..."
+            maxLength={10000}
+          />
+          <p className="text-[9px] text-gray-400 mt-0.5 shrink-0">
+            {toFaNum(form.description.length)}/10000
+          </p>
+        </div>
 
-          {/* راهنمای فشرده */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-[10px] text-blue-700">
-            <p className="font-medium mb-0.5">💡 راهنمایی:</p>
-            <ul className="space-y-0.5 list-disc pr-4 leading-relaxed">
-              <li>مشکل را مرحله‌به‌مرحله شرح دهید</li>
-              <li>متن پیام خطا را کپی کنید</li>
-              <li>اولویت «فوری» فقط برای موارد بحرانی</li>
-            </ul>
-          </div>
+        {/* دکمه لاگ‌ها */}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setShowLogModal(true)}
+          className="w-full justify-center gap-2 h-8 text-xs mb-2.5 shrink-0"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          مشاهده و کپی لاگ‌های سیستم
+        </Button>
+
+        {/* راهنمای فشرده - بدون فضای اضافه */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-[10px] text-blue-700 shrink-0">
+          <p className="font-medium mb-0.5">💡 راهنمایی:</p>
+          <ul className="space-y-0.5 list-disc pr-4 leading-relaxed">
+            <li>مشکل را مرحله‌به‌مرحله شرح دهید</li>
+            <li>متن پیام خطا را کپی کنید</li>
+            <li>اولویت «فوری» فقط برای موارد بحرانی</li>
+          </ul>
         </div>
       </div>
 
       {/* ═══ Footer ثابت ═══ */}
-      <div className="flex items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
+      <div className="flex items-center justify-end gap-2 px-4 sm:px-6 py-3 border-t border-gray-100 shrink-0 bg-gray-50">
         <Button 
           variant="outline" 
           onClick={() => setCreateDialogOpen(false)} 
@@ -1107,8 +1112,12 @@ export function TicketsPage() {
         </Button>
       </div>
     </div>
+  </div>
+)}
 
-    {/* ★ مودال لاگ‌ها */}
+{/* ★ مودال لاگ‌ها - بیرون از مودال تیکت با z-index بالاتر */}
+{showLogModal && (
+  <div style={{ position: 'relative', zIndex: 10001 }}>
     <SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
   </div>
 )}

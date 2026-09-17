@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
+import { logger } from '@/lib/system-logger'
 
 export async function POST(request: Request) {
   try {
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     }
 
     // Check subdomain uniqueness
-    const existingTenant = await db.tenant.findFirst({
+    const existingTenant = await (db as any).client.tenant.findFirst({
       where: { subDomain },
     })
 
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     // Check mobile uniqueness
-    const existingUser = await db.storeUser.findFirst({
+    const existingUser = await (db as any).client.storeUser.findFirst({
       where: { mobile },
     })
 
@@ -66,10 +67,10 @@ export async function POST(request: Request) {
     // Get or create Starter plan (14-day free trial)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let plan: any = null
-    plan = await db.plan.findFirst({ where: { name: 'Starter', isActive: true } })
+    plan = await (db as any).client.plans.findFirst({ where: { name: 'Starter', isActive: true } })
     if (!plan) {
       // Create Starter plan if none exists
-      plan = await db.plan.create({
+      plan = await (db as any).client.plans.create({
         data: {
           name: 'Starter',
           nameFa: 'پایه',
@@ -83,12 +84,14 @@ export async function POST(request: Request) {
     }
 
     // Create tenant
-    const tenant = await db.tenant.create({
+    const tenant = await (db as any).client.tenant.create({
       data: {
+        id: `tenant-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
         subDomain,
         companyName,
-        dbName: subDomain,
-        status: 'Active',
+        status: 'active',
+        ownerMobile: mobile,
+        planName: 'simple',
       },
     })
 
@@ -97,46 +100,56 @@ export async function POST(request: Request) {
     const endDate = new Date()
     endDate.setDate(endDate.getDate() + plan.durationDays)
 
-    await db.subscription.create({
+    await (db as any).client.subscriptions.create({
       data: {
         tenantId: tenant.id,
         planId: plan.id,
         startDate,
         endDate,
-        status: 'Active',
+        status: 'active',
         autoRenew: false,
       },
     })
 
-    // Create store user (manager)
-    const user = await db.storeUser.create({
+    // ★ v11.9.5: Create store user (OWNER/MANAGER - فقط یک مدیر اصلی)
+    // username همیشه 'admin' است و role همیشه 'Manager'
+    const user = await (db as any).client.storeUser.create({
       data: {
         username: 'admin',
-    passwordHash: await bcrypt.hash(password, 10),
-        role: 'Manager',
+        password: await bcrypt.hash(password, 10),
+        role: 'Manager',  // ★ همیشه Manager - این کاربر مالک/مدیر فروشگاه است
         mobile,
         tenantId: tenant.id,
         isActive: true,
       },
     })
 
+    // ★ v11.9.5: لاگ ثبت‌نام موفق
+    logger.info('فروشگاه جدید ثبت‌نام شد', {
+      tenantId: tenant.id,
+      subDomain,
+      companyName,
+      ownerMobile: mobile,
+      planName: plan.name,
+    })
+
     // Seed default accounts for the tenant
     const accountData = [
-      { code: '1', name: 'دارایی‌ها', level: 1, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '11', name: 'صندوق و بانک', level: 2, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '111', name: 'صندوق فروشگاه', level: 3, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '112', name: 'حساب بانکی', level: 3, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '12', name: 'حساب‌های دریافتنی', level: 2, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '121', name: 'مشتریان', level: 3, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '13', name: 'موجودی کالا', level: 2, type: 'Asset', nature: 'Debit', isSystem: true },
-      { code: '4', name: 'درآمدها', level: 1, type: 'Income', nature: 'Credit', isSystem: true },
-      { code: '41', name: 'درآمد فروش', level: 2, type: 'Income', nature: 'Credit', isSystem: true },
-      { code: '5', name: 'هزینه‌ها', level: 1, type: 'Expense', nature: 'Debit', isSystem: true },
-      { code: '51', name: 'بهای تمام‌شده کالای فروش‌رفته', level: 2, type: 'Expense', nature: 'Debit', isSystem: true },
+      { code: '1', name: 'دارایی‌ها', level: 1, type: 'Asset' },
+      { code: '11', name: 'صندوق و بانک', level: 2, type: 'Asset' },
+      { code: '111', name: 'صندوق فروشگاه', level: 3, type: 'Asset' },
+      { code: '112', name: 'حساب بانکی', level: 3, type: 'Asset' },
+      { code: '12', name: 'حساب‌های دریافتنی', level: 2, type: 'Asset' },
+      { code: '121', name: 'مشتریان', level: 3, type: 'Asset' },
+      { code: '13', name: 'موجودی کالا', level: 2, type: 'Asset' },
+      { code: '4', name: 'درآمدها', level: 1, type: 'Income' },
+      { code: '41', name: 'درآمد فروش', level: 2, type: 'Income' },
+      { code: '5', name: 'هزینه‌ها', level: 1, type: 'Expense' },
+      { code: '51', name: 'بهای تمام‌شده کالای فروش‌رفته', level: 2, type: 'Expense' },
     ]
 
     for (const acc of accountData) {
-      await db.account.create({
+      await (db as any).client.account.create({
         data: {
           ...acc,
           tenantId: tenant.id,
@@ -147,7 +160,7 @@ export async function POST(request: Request) {
     // Seed default categories
     const categories = ['لبنیات', 'غلات', 'روغن', 'قند و شکر', 'نوشیدنی', 'کنسرو', 'بهداشت و آرایشی', 'چاشنی']
     for (const catName of categories) {
-      await db.productCategory.create({
+      await (db as any).client.category.create({
         data: {
           name: catName,
           tenantId: tenant.id,
@@ -157,22 +170,15 @@ export async function POST(request: Request) {
     }
 
     // Create default store settings
-    const settings = [
-      { key: 'storeName', value: companyName },
-      { key: 'defaultTaxRate', value: '9' },
-      { key: 'currency', value: 'IRR' },
-    ]
-    for (const setting of settings) {
-      await db.storeSetting.create({
-        data: {
-          key: setting.key,
-          value: setting.value,
-          tenantId: tenant.id,
-        },
-      })
-    }
+    await (db as any).client.storeSetting.create({
+      data: {
+        storeName: companyName,
+        defaultTaxRate: 9,
+        tenantId: tenant.id,
+      },
+    })
 
-       return NextResponse.json({
+    return NextResponse.json({
       success: true,
       data: {
         user: {

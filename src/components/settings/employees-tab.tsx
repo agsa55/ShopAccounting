@@ -3,6 +3,8 @@
 // ============================================================================
 // src/components/settings/employees-tab.tsx
 // ShopAccounting — تب مدیریت کاربران/صندوق‌داران
+// ★ v11.9.6: اصلاح تشخیص مدیر اصلی بر اساس نقش (نه نام کاربری)
+// ★ سازگاری با نقش‌های: Admin, Manager, Owner
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -32,15 +34,21 @@ import {
 } from '@/components/ui/table'
 import {
   Users, Plus, Pencil, Trash2, ShieldCheck, Loader2, Lock, AlertTriangle,
-  Infinity, Crown, AlertCircle, Info,
+  Infinity, Crown, AlertCircle, Info, Shield,
 } from 'lucide-react'
+
+// ★ v11.9.6: تابع کمکی برای تشخیص نقش‌های مدیریتی
+const MANAGER_ROLES = ['Manager', 'Admin', 'Owner', 'manager', 'admin', 'owner']
+
+function isManagerRole(role: string | null | undefined): boolean {
+  return !!role && MANAGER_ROLES.includes(role)
+}
 
 export function EmployeesTab() {
   const currentTenant = useAppStore((s) => s.currentTenant)
   const storeTenantId = useAppStore((s) => s.tenantId)
   const userTenantId = useAppStore((s) => s.user?.tenantId)
   
-  // ★★★ v11.0: خواندن اطلاعات پلن برای اعمال محدودیت
   const planNameFromStore = useAppStore((s) => s.planName)
   const planFeatures = useAppStore((s) => s.planFeatures)
 
@@ -56,7 +64,8 @@ export function EmployeesTab() {
   const [formUsername, setFormUsername] = useState('')
   const [formPassword, setFormPassword] = useState('')
   const [formMobile, setFormMobile] = useState('')
-  const [formRole, setFormRole] = useState<'Cashier' | 'Manager'>('Cashier')
+// ★ v11.9.7: اضافه کردن 'Manager' برای نمایش نقش مدیر در ویرایش
+const [formRole, setFormRole] = useState<'Cashier' | 'Manager'>('Cashier')
   const [formPermissions, setFormPermissions] = useState<string[]>(['pos'])
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -64,34 +73,78 @@ export function EmployeesTab() {
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null)
 
   // ═══════════════════════════════════════════════════════════════
-  //  ★★★ v11.0: محاسبه محدودیت کاربران بر اساس پلن
+  //  محاسبه محدودیت کاربران بر اساس پلن
   // ═══════════════════════════════════════════════════════════════
-  const resolvedPlanName: PlanName = ((): PlanName => {
-    const name = (planNameFromStore || currentTenant?.planName || currentTenant?.planTierName || 'simple')
-      .toString().toLowerCase().trim()
-    if (name.includes('enterprise') || name.includes('سازمانی') || name === 'enterprise') return 'enterprise'
-    if (name.includes('professional') || name.includes('پیشرفته') || name === 'professional') return 'professional'
-    return 'simple'
-  })()
+// ★ v11.9.9: لاگ دقیق برای ریشه‌یابی تشخیص پلن
+const planNameRaw = planNameFromStore || currentTenant?.planName || currentTenant?.planTierName || 'simple'
+console.log('[EmployeesTab] 🔍 Plan detection inputs:', {
+  planNameFromStore,
+  currentTenantPlanName: currentTenant?.planName,
+  currentTenantPlanTierName: currentTenant?.planTierName,
+  planNameRaw,
+  tenantInfo: currentTenant,
+})
 
-  const planInfo = PLANS[resolvedPlanName] || PLANS.simple
-  const maxUsers = planInfo.maxUsers  // 0 = نامحدود
-  const isUnlimitedUsers = maxUsers === 0
+const resolvedPlanName: PlanName = ((): PlanName => {
+  const name = planNameRaw.toString().toLowerCase().trim()
+  if (name.includes('enterprise') || name.includes('سازمانی') || name === 'enterprise') return 'enterprise'
+  if (name.includes('professional') || name.includes('پیشرفته') || name === 'professional') return 'professional'
+  return 'simple'
+})()
 
-  // شمارش کاربران فعال (غیرفعال‌ها در سقف محاسبه نمی‌شوند)
-  const activeUsersCount = useMemo(() => {
-    return users.filter(u => u.isActive !== false).length
-  }, [users])
+console.log('[EmployeesTab] 🔍 Resolved plan:', resolvedPlanName)
 
-  const totalUsersCount = users.length
-  const isAtLimit = !isUnlimitedUsers && activeUsersCount >= maxUsers
-  const remainingSlots = isUnlimitedUsers ? -1 : Math.max(0, maxUsers - activeUsersCount)
-  const usagePercent = isUnlimitedUsers ? 0 : maxUsers > 0 ? Math.round((activeUsersCount / maxUsers) * 100) : 0
+const planInfo = PLANS[resolvedPlanName] || PLANS.simple
+
+// ★ v11.9.8: مقادیر پیش‌فرض برای پلن‌ها (بر اساس طرح تجاری شما)
+// این مقادیر از فایل دیگری خوانده نمی‌شوند تا مطمئن باشیم همیشه مقدار دارند
+const PLAN_LIMITS_FALLBACK: Record<string, number> = {
+  simple: 2,        // پلن پایه: ۲ کاربر (۱ مدیر + ۱ صندوق‌دار)
+  professional: 5,  // پلن پیشرفته: ۵ کاربر (۱ مدیر + ۴ صندوق‌دار)
+  enterprise: 0,    // پلن حرفه‌ای: نامحدود (0 = نامحدود)
+}
+
+// اول از پلن بخوان، اگر نبود از جدول بالا بخوان، اگر باز هم نبود 2 بگذار
+const maxUsersFromPlan = planInfo.maxUsers
+const maxUsers = (maxUsersFromPlan !== undefined && maxUsersFromPlan !== null)
+  ? maxUsersFromPlan
+  : (PLAN_LIMITS_FALLBACK[resolvedPlanName] ?? 2)
+
+const isUnlimitedUsers = maxUsers === 0
+
+// ★ لاگ دقیق برای بررسی
+console.log('[EmployeesTab] Plan info:', {
+  resolvedPlanName,
+  maxUsersFromPlan,
+  maxUsers,
+  isUnlimitedUsers,
+  planInfoLabel: planInfo.label,
+})
+
+// ★ v11.9.6: شمارش صندوق‌داران فعال
+const activeCashiersCount = useMemo(() => {
+  return users.filter(u => u.isActive !== false && !isManagerRole(u.role)).length
+}, [users])
+
+const totalUsersCount = users.length
+const isAtLimit = !isUnlimitedUsers && activeCashiersCount >= maxUsers
+const remainingSlots = isUnlimitedUsers ? -1 : Math.max(0, maxUsers - activeCashiersCount)
+const usagePercent = isUnlimitedUsers ? 0 : maxUsers > 0 ? Math.round((activeCashiersCount / maxUsers) * 100) : 0
+
+// ★ v11.9.7: لاگ برای debug (بعد از تعریف همه متغیرها)
+console.log('[EmployeesTab] Plan info:', {
+  resolvedPlanName,
+  maxUsers,
+  isUnlimitedUsers,
+  activeCashiersCount,
+  isAtLimit,
+  remainingSlots,
+  usagePercent,
+})
 
   // ═══════════════════════════════════════════════════════════════
-  //  ★★★ v11.0: لیست مجوزهای دسترسی (فیلتر شده بر اساس پلن)
+  //  لیست مجوزهای دسترسی (فیلتر شده بر اساس پلن)
   // ═══════════════════════════════════════════════════════════════
-  // مجوزهای پایه که در همه پلن‌ها فعال هستند
   const BASE_PERMISSIONS = [
     { key: 'dashboard', label: 'داشبورد', minTier: 'simple' },
     { key: 'pos', label: 'صندوق فروش', minTier: 'simple' },
@@ -102,7 +155,6 @@ export function EmployeesTab() {
     { key: 'reports', label: 'گزارشات', minTier: 'simple' },
   ]
 
-  // مجوزهای پیشرفته که فقط در پلن‌های خاص فعال هستند
   const ADVANCED_PERMISSIONS = [
     { 
       key: 'installments', 
@@ -118,7 +170,6 @@ export function EmployeesTab() {
     },
   ]
 
-  // ساخت لیست نهایی مجوزها بر اساس پلن فعلی
   const CASHIER_PERMISSIONS = useMemo(() => {
     const available: typeof BASE_PERMISSIONS = [...BASE_PERMISSIONS]
     
@@ -136,7 +187,6 @@ export function EmployeesTab() {
     return available
   }, [planFeatures])
 
-  // لیست مجوزهای غیرفعال (برای نمایش با قفل)
   const LOCKED_PERMISSIONS = useMemo(() => {
     return ADVANCED_PERMISSIONS.filter((perm) => {
       const featureValue = planFeatures[perm.requiresFeature]
@@ -148,10 +198,9 @@ export function EmployeesTab() {
     setFormPermissions((prev) => prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key])
   }
 
-   const fetchUsers = useCallback(async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true)
     try {
-      // ★★★ اصلاح: حذف tenantId از URL (Middleware خودش آن را مدیریت می‌کند)
       const res = await fetch('/api/employees')
       const data = await res.json()
       
@@ -199,36 +248,41 @@ export function EmployeesTab() {
   }
 
   const handleAddUser = () => {
-    // ★★★ v11.0: بررسی محدودیت پلن قبل از باز کردن dialog
+    // بررسی محدودیت پلن قبل از باز کردن dialog
     if (isAtLimit) {
-      setFormError(`سقف کاربران پلن ${planInfo.label} (${maxUsers} کاربر) تکمیل شده است. برای افزودن کاربر بیشتر، لطفاً پلن خود را ارتقا دهید.`)
-      // نمایش alert ساده برای اطلاع‌رسانی سریع
+      setFormError(`سقف صندوق‌داران پلن ${planInfo.label} (${maxUsers} صندوق‌دار) تکمیل شده است. برای افزودن صندوق‌دار بیشتر، لطفاً پلن خود را ارتقا دهید.`)
       return
     }
     resetForm()
     setDialogOpen(true)
   }
 
-  const handleEditUser = (user: any) => {
-    setFormUsername(user.username)
-    setFormPassword('')
-    setFormMobile(user.mobile || '')
-    setFormRole(user.role as 'Cashier' | 'Manager')
-    let userPerms: string[] = []
-    const p = user.permissions
-    if (typeof p === 'string') {
-      try { userPerms = JSON.parse(p) } catch { userPerms = [] }
-    } else if (Array.isArray(p)) {
-      userPerms = p
-    }
-    // ★★★ v11.0: فیلتر مجوزهای ذخیره شده بر اساس پلن فعلی
-    // اگر کاربر قبلاً مجوزی داشته که الان در پلن فعال نیست، آن را حذف کن
-    const availableKeys = CASHIER_PERMISSIONS.map(p => p.key)
-    const filteredPerms = userPerms.filter(perm => availableKeys.includes(perm))
-    setFormPermissions(filteredPerms.length > 0 ? filteredPerms : ['pos'])
-    setEditUserId(user.id || user.userId)
-    setDialogOpen(true)
+const handleEditUser = (user: any) => {
+  setFormUsername(user.username)
+  setFormPassword('')
+  setFormMobile(user.mobile || '')
+  
+  // ★ v11.9.7: نقش واقعی کاربر را ست کن (نه همیشه Cashier)
+  if (isManagerRole(user.role)) {
+    setFormRole('Manager')
+  } else {
+    setFormRole('Cashier')
   }
+  
+  let userPerms: string[] = []
+  const p = user.permissions
+  if (typeof p === 'string') {
+    try { userPerms = JSON.parse(p) } catch { userPerms = [] }
+  } else if (Array.isArray(p)) {
+    userPerms = p
+  }
+  const availableKeys = CASHIER_PERMISSIONS.map(p => p.key)
+  const filteredPerms = userPerms.filter(perm => availableKeys.includes(perm))
+  setFormPermissions(filteredPerms.length > 0 ? filteredPerms : ['pos'])
+  setEditUserId(user.id || user.userId)
+  setFormError('')
+  setDialogOpen(true)
+}
 
   const handleSaveUser = async () => {
     setFormError('')
@@ -236,20 +290,16 @@ export function EmployeesTab() {
     if (!editUserId && !formPassword) { setFormError('رمز عبور الزامی است'); return }
     if (formPassword && formPassword.length < 6) { setFormError('رمز عبور باید حداقل ۶ کاراکتر باشد'); return }
     
-    // ★★★ v11.0: بررسی دوباره محدودیت قبل از ارسال (فقط برای ایجاد کاربر جدید)
-    if (!editUserId && isAtLimit) {
-      setFormError(`سقف کاربران پلن ${planInfo.label} (${maxUsers} کاربر) تکمیل شده است.`)
+    // ★ v11.9.6: جلوگیری از استفاده از نام کاربری مدیر اصلی
+    const mainAdmin = users.find(u => isManagerRole(u.role))
+    if (!editUserId && mainAdmin && formUsername === mainAdmin.username) {
+      setFormError('این نام کاربری رزرو شده است.')
       return
     }
     
-    // ★★★ v11.0: اگر نقش Manager انتخاب شده و پلن محدودیت دارد
-    // در پلن پایه و پیشرفته، فقط ۱ مدیر مجاز است (کاربر اصلی)
-    if (formRole === 'Manager' && !editUserId && !isUnlimitedUsers) {
-      const existingManagers = users.filter(u => u.role === 'Manager' && u.isActive !== false)
-      if (existingManagers.length >= 1) {
-        setFormError(`در پلن ${planInfo.label} فقط یک کاربر با نقش مدیر مجاز است.`)
-        return
-      }
+    if (!editUserId && isAtLimit) {
+      setFormError(`سقف صندوق‌داران پلن ${planInfo.label} (${maxUsers} صندوق‌دار) تکمیل شده است.`)
+      return
     }
     
     setFormSaving(true)
@@ -268,14 +318,12 @@ export function EmployeesTab() {
           tenantId: tid,
           permissions: formRole === 'Cashier' ? formPermissions : undefined,
         }
-        console.log('[EmployeesTab] PUT request body:', { ...requestBody, password: requestBody.password ? '***' : undefined })
 
         const res = await fetch('/api/employees', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         })
         const data = await res.json()
-        console.log('[EmployeesTab] PUT response:', data)
 
         if (!data.success) {
           setFormError(data.error || 'خطا در ویرایش کاربر')
@@ -291,14 +339,12 @@ export function EmployeesTab() {
           tenantId: tid,
           permissions: formRole === 'Cashier' ? formPermissions : undefined,
         }
-        console.log('[EmployeesTab] POST request body:', { ...requestBody, password: '***' })
 
         const res = await fetch('/api/employees', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
         })
         const data = await res.json()
-        console.log('[EmployeesTab] POST response:', data)
 
         if (!data.success) { setFormError(data.error || 'خطا در افزودن کاربر'); setFormSaving(false); return }
       }
@@ -313,9 +359,14 @@ export function EmployeesTab() {
   }
 
   const toggleUserActive = async (user: any) => {
-    // ★★★ v11.0: اگر در حال فعال‌سازی است و به سقف رسیده، هشدار بده
+    // ★ v11.9.6: جلوگیری از غیرفعال‌سازی مدیر اصلی (بر اساس نقش)
+    if (isManagerRole(user.role)) {
+      alert('مدیر اصلی را نمی‌توان غیرفعال کرد.')
+      return
+    }
+    
     if (user.isActive === false && isAtLimit) {
-      alert(`سقف کاربران فعال پلن ${planInfo.label} (${maxUsers} کاربر) تکمیل شده است. ابتدا یک کاربر دیگر را غیرفعال کنید.`)
+      alert(`سقف صندوق‌داران فعال پلن ${planInfo.label} (${maxUsers} صندوق‌دار) تکمیل شده است. ابتدا یک صندوق‌دار دیگر را غیرفعال کنید.`)
       return
     }
     
@@ -357,7 +408,8 @@ export function EmployeesTab() {
   }
 
   const getPermissionLabels = (user: any) => {
-    if (user.role === 'Manager') return 'دسترسی کامل'
+    // ★ v11.9.6: تشخیص مدیر بر اساس نقش
+    if (isManagerRole(user.role)) return 'دسترسی کامل'
     let perms: string[] = []
     const p = user.permissions
     if (typeof p === 'string') { try { perms = JSON.parse(p) } catch { perms = [] } } else if (Array.isArray(p)) { perms = p }
@@ -371,9 +423,6 @@ export function EmployeesTab() {
     return d.toLocaleDateString('fa-IR') + ' ' + d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  //  ★★★ v11.0: رنگ بنر محدودیت بر اساس درصد استفاده
-  // ═══════════════════════════════════════════════════════════════
   const getLimitBarColor = () => {
     if (isUnlimitedUsers) return 'bg-emerald-500'
     if (usagePercent >= 100) return 'bg-red-500'
@@ -381,17 +430,9 @@ export function EmployeesTab() {
     return 'bg-emerald-500'
   }
 
-  const getLimitAlertStyle = () => {
-    if (isAtLimit) return 'border-red-200 bg-red-50'
-    if (usagePercent >= 80) return 'border-amber-200 bg-amber-50'
-    return 'border-emerald-200 bg-emerald-50'
-  }
-
   return (
     <div className="space-y-1.5">
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/*  ★★★ v11.0: بنر محدودیت کاربران پلن                          */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* بنر محدودیت کاربران پلن */}
       <Card className={`border ${isAtLimit ? 'border-red-200' : 'border-gray-200'}`}>
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start gap-3">
@@ -415,7 +456,7 @@ export function EmployeesTab() {
               <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-sm font-bold text-gray-900">
-                    محدودیت کاربران پلن
+                    محدودیت صندوق‌داران پلن
                   </h3>
                   <Badge className={`text-[10px] ${
                     resolvedPlanName === 'enterprise' 
@@ -433,13 +474,13 @@ export function EmployeesTab() {
                   <span className="text-sm font-black text-gray-900">
                     {isUnlimitedUsers ? (
                       <>
-                        <span className="text-emerald-600">{activeUsersCount}</span>
-                        <span className="text-gray-500 text-xs mr-1">کاربر فعال</span>
+                        <span className="text-emerald-600">{activeCashiersCount}</span>
+                        <span className="text-gray-500 text-xs mr-1">صندوق‌دار فعال</span>
                       </>
                     ) : (
                       <>
                         <span className={isAtLimit ? 'text-red-600' : usagePercent >= 80 ? 'text-amber-600' : 'text-emerald-600'}>
-                          {activeUsersCount}
+                          {activeCashiersCount}
                         </span>
                         <span className="text-gray-500 text-xs"> از </span>
                         <span className="text-gray-900">{maxUsers}</span>
@@ -449,7 +490,6 @@ export function EmployeesTab() {
                 </div>
               </div>
               
-              {/* Progress Bar */}
               {!isUnlimitedUsers && (
                 <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-1.5">
                   <div 
@@ -459,18 +499,16 @@ export function EmployeesTab() {
                 </div>
               )}
               
-              {/* پیام وضعیت */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 {isUnlimitedUsers ? (
                   <p className="text-xs text-emerald-700 flex items-center gap-1">
                     <Infinity className="w-3 h-3" />
-                    پلن شما بدون محدودیت کاربر است. هر تعداد کاربر که نیاز دارید اضافه کنید.
+                    پلن شما بدون محدودیت صندوق‌دار است.
                   </p>
                 ) : isAtLimit ? (
                   <p className="text-xs text-red-700 flex items-center gap-1">
                     <AlertCircle className="w-3 h-3 shrink-0" />
-                    <span className="font-bold">سقف کاربران تکمیل شده است!</span>
-                    <span>برای افزودن کاربر بیشتر، پلن خود را ارتقا دهید.</span>
+                    <span className="font-bold">سقف صندوق‌داران تکمیل شده است!</span>
                   </p>
                 ) : usagePercent >= 80 ? (
                   <p className="text-xs text-amber-700 flex items-center gap-1">
@@ -480,21 +518,8 @@ export function EmployeesTab() {
                 ) : (
                   <p className="text-xs text-gray-600 flex items-center gap-1">
                     <Info className="w-3 h-3 shrink-0" />
-                    <span>{remainingSlots} جای خالی برای افزودن کاربر جدید دارید.</span>
+                    <span>{remainingSlots} جای خالی برای افزودن صندوق‌دار جدید دارید.</span>
                   </p>
-                )}
-                
-                {/* لینک به صفحه ارتقا (در صورت رسیدن به سقف) */}
-                {isAtLimit && resolvedPlanName !== 'enterprise' && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="text-xs text-violet-600 hover:text-violet-700 p-0 h-auto"
-                    onClick={() => window.location.href = '/settings?tab=subscription'}
-                  >
-                    <Crown className="w-3 h-3 ml-1" />
-                    ارتقای پلن
-                  </Button>
                 )}
               </div>
             </div>
@@ -518,22 +543,19 @@ export function EmployeesTab() {
               <Button
                 size="sm"
                 disabled
-                title="در حالت تست دمو، افزودن کاربر جدید غیرفعال است"
                 className="bg-gray-300 text-gray-500 cursor-not-allowed w-full sm:w-auto gap-1"
               >
                 <Lock className="w-3.5 h-3.5 ms-1" />
                 افزودن صندوق‌دار (غیرفعال در دمو)
               </Button>
             ) : isAtLimit ? (
-              // ★★★ v11.0: دکمه غیرفعال در صورت رسیدن به سقف
               <Button
                 size="sm"
                 disabled
-                title={`سقف ${maxUsers} کاربر پلن ${planInfo.label} تکمیل شده است`}
                 className="bg-red-100 text-red-700 border border-red-200 hover:bg-red-100 cursor-not-allowed w-full sm:w-auto gap-1"
               >
                 <Lock className="w-3.5 h-3.5 ms-1" />
-                سقف تکمیل ({activeUsersCount}/{maxUsers})
+                سقف تکمیل ({activeCashiersCount}/{maxUsers})
               </Button>
             ) : (
               <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto" onClick={handleAddUser}>
@@ -573,45 +595,99 @@ export function EmployeesTab() {
                     {users.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-500 text-sm">
-                          هنوز کاربری اضافه نشده است. روی "افزودن صندوق‌دار" کلیک کنید.
+                          هنوز صندوق‌داری اضافه نشده است. روی "افزودن صندوق‌دار" کلیک کنید.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      users.map((user, index) => (
-                        <TableRow key={user.id || user.userId || index} className="hover:bg-emerald-50/50" dir="rtl">
-                          <TableCell className="text-sm font-medium whitespace-nowrap text-right">{user.username}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right">
-                            <Badge className={`text-xs ${user.role === 'Manager' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-700 border-gray-200'}`} variant="outline">
-                              {user.role === 'Manager' ? 'مدیر' : 'صندوق‌دار'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-gray-600 max-w-[180px] hidden md:table-cell text-right">
-                            <span className="line-clamp-2">{getPermissionLabels(user)}</span>
-                          </TableCell>
-                          <TableCell className="text-sm whitespace-nowrap hidden sm:table-cell text-right" dir="ltr">{user.mobile || '—'}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right">
-                            <Badge className={`text-xs ${user.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`} variant="outline">
-                              {user.isActive ? 'فعال' : 'غیرفعال'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm text-gray-500 whitespace-nowrap hidden lg:table-cell text-right">{formatDate(user.lastLoginAt)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right">
-                            <div className="flex items-center gap-1 justify-end">
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-gray-500 hover:text-emerald-700" onClick={() => handleEditUser(user)} title="ویرایش">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="sm" className={`h-8 w-8 p-0 ${user.isActive ? 'text-amber-500 hover:text-amber-700' : 'text-emerald-500 hover:text-emerald-700'}`} onClick={() => toggleUserActive(user)} title={user.isActive ? 'غیرفعال کردن' : 'فعال کردن'}>
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                              </Button>
-                              {user.role !== 'Manager' && (
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-500 hover:text-red-700" onClick={() => handleDeleteClick(user.id || user.userId)} title="حذف">
-                                  <Trash2 className="w-3.5 h-3.5" />
+                      users.map((user, index) => {
+                        // ★ v11.9.6: تشخیص مدیر اصلی بر اساس نقش
+                        const isMainAdmin = isManagerRole(user.role)
+                        
+                        return (
+                          <TableRow 
+                            key={user.id || user.userId || index} 
+                            className={`hover:bg-emerald-50/50 ${isMainAdmin ? 'bg-blue-50/30' : ''}`} 
+                            dir="rtl"
+                          >
+                            <TableCell className="text-sm font-medium whitespace-nowrap text-right">
+                              <div className="flex items-center gap-1.5">
+                                {user.username}
+                                {isMainAdmin && (
+                                  <Badge className="text-[9px] bg-blue-100 text-blue-700 border-blue-200">
+                                    <Shield className="w-2.5 h-2.5 ml-0.5" />
+                                    اصلی
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-right">
+                              {/* ★ v11.9.6: تشخیص نقش بر اساس تمام نقش‌های مدیریتی */}
+                              <Badge className={`text-xs ${
+                                isMainAdmin 
+                                  ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                                  : 'bg-gray-100 text-gray-700 border-gray-200'
+                              }`} variant="outline">
+                                {isMainAdmin ? 'مدیر' : 'صندوق‌دار'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-gray-600 max-w-[180px] hidden md:table-cell text-right">
+                              <span className="line-clamp-2">{getPermissionLabels(user)}</span>
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap hidden sm:table-cell text-right" dir="ltr">{user.mobile || '—'}</TableCell>
+                            <TableCell className="whitespace-nowrap text-right">
+                              <Badge className={`text-xs ${user.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`} variant="outline">
+                                {user.isActive ? 'فعال' : 'غیرفعال'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-gray-500 whitespace-nowrap hidden lg:table-cell text-right">{formatDate(user.lastLoginAt)}</TableCell>
+                            <TableCell className="whitespace-nowrap text-right">
+                              <div className="flex items-center gap-1 justify-end">
+                                {/* دکمه ویرایش */}
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 w-8 p-0 text-gray-500 hover:text-emerald-700" 
+                                  onClick={() => handleEditUser(user)} 
+                                  title={isMainAdmin ? 'ویرایش اطلاعات مدیر اصلی' : 'ویرایش'}
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
                                 </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                                
+                                {/* دکمه فعال/غیرفعال - برای مدیر اصلی غیرفعال است */}
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className={`h-8 w-8 p-0 ${
+                                    isMainAdmin 
+                                      ? 'text-gray-300 cursor-not-allowed' 
+                                      : user.isActive 
+                                        ? 'text-amber-500 hover:text-amber-700' 
+                                        : 'text-emerald-500 hover:text-emerald-700'
+                                  }`} 
+                                  onClick={() => !isMainAdmin && toggleUserActive(user)} 
+                                  disabled={isMainAdmin}
+                                  title={isMainAdmin ? 'مدیر اصلی قابل غیرفعال‌سازی نیست' : user.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                </Button>
+                                
+                                {/* دکمه حذف - برای مدیر اصلی مخفی است */}
+                                {!isMainAdmin && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700" 
+                                    onClick={() => handleDeleteClick(user.id || user.userId)} 
+                                    title="حذف"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
                     )}
                   </TableBody>
                 </Table>
@@ -621,30 +697,28 @@ export function EmployeesTab() {
         </CardContent>
       </Card>
 
+      {/* دیالوگ افزودن/ویرایش */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm() }}>
         <DialogContent className="w-[95vw] sm:max-w-[550px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
-              {editUserId ? <><Pencil className="w-4 h-4 text-emerald-600 shrink-0" />ویرایش کاربر</> : <><Plus className="w-4 h-4 text-emerald-600 shrink-0" />افزودن کاربر جدید</>}
+              {editUserId ? <><Pencil className="w-4 h-4 text-emerald-600 shrink-0" />ویرایش کاربر</> : <><Plus className="w-4 h-4 text-emerald-600 shrink-0" />افزودن صندوق‌دار جدید</>}
             </DialogTitle>
             <DialogDescription className="text-sm">
-              {editUserId ? 'اطلاعات کاربر را ویرایش کنید' : 'اطلاعات کاربر جدید را وارد کنید'}
+              {editUserId ? 'اطلاعات کاربر را ویرایش کنید' : 'اطلاعات صندوق‌دار جدید را وارد کنید'}
               {!editUserId && !isUnlimitedUsers && (
                 <span className="block mt-1 text-xs">
-                  با افزودن این کاربر، {activeUsersCount + 1} از {maxUsers} جای پلن {planInfo.label} پر می‌شود.
+                  با افزودن این صندوق‌دار، {activeCashiersCount + 1} از {maxUsers} جای پلن {planInfo.label} پر می‌شود.
                 </span>
               )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2 sm:py-3">
-            {/* ★★★ v11.0: هشدار رسیدن به سقف (در صورت وجود) */}
             {!editUserId && isAtLimit && (
               <Alert className="border-red-200 bg-red-50">
                 <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
                 <AlertDescription className="text-red-700 text-sm">
-                  <span className="font-bold">سقف کاربران پلن تکمیل شده است!</span>
-                  <br />
-                  برای افزودن کاربر بیشتر، لطفاً یک کاربر موجود را حذف یا غیرفعال کنید، یا پلن خود را ارتقا دهید.
+                  <span className="font-bold">سقف صندوق‌داران پلن تکمیل شده است!</span>
                 </AlertDescription>
               </Alert>
             )}
@@ -652,7 +726,13 @@ export function EmployeesTab() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="space-y-1.5">
                 <Label htmlFor="emp-username">نام کاربری</Label>
-                <Input id="emp-username" value={formUsername} onChange={(e) => setFormUsername(e.target.value)} placeholder="مثال: cashier3" dir="ltr" />
+                <Input 
+                  id="emp-username" 
+                  value={formUsername} 
+                  onChange={(e) => setFormUsername(e.target.value)} 
+                  placeholder="مثال: cashier1" 
+                  dir="ltr"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp-password">رمز عبور {editUserId && '(خالی = بدون تغییر)'}</Label>
@@ -664,72 +744,82 @@ export function EmployeesTab() {
                 <Label htmlFor="emp-mobile">شماره موبایل</Label>
                 <Input id="emp-mobile" type="tel" value={formMobile} onChange={(e) => setFormMobile(e.target.value)} placeholder="۰۹۱۲۱۲۳۴۵۶۷" dir="ltr" />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="emp-role">نقش</Label>
-                <Select value={formRole} onValueChange={(v) => setFormRole(v as 'Cashier' | 'Manager')}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Cashier">صندوق‌دار</SelectItem>
-                    <SelectItem value="Manager">مدیر</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-1.5">
+  <Label htmlFor="emp-role">نقش</Label>
+  {/* ★ v11.9.7: نقش هوشمند بر اساس نوع کاربر */}
+  <Select 
+    value={formRole} 
+    onValueChange={(v) => setFormRole(v as 'Cashier' | 'Manager')}
+    disabled={true}  // همیشه غیرفعال - نقش قابل تغییر نیست
+  >
+    <SelectTrigger className="w-full">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+      {editUserId ? (
+        // ویرایش کاربر موجود: نمایش نقش واقعی
+        formRole === 'Manager' ? (
+          <SelectItem value="Manager">مدیر</SelectItem>
+        ) : (
+          <SelectItem value="Cashier">صندوق‌دار</SelectItem>
+        )
+      ) : (
+        // کاربر جدید: فقط صندوق‌دار
+        <SelectItem value="Cashier">صندوق‌دار</SelectItem>
+      )}
+    </SelectContent>
+  </Select>
+  <p className="text-[9px] text-gray-500">
+    {editUserId 
+      ? (formRole === 'Manager' 
+          ? 'مدیر اصلی - نقش قابل تغییر نیست' 
+          : 'صندوق‌دار - نقش قابل تغییر نیست')
+      : 'کاربران جدید همیشه به عنوان صندوق‌دار ایجاد می‌شوند.'
+    }
+  </p>
+</div>
             </div>
-            {formRole === 'Cashier' && (
-              <div className="space-y-2 p-2.5 sm:p-3.5 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                  <Label className="text-sm font-semibold text-amber-800">مجوزهای دسترسی صندوق‌دار</Label>
-                </div>
-                <p className="text-xs text-amber-700">منوهایی که این صندوق‌دار می‌بیند و به آنها دسترسی دارد. مدیر همیشه دسترسی کامل دارد.</p>
-                <p className="text-xs text-amber-600">
-                  <Info className="w-3 h-3 inline ml-1" />
-                  فقط منوهای فعال در پلن <span className="font-bold">{planInfo.label}</span> قابل انتخاب هستند.
-                </p>
-                
-                {/* مجوزهای فعال (قابل انتخاب) */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-                  {CASHIER_PERMISSIONS.map((perm) => (
-                    <label key={perm.key} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all text-sm ${formPermissions.includes(perm.key) ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                      <input type="checkbox" checked={formPermissions.includes(perm.key)} onChange={() => togglePermission(perm.key)} className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
-                      <span className="truncate">{perm.label}</span>
-                    </label>
-                  ))}
-                </div>
-                
-                {/* مجوزهای قفل‌شده (غیرفعال در پلن فعلی) */}
-                {LOCKED_PERMISSIONS.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-amber-200">
-                    <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
-                      <Lock className="w-3 h-3" />
-                      منوهای قفل‌شده (نیاز به ارتقای پلن):
-                    </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {LOCKED_PERMISSIONS.map((perm) => (
-                        <div 
-                          key={perm.key} 
-                          className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 text-gray-400 text-sm cursor-not-allowed"
-                          title={`برای دسترسی به "${perm.label}" باید پلن را به ${perm.tierLabel} ارتقا دهید`}
-                        >
-                          <Lock className="w-3 h-3 shrink-0" />
-                          <span className="truncate line-through">{perm.label}</span>
-                        </div>
-                      ))}
-                    </div>
+            
+            {/* مجوزهای دسترسی - فقط برای صندوق‌دار */}
+            <div className="space-y-2 p-2.5 sm:p-3.5 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                <Label className="text-sm font-semibold text-amber-800">مجوزهای دسترسی صندوق‌دار</Label>
+              </div>
+              <p className="text-xs text-amber-700">منوهایی که این صندوق‌دار می‌بیند و به آنها دسترسی دارد.</p>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                {CASHIER_PERMISSIONS.map((perm) => (
+                  <label key={perm.key} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all text-sm ${formPermissions.includes(perm.key) ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    <input type="checkbox" checked={formPermissions.includes(perm.key)} onChange={() => togglePermission(perm.key)} className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
+                    <span className="truncate">{perm.label}</span>
+                  </label>
+                ))}
+              </div>
+              
+              {LOCKED_PERMISSIONS.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-amber-200">
+                  <p className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    منوهای قفل‌شده (نیاز به ارتقای پلن):
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {LOCKED_PERMISSIONS.map((perm) => (
+                      <div 
+                        key={perm.key} 
+                        className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 text-gray-400 text-sm cursor-not-allowed"
+                      >
+                        <Lock className="w-3 h-3 shrink-0" />
+                        <span className="truncate line-through">{perm.label}</span>
+                      </div>
+                    ))}
                   </div>
-                )}
-                
-                {formPermissions.length === 0 && <p className="text-xs text-red-500 mt-1">حداقل یک مجوز باید انتخاب شود</p>}
-              </div>
-            )}
-            {formRole === 'Manager' && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                <div className="flex items-center gap-2 text-sm text-emerald-800">
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                  <span>مدیر دسترسی کامل به تمام بخش‌ها دارد</span>
                 </div>
-              </div>
-            )}
+              )}
+              
+              {formPermissions.length === 0 && <p className="text-xs text-red-500 mt-1">حداقل یک مجوز باید انتخاب شود</p>}
+            </div>
+            
             {formError && (
               <Alert className="border-red-200 bg-red-50">
                 <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
@@ -744,11 +834,11 @@ export function EmployeesTab() {
               onClick={handleSaveUser} 
               disabled={
                 formSaving || 
-                (formRole === 'Cashier' && formPermissions.length === 0) ||
+                formPermissions.length === 0 ||
                 (!editUserId && isAtLimit)
               }
             >
-              {formSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : editUserId ? 'ذخیره تغییرات' : 'افزودن کاربر'}
+              {formSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : editUserId ? 'ذخیره تغییرات' : 'افزودن صندوق‌دار'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -757,8 +847,8 @@ export function EmployeesTab() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="w-[95vw] sm:max-w-[425px]">
           <AlertDialogHeader>
-            <AlertDialogTitle>حذف کاربر</AlertDialogTitle>
-            <AlertDialogDescription>آیا از حذف این کاربر اطمینان دارید؟ این عمل قابل بازگشت نیست.</AlertDialogDescription>
+            <AlertDialogTitle>حذف صندوق‌دار</AlertDialogTitle>
+            <AlertDialogDescription>آیا از حذف این صندوق‌دار اطمینان دارید؟ این عمل قابل بازگشت نیست.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row gap-2 sm:gap-2">
             <AlertDialogCancel className="w-full sm:w-auto">انصراف</AlertDialogCancel>

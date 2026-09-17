@@ -7,6 +7,11 @@
  *   ★ جستجو بر اساس username, mobile, storeName (نه firstName/lastName)
  *   ★ پشتیبانی از نقش Admin علاوه بر Manager
  *
+ * ★ v11.9.5: محافظت از کاربر اصلی (admin/Manager)
+ *   - جلوگیری از ایجاد Manager جدید
+ *   - جلوگیری از تغییر نقش admin
+ *   - جلوگیری از حذف admin
+ *
  * ستون‌های واقعی StoreUser:
  *   id, username, password, mobile, role, permissions, tenantId,
  *   storeId, storeName, isActive, lastLoginAt, createdAt, updatedAt,
@@ -19,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation';
 import { requireSubscriptionAndLimit } from '@/lib/plan-guard';
 import bcrypt from 'bcryptjs';
+import { logger } from '@/lib/system-logger';
 
 // ─── GET: لیست کاربران فروشگاه ────────────────────────────────
 export const GET = withTenantAndPermission('employees')(
@@ -100,6 +106,26 @@ export const POST = withTenantAndPermission('employees')(
         );
       }
 
+      // ★ v11.9.5: جلوگیری از ایجاد کاربر با نقش Manager
+      // Manager فقط از register ایجاد می‌شود (کاربر اصلی)
+      if (body.role === 'Manager' || body.role === 'Admin' || body.role === 'Owner') {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'ایجاد کاربر با نقش مدیر از این بخش امکان‌پذیر نیست. مدیر اصلی فقط هنگام ثبت‌نام فروشگاه ایجاد می‌شود.' 
+          },
+          { status: 403 }
+        );
+      }
+
+      // ★ v11.9.5: جلوگیری از استفاده از username='admin' (مخصوص مدیر اصلی)
+      if (body.username === 'admin') {
+        return NextResponse.json(
+          { success: false, error: 'نام کاربری "admin" رزرو شده است و فقط برای مدیر اصلی قابل استفاده است.' },
+          { status: 400 }
+        );
+      }
+
       // ★ بررسی تکراری نبودن نام کاربری
       const where: any = { username: body.username };
       if (!tenant.isIsolated) where.tenantId = tenant.tenantId;
@@ -116,11 +142,12 @@ export const POST = withTenantAndPermission('employees')(
       const hashedPassword = await bcrypt.hash(body.password, 10);
 
       // ★ ستون‌های واقعی — بدون firstName/lastName
+      // ★ v11.9.5: role همیشه Cashier (فقط مدیر اصلی Manager است)
       const userData: any = {
         username: body.username,
         password: hashedPassword,
         mobile: body.mobile || null,
-        role: body.role || 'Cashier',
+        role: 'Cashier',  // ★ همیشه Cashier برای کاربران جدید
         permissions: body.permissions || null,
         storeId: body.storeId || null,
         storeName: body.storeName || null,
@@ -135,6 +162,15 @@ export const POST = withTenantAndPermission('employees')(
 
       const user = await tenant.tenantDb.storeUser.create({
         data: userData,
+      });
+
+      // ★ v11.9.5: لاگ ایجاد صندوق‌دار جدید
+      logger.info('صندوق‌دار جدید اضافه شد', {
+        tenantId: tenant.tenantId,
+        username: body.username,
+        role: 'Cashier',
+        createdBy: tenant.user.username,
+        permissions: body.permissions || [],
       });
 
       // ★ بدون برگرداندن رمز عبور
@@ -183,6 +219,35 @@ export const PUT = withTenantAndPermission('employees')(
         );
       }
 
+      // ★ v11.9.5: محافظت از کاربر اصلی (admin)
+      if (existing.username === 'admin') {
+        // جلوگیری از تغییر نقش admin
+        if (body.role !== undefined && body.role !== 'Manager') {
+          return NextResponse.json(
+            { success: false, error: 'نقش مدیر اصلی قابل تغییر نیست.' },
+            { status: 403 }
+          );
+        }
+        
+        // جلوگیری از غیرفعال‌سازی admin
+        if (body.isActive === false) {
+          return NextResponse.json(
+            { success: false, error: 'مدیر اصلی را نمی‌توان غیرفعال کرد.' },
+            { status: 403 }
+          );
+        }
+      }
+
+      // ★ v11.9.5: جلوگیری از تغییر نقش صندوق‌دار به Manager
+      if (body.role === 'Manager' || body.role === 'Admin' || body.role === 'Owner') {
+        if (existing.username !== 'admin') {
+          return NextResponse.json(
+            { success: false, error: 'تغییر نقش به مدیر امکان‌پذیر نیست.' },
+            { status: 403 }
+          );
+        }
+      }
+
       // ★ ستون‌های واقعی — بدون firstName/lastName
       const updateData: any = {};
       if (body.mobile !== undefined) updateData.mobile = body.mobile;
@@ -202,6 +267,15 @@ export const PUT = withTenantAndPermission('employees')(
       const user = await tenant.tenantDb.storeUser.update({
         where: { id: body.id },
         data: updateData,
+      });
+
+      // ★ v11.9.5: لاگ ویرایش کاربر
+      logger.info('کاربر ویرایش شد', {
+        tenantId: tenant.tenantId,
+        userId: body.id,
+        username: existing.username,
+        changes: Object.keys(updateData),
+        editedBy: tenant.user.username,
       });
 
       // ★ بدون برگرداندن رمز عبور
@@ -251,10 +325,27 @@ export const DELETE = withTenantAndPermission('employees')(
         );
       }
 
+      // ★ v11.9.5: جلوگیری از حذف مدیر اصلی (admin)
+      if (existing.username === 'admin' && existing.role === 'Manager') {
+        return NextResponse.json(
+          { success: false, error: 'مدیر اصلی قابل حذف نیست.' },
+          { status: 403 }
+        );
+      }
+
       // ★ به جای حذف واقعی، غیرفعال می‌کنیم (soft delete)
       await tenant.tenantDb.storeUser.update({
         where: { id },
         data: { isActive: false },
+      });
+
+      // ★ v11.9.5: لاگ حذف (غیرفعال‌سازی) کاربر
+      logger.info('کاربر غیرفعال شد', {
+        tenantId: tenant.tenantId,
+        userId: id,
+        username: existing.username,
+        role: existing.role,
+        deletedBy: tenant.user.username,
       });
 
       return NextResponse.json({ success: true, message: 'کاربر غیرفعال شد.' });
