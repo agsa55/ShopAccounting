@@ -1,27 +1,39 @@
 import { MetadataRoute } from 'next'
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://rahgooshasf.ir'
-  const currentDate = new Date().toISOString()
+  const baseUrl = 'https://rahgooshasf.ir'
+  const today = new Date().toISOString()
 
   return [
     {
       url: baseUrl,
-      lastModified: currentDate,
-      changeFrequency: 'weekly',
+      lastModified: today,
+      changeFrequency: 'daily',
       priority: 1.0,
     },
     {
       url: `${baseUrl}/auth/login`,
-      lastModified: currentDate,
+      lastModified: today,
       changeFrequency: 'monthly',
-      priority: 0.8,
+      priority: 0.7,
     },
     {
       url: `${baseUrl}/auth/register`,
-      lastModified: currentDate,
+      lastModified: today,
       changeFrequency: 'monthly',
-      priority: 0.8,
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/offline`,
+      lastModified: today,
+      changeFrequency: 'monthly',
+      priority: 0.3,
+    },
+    {
+      url: `${baseUrl}/renewal`,
+      lastModified: today,
+      changeFrequency: 'monthly',
+      priority: 0.5,
     },
   ]
 }

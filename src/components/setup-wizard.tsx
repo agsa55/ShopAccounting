@@ -1,7 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/setup-wizard.tsx — v10.9 ★★★
+// src/components/setup-wizard.tsx — v10.10 ★★★
+// ★ v10.10: اجباری کردن ویزارد راه‌اندازی + دکمه پیش‌فرض
 // ★ v10.9: جلوگیری از Double Submit + پاک‌سازی cache
 // ★ v3.1: پشتیبانی از حالت basic_renewal_setup برای پلن پایه
 // ============================================================================
@@ -415,9 +416,6 @@ export function useSetupWizard() {
         markWizardDone(tenantId)
       }
 
-      // ═══════════════════════════════════════════════════════════════
-      // ★ v10.9: پاک‌سازی کامل cache برای جلوگیری از نمایش داده‌های قدیمی
-      // ═══════════════════════════════════════════════════════════════
       if (typeof window !== 'undefined') {
         console.log('[SetupWizard] 🧹 Clearing cache after wizard completion...')
 
@@ -443,7 +441,6 @@ export function useSetupWizard() {
     setWizardMode(null)
     setRenewalData(null)
 
-    // ★ v10.9: Force reload dashboard بعد از ۵۰۰ میلی‌ثانیه
     setTimeout(() => {
       if (typeof window !== 'undefined') {
         console.log('[SetupWizard] 🔄 Reloading page to fetch fresh data...')
@@ -501,7 +498,6 @@ export function SetupWizard(props: SetupWizardProps) {
   // ═══ State های حالت بار اول ═══
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
-  // ★ v10.9: flag جداگانه برای جلوگیری از Double Submit در saveBalance
   const [savingBalance, setSavingBalance] = useState(false)
 
   const [fyName, setFyName] = useState('')
@@ -526,7 +522,6 @@ export function SetupWizard(props: SetupWizardProps) {
   const [balError, setBalError] = useState('')
   const [balIsPosted, setBalIsPosted] = useState(false)
 
-  // ═══ مقداردهی اولیه برای حالت تمدید ═══
   useEffect(() => {
     if (isRenewalMode && renewalData) {
       setRenewalFYName(renewalData.suggestedNewYear?.name || '')
@@ -710,11 +705,7 @@ export function SetupWizard(props: SetupWizardProps) {
     setBalError('')
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★ v10.9: saveBalance با flag جلوگیری از Double Submit
-  // ═══════════════════════════════════════════════════════════════
   const saveBalance = async (): Promise<boolean> => {
-    // ★ جلوگیری از Double Submit
     if (savingBalance) {
       console.log('[SetupWizard] ⚠️ saveBalance already in progress, ignoring duplicate call')
       return false
@@ -722,7 +713,6 @@ export function SetupWizard(props: SetupWizardProps) {
 
     if (balItems.length === 0) return true
 
-    // ★ v10.9: Pre-check — آیا قبلاً موجودی ثبت شده؟
     try {
       const checkRes = await fetch('/api/initial-balance', {
         headers: getToken(),
@@ -762,7 +752,6 @@ export function SetupWizard(props: SetupWizardProps) {
         description: b.description?.trim() || '',
       })),
       postToJournal: false,
-      // ★ v10.9.10: همیشه تاریخ امروز را ارسال کن
       date: new Date().toISOString().split('T')[0],
     }
 
@@ -783,7 +772,6 @@ export function SetupWizard(props: SetupWizardProps) {
 
       const data = await res.json()
 
-      // ★ v10.9: اگر skipped بود (idempotency)، موفق در نظر بگیر
       if (data.success || data.data?.skipped) {
         setBalIsPosted(false)
         toast({
@@ -812,7 +800,6 @@ export function SetupWizard(props: SetupWizardProps) {
   const totalEquity = totalAssets - totalLiab
 
   const handleNext = async () => {
-    // ★ v10.9: جلوگیری از Double Submit در navigation
     if (saving || savingBalance) {
       console.log('[SetupWizard] ⚠️ Already saving, ignoring duplicate click')
       return
@@ -843,7 +830,7 @@ export function SetupWizard(props: SetupWizardProps) {
           const ok = await saveWH(whName, whCode)
           if (ok) { setWhName(''); setWhCode(''); setStep(2) }
         } else {
-          setWhError('حداقل یک انبار ایجاد کنید یا روی «رد کردن» کلیک کنید')
+          setWhError('حداقل یک انبار ایجاد کنید یا از دکمه «استفاده از پیش‌فرض» استفاده کنید')
         }
         return
       }
@@ -862,6 +849,7 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }
 
+  // ★ v10.10: دکمه "استفاده از پیش‌فرض" - داده پیش‌فرض می‌سازد و به مرحله بعد می‌رود
   const handleSkip = async () => {
     if (saving) return
     setSaving(true)
@@ -1033,21 +1021,37 @@ export function SetupWizard(props: SetupWizardProps) {
   ]
   const pct = step >= 3 ? 100 : Math.round((step / 3) * 100)
 
+  // ★ v10.10: بررسی اینکه آیا ویزارد تکمیل شده است
+  const isWizardCompleted = isRenewalMode || isBasicRenewalMode 
+    ? renewalSuccess 
+    : step >= 3
+
   return (
     <Dialog open={open} onOpenChange={v => {
+      // ★ v10.10: فقط وقتی ویزارد تکمیل شده اجازه بسته شدن بده
       if (!v) {
-        if (isRenewalMode && !renewalSuccess) return
-        if (isBasicRenewalMode && !renewalSuccess) return
-        handleFinish()
-      } else {
-        onOpenChange(true)
+        if (isWizardCompleted) {
+          handleFinish()
+        }
+        return
       }
+      onOpenChange(true)
     }}>
       <DialogContent
-        className="max-w-xl w-[95vw] max-h-[92vh] overflow-y-auto"
+        className="max-w-xl w-[95vw] max-h-[92vh] overflow-y-auto [&>button:last-child]:hidden [&>button.absolute]:hidden"
         dir="rtl"
-        onInteractOutside={e => (isRenewalMode || isBasicRenewalMode) && e.preventDefault()}
-        onEscapeKeyDown={e => (isRenewalMode || isBasicRenewalMode) && e.preventDefault()}
+        onInteractOutside={e => {
+          // ★ v10.10: جلوگیری از بسته شدن با کلیک روی backdrop
+          if (!isWizardCompleted) {
+            e.preventDefault()
+          }
+        }}
+        onEscapeKeyDown={e => {
+          // ★ v10.10: جلوگیری از بسته شدن با Escape
+          if (!isWizardCompleted) {
+            e.preventDefault()
+          }
+        }}
       >
         {isBasicRenewalMode ? (
           <>
@@ -1509,8 +1513,9 @@ export function SetupWizard(props: SetupWizardProps) {
                   {features.tier === 'enterprise' ? 'حرفه‌ای' : features.tier === 'professional' ? 'پیشرفته' : 'پایه'}
                 </Badge>
               </DialogTitle>
+              {/* ★ v10.10: پیام اجباری بودن */}
               <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
-                این ویزارد فقط یک‌بار نمایش داده می‌شود. می‌توانید هر مرحله را رد کنید.
+                <span className="text-red-600 font-bold">⚠️ تکمیل این مراحل الزامی است.</span> برای استفاده صحیح از سیستم، هر ۳ مرحله را تکمیل کنید. می‌توانید از گزینه «استفاده از پیش‌فرض» برای رد کردن سریع هر مرحله استفاده کنید.
               </DialogDescription>
             </DialogHeader>
 
@@ -1570,7 +1575,7 @@ export function SetupWizard(props: SetupWizardProps) {
                         <Info className="h-3.5 w-3.5 text-blue-600" />
                         <AlertDescription className="text-[11px] text-blue-800 mr-2">
                           سال مالی دوره‌ای است که تمام اسناد حسابداری در آن ثبت می‌شوند.
-                          اگر رد کنید، یک سال مالی از امروز به‌صورت پیش‌فرض ثبت می‌شود.
+                          <strong> این مرحله الزامی است.</strong>
                         </AlertDescription>
                       </Alert>
                       <div className="space-y-2">
@@ -1637,7 +1642,7 @@ export function SetupWizard(props: SetupWizardProps) {
                         : features.tier === 'enterprise'
                         ? 'پلن حرفه‌ای: انبار نامحدود. '
                         : 'پلن پایه: ۱ انبار مجاز. '}
-                      اگر رد کنید، «انبار فروشگاه» پیش‌فرض ایجاد می‌شود.
+                      <strong>حداقل یک انبار الزامی است.</strong>
                     </AlertDescription>
                   </Alert>
 
@@ -1928,13 +1933,14 @@ export function SetupWizard(props: SetupWizardProps) {
                 </Button>
               )}
 
+              {/* ★ v10.10: دکمه "استفاده از پیش‌فرض" - داده پیش‌فرض می‌سازد و به مرحله بعد می‌رود */}
               {step < 3 && (
                 <Button variant="ghost" size="sm" onClick={handleSkip}
                   disabled={saving || savingBalance}
                   className="text-xs gap-1 text-gray-400 hover:text-gray-600 mr-auto"
                 >
                   {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SkipForward className="w-3.5 h-3.5" />}
-                  {step === 2 ? 'رد کردن (بعداً)' : 'رد کردن (پیش‌فرض)'}
+                  {step === 2 ? 'بعداً تکمیل می‌کنم' : 'استفاده از پیش‌فرض'}
                 </Button>
               )}
 
