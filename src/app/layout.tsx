@@ -172,9 +172,7 @@ export const metadata: Metadata = {
   },
   
   other: {
-    // Google Site Verification (اگر از روش meta استفاده می‌کنید)
-    'google-site-verification': process.env.NEXT_PUBLIC_GOOGLE_VERIFICATION || '',
-    
+   
     // زبان و منطقه
     'content-language': 'fa',
     'language': 'Persian',
