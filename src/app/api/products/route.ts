@@ -1,6 +1,7 @@
 // ============================================================================
 // src/app/api/products/route.ts — GET (صفحه‌بندی + جستجو) / POST / PUT / DELETE
 // ============================================================================
+// ★★★ v6.3: اصلاح db.client → tenantDb برای سازگاری با multi-tenant
 // ★★★ v6.2: هنگام ایجاد محصول با موجودی اولیه، یک StockLevel در انبار پیش‌فرض ساخته می‌شود
 // ★★★ v6.1: افزودن صفحه‌بندی و جستجوی سرور
 // ============================================================================
@@ -9,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 import { syncOpeningBalanceWithInventory } from '@/lib/sync-opening-balance'
+
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/products — صفحه‌بندی + جستجو
 // ═══════════════════════════════════════════════════════════════
@@ -97,6 +99,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 // ═══════════════════════════════════════════════════════════════
 // POST /api/products — ایجاد محصول
 // ★★★ v8.9: تولید کد اتوماتیک + تولید بارکد
+// ★★★ v6.3: استفاده از tenantDb به جای db.client
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('products')(
@@ -205,6 +208,7 @@ export const POST = withTenantAndPermission('products')(
 
       // ═══════════════════════════════════════════════════════════════
       // ★ v11.0: ثبت موجودی اولیه (اگر initialStock > 0)
+      // ★ v6.3: استفاده از tenantDb به جای db.client
       // ═══════════════════════════════════════════════════════════════
       if (requestedInitialStock > 0 && purchasePrice > 0) {
         try {
@@ -214,22 +218,22 @@ export const POST = withTenantAndPermission('products')(
             purchasePrice,
           })
 
-          // ۱. پیدا کردن انبار پیش‌فرض
-          let defaultWarehouse = await db.client.warehouse.findFirst({
+          // ۱. پیدا کردن انبار پیش‌فرض (با tenantDb)
+          let defaultWarehouse = await tenantDb.warehouse.findFirst({
             where: { tenantId, isDefault: true, isActive: true },
           })
 
           if (!defaultWarehouse) {
             // اگر انبار پیش‌فرض نبود، اولین انبار فعال را بگیر
-            defaultWarehouse = await db.client.warehouse.findFirst({
+            defaultWarehouse = await tenantDb.warehouse.findFirst({
               where: { tenantId, isActive: true },
               orderBy: { createdAt: 'asc' },
             })
           }
 
           if (defaultWarehouse) {
-            // ۲. ایجاد یا آپدیت StockLevel
-            await db.client.stockLevel.upsert({
+            // ۲. ایجاد یا آپدیت StockLevel (با tenantDb)
+            await tenantDb.stockLevel.upsert({
               where: {
                 warehouseId_productId: {
                   warehouseId: defaultWarehouse.id,
@@ -252,8 +256,8 @@ export const POST = withTenantAndPermission('products')(
 
             console.log('[Products POST] ✅ StockLevel created/updated')
 
-            // ۳. ثبت StockMovement از نوع 'initial'
-            await db.client.stockMovement.create({
+            // ۳. ثبت StockMovement از نوع 'initial' (با tenantDb)
+            await tenantDb.stockMovement.create({
               data: {
                 tenantId,
                 productId: product.id,
@@ -270,8 +274,8 @@ export const POST = withTenantAndPermission('products')(
 
             console.log('[Products POST] ✅ StockMovement (initial) created')
 
-            // ۴. آپدیت currentStock در Product
-            await db.client.product.update({
+            // ۴. آپدیت currentStock در Product (با tenantDb)
+            await tenantDb.product.update({
               where: { id: product.id },
               data: { currentStock: requestedInitialStock },
             })
@@ -281,8 +285,9 @@ export const POST = withTenantAndPermission('products')(
 
             console.log('[Products POST] ✅ Product.currentStock updated to:', requestedInitialStock)
 
-            // ۵. همگام‌سازی سند افتتاحیه (non-blocking)
-            syncOpeningBalanceWithInventory(tenantId, db.client).then((result) => {
+            // ۵. همگام‌سازی سند افتتاحیه (با tenantDb) - ★ v6.3: اصلاح
+            console.log('[Products POST] 🔄 Calling syncOpeningBalanceWithInventory with tenantDb...')
+            syncOpeningBalanceWithInventory(tenantId, tenantDb).then((result) => {
               console.log('[Products POST] 🔄 Opening balance sync result:', result.message)
             }).catch((err) => {
               console.warn('[Products POST] ⚠️ Opening balance sync failed (non-blocking):', err?.message)
@@ -308,13 +313,9 @@ export const POST = withTenantAndPermission('products')(
   }
 )
 
-// ★★★ v8.9: Endpoint جدید برای دریافت کد اتوماتیک
-// GET /api/products?action=nextCode
-// (اضافه شده به ابتدای تابع GET موجود)
-
 // ═══════════════════════════════════════════════════════════════
 //  PUT /api/products — به‌روزرسانی محصول
-//  ★★★ v6.2: فیلد currentStock در ویرایش قابل تغییر نیست (فقط از طریق فاکتور خرید/فروش)
+//  ★★★ v6.3: استفاده از tenantDb به جای db.client
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('products')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -353,19 +354,19 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
     if (body.taxRate !== undefined) data.taxRate = parseFloat(body.taxRate) || 0
     if (body.minStock !== undefined) data.minStock = parseFloat(body.minStock) || 0
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive)
-    // ★★★ v6.2: currentStock در ویرایش قابل تغییر نیست (فقط از طریق فاکتور)
-    // اگر فرانت‌اند آن را فرستاد، نادیده می‌گیریم
+    
     // ★ v11.0: پشتیبانی از initialStock در ویرایش (فقط اگر currentStock === 0)
+    // ★ v6.3: استفاده از tenantDb به جای db.client
     if (body.initialStock !== undefined && Number(existing.currentStock) === 0) {
       const newInitialStock = parseFloat(body.initialStock) || 0
       if (newInitialStock > 0 && existing.purchasePrice > 0) {
-        // پیدا کردن انبار پیش‌فرض
-        const defaultWarehouse = await db.client.warehouse.findFirst({
+        // پیدا کردن انبار پیش‌فرض (با tenantDb)
+        const defaultWarehouse = await tenantDb.warehouse.findFirst({
           where: { tenantId, isDefault: true, isActive: true },
         })
         
         if (defaultWarehouse) {
-          await db.client.stockLevel.upsert({
+          await tenantDb.stockLevel.upsert({
             where: {
               warehouseId_productId: {
                 warehouseId: defaultWarehouse.id,
@@ -385,7 +386,7 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
             },
           })
           
-          await db.client.stockMovement.create({
+          await tenantDb.stockMovement.create({
             data: {
               tenantId,
               productId: body.id,
@@ -401,8 +402,9 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
           
           data.currentStock = newInitialStock
           
-          // sync سند افتتاحیه
-          syncOpeningBalanceWithInventory(tenantId, db.client)
+          // sync سند افتتاحیه (با tenantDb) - ★ v6.3: اصلاح
+          console.log('[Products PUT] 🔄 Calling syncOpeningBalanceWithInventory with tenantDb...')
+          syncOpeningBalanceWithInventory(tenantId, tenantDb)
             .then((result) => {
               console.log('[Products PUT] 🔄 Opening balance sync result:', result.message)
             })
@@ -425,6 +427,7 @@ export const PUT = withTenantAndPermission('products')(async (req: NextRequest, 
 
 // ═══════════════════════════════════════════════════════════════
 //  DELETE /api/products — حذف محصول (soft delete: isActive = false)
+//  ★★★ v6.3: استفاده از tenantDb به جای db.client
 // ═══════════════════════════════════════════════════════════════
 
 export const DELETE = withTenantAndPermission('products')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -470,8 +473,9 @@ export const DELETE = withTenantAndPermission('products')(async (req: NextReques
 
     await tenantDb.product.delete({ where: { id } })
 
-    // ★ v11.0: همگام‌سازی سند افتتاحیه بعد از حذف محصول
-    syncOpeningBalanceWithInventory(tenantId, db.client)
+    // ★ v11.0: همگام‌سازی سند افتتاحیه بعد از حذف محصول (با tenantDb) - ★ v6.3: اصلاح
+    console.log('[Products DELETE] 🔄 Calling syncOpeningBalanceWithInventory with tenantDb...')
+    syncOpeningBalanceWithInventory(tenantId, tenantDb)
       .then((result) => {
         console.log('[Products DELETE] 🔄 Opening balance sync result:', result.message)
       })
