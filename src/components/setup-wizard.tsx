@@ -1,7 +1,9 @@
 'use client'
 
 // ============================================================================
-// src/components/setup-wizard.tsx — v10.10 ★★★
+// src/components/setup-wizard.tsx — v10.11 ★★★
+// ★ v10.11: رفع قطعی نمایش مجدد ویزارد بعد از Logout/Login
+// ★ پشتیبانی از completion flag روی سرور + fallback هوشمند
 // ★ v10.10: اجباری کردن ویزارد راه‌اندازی + دکمه پیش‌فرض
 // ★ v10.9: جلوگیری از Double Submit + پاک‌سازی cache
 // ★ v3.1: پشتیبانی از حالت basic_renewal_setup برای پلن پایه
@@ -12,8 +14,12 @@ import { useAppStore } from '@/lib/store'
 import { getFeaturesByPlanName, type PlanName } from '@/lib/plan-features'
 import { useDemoStatus } from '@/lib/use-demo-status'
 import {
-  Dialog, DialogContent, DialogHeader,
-  DialogTitle, DialogDescription, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -21,111 +27,275 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { PersianDatePicker } from '@/components/ui/persian-date-picker'
 import {
-  Loader2, CheckCircle2, AlertCircle, AlertTriangle,
-  ChevronRight, ChevronLeft, Calendar, Package,
-  Wallet, Zap, Trash2, Plus, Info, Building2,
-  TrendingUp, TrendingDown, ArrowLeft, SkipForward,
-  RefreshCw, Archive,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  ChevronLeft,
+  Calendar,
+  Package,
+  Wallet,
+  Zap,
+  Trash2,
+  Plus,
+  Info,
+  Building2,
+  SkipForward,
+  RefreshCw,
+  Archive,
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  تبدیل تاریخ شمسی ↔ میلادی
 // ─────────────────────────────────────────────────────────────────────────────
-function _div(a: number, b: number) { return ~~(a / b) }
-function _rem(a: number, b: number) { return a - ~~(a / b) * b }
+function _div(a: number, b: number) {
+  return ~~(a / b)
+}
+
+function _rem(a: number, b: number) {
+  return a - ~~(a / b) * b
+}
+
 function _jalCal(jy: number) {
-  const breaks = [-61,9,38,199,426,686,756,818,1111,1181,1210,1635,2060,2097,2192,2262,2324,2394,2456,3178]
-  let leapJ = -14, jp = breaks[0], jm = 0, jump = 0
+  const breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178]
+  let leapJ = -14
+  let jp = breaks[0]
+  let jm = 0
+  let jump = 0
+
   for (let i = 1; i < breaks.length; i++) {
-    jm = breaks[i]; jump = jm - jp
+    jm = breaks[i]
+    jump = jm - jp
     if (jy < jm) break
-    leapJ += _div(jump,33)*8 + _div(_rem(jump,33),4)
+    leapJ += _div(jump, 33) * 8 + _div(_rem(jump, 33), 4)
     jp = jm
   }
+
   let n = jy - jp
-  leapJ += _div(n,33)*8 + _div(_rem(n,33)+3,4)
-  if (_rem(jump,33)===4 && jump-n===4) leapJ++
-  const leapG = _div(jy+621,4) - _div((_div(jy+621,100)+1)*3,4) - 150
+  leapJ += _div(n, 33) * 8 + _div(_rem(n, 33) + 3, 4)
+  if (_rem(jump, 33) === 4 && jump - n === 4) leapJ++
+
+  const leapG = _div(jy + 621, 4) - _div((_div(jy + 621, 100) + 1) * 3, 4) - 150
   const march = 20 + leapJ - leapG
-  if (jump-n<6) n = n-jump+_div(jump+4,33)*33
-  let leap = _rem(_rem(n+1,33)-1,4)
-  if (leap===-1) leap=4
-  return { leap, gy: jy+621, march }
+
+  if (jump - n < 6) n = n - jump + _div(jump + 4, 33) * 33
+
+  let leap = _rem(_rem(n + 1, 33) - 1, 4)
+  if (leap === -1) leap = 4
+
+  return { leap, gy: jy + 621, march }
 }
-function _g2d(gy:number,gm:number,gd:number){
-  let d=_div((gy+_div(gm-8,6)+100100)*1461,4)+_div(153*_rem(gm+9,12)+2,5)+gd-34840408
-  d=d-_div(_div(gy+100100+_div(gm-8,6),100)*3,4)+752
+
+function _g2d(gy: number, gm: number, gd: number) {
+  let d = _div((gy + _div(gm - 8, 6) + 100100) * 1461, 4) + _div(153 * _rem(gm + 9, 12) + 2, 5) + gd - 34840408
+  d = d - _div(_div(gy + 100100 + _div(gm - 8, 6), 100) * 3, 4) + 752
   return d
 }
-function _d2g(jdn:number){
-  let j=4*jdn+139361631+_div(_div(4*jdn+183187720,146097)*3,4)*4-3908
-  const i=_div(_rem(j,1461),4)*5+308
-  return{gd:_div(_rem(i,153),5)+1,gm:_rem(_div(i,153),12)+1,gy:_div(j,1461)-100100+_div(8-(_rem(_div(i,153),12)+1),6)}
+
+function _d2g(jdn: number) {
+  let j = 4 * jdn + 139361631 + _div(_div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908
+  const i = _div(_rem(j, 1461), 4) * 5 + 308
+  return {
+    gd: _div(_rem(i, 153), 5) + 1,
+    gm: _rem(_div(i, 153), 12) + 1,
+    gy: _div(j, 1461) - 100100 + _div(8 - (_rem(_div(i, 153), 12) + 1), 6),
+  }
 }
-function _j2d(jy:number,jm:number,jd:number){
-  const r=_jalCal(jy)
-  return _g2d(r.gy,3,r.march)+(jm-1)*31-_div(jm,7)*(jm-7)+jd-1
+
+function _j2d(jy: number, jm: number, jd: number) {
+  const r = _jalCal(jy)
+  return _g2d(r.gy, 3, r.march) + (jm - 1) * 31 - _div(jm, 7) * (jm - 7) + jd - 1
 }
-function _d2j(jdn:number){
-  const gy=_d2g(jdn).gy; let jy=gy-621
-  const r=_jalCal(jy); const jdn1f=_g2d(gy,3,r.march)
-  let k=jdn-jdn1f
-  if(k>=0){ if(k<=185){return{jy,jm:1+_div(k,31),jd:_rem(k,31)+1}} else{k-=186} }
-  else { jy--; k+=179; if(r.leap===1)k++ }
-  return{jy,jm:7+_div(k,30),jd:_rem(k,30)+1}
+
+function _d2j(jdn: number) {
+  const gy = _d2g(jdn).gy
+  let jy = gy - 621
+  const r = _jalCal(jy)
+  const jdn1f = _g2d(gy, 3, r.march)
+  let k = jdn - jdn1f
+
+  if (k >= 0) {
+    if (k <= 185) {
+      return { jy, jm: 1 + _div(k, 31), jd: _rem(k, 31) + 1 }
+    } else {
+      k -= 186
+    }
+  } else {
+    jy--
+    k += 179
+    if (r.leap === 1) k++
+  }
+
+  return { jy, jm: 7 + _div(k, 30), jd: _rem(k, 30) + 1 }
 }
-function isoToJalali(iso:string):[number,number,number]|null{
-  const m=iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if(!m)return null
-  const r=_d2j(_g2d(+m[1],+m[2],+m[3]))
-  return [r.jy,r.jm,r.jd]
+
+function isoToJalali(iso: string): [number, number, number] | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  const r = _d2j(_g2d(+m[1], +m[2], +m[3]))
+  return [r.jy, r.jm, r.jd]
 }
-function isoToJalaliFa(iso:string|null|undefined):string{
-  if(!iso)return '—'
-  const j=isoToJalali(iso.slice(0,10))
-  if(!j)return '—'
-  const fa=['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹']
-  const tf=(n:number,l=2)=>String(n).padStart(l,'0').replace(/\d/g,d=>fa[+d])
-  return `${tf(j[0],4)}/${tf(j[1])}/${tf(j[2])}`
+
+function isoToJalaliFa(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const j = isoToJalali(iso.slice(0, 10))
+  if (!j) return '—'
+  const fa = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
+  const tf = (n: number, l = 2) => String(n).padStart(l, '0').replace(/\d/g, (d) => fa[+d])
+  return `${tf(j[0], 4)}/${tf(j[1])}/${tf(j[2])}`
 }
-function todayISO():string{ return new Date().toISOString().slice(0,10) }
-function addDays(iso:string,days:number):string{
-  const d=new Date(iso); d.setDate(d.getDate()+days)
-  return d.toISOString().slice(0,10)
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10)
 }
-function daysBetween(from:string,to:string):number{
-  return Math.round((new Date(to).getTime()-new Date(from).getTime())/(1000*60*60*24))
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(iso)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
 }
-function formatNum(n:number):string{ return (n||0).toLocaleString('fa-IR') }
-function getJalaliYearName(iso:string):string{
-  const j=isoToJalali(iso)
-  if(!j)return 'سال مالی'
-  const fa=['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹']
-  const toFa=(n:number)=>String(n).replace(/\d/g,d=>fa[+d])
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function formatNum(n: number): string {
+  return (n || 0).toLocaleString('fa-IR')
+}
+
+function getJalaliYearName(iso: string): string {
+  const j = isoToJalali(iso)
+  if (!j) return 'سال مالی'
+  const fa = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
+  const toFa = (n: number) => String(n).replace(/\d/g, (d) => fa[+d])
   return `سال مالی ${toFa(j[0])}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  کلید localStorage برای یک‌بار نمایش
+//  ★ نسخه سازگار: هم string می‌پذیرد، هم array
 // ─────────────────────────────────────────────────────────────────────────────
 const WIZARD_DONE_KEY = 'setup_wizard_done'
+const LEGACY_WIZARD_DONE_KEY = 'wizard_done'
+const SERVER_SETUP_COMPLETED_ENDPOINT = '/api/setup-wizard/completed'
 
-function getWizardDoneKey(tenantId: string) {
-  return `${WIZARD_DONE_KEY}_${tenantId}`
+type WizardIdScalar = string | number | null | undefined
+
+type WizardIdInput =
+  | WizardIdScalar
+  | ReadonlyArray<WizardIdScalar>
+
+function isWizardIdArray(
+  input: WizardIdInput
+): input is ReadonlyArray<WizardIdScalar> {
+  return Array.isArray(input)
 }
 
-function isWizardDone(tenantId: string): boolean {
+function toIdArray(input: WizardIdInput): WizardIdScalar[] {
+  if (input === null || input === undefined) return []
+
+  if (isWizardIdArray(input)) {
+    return [...input]
+  }
+
+  return [input]
+}
+
+function normalizeIds(input: WizardIdInput): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const raw of toIdArray(input)) {
+    if (raw === null || raw === undefined) continue
+
+    const value = String(raw).trim()
+    if (!value || seen.has(value)) continue
+
+    seen.add(value)
+    out.push(value)
+  }
+
+  return out
+}
+
+function getWizardDoneKey(id: WizardIdScalar): string {
+  return `${WIZARD_DONE_KEY}_${String(id ?? '')}`
+}
+
+function getLegacyWizardDoneKey(id: WizardIdScalar): string {
+  return `${LEGACY_WIZARD_DONE_KEY}_${String(id ?? '')}`
+}
+
+function getWizardDoneKeys(input: WizardIdInput): string[] {
+  const keys: string[] = []
+  const seen = new Set<string>()
+
+  normalizeIds(input).forEach((id) => {
+    const currentKey = getWizardDoneKey(id)
+    const legacyKey = getLegacyWizardDoneKey(id)
+
+    if (!seen.has(currentKey)) {
+      seen.add(currentKey)
+      keys.push(currentKey)
+    }
+
+    if (!seen.has(legacyKey)) {
+      seen.add(legacyKey)
+      keys.push(legacyKey)
+    }
+  })
+
+  return keys
+}
+
+function isWizardDoneAny(input: WizardIdInput): boolean {
   if (typeof window === 'undefined') return false
-  return localStorage.getItem(getWizardDoneKey(tenantId)) === 'true'
+
+  const keys = getWizardDoneKeys(input)
+
+  return keys.some((key) => {
+    try {
+      return localStorage.getItem(key) === 'true'
+    } catch {
+      return false
+    }
+  })
 }
 
-function markWizardDone(tenantId: string) {
+function markWizardDoneAny(input: WizardIdInput): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(getWizardDoneKey(tenantId), 'true')
+
+  getWizardDoneKeys(input).forEach((key) => {
+    try {
+      localStorage.setItem(key, 'true')
+    } catch {}
+  })
+}
+
+function clearWizardDoneAny(input: WizardIdInput): void {
+  if (typeof window === 'undefined') return
+
+  getWizardDoneKeys(input).forEach((key) => {
+    try {
+      localStorage.removeItem(key)
+    } catch {}
+  })
+}
+
+// ★ Alias های سازگار با نام‌های قدیمی
+function isWizardDone(input: WizardIdInput): boolean {
+  return isWizardDoneAny(input)
+}
+
+function markWizardDone(input: WizardIdInput): void {
+  markWizardDoneAny(input)
+}
+
+function clearWizardDone(input: WizardIdInput): void {
+  clearWizardDoneAny(input)
 }
 
 function getToken(): Record<string, string> {
@@ -135,20 +305,149 @@ function getToken(): Record<string, string> {
 
 function getAuthHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return { 'Content-Type': 'application/json' }
+
   const token = localStorage.getItem('token')
+
   if (!token) {
     console.warn('[SetupWizard] No token found in localStorage!')
   }
+
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
 }
 
+async function fetchJsonSafe(url: string, headers: Record<string, string>): Promise<any | null> {
+  try {
+    const res = await fetch(url, {
+      headers,
+      cache: 'no-store',
+    })
+
+    if (!res.ok) return null
+
+    return await res.json().catch(() => null)
+  } catch {
+    return null
+  }
+}
+
+async function getServerSetupCompleted(token: string): Promise<boolean | null> {
+  if (typeof window === 'undefined' || !token) return null
+
+  try {
+    const res = await fetch(`${SERVER_SETUP_COMPLETED_ENDPOINT}?_t=${Date.now()}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+      },
+      cache: 'no-store',
+    })
+
+    // اگر هنوز API ساخته نشده بود، null برگردان تا fallback کار کند
+    if (res.status === 404) return null
+
+    if (!res.ok) return null
+
+    const data = await res.json().catch(() => null)
+
+    if (data?.success) {
+      return Boolean(data?.data?.completed)
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function postServerSetupCompleted(token: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !token) return false
+
+  try {
+    const res = await fetch(SERVER_SETUP_COMPLETED_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    })
+
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * ★ fallback هوشمند:
+ * اگر API جدید هنوز در دسترس نبود یا flag سرور ست نشده بود،
+ * از وجود شواهد راه‌اندازی استفاده می‌کنیم.
+ *
+ * امتیازدهی:
+ * - سال مالی فعال: ۲ امتیاز
+ * - سال مالی غیرفعال ولی موجود: ۱ امتیاز
+ * - حداقل یک انبار: ۱ امتیاز
+ * - حداقل یک موجودی اولیه: ۱ امتیاز
+ *
+ * اگر امتیاز >= ۲ شد، ویزارد تکمیل‌شده تلقی می‌شود.
+ */
+async function hasSetupEvidence(token: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !token) return false
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Cache-Control': 'no-cache',
+  }
+
+  const [fyData, whData, ibData] = await Promise.all([
+    fetchJsonSafe('/api/fiscal-years?_t=' + Date.now(), headers),
+    fetchJsonSafe('/api/warehouses?_t=' + Date.now(), headers),
+    fetchJsonSafe('/api/initial-balance?_t=' + Date.now(), headers),
+  ])
+
+  let score = 0
+
+  // ─── سال مالی ───
+  if (fyData) {
+    const years = fyData?.data?.years || fyData?.data?.fiscalYears || fyData?.data || []
+
+    if (Array.isArray(years)) {
+      const hasActiveYear = years.some((y: any) => y?.isActive === true)
+      const hasAnyYear = years.length > 0
+
+      if (hasActiveYear) score += 2
+      else if (hasAnyYear) score += 1
+    }
+  }
+
+  // ─── انبارها ───
+  if (whData) {
+    const warehouses = whData?.data?.warehouses || whData?.data || []
+
+    if (Array.isArray(warehouses) && warehouses.length > 0) {
+      score += 1
+    }
+  }
+
+  // ─── موجودی اولیه ───
+  if (ibData) {
+    const balances = ibData?.data || []
+
+    if (Array.isArray(balances) && balances.length > 0) {
+      score += 1
+    }
+  }
+
+  return score >= 2
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  نوع‌های موجودی اولیه
 // ─────────────────────────────────────────────────────────────────────────────
-type BalanceType = 'cash'|'bank'|'inventory'|'fixed_asset'|'liability'
+type BalanceType = 'cash' | 'bank' | 'inventory' | 'fixed_asset' | 'liability'
 
 interface BalanceItem {
   type: BalanceType
@@ -157,17 +456,20 @@ interface BalanceItem {
   description?: string
 }
 
-const BAL_LABELS: Record<BalanceType,string> = {
-  cash:'💵 نقدی (صندوق)', bank:'🏦 بانک',
-  inventory:'📦 موجودی کالا', fixed_asset:'🏭 دارایی ثابت',
-  liability:'📋 بدهی / وام',
+const BAL_LABELS: Record<BalanceType, string> = {
+  cash: '💵 نقدی (صندوق)',
+  bank: '🏦 بانک',
+  inventory: '📦 موجودی کالا',
+  fixed_asset: '🏭 دارایی ثابت',
+  liability: '📋 بدهی / وام',
 }
-const BAL_COLORS: Record<BalanceType,string> = {
-  cash:'bg-emerald-50 border-emerald-200 text-emerald-800',
-  bank:'bg-blue-50 border-blue-200 text-blue-800',
-  inventory:'bg-amber-50 border-amber-200 text-amber-800',
-  fixed_asset:'bg-purple-50 border-purple-200 text-purple-800',
-  liability:'bg-red-50 border-red-200 text-red-800',
+
+const BAL_COLORS: Record<BalanceType, string> = {
+  cash: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+  bank: 'bg-blue-50 border-blue-200 text-blue-800',
+  inventory: 'bg-amber-50 border-amber-200 text-amber-800',
+  fixed_asset: 'bg-purple-50 border-purple-200 text-purple-800',
+  liability: 'bg-red-50 border-red-200 text-red-800',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,6 +478,7 @@ const BAL_COLORS: Record<BalanceType,string> = {
 export function useSetupWizard() {
   const currentTenant = useAppStore((s) => s.currentTenant)
   const tenantId = useAppStore((s) => s.tenantId) || (currentTenant as any)?.id || ''
+  const user = useAppStore((s) => s.user)
   const { isDemo } = useDemoStatus()
   const planName = useAppStore((s) => s.planName)
   const billingCycle = useAppStore((s) => s.selectedBillingCycle)
@@ -185,41 +488,124 @@ export function useSetupWizard() {
   const [wizardMode, setWizardMode] = useState<'first_setup' | 'renewal_setup' | 'basic_renewal_setup' | null>(null)
   const [renewalData, setRenewalData] = useState<any>(null)
 
+  const checkedTenantRef = useRef<string | null>(null)
+  const openTimerRef = useRef<any>(null)
+  const reloadingRef = useRef(false)
+
+  const completionIds = useMemo(() => {
+    return normalizeIds([
+      tenantId,
+      (user as any)?.id,
+      (currentTenant as any)?.id,
+      (currentTenant as any)?.subDomain,
+      (currentTenant as any)?.slug,
+    ])
+  }, [tenantId, user, currentTenant])
+
+  const clearOpenTimer = useCallback(() => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current)
+      openTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleOpen = useCallback(
+    (mode: 'first_setup' | 'renewal_setup' | 'basic_renewal_setup', data: any = null) => {
+      clearOpenTimer()
+
+      setWizardMode(mode)
+
+      if (data) {
+        setRenewalData(data)
+      }
+
+      openTimerRef.current = setTimeout(() => {
+        setOpen(true)
+        openTimerRef.current = null
+      }, 600)
+    },
+    [clearOpenTimer]
+  )
+
+  const finishCheck = useCallback(() => {
+    setChecked(true)
+  }, [])
+
   useEffect(() => {
     const handler = () => {
       console.log('[useSetupWizard] 🔄 Renewal wizard triggered from fiscal-year-tab')
+
       if (typeof window !== 'undefined' && tenantId) {
-        localStorage.setItem(`force_renewal_setup_${tenantId}`, 'true')
+        try {
+          localStorage.setItem(`force_renewal_setup_${tenantId}`, 'true')
+        } catch {}
       }
+
+      checkedTenantRef.current = null
+      clearOpenTimer()
+      setOpen(false)
+      setWizardMode(null)
+      setRenewalData(null)
       setChecked(false)
     }
+
     window.addEventListener('trigger-renewal-setup', handler)
-    return () => window.removeEventListener('trigger-renewal-setup', handler)
-  }, [tenantId])
+
+    return () => {
+      window.removeEventListener('trigger-renewal-setup', handler)
+    }
+  }, [tenantId, clearOpenTimer])
 
   useEffect(() => {
-    if (!tenantId || checked) return
+    return () => {
+      clearOpenTimer()
+    }
+  }, [clearOpenTimer])
+
+  useEffect(() => {
+    if (!tenantId || checkedTenantRef.current === tenantId) return
+
+    checkedTenantRef.current = tenantId
 
     const checkWizardStatus = async () => {
       console.log('[useSetupWizard] 🔄 Checking wizard status for tenant:', tenantId)
 
-      const forceWizardKey = `force_wizard_${tenantId}`
-      const forceWizard = typeof window !== 'undefined' && localStorage.getItem(forceWizardKey) === 'true'
-      if (forceWizard) {
-        console.log('[useSetupWizard] 🆕 Force wizard after registration — clearing flag')
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(forceWizardKey)
-          const wizardDoneKey = `wizard_done_${tenantId}`
-          localStorage.removeItem(wizardDoneKey)
-        }
-      }
+      let forceWizardRequested = false
+
       try {
+        const localDone = isWizardDoneAny(completionIds)
+
+        const forceWizardKey = `force_wizard_${tenantId}`
+        forceWizardRequested =
+          typeof window !== 'undefined' &&
+          localStorage.getItem(forceWizardKey) === 'true'
+
+        if (forceWizardRequested) {
+          console.log('[useSetupWizard] 🆕 Force wizard flag detected')
+
+          try {
+            localStorage.removeItem(forceWizardKey)
+          } catch {}
+
+          // ★ اگر ویزارد قبلاً تکمیل شده، force قدیمی نباید دوباره بازش کند
+          if (localDone) {
+            console.log('[useSetupWizard] ✅ Local completion exists — ignoring stale force wizard')
+            finishCheck()
+            return
+          }
+        }
+
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
         if (!token) {
-          setChecked(true)
+          if (forceWizardRequested) {
+            scheduleOpen('first_setup')
+          }
+          finishCheck()
           return
         }
 
+        // ─── بررسی وضعیت اشتراک ───
         try {
           const subRes = await fetch('/api/subscription/update-status?_t=' + Date.now(), {
             headers: { Authorization: `Bearer ${token}` },
@@ -229,37 +615,41 @@ export function useSetupWizard() {
           if (subRes.status === 403) {
             try {
               const errData = await subRes.json()
+
               if (errData.code === 'SUBSCRIPTION_EXPIRED') {
                 console.log('[useSetupWizard] 🔒 SUBSCRIPTION_EXPIRED from middleware — skipping wizard')
-                setChecked(true)
+                finishCheck()
                 return
               }
-            } catch { }
+            } catch {}
           }
 
           const subData = await subRes.json()
 
           if (!subData.success && subData.code === 'SUBSCRIPTION_EXPIRED') {
             console.log('[useSetupWizard] 🔒 SUBSCRIPTION_EXPIRED in response — skipping wizard')
-            setChecked(true)
+            finishCheck()
             return
           }
 
           if (subData.success && subData.data) {
             const d = subData.data
-            const isLifetime = d.daysUntilUpdate === -1 || (d.status === 'active' && d.daysUntilUpdate === -1)
+            const isLifetime =
+              d.daysUntilUpdate === -1 ||
+              (d.status === 'active' && d.daysUntilUpdate === -1)
+
             const daysRemaining = d.daysUntilUpdate ?? 0
             const isLocked = d.isLocked || daysRemaining <= 0
 
             if (isLocked) {
               console.log('[useSetupWizard] 🔒 System locked — skipping wizard')
-              setChecked(true)
+              finishCheck()
               return
             }
 
             if (!isLifetime && daysRemaining > 0 && daysRemaining <= 3) {
               console.log(`[useSetupWizard] ⚠️ Warning period (${daysRemaining} days) — skipping wizard`)
-              setChecked(true)
+              finishCheck()
               return
             }
           }
@@ -268,153 +658,250 @@ export function useSetupWizard() {
         }
 
         const forceRenewalKey = `force_renewal_setup_${tenantId}`
-        const forceRenewal = typeof window !== 'undefined' && localStorage.getItem(forceRenewalKey) === 'true'
+        const forceRenewal =
+          typeof window !== 'undefined' &&
+          localStorage.getItem(forceRenewalKey) === 'true'
 
         if (forceRenewal) {
           console.log('[useSetupWizard] 🔄 Force renewal_setup detected, clearing flag')
-          if (typeof window !== 'undefined') {
+
+          try {
             localStorage.removeItem(forceRenewalKey)
+          } catch {}
+        }
+
+        let statusPayload: any = null
+
+        try {
+          const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+          })
+
+          if (!res.ok) {
+            console.warn('[useSetupWizard] Status API failed:', res.status)
+
+            if (forceWizardRequested) {
+              scheduleOpen('first_setup')
+            }
+
+            finishCheck()
+            return
           }
-        }
 
-        if (forceWizard) {
-          console.log('[useSetupWizard] 🆕 Force wizard — opening first_setup')
-          setWizardMode('first_setup')
-          setTimeout(() => setOpen(true), 600)
-          setChecked(true)
+          const data = await res.json()
+
+          if (!data.success || !data.data) {
+            if (forceWizardRequested) {
+              scheduleOpen('first_setup')
+            }
+
+            finishCheck()
+            return
+          }
+
+          statusPayload = data.data
+        } catch (err) {
+          console.error('[useSetupWizard] Status check error:', err)
+
+          if (forceWizardRequested) {
+            scheduleOpen('first_setup')
+          }
+
+          finishCheck()
           return
         }
 
-        const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        })
-
-        if (!res.ok) {
-          console.warn('[useSetupWizard] Status API failed:', res.status)
-          setChecked(true)
-          return
-        }
-
-        const data = await res.json()
-        if (!data.success) {
-          setChecked(true)
-          return
-        }
-
-        const status = data.data.status
-        const subscription = data.data.subscription
+        const status = statusPayload.status
+        const subscription = statusPayload.subscription
 
         if (forceRenewal) {
           console.log('[useSetupWizard] 🔄 Opening forced wizard:', status)
+
           if (status === 'basic_renewal_setup') {
-            setWizardMode('basic_renewal_setup')
+            scheduleOpen('basic_renewal_setup', statusPayload.wizardData)
           } else if (status === 'renewal_setup') {
-            setWizardMode('renewal_setup')
+            scheduleOpen('renewal_setup', statusPayload.wizardData)
           } else {
-            setWizardMode('renewal_setup')
+            scheduleOpen('renewal_setup', statusPayload.wizardData)
           }
-          setRenewalData(data.data.wizardData)
-          setTimeout(() => setOpen(true), 600)
-          setChecked(true)
+
+          finishCheck()
           return
         }
 
         if (status === 'ready') {
           console.log('[useSetupWizard] ✅ Ready — no wizard needed')
-          setChecked(true)
+
+          markWizardDoneAny(completionIds)
+
+          // ★ همزمان روی سرور هم ثبت شود
+          postServerSetupCompleted(token).catch(() => {})
+
+          finishCheck()
           return
         }
 
         if (status === 'first_setup') {
-          if (isWizardDone(tenantId)) {
-            setChecked(true)
+          // ۱) اگر محلی تکمیل شده بود
+          if (isWizardDoneAny(completionIds)) {
+            console.log('[useSetupWizard] ✅ Local first_setup completion found')
+            finishCheck()
             return
           }
+
+          // ۲) اگر سرور flag تکمیل داشت
+          const serverCompleted = await getServerSetupCompleted(token)
+
+          if (serverCompleted === true) {
+            console.log('[useSetupWizard] ✅ Server setup completion flag found')
+            markWizardDoneAny(completionIds)
+            finishCheck()
+            return
+          }
+
+          // ۳) fallback هوشمند بر اساس شواهد دیتابیس
+          const evidence = await hasSetupEvidence(token)
+
+          if (evidence) {
+            console.log('[useSetupWizard] ✅ Server setup evidence found — marking first_setup done')
+
+            markWizardDoneAny(completionIds)
+
+            // ★ سعی کن flag سرور هم ست شود
+            postServerSetupCompleted(token).catch(() => {})
+
+            finishCheck()
+            return
+          }
+
           console.log('[useSetupWizard] 🆕 Opening first_setup wizard')
-          setWizardMode('first_setup')
-          setTimeout(() => setOpen(true), 600)
+          scheduleOpen('first_setup')
+          finishCheck()
           return
         }
 
         if (status === 'locked_after_close') {
           console.log('[useSetupWizard] 🔒 Locked after close — redirect to /renewal')
+
           if (typeof window !== 'undefined') {
             window.location.replace('/renewal?reason=locked_after_close')
           }
-          setChecked(true)
+
+          finishCheck()
           return
         }
 
         if (status === 'basic_renewal_setup') {
-          const basicRenewalKey = `basic_renewal_wizard_done_${tenantId}_${data.data.wizardData?.lastBasicClose?.id}`
-          if (typeof window !== 'undefined' && localStorage.getItem(basicRenewalKey) === 'true') {
+          const basicRenewalKey = `basic_renewal_wizard_done_${tenantId}_${statusPayload.wizardData?.lastBasicClose?.id}`
+
+          if (
+            typeof window !== 'undefined' &&
+            localStorage.getItem(basicRenewalKey) === 'true'
+          ) {
             console.log('[useSetupWizard] ✅ Basic renewal wizard already done')
-            setChecked(true)
+            finishCheck()
             return
           }
+
           console.log('[useSetupWizard] 📦 Opening basic_renewal_setup wizard')
-          setWizardMode('basic_renewal_setup')
-          setRenewalData(data.data.wizardData)
-          setTimeout(() => setOpen(true), 600)
+          scheduleOpen('basic_renewal_setup', statusPayload.wizardData)
+          finishCheck()
           return
         }
 
         if (status === 'renewal_setup') {
-          const renewalKey = `renewal_wizard_done_${tenantId}_${data.data.wizardData?.lastClosedYear?.id}`
-          if (typeof window !== 'undefined' && localStorage.getItem(renewalKey) === 'true') {
+          const renewalKey = `renewal_wizard_done_${tenantId}_${statusPayload.wizardData?.lastClosedYear?.id}`
+
+          if (
+            typeof window !== 'undefined' &&
+            localStorage.getItem(renewalKey) === 'true'
+          ) {
             console.log('[useSetupWizard] ✅ Renewal wizard already done')
-            setChecked(true)
+            finishCheck()
             return
           }
-          const isExpired = subscription?.isExpired || subscription?.status === 'read_only'
+
+          const isExpired =
+            subscription?.isExpired || subscription?.status === 'read_only'
+
           if (isExpired && !subscription?.isLifetime) {
             console.log('[useSetupWizard] 💳 Plan expired — redirect to /renewal')
+
             if (typeof window !== 'undefined') {
               window.location.replace('/renewal?reason=expired')
             }
-            setChecked(true)
+
+            finishCheck()
             return
           }
+
           console.log('[useSetupWizard] 🔄 Opening renewal_setup wizard')
-          setWizardMode('renewal_setup')
-          setRenewalData(data.data.wizardData)
-          setTimeout(() => setOpen(true), 600)
+          scheduleOpen('renewal_setup', statusPayload.wizardData)
+          finishCheck()
           return
         }
 
         if (status === 'no_subscription') {
           console.log('[useSetupWizard] ⚠️ No subscription — redirect to /upgrade')
+
           if (typeof window !== 'undefined') {
             window.location.replace('/upgrade')
           }
-          setChecked(true)
+
+          finishCheck()
           return
         }
+
+        finishCheck()
       } catch (err) {
-        console.error('[useSetupWizard] Status check error:', err)
-        setChecked(true)
+        console.error('[useSetupWizard] Unexpected status check error:', err)
+
+        if (forceWizardRequested) {
+          scheduleOpen('first_setup')
+        }
+
+        finishCheck()
       }
     }
 
     checkWizardStatus()
-  }, [tenantId, checked, isDemo, planName, billingCycle])
+  }, [
+    tenantId,
+    checked,
+    isDemo,
+    planName,
+    billingCycle,
+    completionIds,
+    clearOpenTimer,
+    finishCheck,
+    scheduleOpen,
+  ])
 
-  const handleComplete = useCallback(() => {
+  const handleComplete = useCallback(async () => {
+    const ids = completionIds
+
     if (tenantId) {
       if (wizardMode === 'renewal_setup' && renewalData?.lastClosedYear?.id) {
         const renewalKey = `renewal_wizard_done_${tenantId}_${renewalData.lastClosedYear.id}`
-        if (typeof window !== 'undefined') {
+
+        try {
           localStorage.setItem(renewalKey, 'true')
-        }
+        } catch {}
       } else if (wizardMode === 'basic_renewal_setup' && renewalData?.lastBasicClose?.id) {
         const basicRenewalKey = `basic_renewal_wizard_done_${tenantId}_${renewalData.lastBasicClose.id}`
-        if (typeof window !== 'undefined') {
+
+        try {
           localStorage.setItem(basicRenewalKey, 'true')
-        }
+        } catch {}
       } else {
-        markWizardDone(tenantId)
+        markWizardDoneAny(ids)
       }
+
+      // ★ پاک کردن force wizard قدیمی بعد از تکمیل
+      try {
+        localStorage.removeItem(`force_wizard_${tenantId}`)
+      } catch {}
 
       if (typeof window !== 'undefined') {
         console.log('[SetupWizard] 🧹 Clearing cache after wizard completion...')
@@ -428,26 +915,50 @@ export function useSetupWizard() {
           'customers_list',
         ]
 
-        cacheKeys.forEach(key => {
-          try { localStorage.removeItem(key) } catch {}
+        cacheKeys.forEach((key) => {
+          try {
+            localStorage.removeItem(key)
+          } catch {}
         })
 
-        try { sessionStorage.clear() } catch {}
+        try {
+          sessionStorage.clear()
+        } catch {}
 
         console.log('[SetupWizard] ✅ Cache cleared')
       }
     }
+
+    // ★ ثبت دائمی روی سرور
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
+    if (token) {
+      try {
+        await postServerSetupCompleted(token)
+      } catch (err) {
+        console.warn('[SetupWizard] Failed to persist setup completion on server:', err)
+      }
+    }
+
+    clearOpenTimer()
     setOpen(false)
     setWizardMode(null)
     setRenewalData(null)
+    setChecked(true)
 
-    setTimeout(() => {
-      if (typeof window !== 'undefined') {
+    if (tenantId) {
+      checkedTenantRef.current = tenantId
+    }
+
+    if (!reloadingRef.current && typeof window !== 'undefined') {
+      reloadingRef.current = true
+
+      setTimeout(() => {
         console.log('[SetupWizard] 🔄 Reloading page to fetch fresh data...')
         window.location.reload()
-      }
-    }, 500)
-  }, [tenantId, wizardMode, renewalData])
+      }, 500)
+    }
+  }, [tenantId, wizardMode, renewalData, completionIds, clearOpenTimer])
 
   return { open, setOpen, handleComplete, wizardMode, renewalData }
 }
@@ -472,6 +983,7 @@ export function SetupWizard(props: SetupWizardProps) {
     () => getFeaturesByPlanName((planName || 'simple') as PlanName),
     [planName]
   )
+
   const maxWarehouses = useMemo(() => {
     if (features.tier === 'enterprise') return Infinity
     if (features.tier === 'professional') return 2
@@ -522,6 +1034,16 @@ export function SetupWizard(props: SetupWizardProps) {
   const [balError, setBalError] = useState('')
   const [balIsPosted, setBalIsPosted] = useState(false)
 
+  const finishedRef = useRef(false)
+  const renewalFinishedRef = useRef(false)
+
+  useEffect(() => {
+    if (!open) {
+      finishedRef.current = false
+      renewalFinishedRef.current = false
+    }
+  }, [open])
+
   useEffect(() => {
     if (isRenewalMode && renewalData) {
       setRenewalFYName(renewalData.suggestedNewYear?.name || '')
@@ -544,18 +1066,6 @@ export function SetupWizard(props: SetupWizardProps) {
       setRenewalSuccess(false)
     }
   }, [isBasicRenewalMode, basicRenewalData])
-
-  useEffect(() => {
-    if (!open || isRenewalMode || isBasicRenewalMode) return
-    setStep(0)
-    setSaving(false)
-    setSavingBalance(false)
-    setFyError('')
-    setWhError('')
-    setBalError('')
-    loadAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, isRenewalMode, isBasicRenewalMode])
 
   const loadAll = async () => {
     try {
@@ -580,16 +1090,30 @@ export function SetupWizard(props: SetupWizardProps) {
       const r = await fetch('/api/initial-balance', { headers: getToken() })
       const d = await r.json()
       if (d.success && d.data?.length > 0) {
-        setBalItems(d.data.map((b: any) => ({
-          type: b.type as BalanceType,
-          title: b.title,
-          amount: b.amount,
-          description: b.description,
-        })))
+        setBalItems(
+          d.data.map((b: any) => ({
+            type: b.type as BalanceType,
+            title: b.title,
+            amount: b.amount,
+            description: b.description,
+          }))
+        )
         setBalIsPosted(d.summary?.isPosted || false)
       }
     } catch {}
   }
+
+  useEffect(() => {
+    if (!open || isRenewalMode || isBasicRenewalMode) return
+    setStep(0)
+    setSaving(false)
+    setSavingBalance(false)
+    setFyError('')
+    setWhError('')
+    setBalError('')
+    loadAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isRenewalMode, isBasicRenewalMode])
 
   useEffect(() => {
     if (!isRenewalMode && !isBasicRenewalMode) {
@@ -600,7 +1124,10 @@ export function SetupWizard(props: SetupWizardProps) {
 
   const saveFY = async (): Promise<boolean> => {
     setFyError('')
-    if (!fyName.trim()) { setFyError('نام سال مالی الزامی است'); return false }
+    if (!fyName.trim()) {
+      setFyError('نام سال مالی الزامی است')
+      return false
+    }
 
     try {
       const r = await fetch('/api/fiscal-years', {
@@ -617,7 +1144,7 @@ export function SetupWizard(props: SetupWizardProps) {
       if (d.success) {
         setFyDone(true)
         const ys = d.data?.year ? [d.data.year] : []
-        if (ys.length) setFyExisting(p => [...p, ...ys])
+        if (ys.length) setFyExisting((p) => [...p, ...ys])
         return true
       }
       setFyError(d.error || 'خطا در ایجاد سال مالی')
@@ -634,11 +1161,18 @@ export function SetupWizard(props: SetupWizardProps) {
       const r = await fetch('/api/fiscal-years', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getToken() },
-        body: JSON.stringify({ name, startDate: todayISO(), endDate: addDays(todayISO(), 364), activate: true }),
+        body: JSON.stringify({
+          name,
+          startDate: todayISO(),
+          endDate: addDays(todayISO(), 364),
+          activate: true,
+        }),
       })
       const d = await r.json()
       return d.success
-    } catch { return false }
+    } catch {
+      return false
+    }
   }
 
   const saveWH = async (name: string, code?: string): Promise<boolean> => {
@@ -655,7 +1189,7 @@ export function SetupWizard(props: SetupWizardProps) {
       const d = await r.json()
       if (d.success) {
         setWhDone(true)
-        setWarehouses(p => [...p, d.data])
+        setWarehouses((p) => [...p, d.data])
         return true
       }
       setWhError(d.error || 'خطا در ایجاد انبار')
@@ -671,7 +1205,7 @@ export function SetupWizard(props: SetupWizardProps) {
       const r = await fetch(`/api/warehouses?id=${id}`, { method: 'DELETE', headers: getToken() })
       const d = await r.json()
       if (d.success) {
-        setWarehouses(p => p.filter(w => w.id !== id))
+        setWarehouses((p) => p.filter((w) => w.id !== id))
         if (warehouses.length <= 1) setWhDone(false)
       } else {
         toast({ title: 'خطا', description: d.error, variant: 'destructive' })
@@ -690,14 +1224,14 @@ export function SetupWizard(props: SetupWizardProps) {
       setBalError('مبلغ باید عدد مثبت باشد')
       return
     }
-    setBalItems(prev => [
+    setBalItems((prev) => [
       ...prev,
       {
         type: balType,
         title: balTitle.trim(),
         amount: amt,
         description: balDesc.trim() || undefined,
-      }
+      },
     ])
     setBalTitle('')
     setBalAmount('')
@@ -744,7 +1278,7 @@ export function SetupWizard(props: SetupWizardProps) {
 
     setSavingBalance(true)
 
-     const requestBody = {
+    const requestBody = {
       items: balItems.map((b) => ({
         type: b.type,
         title: b.title.trim(),
@@ -795,8 +1329,11 @@ export function SetupWizard(props: SetupWizardProps) {
     }
   }
 
-  const totalAssets = balItems.filter(b => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type)).reduce((s, b) => s + b.amount, 0)
-  const totalLiab = balItems.filter(b => b.type === 'liability').reduce((s, b) => s + b.amount, 0)
+  const totalAssets = balItems
+    .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
+    .reduce((s, b) => s + b.amount, 0)
+
+  const totalLiab = balItems.filter((b) => b.type === 'liability').reduce((s, b) => s + b.amount, 0)
   const totalEquity = totalAssets - totalLiab
 
   const handleNext = async () => {
@@ -811,11 +1348,15 @@ export function SetupWizard(props: SetupWizardProps) {
     setBalError('')
     try {
       if (step === 0) {
-        if (fyDone) { setStep(1); return }
+        if (fyDone) {
+          setStep(1)
+          return
+        }
         const ok = await saveFY()
         if (ok) setStep(1)
         return
       }
+
       if (step === 1) {
         if (whDone || warehouses.length > 0) {
           if (whName.trim()) {
@@ -826,20 +1367,29 @@ export function SetupWizard(props: SetupWizardProps) {
           setStep(2)
           return
         }
+
         if (whName.trim()) {
           const ok = await saveWH(whName, whCode)
-          if (ok) { setWhName(''); setWhCode(''); setStep(2) }
+          if (ok) {
+            setWhName('')
+            setWhCode('')
+            setStep(2)
+          }
         } else {
           setWhError('حداقل یک انبار ایجاد کنید یا از دکمه «استفاده از پیش‌فرض» استفاده کنید')
         }
         return
       }
+
       if (step === 2) {
         if (balTitle.trim() && balAmount) {
           setBalError('آیتم در حال ورود را ابتدا با دکمه «افزودن» اضافه کنید')
           return
         }
-        if (balItems.length === 0) { setStep(3); return }
+        if (balItems.length === 0) {
+          setStep(3)
+          return
+        }
         const ok = await saveBalance()
         if (ok) setStep(3)
         return
@@ -867,20 +1417,30 @@ export function SetupWizard(props: SetupWizardProps) {
         setStep(2)
         return
       }
-      if (step === 2) { setStep(3); return }
+      if (step === 2) {
+        setStep(3)
+        return
+      }
     } finally {
       setSaving(false)
     }
   }
 
   const handleFinish = async () => {
-    if (saving) return
+    if (finishedRef.current || saving) return
+
+    finishedRef.current = true
     setSaving(true)
+
     try {
       if (!fyDone) await autoCreateFY()
       if (warehouses.length === 0) await saveWH('انبار فروشگاه', 'WH-01')
-      toast({ title: '🎉 راه‌اندازی کامل شد!', description: 'فروشگاه شما آماده‌ی استفاده است' })
-      onOpenChange(false)
+
+      toast({
+        title: '🎉 راه‌اندازی کامل شد!',
+        description: 'فروشگاه شما آماده‌ی استفاده است',
+      })
+
       onComplete?.()
     } finally {
       setSaving(false)
@@ -896,6 +1456,7 @@ export function SetupWizard(props: SetupWizardProps) {
       setRenewalError(`حداکثر ${maxWarehouses} انبار مجاز است`)
       return
     }
+
     setRenewalError('')
     try {
       const res = await fetch('/api/warehouses', {
@@ -908,12 +1469,15 @@ export function SetupWizard(props: SetupWizardProps) {
       })
       const data = await res.json()
       if (data.success) {
-        setRenewalWarehouses(prev => [...prev, {
-          id: data.data.id,
-          name: data.data.name,
-          code: data.data.code,
-          isDefault: false,
-        }])
+        setRenewalWarehouses((prev) => [
+          ...prev,
+          {
+            id: data.data.id,
+            name: data.data.name,
+            code: data.data.code,
+            isDefault: false,
+          },
+        ])
         setRenewalNewWhName('')
         setRenewalNewWhCode('')
         toast({ title: '✅ انبار جدید اضافه شد' })
@@ -933,7 +1497,7 @@ export function SetupWizard(props: SetupWizardProps) {
       })
       const data = await res.json()
       if (data.success) {
-        setRenewalWarehouses(prev => prev.filter(w => w.id !== id))
+        setRenewalWarehouses((prev) => prev.filter((w) => w.id !== id))
       } else {
         toast({ title: 'خطا', description: data.error, variant: 'destructive' })
       }
@@ -960,9 +1524,13 @@ export function SetupWizard(props: SetupWizardProps) {
         setRenewalSuccess(true)
         toast({
           title: '🎉 سال مالی جدید ایجاد شد!',
-          description: `سال «${data.data.newYear.name}» فعال و سند افتتاحیه صادر شد`,
+          description: `سال «${data.data?.newYear?.name || 'سال جدید'}» فعال و سند افتتاحیه صادر شد`,
         })
+
         setTimeout(() => {
+          if (renewalFinishedRef.current) return
+
+          renewalFinishedRef.current = true
           onOpenChange(false)
           onComplete?.()
         }, 2000)
@@ -998,7 +1566,11 @@ export function SetupWizard(props: SetupWizardProps) {
           title: '🎉 دوره جدید آماده است!',
           description: 'انبارها به‌روزرسانی شدند و سند افتتاحیه صادر شد',
         })
+
         setTimeout(() => {
+          if (renewalFinishedRef.current) return
+
+          renewalFinishedRef.current = true
           onOpenChange(false)
           onComplete?.()
         }, 2000)
@@ -1019,34 +1591,48 @@ export function SetupWizard(props: SetupWizardProps) {
     { label: 'انبار', icon: <Building2 className="w-4 h-4" />, done: whDone || warehouses.length > 0 },
     { label: 'سند افتتاحیه', icon: <Wallet className="w-4 h-4" />, done: balIsPosted || balItems.length > 0 },
   ]
+
   const pct = step >= 3 ? 100 : Math.round((step / 3) * 100)
 
   // ★ v10.10: بررسی اینکه آیا ویزارد تکمیل شده است
-  const isWizardCompleted = isRenewalMode || isBasicRenewalMode 
-    ? renewalSuccess 
-    : step >= 3
+  const isWizardCompleted = isRenewalMode || isBasicRenewalMode ? renewalSuccess : step >= 3
 
   return (
-    <Dialog open={open} onOpenChange={v => {
-      // ★ v10.10: فقط وقتی ویزارد تکمیل شده اجازه بسته شدن بده
-      if (!v) {
-        if (isWizardCompleted) {
-          handleFinish()
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) {
+          // در حالت تمدید، فقط بعد از موفقیت اجازه بسته شدن بده
+          if (isRenewalMode || isBasicRenewalMode) {
+            if (renewalSuccess && !renewalFinishedRef.current) {
+              renewalFinishedRef.current = true
+              onOpenChange(false)
+              onComplete?.()
+            }
+            return
+          }
+
+          // در حالت راه‌اندازی اولیه، فقط وقتی مراحل تمام شده finish صدا زده شود
+          if (isWizardCompleted && !finishedRef.current) {
+            handleFinish()
+          }
+
+          return
         }
-        return
-      }
-      onOpenChange(true)
-    }}>
+
+        onOpenChange(true)
+      }}
+    >
       <DialogContent
         className="max-w-xl w-[95vw] max-h-[92vh] overflow-y-auto [&>button:last-child]:hidden [&>button.absolute]:hidden"
         dir="rtl"
-        onInteractOutside={e => {
+        onInteractOutside={(e) => {
           // ★ v10.10: جلوگیری از بسته شدن با کلیک روی backdrop
           if (!isWizardCompleted) {
             e.preventDefault()
           }
         }}
-        onEscapeKeyDown={e => {
+        onEscapeKeyDown={(e) => {
           // ★ v10.10: جلوگیری از بسته شدن با Escape
           if (!isWizardCompleted) {
             e.preventDefault()
@@ -1061,9 +1647,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   <RefreshCw className="w-4 h-4 text-amber-600" />
                 </div>
                 شروع دوره جدید
-                <Badge className="bg-amber-100 text-amber-700 text-[10px] mr-auto">
-                  پلن پایه
-                </Badge>
+                <Badge className="bg-amber-100 text-amber-700 text-[10px] mr-auto">پلن پایه</Badge>
               </DialogTitle>
               <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
                 حساب بسته شد. انبارها و سند افتتاحیه را بررسی و تأیید کنید.
@@ -1076,9 +1660,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   <CheckCircle2 className="w-8 h-8 text-emerald-600" />
                 </div>
                 <h3 className="text-lg font-bold text-gray-900">🎉 دوره جدید آماده است!</h3>
-                <p className="text-xs text-gray-500">
-                  سند افتتاحیه صادر شد. می‌توانید کار کنید.
-                </p>
+                <p className="text-xs text-gray-500">سند افتتاحیه صادر شد. می‌توانید کار کنید.</p>
               </div>
             ) : (
               <div className="space-y-4 py-2">
@@ -1086,15 +1668,13 @@ export function SetupWizard(props: SetupWizardProps) {
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center gap-2 mb-2">
                       <Archive className="w-4 h-4 text-blue-600" />
-                      <span className="text-xs font-bold text-blue-800">
-                        سند اختتامیه صادر شد
-                      </span>
+                      <span className="text-xs font-bold text-blue-800">سند اختتامیه صادر شد</span>
                     </div>
                     <div className="text-[10px] text-gray-600" dir="ltr">
-                      {basicRenewalData.lastBasicClose?.number || '—'}
+                      {basicRenewalData?.lastBasicClose?.number || '—'}
                     </div>
                     <div className="text-[10px] text-gray-600">
-                      {isoToJalaliFa(basicRenewalData.lastBasicClose?.date)}
+                      {isoToJalaliFa(basicRenewalData?.lastBasicClose?.date)}
                     </div>
                   </CardContent>
                 </Card>
@@ -1113,9 +1693,7 @@ export function SetupWizard(props: SetupWizardProps) {
 
                     <Alert className="border-blue-200 bg-blue-50 py-1.5">
                       <Info className="h-3.5 w-3.5 text-blue-600" />
-                      <AlertDescription className="text-[10px] text-blue-800 mr-2">
-                        پلن پایه: ۱ انبار مجاز.
-                      </AlertDescription>
+                      <AlertDescription className="text-[10px] text-blue-800 mr-2">پلن پایه: ۱ انبار مجاز.</AlertDescription>
                     </Alert>
 
                     {renewalWarehouses.map((wh: any, idx: number) => (
@@ -1123,16 +1701,14 @@ export function SetupWizard(props: SetupWizardProps) {
                         <Package className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                         <Input
                           value={wh.name}
-                          onChange={e => {
+                          onChange={(e) => {
                             const updated = [...renewalWarehouses]
                             updated[idx] = { ...updated[idx], name: e.target.value, code: e.target.value }
                             setRenewalWarehouses(updated)
                           }}
                           className="h-7 text-xs flex-1"
                         />
-                        {wh.isDefault && (
-                          <Badge className="bg-emerald-100 text-emerald-700 text-[8px]">پیش‌فرض</Badge>
-                        )}
+                        {wh.isDefault && <Badge className="bg-emerald-100 text-emerald-700 text-[8px]">پیش‌فرض</Badge>}
                         {!wh.isDefault && (
                           <Button
                             variant="ghost"
@@ -1152,13 +1728,13 @@ export function SetupWizard(props: SetupWizardProps) {
                         <div className="grid grid-cols-2 gap-2">
                           <Input
                             value={renewalNewWhName}
-                            onChange={e => setRenewalNewWhName(e.target.value)}
+                            onChange={(e) => setRenewalNewWhName(e.target.value)}
                             placeholder="نام انبار"
                             className="h-7 text-xs"
                           />
                           <Input
                             value={renewalNewWhCode}
-                            onChange={e => setRenewalNewWhCode(e.target.value)}
+                            onChange={(e) => setRenewalNewWhCode(e.target.value)}
                             placeholder="کد (اختیاری)"
                             className="h-7 text-xs"
                             dir="ltr"
@@ -1188,9 +1764,7 @@ export function SetupWizard(props: SetupWizardProps) {
                       </Alert>
                     )}
 
-                    <p className="text-[9px] text-gray-500 mt-1">
-                      💡 موجودی انبارها از دوره قبل منتقل می‌شود.
-                    </p>
+                    <p className="text-[9px] text-gray-500 mt-1">💡 موجودی انبارها از دوره قبل منتقل می‌شود.</p>
                   </CardContent>
                 </Card>
 
@@ -1210,11 +1784,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   onClick={handleBasicRenewalFinish}
                   disabled={renewalSaving || renewalWarehouses.length === 0}
                 >
-                  {renewalSaving ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                  )}
+                  {renewalSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   {renewalSaving ? 'در حال ایجاد...' : 'تأیید و شروع دوره جدید'}
                 </Button>
               )}
@@ -1228,9 +1798,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   <RefreshCw className="w-4 h-4 text-emerald-600" />
                 </div>
                 شروع سال مالی جدید
-                <Badge className="bg-emerald-100 text-emerald-700 text-[10px] mr-auto">
-                  تمدید هوشمند
-                </Badge>
+                <Badge className="bg-emerald-100 text-emerald-700 text-[10px] mr-auto">تمدید هوشمند</Badge>
               </DialogTitle>
               <DialogDescription className="text-[11px] text-gray-500 mt-0.5">
                 سال مالی قبل بسته شده. سال جدید را بررسی و تأیید کنید.
@@ -1243,9 +1811,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   <CheckCircle2 className="w-8 h-8 text-emerald-600" />
                 </div>
                 <h3 className="text-lg font-bold text-gray-900">🎉 سال مالی جدید آماده است!</h3>
-                <p className="text-xs text-gray-500">
-                  سند افتتاحیه از سال قبل منتقل شد. می‌توانید کار کنید.
-                </p>
+                <p className="text-xs text-gray-500">سند افتتاحیه از سال قبل منتقل شد. می‌توانید کار کنید.</p>
               </div>
             ) : (
               <div className="space-y-4 py-2">
@@ -1254,13 +1820,13 @@ export function SetupWizard(props: SetupWizardProps) {
                     <div className="flex items-center gap-2 mb-2">
                       <Archive className="w-4 h-4 text-blue-600" />
                       <span className="text-xs font-bold text-blue-800">
-                        سال مالی قبل: {renewalData.lastClosedYear.name}
+                        سال مالی قبل: {renewalData?.lastClosedYear?.name || '—'}
                       </span>
                     </div>
                     <div className="text-[10px] text-gray-600" dir="ltr">
-                      {isoToJalaliFa(renewalData.lastClosedYear.startDate)} — {isoToJalaliFa(renewalData.lastClosedYear.endDate)}
+                      {isoToJalaliFa(renewalData?.lastClosedYear?.startDate)} — {isoToJalaliFa(renewalData?.lastClosedYear?.endDate)}
                     </div>
-                    {renewalData.closingEntry && (
+                    {renewalData?.closingEntry && (
                       <div className="grid grid-cols-3 gap-2 pt-2 border-t border-blue-100">
                         <div className="text-center">
                           <div className="text-[9px] text-gray-500">سند اختتامیه</div>
@@ -1270,10 +1836,14 @@ export function SetupWizard(props: SetupWizardProps) {
                         </div>
                         <div className="text-center">
                           <div className="text-[9px] text-gray-500">
-                            {renewalData.closingEntry.netProfit >= 0 ? 'سود' : 'زیان'}
+                            {(renewalData.closingEntry.netProfit ?? 0) >= 0 ? 'سود' : 'زیان'}
                           </div>
-                          <div className={`text-[10px] font-bold font-mono ${renewalData.closingEntry.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                            {formatNum(Math.abs(renewalData.closingEntry.netProfit))}
+                          <div
+                            className={`text-[10px] font-bold font-mono ${
+                              (renewalData.closingEntry.netProfit ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700'
+                            }`}
+                          >
+                            {formatNum(Math.abs(renewalData.closingEntry.netProfit ?? 0))}
                           </div>
                         </div>
                         <div className="text-center">
@@ -1297,7 +1867,7 @@ export function SetupWizard(props: SetupWizardProps) {
                       <Label className="text-[11px] text-gray-600">نام سال مالی</Label>
                       <Input
                         value={renewalFYName}
-                        onChange={e => setRenewalFYName(e.target.value)}
+                        onChange={(e) => setRenewalFYName(e.target.value)}
                         className="h-8 text-xs mt-1 font-bold"
                       />
                     </div>
@@ -1346,16 +1916,14 @@ export function SetupWizard(props: SetupWizardProps) {
                         <Package className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                         <Input
                           value={wh.name}
-                          onChange={e => {
+                          onChange={(e) => {
                             const updated = [...renewalWarehouses]
                             updated[idx] = { ...updated[idx], name: e.target.value, code: e.target.value }
                             setRenewalWarehouses(updated)
                           }}
                           className="h-7 text-xs flex-1"
                         />
-                        {wh.isDefault && (
-                          <Badge className="bg-emerald-100 text-emerald-700 text-[8px]">پیش‌فرض</Badge>
-                        )}
+                        {wh.isDefault && <Badge className="bg-emerald-100 text-emerald-700 text-[8px]">پیش‌فرض</Badge>}
                         {!wh.isDefault && (
                           <Button
                             variant="ghost"
@@ -1375,13 +1943,13 @@ export function SetupWizard(props: SetupWizardProps) {
                         <div className="grid grid-cols-2 gap-2">
                           <Input
                             value={renewalNewWhName}
-                            onChange={e => setRenewalNewWhName(e.target.value)}
+                            onChange={(e) => setRenewalNewWhName(e.target.value)}
                             placeholder="نام انبار"
                             className="h-7 text-xs"
                           />
                           <Input
                             value={renewalNewWhCode}
-                            onChange={e => setRenewalNewWhCode(e.target.value)}
+                            onChange={(e) => setRenewalNewWhCode(e.target.value)}
                             placeholder="کد (اختیاری)"
                             className="h-7 text-xs"
                             dir="ltr"
@@ -1411,13 +1979,11 @@ export function SetupWizard(props: SetupWizardProps) {
                       </Alert>
                     )}
 
-                    <p className="text-[9px] text-gray-500 mt-1">
-                      💡 موجودی انبارها از سال قبل منتقل می‌شود.
-                    </p>
+                    <p className="text-[9px] text-gray-500 mt-1">💡 موجودی انبارها از سال قبل منتقل می‌شود.</p>
                   </CardContent>
                 </Card>
 
-                {renewalData.closingDetails && (
+                {renewalData?.closingDetails && (
                   <Card className="border-amber-200 bg-amber-50/30">
                     <CardContent className="p-3 space-y-2">
                       <div className="flex items-center gap-2 mb-2">
@@ -1434,24 +2000,24 @@ export function SetupWizard(props: SetupWizardProps) {
                         <div className="flex justify-between">
                           <span className="text-gray-600">جمع دارایی‌ها:</span>
                           <span className="font-bold text-emerald-700 font-mono">
-                            {formatNum(renewalData.closingDetails.totalAssets)} ﷼
+                            {formatNum(renewalData.closingDetails.totalAssets ?? 0)} ﷼
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">جمع بدهی‌ها:</span>
                           <span className="font-bold text-red-600 font-mono">
-                            {formatNum(renewalData.closingDetails.totalLiabilities)} ﷼
+                            {formatNum(renewalData.closingDetails.totalLiabilities ?? 0)} ﷼
                           </span>
                         </div>
                         <div className="flex justify-between border-t border-amber-100 pt-1 font-bold">
                           <span className="text-gray-900">سرمایه:</span>
                           <span className="text-blue-700 font-mono">
-                            {formatNum(renewalData.closingDetails.totalEquity)} ﷼
+                            {formatNum(renewalData.closingDetails.totalEquity ?? 0)} ﷼
                           </span>
                         </div>
                       </div>
 
-                      {renewalData.closingDetails.openingItems?.length > 0 && (
+                      {(renewalData.closingDetails.openingItems?.length ?? 0) > 0 && (
                         <details className="mt-2">
                           <summary className="text-[10px] text-amber-700 cursor-pointer hover:text-amber-800">
                             مشاهده {renewalData.closingDetails.openingItems.length} حساب
@@ -1464,7 +2030,7 @@ export function SetupWizard(props: SetupWizardProps) {
                                   {item.accountName}
                                 </span>
                                 <span className={`font-mono font-bold ${item.balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                  {formatNum(Math.abs(item.balance))}
+                                  {formatNum(Math.abs(item.balance ?? 0))}
                                 </span>
                               </div>
                             ))}
@@ -1491,11 +2057,7 @@ export function SetupWizard(props: SetupWizardProps) {
                   onClick={handleRenewalFinish}
                   disabled={renewalSaving || !renewalFYName.trim() || renewalWarehouses.length === 0}
                 >
-                  {renewalSaving ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                  )}
+                  {renewalSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   {renewalSaving ? 'در حال ایجاد...' : 'تأیید و شروع سال جدید'}
                 </Button>
               )}
@@ -1522,23 +2084,25 @@ export function SetupWizard(props: SetupWizardProps) {
             {step < 3 && (
               <div className="space-y-2 pt-1">
                 <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-violet-500 h-full rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
+                  <div className="bg-violet-500 h-full rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
                   {STEPS.map((s, idx) => (
-                    <div key={idx} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] transition-all ${
-                      idx === step
-                        ? 'border-violet-400 bg-violet-50 text-violet-700 font-bold'
-                        : s.done
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                        : 'border-gray-200 bg-gray-50 text-gray-400'
-                    }`}>
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
-                        s.done ? 'bg-emerald-500 text-white' : idx === step ? 'bg-violet-500 text-white' : 'bg-gray-300 text-gray-500'
-                      }`}>
+                    <div
+                      key={idx}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] transition-all ${
+                        idx === step
+                          ? 'border-violet-400 bg-violet-50 text-violet-700 font-bold'
+                          : s.done
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                          : 'border-gray-200 bg-gray-50 text-gray-400'
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
+                          s.done ? 'bg-emerald-500 text-white' : idx === step ? 'bg-violet-500 text-white' : 'bg-gray-300 text-gray-500'
+                        }`}
+                      >
                         {s.done ? <CheckCircle2 className="w-3 h-3" /> : idx + 1}
                       </div>
                       <span className="truncate">{s.label}</span>
@@ -1561,11 +2125,13 @@ export function SetupWizard(props: SetupWizardProps) {
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                       <AlertDescription className="text-xs text-emerald-800 mr-2">
                         <p className="font-medium">سال مالی فعال موجود است:</p>
-                        {fyExisting.filter((y: any) => y.isActive).map((y: any) => (
-                          <p key={y.id} className="mt-1">
-                            <strong>{y.name}</strong> — {isoToJalaliFa(y.startDate)} تا {isoToJalaliFa(y.endDate)}
-                          </p>
-                        ))}
+                        {fyExisting
+                          .filter((y: any) => y.isActive)
+                          .map((y: any) => (
+                            <p key={y.id} className="mt-1">
+                              <strong>{y.name}</strong> — {isoToJalaliFa(y.startDate)} تا {isoToJalaliFa(y.endDate)}
+                            </p>
+                          ))}
                         <p className="mt-1.5 text-emerald-600 text-[11px]">می‌توانید ادامه دهید.</p>
                       </AlertDescription>
                     </Alert>
@@ -1583,7 +2149,7 @@ export function SetupWizard(props: SetupWizardProps) {
                           <Label className="text-[11px] text-gray-600">نام سال مالی</Label>
                           <Input
                             value={fyName}
-                            onChange={e => setFyName(e.target.value)}
+                            onChange={(e) => setFyName(e.target.value)}
                             placeholder="مثلاً: سال مالی ۱۴۰۴"
                             className="h-8 text-xs mt-1"
                           />
@@ -1593,7 +2159,9 @@ export function SetupWizard(props: SetupWizardProps) {
                             <Label className="text-[11px] text-gray-600">تاریخ شروع (شمسی)</Label>
                             <PersianDatePicker
                               value={fyStart}
-                              onChange={(iso) => { if (iso) setFyStart(iso) }}
+                              onChange={(iso) => {
+                                if (iso) setFyStart(iso)
+                              }}
                               placeholder="انتخاب تاریخ"
                               label=""
                             />
@@ -1604,9 +2172,7 @@ export function SetupWizard(props: SetupWizardProps) {
                             <div className="mt-0.5 h-9 px-2 py-1.5 border border-gray-100 rounded-md bg-gray-50 flex items-center text-xs text-gray-500">
                               {isoToJalaliFa(fyEnd)}
                             </div>
-                            <p className="text-[10px] text-gray-500 mt-0.5">
-                              {formatNum(daysBetween(fyStart, fyEnd))} روز
-                            </p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">{formatNum(daysBetween(fyStart, fyEnd))} روز</p>
                           </div>
                         </div>
                       </div>
@@ -1654,19 +2220,22 @@ export function SetupWizard(props: SetupWizardProps) {
                   ) : warehouses.length > 0 ? (
                     <div className="space-y-1.5">
                       {warehouses.map((wh: any) => (
-                        <div key={wh.id} className="flex items-center justify-between gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div
+                          key={wh.id}
+                          className="flex items-center justify-between gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg"
+                        >
                           <div className="flex items-center gap-2 min-w-0">
                             <Package className="w-4 h-4 text-emerald-500 shrink-0" />
                             <div className="min-w-0">
                               <p className="text-xs font-medium text-gray-800 truncate">{wh.name}</p>
                               <p className="text-[10px] text-gray-500">کد: {wh.code}</p>
                             </div>
-                            {wh.isDefault && (
-                              <Badge className="bg-emerald-200 text-emerald-800 text-[9px]">پیش‌فرض</Badge>
-                            )}
+                            {wh.isDefault && <Badge className="bg-emerald-200 text-emerald-800 text-[9px]">پیش‌فرض</Badge>}
                           </div>
                           {!wh.isDefault && (
-                            <Button variant="ghost" size="sm"
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
                               onClick={() => deleteWH(wh.id)}
                             >
@@ -1689,13 +2258,16 @@ export function SetupWizard(props: SetupWizardProps) {
                             <Label className="text-[11px] text-gray-600">نام انبار</Label>
                             <Input
                               value={whName}
-                              onChange={e => setWhName(e.target.value)}
+                              onChange={(e) => setWhName(e.target.value)}
                               placeholder="مثلاً: انبار اصلی"
                               className="h-8 text-xs mt-0.5"
-                              onKeyDown={e => {
+                              onKeyDown={(e) => {
                                 if (e.key === 'Enter' && whName.trim()) {
-                                  saveWH(whName, whCode).then(ok => {
-                                    if (ok) { setWhName(''); setWhCode('') }
+                                  saveWH(whName, whCode).then((ok) => {
+                                    if (ok) {
+                                      setWhName('')
+                                      setWhCode('')
+                                    }
                                   })
                                 }
                               }}
@@ -1705,7 +2277,7 @@ export function SetupWizard(props: SetupWizardProps) {
                             <Label className="text-[11px] text-gray-600">کد (اختیاری)</Label>
                             <Input
                               value={whCode}
-                              onChange={e => setWhCode(e.target.value)}
+                              onChange={(e) => setWhCode(e.target.value)}
                               placeholder="WH-01"
                               className="h-8 text-xs mt-0.5"
                               dir="ltr"
@@ -1714,11 +2286,15 @@ export function SetupWizard(props: SetupWizardProps) {
                         </div>
                         {whName.trim() && (
                           <Button
-                            variant="outline" size="sm"
+                            variant="outline"
+                            size="sm"
                             className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
                             onClick={async () => {
                               const ok = await saveWH(whName, whCode)
-                              if (ok) { setWhName(''); setWhCode('') }
+                              if (ok) {
+                                setWhName('')
+                                setWhCode('')
+                              }
                             }}
                             disabled={saving}
                           >
@@ -1778,11 +2354,13 @@ export function SetupWizard(props: SetupWizardProps) {
                           <Label className="text-[11px] text-gray-600">نوع</Label>
                           <select
                             value={balType}
-                            onChange={e => setBalType(e.target.value as BalanceType)}
+                            onChange={(e) => setBalType(e.target.value as BalanceType)}
                             className="w-full mt-0.5 h-8 text-xs border border-gray-200 rounded-md px-2 bg-white"
                           >
-                            {(Object.keys(BAL_LABELS) as BalanceType[]).map(t => (
-                              <option key={t} value={t}>{BAL_LABELS[t]}</option>
+                            {(Object.keys(BAL_LABELS) as BalanceType[]).map((t) => (
+                              <option key={t} value={t}>
+                                {BAL_LABELS[t]}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -1790,12 +2368,15 @@ export function SetupWizard(props: SetupWizardProps) {
                           <Label className="text-[11px] text-gray-600">عنوان</Label>
                           <Input
                             value={balTitle}
-                            onChange={e => setBalTitle(e.target.value)}
+                            onChange={(e) => setBalTitle(e.target.value)}
                             placeholder={
-                              balType === 'cash' ? 'صندوق فروشگاه'
-                              : balType === 'bank' ? 'بانک ملت'
-                              : balType === 'liability' ? 'وام بانک'
-                              : 'عنوان'
+                              balType === 'cash'
+                                ? 'صندوق فروشگاه'
+                                : balType === 'bank'
+                                ? 'بانک ملت'
+                                : balType === 'liability'
+                                ? 'وام بانک'
+                                : 'عنوان'
                             }
                             className="h-8 text-xs mt-0.5"
                           />
@@ -1807,25 +2388,26 @@ export function SetupWizard(props: SetupWizardProps) {
                           <Input
                             type="number"
                             value={balAmount}
-                            onChange={e => setBalAmount(e.target.value)}
+                            onChange={(e) => setBalAmount(e.target.value)}
                             placeholder="مثلاً: 5000000"
                             className="h-8 text-xs mt-0.5"
                             dir="ltr"
-                            onKeyDown={e => e.key === 'Enter' && addBalItem()}
+                            onKeyDown={(e) => e.key === 'Enter' && addBalItem()}
                           />
                         </div>
                         <div>
                           <Label className="text-[11px] text-gray-600">توضیح (اختیاری)</Label>
                           <Input
                             value={balDesc}
-                            onChange={e => setBalDesc(e.target.value)}
+                            onChange={(e) => setBalDesc(e.target.value)}
                             placeholder="یادداشت"
                             className="h-8 text-xs mt-0.5"
                           />
                         </div>
                       </div>
                       <Button
-                        variant="outline" size="sm"
+                        variant="outline"
+                        size="sm"
                         className="w-full h-7 text-xs border-violet-300 text-violet-700 hover:bg-violet-100"
                         onClick={addBalItem}
                         disabled={!balTitle.trim() || !balAmount}
@@ -1840,7 +2422,8 @@ export function SetupWizard(props: SetupWizardProps) {
                     <div className="space-y-1">
                       <div className="max-h-36 overflow-y-auto space-y-1 rounded-lg">
                         {balItems.map((item, idx) => (
-                          <div key={idx}
+                          <div
+                            key={idx}
                             className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${BAL_COLORS[item.type]}`}
                           >
                             <div className="flex items-center gap-2 min-w-0">
@@ -1849,9 +2432,11 @@ export function SetupWizard(props: SetupWizardProps) {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="font-bold font-mono">{formatNum(item.amount)}﷼</span>
-                              <Button variant="ghost" size="sm"
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 className="h-5 w-5 p-0 hover:text-red-600 hover:bg-red-50"
-                                onClick={() => setBalItems(p => p.filter((_, i) => i !== idx))}
+                                onClick={() => setBalItems((p) => p.filter((_, i) => i !== idx))}
                               >
                                 <Trash2 className="w-3 h-3" />
                               </Button>
@@ -1900,16 +2485,37 @@ export function SetupWizard(props: SetupWizardProps) {
                   </div>
                   <div className="text-right space-y-1.5 max-w-xs mx-auto">
                     {[
-                      { done: fyDone, label: 'سال مالی', sub: fyExisting.find((y: any) => y.isActive)?.name || fyName || 'ثبت شد' },
-                      { done: whDone || warehouses.length > 0, label: 'انبار', sub: `${warehouses.length || 1} انبار` },
-                      { done: balIsPosted || balItems.length > 0, label: 'سند افتتاحیه', sub: balIsPosted ? `${balItems.length} آیتم — سند صادر شد` : balItems.length > 0 ? `${balItems.length} آیتم — پیش‌نویس (ثبت نهایی در تنظیمات)` : 'می‌توانید بعداً ثبت کنید' },
+                      {
+                        done: fyDone,
+                        label: 'سال مالی',
+                        sub: fyExisting.find((y: any) => y.isActive)?.name || fyName || 'ثبت شد',
+                      },
+                      {
+                        done: whDone || warehouses.length > 0,
+                        label: 'انبار',
+                        sub: `${warehouses.length || 1} انبار`,
+                      },
+                      {
+                        done: balIsPosted || balItems.length > 0,
+                        label: 'سند افتتاحیه',
+                        sub: balIsPosted
+                          ? `${balItems.length} آیتم — سند صادر شد`
+                          : balItems.length > 0
+                          ? `${balItems.length} آیتم — پیش‌نویس (ثبت نهایی در تنظیمات)`
+                          : 'می‌توانید بعداً ثبت کنید',
+                      },
                     ].map((s, i) => (
-                      <div key={i} className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
-                        s.done ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'
-                      }`}>
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                          s.done ? 'bg-emerald-500' : 'bg-gray-300'
-                        }`}>
+                      <div
+                        key={i}
+                        className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs ${
+                          s.done ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'
+                        }`}
+                      >
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                            s.done ? 'bg-emerald-500' : 'bg-gray-300'
+                          }`}
+                        >
                           <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                         </div>
                         <div>
@@ -1925,8 +2531,12 @@ export function SetupWizard(props: SetupWizardProps) {
 
             <DialogFooter className="flex items-center gap-2 pt-3 border-t border-gray-100">
               {step > 0 && step < 3 && (
-                <Button variant="ghost" size="sm" onClick={() => setStep(s => s - 1)}
-                  disabled={saving || savingBalance} className="text-xs gap-1 text-gray-500"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setStep((s) => s - 1)}
+                  disabled={saving || savingBalance}
+                  className="text-xs gap-1 text-gray-500"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                   قبلی
@@ -1935,7 +2545,10 @@ export function SetupWizard(props: SetupWizardProps) {
 
               {/* ★ v10.10: دکمه "استفاده از پیش‌فرض" - داده پیش‌فرض می‌سازد و به مرحله بعد می‌رود */}
               {step < 3 && (
-                <Button variant="ghost" size="sm" onClick={handleSkip}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSkip}
                   disabled={saving || savingBalance}
                   className="text-xs gap-1 text-gray-400 hover:text-gray-600 mr-auto"
                 >
@@ -1952,7 +2565,11 @@ export function SetupWizard(props: SetupWizardProps) {
                     disabled={saving || savingBalance}
                   >
                     {(saving || savingBalance) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    {step === 0 && fyDone ? 'ادامه →' : step === 1 && (warehouses.length > 0) ? 'ادامه →' : 'ثبت و ادامه →'}
+                    {step === 0 && fyDone
+                      ? 'ادامه →'
+                      : step === 1 && warehouses.length > 0
+                      ? 'ادامه →'
+                      : 'ثبت و ادامه →'}
                   </Button>
                 ) : (
                   <Button

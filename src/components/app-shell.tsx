@@ -1175,85 +1175,132 @@ function AppHeader() {
   const unreadCount = notifications.filter(n => !n.isRead).length
   const canAccessSettings = isFullAccessRole(user?.role)
 
-  const handleLogout = async () => {
+ const handleLogout = async () => {
+  try {
+    // ★ حفظ کلیدهای تکمیل ویزارد هنگام خروج
+    const preservedSetupEntries: Array<[string, string | null]> = []
+
     try {
-      if ('serviceWorker' in navigator) {
-        try {
-          const registrations = await navigator.serviceWorker.getRegistrations()
-          for (const registration of registrations) {
-            await registration.unregister()
-          }
-        } catch (err) {
-          console.warn('[AppHeader] Error unregistering SW:', err)
+      Object.keys(localStorage).forEach((key) => {
+        if (
+          key.startsWith('setup_wizard_done_') ||
+          key.startsWith('wizard_done_')
+        ) {
+          preservedSetupEntries.push([key, localStorage.getItem(key)])
         }
-      }
-
-      if ('caches' in window) {
-        try {
-          const cacheNames = await caches.keys()
-          await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)))
-        } catch (err) {
-          console.warn('[AppHeader] Error clearing caches:', err)
-        }
-      }
-
-      const keysToRemove = [
-        'token', 'refreshToken', 'user', 'storeName', 'tenant',
-        'planName', 'tenant-slug', 'auth-token', 'shop-accounting-store',
-      ]
-      keysToRemove.forEach((key) => {
-        try { localStorage.removeItem(key) } catch (e) { }
       })
+    } catch {}
 
-      try { sessionStorage.clear() } catch (e) { }
-
-      const cookiesToClear = ['tenant-slug', 'tenant-view', 'auth-token', 'token', 'refreshToken']
-      const hostname = window.location.hostname
-      cookiesToClear.forEach((name) => {
-        try {
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname}; SameSite=Lax;`
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname}; SameSite=Lax;`
-        } catch (e) { }
-      })
-
-      useStore.setState({
-        user: null,
-        isAuthenticated: false,
-        token: null,
-        refreshToken: null,
-        tenantId: null,
-        storeName: null,
-        currentTenant: null,
-        planName: null,
-        selectedPlanId: null,
-        selectedBillingCycle: null,
-        selectedJournalEntryId: null,
-        cart: [],
-        selectedCustomerId: null,
-        selectedCustomerName: null,
-        notifications: [],
-        pendingSyncCount: 0,
-        currentView: 'landing',
-      })
-
+    if ('serviceWorker' in navigator) {
       try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-        })
-      } catch (err) { }
+        const registrations = await navigator.serviceWorker.getRegistrations()
 
-      setTimeout(() => {
-        window.location.href = `/?logout=1&t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`
-      }, 300)
-
-    } catch (err) {
-      console.error('[AppHeader] Logout error:', err)
-      window.location.href = `/?logout=1&t=${Date.now()}`
+        for (const registration of registrations) {
+          await registration.unregister()
+        }
+      } catch (err) {
+        console.warn('[AppHeader] Error unregistering SW:', err)
+      }
     }
+
+    if ('caches' in window) {
+      try {
+        const cacheNames = await caches.keys()
+        await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)))
+      } catch (err) {
+        console.warn('[AppHeader] Error clearing caches:', err)
+      }
+    }
+
+    const keysToRemove = [
+      'token',
+      'refreshToken',
+      'user',
+      'storeName',
+      'tenant',
+      'planName',
+      'tenant-slug',
+      'auth-token',
+      'shop-accounting-store',
+    ]
+
+    keysToRemove.forEach((key) => {
+      try {
+        localStorage.removeItem(key)
+      } catch (e) {}
+    })
+
+    try {
+      sessionStorage.clear()
+    } catch (e) {}
+
+    const cookiesToClear = [
+      'tenant-slug',
+      'tenant-view',
+      'auth-token',
+      'token',
+      'refreshToken',
+    ]
+
+    const hostname = window.location.hostname
+
+    cookiesToClear.forEach((name) => {
+      try {
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${hostname}; SameSite=Lax;`
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.${hostname}; SameSite=Lax;`
+      } catch (e) {}
+    })
+
+    // ★ بازگردانی کلیدهای تکمیل ویزارد بعد از پاک‌سازی
+    preservedSetupEntries.forEach(([key, value]) => {
+      if (value !== null) {
+        try {
+          localStorage.setItem(key, value)
+        } catch {}
+      }
+    })
+
+    useStore.setState({
+      user: null,
+      isAuthenticated: false,
+      token: null,
+      refreshToken: null,
+      tenantId: null,
+      storeName: null,
+      currentTenant: null,
+      planName: null,
+      selectedPlanId: null,
+      selectedBillingCycle: null,
+      selectedJournalEntryId: null,
+      cart: [],
+      selectedCustomerId: null,
+      selectedCustomerName: null,
+      notifications: [],
+      pendingSyncCount: 0,
+      currentView: 'landing',
+    })
+
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+    } catch (err) {}
+
+    setTimeout(() => {
+      window.location.href = `/?logout=1&t=${Date.now()}&r=${Math.random()
+        .toString(36)
+        .substring(7)}`
+    }, 300)
+  } catch (err) {
+    console.error('[AppHeader] Logout error:', err)
+    window.location.href = `/?logout=1&t=${Date.now()}`
   }
+}
 
   return (
   <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-emerald-900/50 bg-gradient-to-l from-slate-900 via-slate-800 to-slate-900 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-xl sticky top-0 z-10">
