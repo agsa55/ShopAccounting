@@ -1,10 +1,11 @@
 'use client';
 
 // ============================================================================
-// src/components/pos/cashier-panel.tsx — v11.7.2
+// src/components/pos/cashier-panel.tsx — v11.9.8
 // ★ پنل یکپارچه صندوق‌دار (نوار وضعیت + تراکنش دستی + گزارش)
 // ★ v11.7.2: نمایش موجودی اولیه و ابتدای روز
 // ★ v11.9.1: لاگ‌های سیستمی + API جدید cashier-dashboard
+// ★ v11.9.8: نمایش صحیح برگشتی‌ها و خالص فروش
 // ★ فقط یک خط در pos-page.tsx اضافه می‌شود: <CashierPanel />
 // ============================================================================
 
@@ -13,7 +14,7 @@ import {
   Wallet, TrendingUp, TrendingDown, PlusCircle, 
   BarChart3, Loader2, RefreshCw, X, CheckCircle2,
   AlertTriangle, ArrowDownCircle, ArrowUpCircle,
-  Receipt, Calendar
+  Receipt, Calendar, RotateCcw
 } from 'lucide-react';
 import { logger } from '@/lib/system-logger'
 
@@ -83,7 +84,7 @@ export default function CashierPanel() {
 
   // ═══════════════════════════════════════════════════════════════
   // بارگذاری خلاصه تراکنش‌های امروز
-  // ★ v11.9.1: استفاده از API جدید cashier-dashboard که openingBalance را برمی‌گرداند
+  // ★ v11.9.8: دریافت netSales و returns از API
   // ═══════════════════════════════════════════════════════════════
   const loadSummary = useCallback(async (isRefresh = false) => {
     if (!currentUser?.id || !currentTenantId) return;
@@ -100,6 +101,16 @@ export default function CashierPanel() {
 
       if (data.success) {
         setSummary(data.summary);
+        
+        // ★ v11.9.8: لاگ آمار برگشتی‌ها (اگر وجود داشته باشد)
+        if (data.summary.returns > 0) {
+          logger.info('آمار فروش با برگشتی به‌روز شد', {
+            totalSales: data.summary.totalSales,
+            returns: data.summary.returns,
+            netSales: data.summary.netSales,
+            returnsCount: data.summary.returnsCount,
+          });
+        }
       }
     } catch (err) {
       console.error('[CashierPanel] Load summary error:', err);
@@ -111,7 +122,7 @@ export default function CashierPanel() {
 
   useEffect(() => {
     loadSummary();
-    // ★ v11.6.5: رفرش هر ۵ ثانیه (به جای ۶۰ ثانیه)
+    // ★ v11.6.5: رفرش هر ۵ ثانیه
     const interval = setInterval(() => loadSummary(true), 5000);
     return () => clearInterval(interval);
   }, [loadSummary]);
@@ -231,12 +242,35 @@ export default function CashierPanel() {
   // ═══════════════════════════════════════════════════════════════
   // محاسبات
   // ═══════════════════════════════════════════════════════════════
-  // ★ v11.7.2: موجودی فعلی = موجودی ابتدای امروز + ورودی‌های امروز - خروجی‌های امروز
-  const currentBalance = summary 
-    ? (summary.startOfDayBalance || 0) + summary.totalCashIn - summary.totalCashOut 
-    : 0;
+  // ★ v11.9.8: موجودی فعلی از API دریافت می‌شود
+// ═══════════════════════════════════════════════════════════════
+// محاسبات — v11.9.9 سازگارتر با fallback
+// ═══════════════════════════════════════════════════════════════
 
-  const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
+// ★ v11.9.8: موجودی فعلی از API دریافت می‌شود
+const currentBalance = summary?.currentBalance || 0;
+
+// ★ v11.9.9: fallback برای netSales — اگر نبود از totalSales استفاده کن
+const netSales = summary?.netSales !== undefined 
+  ? summary.netSales 
+  : (summary?.totalSales || 0);
+
+const returns = summary?.returns || 0;
+const returnsCount = summary?.returnsCount || 0;
+
+// ★ لاگ برای دیباگ
+console.log('[CashierPanel] Summary received:', {
+  hasNetSales: summary?.netSales !== undefined,
+  netSales: summary?.netSales,
+  totalSales: summary?.totalSales,
+  returns: summary?.returns,
+  returnsCount: summary?.returnsCount,
+  cashSales: summary?.cashSales,
+});
+
+const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
+
+
 
   const periodLabels: Record<string, string> = {
     today: 'امروز',
@@ -312,20 +346,40 @@ export default function CashierPanel() {
               </div>
             </div>
 
-            {/* بخش وسط: آمار فروش با تفکیک نوع */}
+            {/* ═══════════════════════════════════════════════════════════ */}
+            {/* بخش وسط: آمار فروش با تفکیک نوع — v11.9.8 اصلاح شد */}
+            {/* ═══════════════════════════════════════════════════════════ */}
             <div className="hidden md:flex items-center gap-3">
-              {/* فروش کل */}
+              {/* ═══ خالص فروش (به جای کل فروش) ═══ */}
               <div className="flex items-center gap-1">
                 <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
                 <div>
-                  <p className="text-[9px] text-slate-500">کل فروش</p>
+                  <p className="text-[9px] text-slate-500">خالص فروش</p>
                   <p className="text-[11px] font-bold text-emerald-700" dir="ltr">
-                    {formatPrice(summary?.totalSales || 0)}
+                    {formatPrice(netSales)}
                   </p>
                 </div>
               </div>
 
-              {/* تفکیک بر اساس نوع پرداخت */}
+              {/* ═══ برگشتی‌ها (جدید!) ═══ */}
+              {returns > 0 && (
+                <div className="flex items-center gap-1 bg-red-50 px-2 py-1 rounded-lg border border-red-200">
+                  <RotateCcw className="w-3.5 h-3.5 text-red-500" />
+                  <div>
+                    <p className="text-[9px] text-red-700">
+                      برگشتی
+                      {returnsCount > 0 && (
+                        <span className="text-[8px] text-red-500 mr-1">({toFaNum(returnsCount)})</span>
+                      )}
+                    </p>
+                    <p className="text-[11px] font-bold text-red-600" dir="ltr">
+                      {formatPrice(returns)}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* ═══ تفکیک بر اساس نوع پرداخت ═══ */}
               <div className="flex items-center gap-1">
                 <div className="flex flex-col gap-0.5">
                   {/* فروش نقدی */}

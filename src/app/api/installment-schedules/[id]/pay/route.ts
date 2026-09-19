@@ -1,7 +1,8 @@
 // ============================================================================
-// src/app/api/installment-schedules/[id]/pay/route.ts — POST (v3.36.6 ★★★)
+// src/app/api/installment-schedules/[id]/pay/route.ts — POST (v3.36.7)
 // ShopAccounting — Register In-Store Payment for a Specific Installment
 // ============================================================================
+// ★★★ v3.36.7: سازگاری با Next.js 15+ — params باید await شود
 // ★★★ v3.36.6: رفع باگ به‌روزرسانی دیرهنگام مانده مشتری + یکپارچگی tenantDb
 // ============================================================================
 
@@ -9,13 +10,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { getTenantPlanInfo } from '@/lib/plan-limits'
 import { resolvePlanTier } from '@/lib/plan-features'
-
+import { db } from '@/lib/db'
 export const POST = withTenantAndPermission('pos')(
   async (req: NextRequest, ctx: any, tenant: any) => {
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
-      const scheduleId = ctx?.params?.id
+      
+      // ★ v3.36.7: سازگاری با Next.js 15+ — params یک Promise است
+      const params = await ctx?.params
+      const scheduleId = params?.id
 
       if (!scheduleId) {
         return NextResponse.json(
@@ -228,7 +232,7 @@ export const POST = withTenantAndPermission('pos')(
 
           if (planTier === 'professional' || planTier === 'enterprise') {
             journalCreated = await createAutoJournalEntryForInstallment(
-              tx, // ★★★ استفاده از tx برای اطمینان از یکپارچگی تراکنش
+              tx,
               tenantId,
               invoice,
               amount,
@@ -254,6 +258,9 @@ export const POST = withTenantAndPermission('pos')(
           journalCreated,
         }
       })
+
+     
+
 
       // ─── ۵. پاسخ ────────────────────────────────────────────
       return NextResponse.json({
@@ -299,7 +306,7 @@ export const POST = withTenantAndPermission('pos')(
 // ═══════════════════════════════════════════════════════════════
 
 async function createAutoJournalEntryForInstallment(
-  tx: any, // ★★★ دریافت tx از تراکنش اصلی
+  tx: any,
   tenantId: string,
   invoice: any,
   amount: number,

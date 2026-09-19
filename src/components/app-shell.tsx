@@ -810,25 +810,29 @@ function AppSidebar() {
   };
 
   return (
-   <Sidebar
-  side="right"
-  collapsible="icon"
-  className="border-l border-emerald-900/50 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-2xl"
-
+       <Sidebar
+      side="right"
+      collapsible="icon"
+      className="border-l border-emerald-400/15 bg-[radial-gradient(circle_at_15%_0%,rgba(16,185,129,0.20),transparent_35%),radial-gradient(circle_at_85%_100%,rgba(99,102,241,0.16),transparent_40%),linear-gradient(180deg,#475569_0%,#334155_42%,#1e293b_100%)] shadow-[0_0_45px_rgba(16,185,129,0.10)] backdrop-blur-xl"
     >
-  <SidebarHeader className="p-2 border-b border-white/5">
+
+
+            <SidebarHeader className="p-2 border-b border-white/10 bg-white/5 backdrop-blur-sm">
         <SidebarMenu>
           <SidebarMenuItem>
-        <SidebarMenuButton size="lg" className="gap-2 sm:gap-3 hover:bg-white/5 transition-colors">
-  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shrink-0 shadow-lg shadow-emerald-500/30">
-    <Store className="size-4" />
-  </div>
-  <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
-    <span className="text-xs sm:text-sm font-semibold truncate text-white">
-      {storeName || 'فروشگاه'}
-    </span>
-  </div>
-</SidebarMenuButton>
+            <SidebarMenuButton
+              size="lg"
+              className="gap-2 sm:gap-3 hover:bg-white/10 transition-colors rounded-xl"
+            >
+              <div className="flex aspect-square size-8 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 via-teal-400 to-cyan-500 text-white shrink-0 shadow-lg shadow-emerald-500/25 ring-1 ring-white/15">
+                <Store className="size-4" />
+              </div>
+              <div className="flex flex-col gap-0.5 min-w-0 overflow-hidden">
+                <span className="text-xs sm:text-sm font-semibold truncate text-white/95 drop-shadow-sm">
+                  {storeName || 'فروشگاه'}
+                </span>
+              </div>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
 
@@ -863,14 +867,15 @@ function AppSidebar() {
                   setCurrentView('subscription-tab' as AppView)
                 }
               }}
-         className={`cursor-pointer group p-2 rounded-lg transition-all duration-200 ${isExpired
-    ? 'bg-red-500/20 border-2 border-red-500/50 hover:shadow-lg hover:shadow-red-500/20 animate-pulse'
-    : daysRemaining > 0 && daysRemaining <= 3
-      ? 'bg-orange-500/20 border-2 border-orange-500/50 hover:shadow-lg hover:shadow-orange-500/20'
-      : isLifetime
-        ? 'bg-purple-500/20 border border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/20'
-        : 'bg-white/5 border border-white/10 hover:shadow-lg hover:shadow-emerald-500/10 hover:border-emerald-500/30'
-  }`}
+                  className={`cursor-pointer group p-2 rounded-xl transition-all duration-200 backdrop-blur-sm ${
+                isExpired
+                  ? 'bg-red-500/20 border-2 border-red-400/50 hover:shadow-lg hover:shadow-red-500/20 animate-pulse'
+                  : daysRemaining > 0 && daysRemaining <= 3
+                  ? 'bg-orange-500/20 border-2 border-orange-400/50 hover:shadow-lg hover:shadow-orange-500/20'
+                  : isLifetime
+                  ? 'bg-purple-500/15 border border-purple-400/30 hover:bg-purple-500/20 hover:shadow-lg hover:shadow-purple-500/20 hover:border-purple-300/50'
+                  : 'bg-white/10 border border-white/15 hover:bg-white/15 hover:shadow-lg hover:shadow-emerald-500/10 hover:border-emerald-400/40'
+              }`}
             >
               {/* ★ حالت ۱: قفل کامل */}
         {isExpired ? (
@@ -1002,21 +1007,25 @@ function AppSidebar() {
                           }
                         }}
                         tooltip={item.label}
-                      className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-lg transition-all ${isExpired
-    ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-500'
-    : isItemDisabled
-      ? 'opacity-50 cursor-not-allowed hover:bg-transparent text-slate-500'
-      : isActive
-        ? 'bg-gradient-to-l from-emerald-600/30 to-emerald-500/20 text-white font-semibold shadow-md shadow-emerald-500/20 border-r-2 border-emerald-400'
-        : 'hover:bg-white/10 text-slate-300 hover:text-white'
-  }`}
+                                    className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-xl transition-all duration-200 ${
+                          isExpired
+                            ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-400'
+                            : isItemDisabled
+                            ? 'opacity-50 cursor-not-allowed hover:bg-transparent text-slate-400'
+                            : isActive
+                            ? 'bg-gradient-to-l from-emerald-500/25 via-emerald-400/15 to-transparent text-white font-semibold shadow-inner shadow-emerald-500/10 border-r-2 border-emerald-400'
+                            : 'text-slate-200/85 hover:bg-white/10 hover:text-white'
+                        }`}
                       >
-                   <item.icon className={`size-4 ${isExpired 
-  ? 'text-slate-500' 
-  : isActive && !isItemDisabled 
-    ? 'text-emerald-400' 
-    : 'text-slate-400'
-}`} />
+                               <item.icon
+                          className={`size-4 transition-colors ${
+                            isExpired
+                              ? 'text-slate-500'
+                              : isActive && !isItemDisabled
+                              ? 'text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.35)]'
+                              : 'text-slate-300/85'
+                          }`}
+                        />
                         <span className="text-xs sm:text-sm">{item.label}</span>
 
                     {isExpired && (
@@ -1039,22 +1048,26 @@ function AppSidebar() {
         ))}
       </SidebarContent>
 
-  <SidebarFooter className="p-2 border-t border-white/5">
-  <SidebarSeparator className="bg-white/10" />
-  <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
-    <Avatar className="size-7 sm:size-8 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/30">
-      <AvatarFallback className="bg-transparent text-white text-[10px] sm:text-xs font-semibold">
-        {userInitials}
-      </AvatarFallback>
-    </Avatar>
-    <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
-      <span className="text-[11px] sm:text-xs font-medium truncate text-white">{userDisplayName}</span>
-      <span className="text-[9px] sm:text-[10px] text-slate-400">{getRoleLabel(user?.role)}</span>
-    </div>
-  </div>
-</SidebarFooter>
+       <SidebarFooter className="p-2 border-t border-white/10 bg-white/5 backdrop-blur-sm">
+        <SidebarSeparator className="bg-white/10" />
+        <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
+          <Avatar className="size-7 sm:size-8 border-2 border-emerald-400/50 bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/25 ring-1 ring-white/10">
+            <AvatarFallback className="bg-transparent text-white/95 text-[10px] sm:text-xs font-semibold">
+              {userInitials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex flex-col min-w-0 overflow-hidden group-data-[collapsible=icon]:hidden">
+            <span className="text-[11px] sm:text-xs font-medium truncate text-white/95">
+              {userDisplayName}
+            </span>
+            <span className="text-[9px] sm:text-[10px] text-slate-300/75">
+              {getRoleLabel(user?.role)}
+            </span>
+          </div>
+        </div>
+      </SidebarFooter>
 
-  <SidebarRail className="bg-slate-900/50 border-l border-white/5" />
+        <SidebarRail className="bg-white/5 border-l border-white/10 backdrop-blur-sm" />
     </Sidebar>
   )
 }
@@ -1303,31 +1316,36 @@ function AppHeader() {
 }
 
   return (
-  <header className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-emerald-900/50 bg-gradient-to-l from-slate-900 via-slate-800 to-slate-900 backdrop-blur-md px-2 sm:px-3 md:px-4 shadow-xl sticky top-0 z-10">
-    <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-300 hover:bg-white/10 hover:text-white transition-colors" />
+     <header
+      className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-white/10 bg-[linear-gradient(90deg,rgba(71,85,105,0.92),rgba(51,65,85,0.88),rgba(30,41,59,0.86))] backdrop-blur-xl px-2 sm:px-3 md:px-4 shadow-[0_8px_30px_rgba(0,0,0,0.12)] sticky top-0 z-10"
+    >
+        <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-200/90 hover:bg-white/10 hover:text-white transition-colors rounded-lg" />
    <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-white/20" />
 
       <Breadcrumb className="flex-1 min-w-0 overflow-hidden">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="hidden md:inline-block">
-        <BreadcrumbPage className="text-[10px] md:text-xs text-slate-400 truncate">
-  {storeName || 'فروشگاه'}
-</BreadcrumbPage>
+                <BreadcrumbPage className="text-[10px] md:text-xs text-slate-300/80 truncate">
+              {storeName || 'فروشگاه'}
+            </BreadcrumbPage>
           </BreadcrumbItem>
       <BreadcrumbSeparator className="hidden md:inline-block text-white/30" />
           <BreadcrumbItem>
-         <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-white truncate max-w-[120px] sm:max-w-[200px] md:max-w-none">
-  {viewLabels[currentView] || currentView}
-</BreadcrumbPage>
+                 <BreadcrumbPage className="text-[11px] sm:text-xs md:text-sm font-semibold text-white/95 truncate max-w-[120px] sm:max-w-[200px] md:max-w-none drop-shadow-sm">
+              {viewLabels[currentView] || currentView}
+            </BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-      <div className="hidden sm:flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 shadow-sm backdrop-blur-sm" dir="rtl">
-  <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-  <span className="text-[11px] font-semibold text-white whitespace-nowrap">
+           <div
+          className="hidden sm:flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-xl border border-white/15 shadow-sm backdrop-blur-md"
+          dir="rtl"
+        >
+          <Clock className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+          <span className="text-[11px] font-semibold text-white/95 whitespace-nowrap">
             {(() => {
               const now = new Date();
               const formatter = new Intl.DateTimeFormat('fa-IR', {
@@ -1353,7 +1371,7 @@ function AppHeader() {
 <Button
   variant="ghost"
   size="icon"
-  className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+  className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-200/90 hover:text-white transition"
   onClick={() => setShowLogModal(true)}
   title="مشاهده لاگ‌های سیستم"
 >
@@ -1363,7 +1381,7 @@ function AppHeader() {
 {/* ── Notifications ── */}
 <DropdownMenu>
           <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-300 hover:text-white transition-colors">
+          <Button variant="ghost" size="icon" className="relative size-8 md:size-9 shrink-0 hover:bg-white/10 text-slate-200/90 hover:text-white transition-colors rounded-xl">
               <Bell className="size-3.5 sm:size-4" />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -left-0.5 flex size-3.5 sm:size-4 items-center justify-center rounded-full bg-red-500 text-[7px] sm:text-[9px] font-bold text-white leading-none">
@@ -1417,14 +1435,14 @@ function AppHeader() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="gap-1 sm:gap-1.5 md:gap-2 px-1.5 sm:px-2 h-8 md:h-9 shrink-0 hover:bg-white/10 transition-colors">
-  <Avatar className="size-6 md:size-7 border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 shadow-md shadow-emerald-500/20">
-    <AvatarFallback className="bg-transparent text-white text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
-      {user?.username?.charAt(0) || 'م'}
-    </AvatarFallback>
-  </Avatar>
-  <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-white">
-    {user?.username || 'کاربر'}
-  </span>
+            <Avatar className="size-6 md:size-7 border-2 border-emerald-400/50 bg-gradient-to-br from-emerald-400 to-teal-500 shadow-md shadow-emerald-500/25 ring-1 ring-white/10">
+              <AvatarFallback className="bg-transparent text-white/95 text-[8px] sm:text-[9px] md:text-[10px] font-semibold">
+                {user?.username?.charAt(0) || 'م'}
+              </AvatarFallback>
+            </Avatar>
+             <span className="text-xs md:text-sm font-medium hidden md:inline max-w-[80px] lg:max-w-none truncate text-white/95">
+              {user?.username || 'کاربر'}
+            </span>
 </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
