@@ -86,10 +86,7 @@ export const GET = withTenantAndPermission('accounting')(async (req: NextRequest
       data: { checks: checksWithInvoice },
     })
 
-    return NextResponse.json({
-      success: true,
-      data: { checks },
-    })
+  
   } catch (error: any) {
     console.error('[Checks GET] Error:', error?.message || error)
     return NextResponse.json(
