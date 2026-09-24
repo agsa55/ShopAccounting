@@ -1,13 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/products/barcode-scanner.tsx — v11.0 (نهایی با ZXing)
-// ★ استفاده از ZXing Browser (دقیق‌ترین کتابخانه اسکن بارکد)
-// ★ پشتیبانی از همه بارکدها: EAN-13, Code-128, QR و...
+// src/components/products/barcode-scanner.tsx — v11.2 (رفع قطعی چراغ دوربین)
+// ★ استفاده از decodeFromConstraints (مدیریت stream توسط ZXing)
+// ★ controls.stop() برای خاموش کردن قطعی دوربین
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
+import type { IScannerControls } from '@zxing/browser'
 import { Camera, Loader2, AlertCircle } from 'lucide-react'
 import {
   Dialog,
@@ -23,6 +24,7 @@ interface BarcodeScannerDialogProps {
 export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScannerDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const readerRef = useRef<BrowserMultiFormatReader | null>(null)
+  const controlsRef = useRef<IScannerControls | null>(null)
   const hasStartedRef = useRef(false)
   const scannedRef = useRef(false)
 
@@ -38,59 +40,89 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
     }
   }, [open])
 
+  // ★ useEffect اصلی: شروع وقتی open=true، توقف وقتی open=false
   useEffect(() => {
-    if (!open) return
+    // اگر بسته است، همه چیز را متوقف کن
+    if (!open) {
+      if (controlsRef.current) {
+        try {
+          controlsRef.current.stop()
+          console.log('[Scanner] ✅ controls.stop() called')
+        } catch (e) {
+          console.warn('[Scanner] Error stopping controls:', e)
+        }
+        controlsRef.current = null
+      }
+      if (readerRef.current) {
+        try {
+          readerRef.current.reset()
+        } catch (e) {
+          console.warn('[Scanner] Error resetting reader:', e)
+        }
+        readerRef.current = null
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
+      }
+      return
+    }
+
+    // اگر قبلاً شروع شده، دوباره شروع نکن
     if (hasStartedRef.current) return
     hasStartedRef.current = true
 
     let isActive = true
 
     const startScanner = async () => {
-      await new Promise((r) => setTimeout(r, 150))
-      if (!isActive) return
+      await new Promise((r) => setTimeout(r, 200))
+      if (!isActive || !videoRef.current) return
 
       try {
         const reader = new BrowserMultiFormatReader()
         readerRef.current = reader
 
-        // درخواست دسترسی دوربین
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        })
-
-        if (!isActive) {
-          stream.getTracks().forEach((t) => t.stop())
-          return
-        }
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
-
         setStarting(false)
 
-        // شروع اسکن مداوم
-        reader.decodeFromVideoDevice(undefined, videoRef.current!, (result, error) => {
-          if (!isActive || scannedRef.current) return
-          
-          if (result) {
-            scannedRef.current = true
-            const barcode = result.getText()
-            if (navigator.vibrate) navigator.vibrate(200)
-            
-            // توقف اسکنر
-            if (readerRef.current) {
-              try { readerRef.current.reset() } catch {}
+        // ★ استفاده از decodeFromConstraints
+        // ZXing خودش stream را می‌سازد و مدیریت می‌کند
+        const controls = await reader.decodeFromConstraints(
+          {
+            video: {
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          videoRef.current,
+          (result, err) => {
+            if (!isActive || scannedRef.current) return
+
+            if (result) {
+              scannedRef.current = true
+              const barcode = result.getText()
+              if (navigator.vibrate) navigator.vibrate(200)
+
+              // توقف کامل
+              if (controlsRef.current) {
+                try {
+                  controlsRef.current.stop()
+                } catch (e) {}
+                controlsRef.current = null
+              }
+
+              onScan(barcode)
             }
-            stream.getTracks().forEach((t) => t.stop())
-            
-            onScan(barcode)
           }
-        })
+        )
+
+        // ★ نگهداری controls برای خاموش کردن بعدی
+        if (isActive) {
+          controlsRef.current = controls
+          console.log('[Scanner] 🟢 دوربین شروع شد')
+        } else {
+          controls.stop()
+        }
       } catch (err: any) {
         if (isActive) {
           const message = err?.message || ''
@@ -108,18 +140,51 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
 
     startScanner()
 
+    // ★ Cleanup هنگام unmount یا تغییر open
     return () => {
       isActive = false
-      hasStartedRef.current = false
+      console.log('[Scanner] 🛑 Cleanup running...')
+      
+      if (controlsRef.current) {
+        try {
+          controlsRef.current.stop()
+          console.log('[Scanner] ✅ controls.stop() in cleanup')
+        } catch (e) {
+          console.warn('[Scanner] Error in cleanup:', e)
+        }
+        controlsRef.current = null
+      }
+
       if (readerRef.current) {
-        try { readerRef.current.reset() } catch {}
+        try {
+          readerRef.current.reset()
+        } catch (e) {}
         readerRef.current = null
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
       }
     }
   }, [open, onScan])
 
+  // ★ وقتی Dialog بسته می‌شود، open را false کن
+  const handleDialogOpenChange = (isOpen: boolean) => {
+    if (!isOpen) {
+      // توقف فوری قبل از تغییر state
+      if (controlsRef.current) {
+        try {
+          controlsRef.current.stop()
+          console.log('[Scanner] ✅ Stop on dialog close')
+        } catch (e) {}
+        controlsRef.current = null
+      }
+    }
+    onOpenChange(isOpen)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         className="sm:max-w-sm w-[calc(100%-2rem)] p-0 overflow-hidden border-0 bg-white"
         dir="rtl"
@@ -154,7 +219,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
               <p className="text-xs text-red-700 mb-3 px-2">{error}</p>
               <button
                 type="button"
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleDialogOpenChange(false)}
                 className="px-4 py-1.5 rounded-lg border border-gray-300 text-xs hover:bg-gray-50"
               >
                 بستن
@@ -185,7 +250,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
               <div className="flex items-center justify-center gap-2 mt-3">
                 <button
                   type="button"
-                  onClick={() => onOpenChange(false)}
+                  onClick={() => handleDialogOpenChange(false)}
                   className="px-4 py-2 rounded-lg text-xs hover:bg-gray-100 cursor-pointer border border-gray-300"
                 >
                   انصراف
