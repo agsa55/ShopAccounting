@@ -1,14 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/products/barcode-scanner.tsx — v8.0 (نهایی قطعی)
-// ★ استفاده از BarcodeDetector بومی مرورگر (دقیقاً مثل اسکنر گوشی)
-// ★ پشتیبانی از: کروم، سافاری، فایرفاکس، موبایل
-// ★ اگر مرورگر پشتیبانی نکرد، به روش قدیمی برمی‌گردد
+// src/components/products/barcode-scanner.tsx — v9.0 (نهایی)
+// ★ اسکن خودکار هر ۳۰۰ms با BarcodeDetector بومی
+// ★ دکمه اسکن دستی برای اطمینان بیشتر
+// ★ اگر مرورگر پشتیبانی نکرد، پیام مناسب نمایش می‌دهد
 // ============================================================================
 
-import { useEffect, useRef, useState } from 'react'
-import { Camera, Loader2, AlertCircle, Flashlight, FlashlightOff, Barcode } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { Camera, Loader2, AlertCircle, Flashlight, FlashlightOff, ScanLine } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -23,14 +23,16 @@ interface BarcodeScannerDialogProps {
 export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScannerDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const detectorRef = useRef<any>(null)
   const hasStartedRef = useRef(false)
   const scannedRef = useRef(false)
 
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(true)
   const [torchOn, setTorchOn] = useState(false)
-  const [detectorType, setDetectorType] = useState<'native' | 'library' | null>(null)
+  const [detectorAvailable, setDetectorAvailable] = useState(false)
+  const [lastScanAttempt, setLastScanAttempt] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -39,9 +41,39 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
       setError('')
       setStarting(true)
       setTorchOn(false)
-      setDetectorType(null)
+      setLastScanAttempt('')
     }
   }, [open])
+
+  const stopCamera = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+  }, [])
+
+  const doScan = useCallback(async () => {
+    if (scannedRef.current || !videoRef.current || !detectorRef.current) return
+    
+    try {
+      if (videoRef.current.readyState >= 2) {
+        const barcodes = await detectorRef.current.detect(videoRef.current)
+        setLastScanAttempt(new Date().toLocaleTimeString('fa-IR'))
+        
+        if (barcodes.length > 0 && !scannedRef.current) {
+          scannedRef.current = true
+          const barcode = barcodes[0].rawValue
+          if (navigator.vibrate) navigator.vibrate(200)
+          stopCamera()
+          onScan(barcode)
+        }
+      }
+    } catch {}
+  }, [onScan, stopCamera])
 
   useEffect(() => {
     if (!open) return
@@ -49,17 +81,6 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
     hasStartedRef.current = true
 
     let isActive = true
-
-    const stopCamera = () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop())
-        streamRef.current = null
-      }
-    }
 
     const startCamera = async () => {
       await new Promise((r) => setTimeout(r, 200))
@@ -88,69 +109,28 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
 
         setStarting(false)
 
+        // بررسی وجود BarcodeDetector
         const BarcodeDetectorAPI = (window as any).BarcodeDetector
 
         if (BarcodeDetectorAPI) {
-          // ✅ اسکنر بومی مرورگر (دقیقاً مثل اسکنر گوشی)
-          setDetectorType('native')
-          
-          const detector = new BarcodeDetectorAPI({
+          setDetectorAvailable(true)
+          detectorRef.current = new BarcodeDetectorAPI({
             formats: [
               'ean_13', 'ean_8', 'code_128', 'code_39',
               'upc_a', 'upc_e', 'qr_code', 'data_matrix',
-              'itf', 'codabar',
+              'itf', 'codabar', 'pdf417', 'aztec',
             ],
           })
 
-          const scan = async () => {
-            if (!isActive || scannedRef.current) return
-
-            if (
-              videoRef.current &&
-              videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
-            ) {
-              try {
-                const barcodes = await detector.detect(videoRef.current)
-                if (barcodes.length > 0 && !scannedRef.current) {
-                  scannedRef.current = true
-                  const barcode = barcodes[0].rawValue
-                  if (navigator.vibrate) navigator.vibrate(200)
-                  onScan(barcode)
-                  stopCamera()
-                  return
-                }
-              } catch {}
-            }
-
-            animationFrameRef.current = requestAnimationFrame(scan)
-          }
-
-          scan()
+          // اسکن خودکار هر ۳۰۰ میلی‌ثانیه
+          intervalRef.current = setInterval(() => {
+            doScan()
+          }, 300)
         } else {
-          // ⚠️ مرورگر پشتیبانی نمی‌کند — استفاده از روش قدیمی
-          setDetectorType('library')
-          
-          try {
-            const { Html5Qrcode } = await import('html5-qrcode')
-            const scanner = new Html5Qrcode('barcode-scanner-fallback')
-            
-            await scanner.start(
-              { facingMode: 'environment' },
-              { fps: 20, qrbox: { width: 300, height: 200 } },
-              (decodedText) => {
-                if (scannedRef.current || !isActive) return
-                scannedRef.current = true
-                if (navigator.vibrate) navigator.vibrate(200)
-                onScan(decodedText)
-                scanner.stop().catch(() => {})
-              },
-              () => {}
-            )
-          } catch (err: any) {
-            if (isActive) {
-              setError('مرورگر شما از اسکنر بارکد پشتیبانی نمی‌کند. لطفاً از کروم استفاده کنید.')
-            }
-          }
+          setDetectorAvailable(false)
+          setError(
+            'مرورگر شما از اسکنر بارکد پشتیبانی نمی‌کند. لطفاً از مرورگر کروم (نسخه ۸۳ به بالا) استفاده کنید.'
+          )
         }
       } catch (err: any) {
         if (isActive) {
@@ -176,7 +156,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
       hasStartedRef.current = false
       stopCamera()
     }
-  }, [open, onScan])
+  }, [open, doScan, stopCamera])
 
   const toggleTorch = async () => {
     try {
@@ -211,13 +191,13 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
             <div>
               <h3 className="text-sm font-bold">اسکن بارکد</h3>
               <p className="text-[10px] text-blue-100">
-                {detectorType === 'native' ? 'اسکنر بومی (دقت بالا)' : 'اسکنر استاندارد'}
+                {detectorAvailable ? '✨ اسکنر پیشرفته فعال' : '⚠️ اسکنر در دسترس نیست'}
               </p>
             </div>
           </div>
-          {detectorType && (
-            <span className="text-[9px] bg-white/20 px-2 py-1 rounded-full">
-              {detectorType === 'native' ? '✨ پیشرفته' : '⚡ استاندارد'}
+          {detectorAvailable && (
+            <span className="text-[9px] bg-white/20 px-2 py-1 rounded-full animate-pulse">
+              در حال اسکن...
             </span>
           )}
         </div>
@@ -235,23 +215,23 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
             <div className="text-center py-8">
               <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
               <p className="text-sm text-red-700 mb-4 px-2">{error}</p>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+              >
+                بستن
+              </button>
             </div>
           ) : (
             <>
               <div className="relative rounded-xl overflow-hidden bg-black">
-                {/* ویدیو برای اسکنر بومی */}
                 <video
                   ref={videoRef}
-                  className={`w-full ${detectorType === 'library' ? 'hidden' : ''}`}
+                  className="w-full"
                   playsInline
                   muted
                   autoPlay
-                />
-                
-                {/* کانتینر برای اسکنر قدیمی */}
-                <div
-                  id="barcode-scanner-fallback"
-                  className={detectorType === 'library' ? 'w-full' : 'hidden'}
                 />
 
                 {/* کادر اسکن */}
@@ -266,20 +246,39 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
                 </div>
               </div>
 
+              {/* وضعیت اسکن */}
+              {detectorAvailable && (
+                <div className="mt-2 text-center">
+                  <p className="text-[10px] text-gray-400">
+                    {lastScanAttempt ? `آخرین تلاش: ${lastScanAttempt}` : 'در انتظار اسکن...'}
+                  </p>
+                </div>
+              )}
+
               {/* دکمه‌ها */}
-              <div className="flex items-center justify-center gap-2 mt-4">
+              <div className="flex items-center justify-center gap-2 mt-3">
+                {detectorAvailable && (
+                  <button
+                    type="button"
+                    onClick={doScan}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 cursor-pointer font-bold"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    اسکن الان
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={toggleTorch}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-xs hover:bg-gray-50 cursor-pointer bg-white"
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-gray-300 text-xs hover:bg-gray-50 cursor-pointer bg-white"
                 >
                   {torchOn ? <FlashlightOff className="w-3.5 h-3.5" /> : <Flashlight className="w-3.5 h-3.5" />}
-                  {torchOn ? 'خاموش' : 'چراغ قوه'}
+                  {torchOn ? 'خاموش' : 'چراغ'}
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenChange(false)}
-                  className="px-4 py-2 rounded-lg text-xs hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
+                  className="px-4 py-2.5 rounded-lg text-xs hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
                 >
                   انصراف
                 </button>
@@ -294,6 +293,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
                   <li>بارکد را <b>۲۰ تا ۳۰ سانتی‌متر</b> از دوربین نگه دارید</li>
                   <li>بارکد را <b>صاف</b> جلوی دوربین بگیرید</li>
                   <li><b>نور کافی</b> داشته باشید</li>
+                  <li>اگر اسکن خودکار کار نکرد، دکمه <b>"اسکن الان"</b> را بزنید</li>
                 </ul>
               </div>
             </>
