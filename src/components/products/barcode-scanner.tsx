@@ -1,20 +1,17 @@
 'use client'
 
 // ============================================================================
-// src/components/products/barcode-scanner.tsx — v7.0 (نهایی قطعی)
-// ★ استفاده از Dialog خود shadcn (بدون createPortal، بدون window listener)
-// ★ رفع قطعی مشکل قفل شدن صفحه
+// src/components/products/barcode-scanner.tsx — v8.0 (نهایی قطعی)
+// ★ استفاده از BarcodeDetector بومی مرورگر (دقیقاً مثل اسکنر گوشی)
+// ★ پشتیبانی از: کروم، سافاری، فایرفاکس، موبایل
+// ★ اگر مرورگر پشتیبانی نکرد، به روش قدیمی برمی‌گردد
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react'
-import { Html5Qrcode } from 'html5-qrcode'
-import { Camera, X, Loader2, AlertCircle, Flashlight, FlashlightOff } from 'lucide-react'
+import { Camera, Loader2, AlertCircle, Flashlight, FlashlightOff, Barcode } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog'
 
 interface BarcodeScannerDialogProps {
@@ -24,14 +21,17 @@ interface BarcodeScannerDialogProps {
 }
 
 export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScannerDialogProps) {
-  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const hasStartedRef = useRef(false)
+  const scannedRef = useRef(false)
+
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(true)
   const [torchOn, setTorchOn] = useState(false)
-  const scannedRef = useRef(false)
+  const [detectorType, setDetectorType] = useState<'native' | 'library' | null>(null)
 
-  // Reset وقتی Dialog باز می‌شود
   useEffect(() => {
     if (open) {
       hasStartedRef.current = false
@@ -39,6 +39,7 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
       setError('')
       setStarting(true)
       setTorchOn(false)
+      setDetectorType(null)
     }
   }, [open])
 
@@ -48,63 +49,118 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
     hasStartedRef.current = true
 
     let isActive = true
-    let scannerInstance: Html5Qrcode | null = null
 
-      const stopScanner = async () => {
-      try {
-        if (scannerInstance) {
-          // stop() اگر اسکنر فعال نباشد خطا می‌دهد که با catch مدیریت می‌شود
-          await scannerInstance.stop()
-          scannerInstance.clear()
-          scannerInstance = null
-        }
-      } catch {}
+    const stopCamera = () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+      }
     }
 
-    const startScanner = async () => {
-      // صبر برای رندر DOM
+    const startCamera = async () => {
       await new Promise((r) => setTimeout(r, 200))
-
-      const container = document.getElementById('barcode-scanner-video')
-      if (!container || !isActive) return
+      if (!isActive) return
 
       try {
-        scannerInstance = new Html5Qrcode('barcode-scanner-video', {
-          formatsToSupport: undefined as any,
-          verbose: false,
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
         })
-        scannerRef.current = scannerInstance
 
-         await scannerInstance.start(
-         { facingMode: 'environment' },
-          {
-            fps: 20,  // ★ سرعت بالاتر برای تشخیص بهتر
-            qrbox: { width: 400, height: 250 },  // ★ کادر بزرگ‌تر
-            disableFlip: false,
-            // ★ حذف videoConstraints برای سازگاری بیشتر با دوربین‌های مختلف
-          },
-          (decodedText) => {
-            if (scannedRef.current || !isActive) return
-            scannedRef.current = true
-            if (navigator.vibrate) navigator.vibrate(200)
-            onScan(decodedText)
-            stopScanner()
-          },
-          () => {}
-        )
+        if (!isActive) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
 
-        if (isActive) setStarting(false)
+        streamRef.current = stream
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+
+        setStarting(false)
+
+        const BarcodeDetectorAPI = (window as any).BarcodeDetector
+
+        if (BarcodeDetectorAPI) {
+          // ✅ اسکنر بومی مرورگر (دقیقاً مثل اسکنر گوشی)
+          setDetectorType('native')
+          
+          const detector = new BarcodeDetectorAPI({
+            formats: [
+              'ean_13', 'ean_8', 'code_128', 'code_39',
+              'upc_a', 'upc_e', 'qr_code', 'data_matrix',
+              'itf', 'codabar',
+            ],
+          })
+
+          const scan = async () => {
+            if (!isActive || scannedRef.current) return
+
+            if (
+              videoRef.current &&
+              videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
+            ) {
+              try {
+                const barcodes = await detector.detect(videoRef.current)
+                if (barcodes.length > 0 && !scannedRef.current) {
+                  scannedRef.current = true
+                  const barcode = barcodes[0].rawValue
+                  if (navigator.vibrate) navigator.vibrate(200)
+                  onScan(barcode)
+                  stopCamera()
+                  return
+                }
+              } catch {}
+            }
+
+            animationFrameRef.current = requestAnimationFrame(scan)
+          }
+
+          scan()
+        } else {
+          // ⚠️ مرورگر پشتیبانی نمی‌کند — استفاده از روش قدیمی
+          setDetectorType('library')
+          
+          try {
+            const { Html5Qrcode } = await import('html5-qrcode')
+            const scanner = new Html5Qrcode('barcode-scanner-fallback')
+            
+            await scanner.start(
+              { facingMode: 'environment' },
+              { fps: 20, qrbox: { width: 300, height: 200 } },
+              (decodedText) => {
+                if (scannedRef.current || !isActive) return
+                scannedRef.current = true
+                if (navigator.vibrate) navigator.vibrate(200)
+                onScan(decodedText)
+                scanner.stop().catch(() => {})
+              },
+              () => {}
+            )
+          } catch (err: any) {
+            if (isActive) {
+              setError('مرورگر شما از اسکنر بارکد پشتیبانی نمی‌کند. لطفاً از کروم استفاده کنید.')
+            }
+          }
+        }
       } catch (err: any) {
         if (isActive) {
           const message = err?.message || ''
           if (message.includes('Permission') || message.includes('NotAllowed')) {
             setError('دسترسی به دوربین رد شد. لطفاً دسترسی دوربین را فعال کنید.')
-          } else if (message.includes('NotFound') || message.includes('DevicesNotFound')) {
-            setError('دوربینی یافت نشد. از دستگاهی با دوربین استفاده کنید.')
+          } else if (message.includes('NotFound')) {
+            setError('دوربینی یافت نشد.')
           } else if (message.includes('NotReadable')) {
             setError('دوربین در حال استفاده توسط برنامه دیگری است.')
-          } else if (message.includes('secure') || message.includes('https')) {
-            setError('برای استفاده از دوربین، سایت باید با HTTPS باز شود.')
           } else {
             setError('خطا در راه‌اندازی دوربین: ' + message)
           }
@@ -113,23 +169,19 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
       }
     }
 
-    startScanner()
+    startCamera()
 
     return () => {
       isActive = false
       hasStartedRef.current = false
-      stopScanner()
+      stopCamera()
     }
   }, [open, onScan])
 
   const toggleTorch = async () => {
     try {
-      const videoElement = document.querySelector(
-        '#barcode-scanner-video video'
-      ) as HTMLVideoElement | null
-      if (!videoElement?.srcObject) return
-
-      const tracks = (videoElement.srcObject as MediaStream).getVideoTracks()
+      if (!streamRef.current) return
+      const tracks = streamRef.current.getVideoTracks()
       for (const track of tracks) {
         const capabilities = track.getCapabilities?.() as any
         if (capabilities?.torch) {
@@ -147,7 +199,6 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
       <DialogContent
         className="sm:max-w-md w-[calc(100%-2rem)] p-0 overflow-hidden border-0 bg-white"
         dir="rtl"
-        // ★ مهم: جلوگیری از بسته شدن با کلیک بیرون
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
       >
@@ -158,12 +209,17 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
               <Camera className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold">اسکن بارکد با دوربین</h3>
+              <h3 className="text-sm font-bold">اسکن بارکد</h3>
               <p className="text-[10px] text-blue-100">
-                EAN-13, Code-128, QR و...
+                {detectorType === 'native' ? 'اسکنر بومی (دقت بالا)' : 'اسکنر استاندارد'}
               </p>
             </div>
           </div>
+          {detectorType && (
+            <span className="text-[9px] bg-white/20 px-2 py-1 rounded-full">
+              {detectorType === 'native' ? '✨ پیشرفته' : '⚡ استاندارد'}
+            </span>
+          )}
         </div>
 
         {/* Body */}
@@ -172,9 +228,6 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-3" />
               <p className="text-sm text-gray-600">در حال راه‌اندازی دوربین...</p>
-              <p className="text-[10px] text-gray-400 mt-1">
-                لطفاً دسترسی دوربین را تأیید کنید
-              </p>
             </div>
           )}
 
@@ -186,31 +239,41 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
           ) : (
             <>
               <div className="relative rounded-xl overflow-hidden bg-black">
-                <div id="barcode-scanner-video" className="w-full" />
+                {/* ویدیو برای اسکنر بومی */}
+                <video
+                  ref={videoRef}
+                  className={`w-full ${detectorType === 'library' ? 'hidden' : ''}`}
+                  playsInline
+                  muted
+                  autoPlay
+                />
+                
+                {/* کانتینر برای اسکنر قدیمی */}
+                <div
+                  id="barcode-scanner-fallback"
+                  className={detectorType === 'library' ? 'w-full' : 'hidden'}
+                />
 
-                                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-[350px] h-[220px] max-w-[95%] border-2 border-blue-400 rounded-lg relative bg-blue-500/5 overflow-hidden">
+                {/* کادر اسکن */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-[300px] h-[200px] max-w-[95%] border-2 border-blue-400 rounded-lg relative bg-blue-500/5 overflow-hidden">
                     <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-blue-500 rounded-tl-lg" />
                     <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-blue-500 rounded-tr-lg" />
                     <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-blue-500 rounded-bl-lg" />
                     <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-blue-500 rounded-br-lg" />
-                    {/* ★ خط قرمز اسکن با انیمیشن */}
                     <div className="absolute inset-x-0 h-0.5 bg-red-500 shadow-lg shadow-red-500/50 scan-line-animation" />
                   </div>
                 </div>
               </div>
 
+              {/* دکمه‌ها */}
               <div className="flex items-center justify-center gap-2 mt-4">
                 <button
                   type="button"
                   onClick={toggleTorch}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 text-xs hover:bg-gray-50 cursor-pointer bg-white"
                 >
-                  {torchOn ? (
-                    <FlashlightOff className="w-3.5 h-3.5" />
-                  ) : (
-                    <Flashlight className="w-3.5 h-3.5" />
-                  )}
+                  {torchOn ? <FlashlightOff className="w-3.5 h-3.5" /> : <Flashlight className="w-3.5 h-3.5" />}
                   {torchOn ? 'خاموش' : 'چراغ قوه'}
                 </button>
                 <button
@@ -222,30 +285,22 @@ export function BarcodeScannerDialog({ open, onOpenChange, onScan }: BarcodeScan
                 </button>
               </div>
 
-                                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              {/* راهنما */}
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-[11px] text-blue-800 font-bold mb-1.5 text-center">
-                  📱 راهنمای اسکن موفق:
+                  📱 راهنمای اسکن:
                 </p>
                 <ul className="text-[10px] text-blue-700 space-y-1 pr-4 list-disc">
                   <li>بارکد را <b>۲۰ تا ۳۰ سانتی‌متر</b> از دوربین نگه دارید</li>
-                  <li>بارکد را <b>صاف و عمود</b> بر دوربین بگیرید</li>
-                  <li><b>نور کافی</b> داشته باشید (کنار پنجره یا زیر چراغ)</li>
-                  <li>از <b>لرزش دست</b> جلوگیری کنید</li>
-                  <li>بارکد باید <b>کامل و خوانا</b> باشد (پاره یا محو نباشد)</li>
+                  <li>بارکد را <b>صاف</b> جلوی دوربین بگیرید</li>
+                  <li><b>نور کافی</b> داشته باشید</li>
                 </ul>
-                <div className="mt-2 pt-2 border-t border-blue-200">
-                  <p className="text-[10px] text-amber-700 font-medium">
-                    💡 <b>نکته:</b> دوربین لپ‌تاپ ممکن است کیفیت کافی برای اسکن بارکدهای کوچک نداشته باشد.
-                    اگر بارکد خوانده نشد، از <b>موبایل</b> یا <b>بارکدخوان فیزیکی</b> استفاده کنید.
-                  </p>
-                </div>
               </div>
             </>
           )}
         </div>
-            </DialogContent>
+      </DialogContent>
 
-      {/* ★ استایل انیمیشن خط اسکن */}
       <style jsx global>{`
         @keyframes scanLine {
           0%, 100% { top: 5%; }
