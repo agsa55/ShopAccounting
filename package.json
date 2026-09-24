@@ -10,7 +10,6 @@
     "postinstall": "prisma generate",
     "dev": "next dev -p 3000",
     "build": "prisma generate && next build",
-
     "sitemap": "next-sitemap",
     "start": "next start -p 3000",
     "start:prod": "NODE_ENV=production node .next/standalone/server.js",
@@ -76,6 +75,7 @@
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.23.2",
+    "html5-qrcode": "^2.3.8",
     "idb": "^8.0.3",
     "input-otp": "^1.4.2",
     "ioredis": "^5.11.0",

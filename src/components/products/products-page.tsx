@@ -13,6 +13,7 @@
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@/lib/store'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -65,7 +66,8 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { BarcodePrintModal } from './barcode-print-modal'
 import { logger } from '@/lib/system-logger'
-
+import { Camera } from 'lucide-react'
+import { BarcodeScannerDialog } from '@/components/products/barcode-scanner'
 // ══════════════════════════
 // Helpers
 // ══════════════════════════
@@ -557,6 +559,10 @@ export default function ProductsPage() {
   const [savingPrice, setSavingPrice] = useState(false)
   const { toast } = useToast()
 
+
+// ★ v12.2: state برای اسکنر بارکد با دوربین
+const [scannerOpen, setScannerOpen] = useState(false)
+const [scanTarget, setScanTarget] = useState<'add' | 'edit' | null>(null)
   // ══════════════════════════════════════════
   // ★ v9.3: بررسی بارکد تکراری به صورت خودکار
   // ══════════════════════════════════════════
@@ -2038,9 +2044,8 @@ export default function ProductsPage() {
           </div>
         </div>
       )}
-
       {/* ══════════════════════════════════════════════════════════ */}
-      {/* ★ Add Dialog - v9.3: با preventDefault برای بیرون        */}
+      {/* ★ Add Dialog - v12.6: اسکنر فقط در این مودال              */}
       {/* ══════════════════════════════════════════════════════════ */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
         <DialogContent
@@ -2108,20 +2113,36 @@ export default function ProductsPage() {
 
             <div>
               <Label className="text-xs">بارکد</Label>
-              <Input
-                value={addForm.barcode}
-                onChange={(e) =>
-                  setAddForm({
-                    ...addForm,
-                    barcode: e.target.value,
-                    generateBarcode: false,
-                  })
-                }
-                className={`mt-1 ${addBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
-                dir="ltr"
-                placeholder="اسکن یا وارد کنید"
-                disabled={addForm.generateBarcode}
-              />
+              <div className="flex gap-1 mt-1">
+                <Input
+                  value={addForm.barcode}
+                  onChange={(e) =>
+                    setAddForm({
+                      ...addForm,
+                      barcode: e.target.value,
+                      generateBarcode: false,
+                    })
+                  }
+                  className={`flex-1 ${addBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
+                  dir="ltr"
+                  placeholder="اسکن یا وارد کنید"
+                  disabled={addForm.generateBarcode}
+                />
+             <Button
+  type="button"
+  variant="outline"
+  size="sm"
+  className="px-2.5 h-9 shrink-0 border-blue-200 text-blue-600 hover:bg-blue-50"
+  onClick={() => {
+    setScanTarget('add')
+    setScannerOpen(true)
+  }}
+  disabled={addForm.generateBarcode}
+  title="اسکن بارکد با دوربین"
+>
+  <Camera className="w-4 h-4" />
+</Button>
+              </div>
               {addBarcodeIsDuplicate && (
                 <div className="flex items-center gap-1.5 mt-1.5 p-2 bg-red-50 border border-red-200 rounded-md">
                   <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
@@ -2269,10 +2290,6 @@ export default function ProductsPage() {
               />
             </div>
 
-            {/* ══════════════════════════════════════════════════════════ */}
-            {/* ★ v11.0: فیلد موجودی اولیه - برای فروشگاه‌دارانی که       */}
-            {/* قبلاً کالا در مغازه دارند و نمی‌خواهند فاکتور خرید بزنند  */}
-            {/* ══════════════════════════════════════════════════════════ */}
             <div className="col-span-1 sm:col-span-2 p-3 bg-amber-50/50 border border-amber-200 rounded-lg">
               <div className="flex items-center gap-1.5 mb-2">
                 <Package className="w-3.5 h-3.5 text-amber-600" />
@@ -2368,11 +2385,13 @@ export default function ProductsPage() {
               {!isOnline ? 'ذخیره آفلاین و ادامه' : 'ایجاد کالا و ادامه'}
             </Button>
           </DialogFooter>
+
+        
         </DialogContent>
       </Dialog>
-
-      {/* ══════════════════════════════════════════════════════════ */}
-      {/* ★ Edit Dialog - v9.3: با preventDefault برای بیرون       */}
+      
+            {/* ══════════════════════════════════════════════════════════ */}
+      {/* ★ Edit Dialog - v12.5: با پشتیبانی از اسکن بارکد با دوربین */}
       {/* ══════════════════════════════════════════════════════════ */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent
@@ -2418,15 +2437,31 @@ export default function ProductsPage() {
 
             <div className="col-span-1 sm:col-span-2">
               <Label className="text-xs">بارکد</Label>
-              <Input
-                value={editForm.barcode}
-                onChange={(e) =>
-                  setEditForm({ ...editForm, barcode: e.target.value })
-                }
-                className={`mt-1 ${editBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
-                dir="ltr"
-                placeholder="اسکن یا دستی وارد کنید"
-              />
+              <div className="flex gap-1 mt-1">
+                <Input
+                  value={editForm.barcode}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, barcode: e.target.value })
+                  }
+                  className={`flex-1 ${editBarcodeIsDuplicate ? 'border-red-400 focus-visible:ring-red-500' : ''}`}
+                  dir="ltr"
+                  placeholder="اسکن یا دستی وارد کنید"
+                />
+                {/* ★ v12.5: دکمه اسکن بارکد با دوربین */}
+              <Button
+  type="button"
+  variant="outline"
+  size="sm"
+  className="px-2.5 h-9 shrink-0 border-blue-200 text-blue-600 hover:bg-blue-50"
+  onClick={() => {
+    setScanTarget('edit')
+    setScannerOpen(true)
+  }}
+  title="اسکن بارکد با دوربین"
+>
+  <Camera className="w-4 h-4" />
+</Button>
+              </div>
               {editBarcodeIsDuplicate && (
                 <div className="flex items-center gap-1.5 mt-1.5 p-2 bg-red-50 border border-red-200 rounded-md">
                   <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
@@ -2621,25 +2656,29 @@ export default function ProductsPage() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="h-9">
+                  <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)} className="h-9">
               انصراف
             </Button>
             <Button
-              onClick={handleEditProduct}
-              disabled={submitting || editBarcodeIsDuplicate}
-              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} ${(submitting || editBarcodeIsDuplicate) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={handleAddProduct}
+              disabled={submitting || addBarcodeIsDuplicate}
+              className={`h-9 gap-2 ${!isOnline ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} ${(submitting || addBarcodeIsDuplicate) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {submitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : !isOnline ? (
                 <CloudOff className="w-4 h-4" />
-              ) : null}
-              {!isOnline ? 'ذخیره آفلاین' : 'به‌روزرسانی'}
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              {!isOnline ? 'ذخیره آفلاین و ادامه' : 'ایجاد کالا و ادامه'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+
 
       {/* ★ Delete Dialog */}
       <Dialog
@@ -2689,6 +2728,37 @@ export default function ProductsPage() {
         open={printModalOpen}
         onOpenChange={setPrintModalOpen}
         products={allProducts}
+      />
+
+          {/* ══════════════════════════════════════════════════════════ */}
+      {/* ★ v12.7: اسکنر بارکد با Dialog خود shadcn (راه‌حل قطعی)   */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <BarcodeScannerDialog
+        open={scannerOpen}
+        onOpenChange={(open) => {
+          setScannerOpen(open)
+          if (!open) setScanTarget(null)
+        }}
+        onScan={(barcode) => {
+          if (scanTarget === 'add') {
+            setAddForm({
+              ...addForm,
+              barcode,
+              generateBarcode: false,
+            })
+          } else if (scanTarget === 'edit') {
+            setEditForm({
+              ...editForm,
+              barcode,
+            })
+          }
+          toast({
+            title: '✅ بارکد اسکن شد',
+            description: `بارکد: ${barcode}`,
+          })
+          setScannerOpen(false)
+          setScanTarget(null)
+        }}
       />
     </div>
   )
