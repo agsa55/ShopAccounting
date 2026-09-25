@@ -22,6 +22,222 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 
+
+// ═══════════════════════════════════════════════════════════════
+// ★ Helper: پیدا کردن حساب دریافتنی از روی سند فروش همان فاکتور
+// ★ v9.3.1: رفع خطای TypeScript برای accountId nullable
+// ═══════════════════════════════════════════════════════════════
+async function resolveReceivableAccountIdFromInvoiceJournal(
+  tenantId: string | null,
+  invoiceId: string | null
+): Promise<string | null> {
+  const safeTenantId = String(tenantId || '').trim()
+  const safeInvoiceId = String(invoiceId || '').trim()
+
+  if (!safeTenantId || !safeInvoiceId) {
+    console.warn('[Verify] Missing tenantId or invoiceId for receivable resolution')
+    return null
+  }
+
+  try {
+    const entries: any[] = await db.client.journalEntry.findMany({
+      where: {
+        tenantId: safeTenantId,
+        sourceId: safeInvoiceId,
+      },
+      select: {
+        id: true,
+        sourceType: true,
+        status: true,
+        date: true,
+      },
+      orderBy: {
+        date: 'asc',
+      },
+    })
+
+    if (!entries || entries.length === 0) {
+      return null
+    }
+
+    const postedEntries = entries.filter((entry: any) => {
+      const status = String(entry.status || '').toLowerCase().trim()
+      return status === 'posted'
+    })
+
+    if (postedEntries.length === 0) {
+      return null
+    }
+
+    const saleEntries = postedEntries.filter((entry: any) => {
+      const sourceType = String(entry.sourceType || '').toLowerCase().trim()
+      return sourceType !== 'invoice_payment' && sourceType !== 'online_payment'
+    })
+
+    const targetEntries = saleEntries.length > 0 ? saleEntries : postedEntries
+
+    const entryIds: string[] = targetEntries
+      .map((entry: any) => String(entry.id || '').trim())
+      .filter(Boolean)
+
+    if (entryIds.length === 0) {
+      return null
+    }
+
+    const lines: any[] = await db.client.journalEntryLine.findMany({
+      where: {
+        journalEntryId: { in: entryIds },
+      },
+      select: {
+        accountId: true,
+        debit: true,
+        credit: true,
+      },
+    })
+
+    const debitLines = lines.filter((line: any) => {
+      return Number(line.debit || 0) > 0 && line.accountId
+    })
+
+    if (debitLines.length === 0) {
+      return null
+    }
+
+    const accountIds: string[] = Array.from(
+      new Set(
+        debitLines
+          .map((line: any) => String(line.accountId || '').trim())
+          .filter(Boolean)
+      )
+    )
+
+    if (accountIds.length === 0) {
+      return null
+    }
+
+    const accountModel: any =
+      (db.client as any).account || (db.client as any).Account
+
+    if (!accountModel) {
+      console.warn('[Verify] Account model not found for receivable resolution')
+      return null
+    }
+
+    const accounts: any[] = await accountModel.findMany({
+      where: {
+        id: { in: accountIds },
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        type: true,
+      },
+    })
+
+    const accountMap = new Map<string, any>(
+      accounts.map((account: any) => [String(account.id || '').trim(), account])
+    )
+
+    let bestAccountId: string | null = null
+    let bestScore = 0
+
+    for (const line of debitLines) {
+      const accountId = String(line.accountId || '').trim()
+
+      if (!accountId) {
+        continue
+      }
+
+      const account = accountMap.get(accountId)
+
+      if (!account) {
+        continue
+      }
+
+      const code = String(account.code || '').trim()
+      const name = String(account.name || '')
+      const type = String(account.type || '')
+
+      let score = 0
+
+      if (code === '1300') {
+        score = 100
+      } else if (code === '1310') {
+        score = 90
+      } else if (code.startsWith('13')) {
+        score = 80
+      }
+
+      if (
+        name.includes('حساب‌های دریافتنی') ||
+        name.includes('حساب های دریافتنی') ||
+        name.includes('دریافتنی')
+      ) {
+        score = Math.max(score, 70)
+      }
+
+      if (name.includes('بدهکاران تجاری')) {
+        score = Math.max(score, 60)
+      }
+
+      if (type.includes('دریافتنی')) {
+        score = Math.max(score, 50)
+      }
+
+      if (score > bestScore) {
+        bestScore = score
+        bestAccountId = accountId
+      }
+    }
+
+    if (bestAccountId && bestScore >= 50) {
+      console.log('[Verify] ✅ Receivable account resolved from sale journal:', {
+        invoiceId: safeInvoiceId,
+        accountId: bestAccountId,
+        score: bestScore,
+      })
+
+      return bestAccountId
+    }
+
+    console.log('[Verify] ℹ️ No receivable account found in sale journal:', {
+      invoiceId: safeInvoiceId,
+      checkedAccounts: accounts.map((a: any) => ({
+        id: a.id,
+        code: a.code,
+        name: a.name,
+        type: a.type,
+      })),
+    })
+
+    return null
+  } catch (err: any) {
+    console.warn(
+      '[Verify] resolveReceivableAccountIdFromInvoiceJournal failed:',
+      err?.message
+    )
+
+    return null
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ Helper: تلاش برای غیردستی کردن سند حسابداری
+// بعضی schemaها فیلد isManual دارند و default آن true است.
+// اگر فیلد وجود نداشت، خطا نمی‌دهد.
+// ═══════════════════════════════════════════════════════════════
+async function tryMarkJournalAsAuto(tx: any, journalId: string) {
+  try {
+    await tx.journalEntry.update({
+      where: { id: journalId },
+      data: { isManual: false } as any,
+    })
+  } catch {
+    // اگر فیلد isManual در schema وجود نداشت، نادیده گرفته می‌شود
+  }
+}
+
 export async function GET(req: NextRequest) {
   console.log('[Online Payment Verify] 📥 Callback received')
   try {
@@ -298,18 +514,55 @@ export async function GET(req: NextRequest) {
     // ═══════════════════════════════════════════════════════════════
     // ★★★ v8.8: گرفتن حساب‌های استاندارد قبل از transaction
     // ═══════════════════════════════════════════════════════════════
-    await getStandardAccountIds(tenantId).catch(() => ({} as any))
-    const accIds = await getStandardAccountIds(tenantId)
+     const safeTenantId = String(tenantId || '')
+    const safeInvoiceId = String(onlinePayment.invoiceId || '')
+
+    if (!safeTenantId || !safeInvoiceId) {
+      console.error('[Verify] ❌ Missing tenantId or invoiceId for journal resolution:', {
+        safeTenantId: safeTenantId || null,
+        safeInvoiceId: safeInvoiceId || null,
+        onlinePaymentId: onlinePayment.id,
+      })
+
+      if (portalToken) {
+        return NextResponse.redirect(
+          new URL(`/portal/${portalToken}?payment=error&reason=missing_invoice`, req.url)
+        )
+      }
+
+      return NextResponse.redirect(
+        new URL('/payment-result?status=error&reason=missing_invoice', req.url)
+      )
+    }
+
+    await getStandardAccountIds(safeTenantId).catch(() => ({} as any))
+    const accIds = await getStandardAccountIds(safeTenantId)
+
+    // ★ مهم‌ترین اصلاح: اول حساب دریافتنی از سند فروش همان فاکتور پیدا می‌شود
+    const saleReceivableAccountId = await resolveReceivableAccountIdFromInvoiceJournal(
+      safeTenantId,
+      safeInvoiceId
+    ).catch(() => null)
 
     const bankAccountId = accIds.bankAccountId || accIds.cashAccountId
-    const receivablesAccountId = accIds.tradeReceivableId || accIds.receivablesAccountId
+
+    const receivablesAccountId =
+      saleReceivableAccountId ||
+      accIds.receivablesAccountId ||
+      accIds.tradeReceivableId
+
     const salesAccountId = accIds.salesAccountId
 
     const now = new Date()
 
-    console.log('[Verify] 📊 Account IDs:', {
+    console.log('[Verify] 🧾 Journal account selection:', {
+      invoiceId: safeInvoiceId,
+      paymentMethod: 'online',
       bankAccountId,
-      receivablesAccountId,
+      saleReceivableAccountId: saleReceivableAccountId || null,
+      accIdsReceivablesAccountId: accIds.receivablesAccountId || null,
+      accIdsTradeReceivableId: accIds.tradeReceivableId || null,
+      finalReceivablesAccountId: receivablesAccountId,
       salesAccountId,
     })
 
@@ -447,44 +700,92 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          const firstUnpaidSchedule = await tx.installmentSchedule.findFirst({
-            where: { planId: plan.id, status: { not: 'paid' } },
-            orderBy: { installmentNumber: 'asc' },
+                 // ★ v9.3: به‌جای جمع بستن روی عدد قبلی، دوباره شمارش دقیق انجام می‌شود
+          const paidInstallmentsCount = await tx.installmentSchedule.count({
+            where: {
+              planId: plan.id,
+              tenantId,
+              status: 'paid',
+            },
           })
+
+          const totalPaidAgg = await tx.installmentSchedule.aggregate({
+            where: {
+              planId: plan.id,
+              tenantId,
+            },
+            _sum: {
+              paidAmount: true,
+            },
+          })
+
+          const firstUnpaidSchedule = await tx.installmentSchedule.findFirst({
+            where: {
+              planId: plan.id,
+              tenantId,
+              status: { not: 'paid' },
+            },
+            orderBy: {
+              installmentNumber: 'asc' as const,
+            },
+          })
+
           const nextDueDate = firstUnpaidSchedule?.dueDate || null
+
+          const planInstallmentCount = Number(plan.numberOfInstallments || 0)
+          const isPlanCompleted =
+            (planInstallmentCount > 0 && paidInstallmentsCount >= planInstallmentCount) ||
+            newRemaining <= 0
 
           await tx.installmentPlan.update({
             where: { id: plan.id },
             data: {
-              paidInstallments: (plan.paidInstallments || 0) + newlyPaidInstallments,
-              totalPaidAmount: (Number(plan.totalPaidAmount) || 0) + Number(onlinePayment.amount),
-              nextDueDate: nextDueDate,
-              status: newRemaining <= 0 ? 'completed' : 'active',
+              paidInstallments: paidInstallmentsCount,
+              totalPaidAmount: Number(totalPaidAgg._sum.paidAmount || 0),
+              nextDueDate,
+              status: isPlanCompleted ? 'completed' : 'active',
             },
           })
 
-          console.log(`[Verify] ✅ InstallmentPlan updated:`, {
+          console.log(`[Verify] ✅ InstallmentPlan recalculated:`, {
+            planId: plan.id,
             targeted: !!targetInstallmentId,
-            newlyPaid: newlyPaidInstallments,
-            totalPaid: (plan.paidInstallments || 0) + newlyPaidInstallments,
+            newlyPaidInThisPayment: newlyPaidInstallments,
+            paidInstallmentsCount,
+            totalPaidAmount: Number(totalPaidAgg._sum.paidAmount || 0),
             nextDueDate,
+            isPlanCompleted,
           })
         }
 
         // ═══════════════════════════════════════════════════════════════
         // ۴. سند حسابداری — Dr بانک / Cr مطالبات (نسیه/قسطی)
         // ═══════════════════════════════════════════════════════════════
+             // ═══════════════════════════════════════════════════════════════
+        // ۴. سند حسابداری — Dr بانک / Cr حساب دریافتنی صحیح
+        // ═══════════════════════════════════════════════════════════════
         try {
           if (bankAccountId && (!isCredit || receivablesAccountId)) {
             const jeCount = await tx.journalEntry.count({ where: { tenantId } })
             const jeNumber = `JE-${(jeCount + 1).toString().padStart(6, '0')}`
+
+            // ★ اگر پرداخت مربوط به قسط خاص است، شماره قسط را در شرح بیانداز
+            const targetScheduleForLabel = onlinePayment.installmentId
+              ? invoice.installmentPlan?.schedules?.find(
+                  (s: any) => s.id === onlinePayment.installmentId
+                )
+              : null
+
+            const installmentLabel = targetScheduleForLabel
+              ? ` — قسط ${targetScheduleForLabel.installmentNumber}`
+              : ''
 
             const lines: any[] = [
               {
                 accountId: bankAccountId,
                 debit: onlinePayment.amount,
                 credit: 0,
-                description: `بدهکار: دریافت آنلاین — فاکتور ${invoice.number} — کد پیگیری ${refId}`,
+                description: `بدهکار: دریافت آنلاین${installmentLabel} — فاکتور ${invoice.number} — کد پیگیری ${refId || '—'}`,
               },
             ]
 
@@ -493,7 +794,7 @@ export async function GET(req: NextRequest) {
                 accountId: receivablesAccountId,
                 debit: 0,
                 credit: onlinePayment.amount,
-                description: `بستانکار: تسویه بدهی مشتری — فاکتور ${invoice.number}`,
+                description: `بستانکار: تسویه بدهی مشتری${installmentLabel} — فاکتور ${invoice.number}`,
               })
             } else if (!isCredit && salesAccountId) {
               lines.push({
@@ -507,11 +808,11 @@ export async function GET(req: NextRequest) {
             const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
             const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
 
-            await tx.journalEntry.create({
+            const journalEntry = await tx.journalEntry.create({
               data: {
                 number: jeNumber,
                 date: now,
-                description: `سند خودکار — دریافت آنلاین فاکتور ${invoice.number}`,
+                description: `سند خودکار — دریافت آنلاین${installmentLabel} فاکتور ${invoice.number}`,
                 status: 'posted',
                 sourceType: 'online_payment',
                 sourceId: onlinePayment.id,
@@ -522,11 +823,18 @@ export async function GET(req: NextRequest) {
               },
             })
 
+            // ★ اگر schema فیلد isManual دارد، آن را false کن تا در UI «دستی» نمایش داده نشود
+            await tryMarkJournalAsAuto(tx, journalEntry.id)
+
             console.log('[Verify] ✅ Journal entry created:', {
               number: jeNumber,
+              journalEntryId: journalEntry.id,
               totalDebit,
               totalCredit,
               isCredit,
+              receivablesAccountId,
+              bankAccountId,
+              installmentLabel: installmentLabel || null,
             })
           } else {
             console.warn('[Verify] ⚠️ Missing accounts for journal entry:', {
@@ -539,7 +847,6 @@ export async function GET(req: NextRequest) {
         } catch (jeErr: any) {
           console.warn('[Verify] ⚠️ Journal entry failed (non-blocking):', jeErr?.message)
         }
-
         // ۵. در صورت نسیه/قسطی، کاهش طلب از مشتری
         if (isCredit && invoice.customerId) {
           try {

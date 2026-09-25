@@ -1504,163 +1504,444 @@ await loadGlobalStats() // ★ v9.4.0: بروزرسانی آمار کلی
     }
   }
 
-  const renderDetailDialog = () => {
-    if (!selectedInvoice) return null
-    const inv = selectedInvoice
-    const items = inv.items || []
-    const payments = inv.payments || []
-    const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
+const renderDetailDialog = () => {
+  if (!selectedInvoice) return null
+  const inv = selectedInvoice
+  const items = inv.items || []
+  const payments = inv.payments || []
 
-    return (
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-xl max-h-[90vh] overflow-y-auto rounded-xl p-0 gap-0" dir="rtl">
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base m-0">
-              <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-                <FileText className="w-3.5 h-3.5 text-emerald-600" />
+  const totalAmount = Number(inv.totalAmount || 0)
+  const paidAmount = Number(inv.paidAmount || 0)
+  const remaining = Math.max(0, totalAmount - paidAmount)
+  const paymentPercent = totalAmount > 0 ? Math.min(100, Math.round((paidAmount / totalAmount) * 100)) : 0
+  const isCancelled = String(inv.paymentStatus || inv.status || '').toUpperCase() === 'CANCELLED'
+  const isReturn = inv.invoiceType === 'sale_return' || inv.invoiceType === 'purchase_return'
+
+  const paymentType = String(inv.paymentType || '').toLowerCase().trim()
+  const isCredit = paymentType === 'credit' || paymentType === 'نسیه'
+  const isInstallment = paymentType === 'installment' || paymentType === 'قسطی' || paymentType === 'installments'
+  const isCheck = paymentType === 'check' || paymentType === 'cheque' || paymentType.includes('check') || !!inv.checkInfo || !!inv.checkStatus
+
+  const plan: any = (inv as any).installmentPlan || {}
+  const schedules: InstallmentScheduleItem[] = Array.isArray(plan.schedule)
+    ? plan.schedule
+    : Array.isArray(plan.installments)
+      ? plan.installments
+      : Array.isArray((inv as any).installmentSchedules)
+        ? (inv as any).installmentSchedules
+        : []
+
+  const isFullyPaidSchedule = (s: InstallmentScheduleItem) => {
+    const status = String(s.status || '').toLowerCase()
+    const amount = Number(s.amount || 0)
+    const paid = Number(s.paidAmount || 0)
+    return status === 'paid' || status === 'completed' || (amount > 0 && paid >= amount - 1)
+  }
+
+  const isPartialSchedule = (s: InstallmentScheduleItem) => {
+    return !isFullyPaidSchedule(s) && Number(s.paidAmount || 0) > 0
+  }
+
+  const isOverdueSchedule = (s: InstallmentScheduleItem) => {
+    if (isFullyPaidSchedule(s)) return false
+    const due = s.dueDate ? new Date(s.dueDate) : null
+    return !!due && due.getTime() < Date.now()
+  }
+
+  const scheduleTotal = schedules.reduce((sum, s) => sum + Number(s.amount || 0), 0)
+  const schedulePaid = schedules.reduce((sum, s) => sum + Number(s.paidAmount || 0), 0)
+  const paidSchedulesCount = schedules.filter(isFullyPaidSchedule).length
+  const overdueSchedulesCount = schedules.filter(isOverdueSchedule).length
+  const nextDueSchedule = schedules
+    .filter((s) => !isFullyPaidSchedule(s))
+    .sort((a, b) => {
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : 0
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : 0
+      return da - db
+    })[0] || null
+
+  const hasInstallmentData = schedules.length > 0 || Number(plan.numberOfInstallments || 0) > 0 || isInstallment
+  const installmentCount = schedules.length > 0 ? schedules.length : Number(plan.numberOfInstallments || 0)
+  const installmentPaidCount = schedules.length > 0 ? paidSchedulesCount : Number(plan.paidInstallments || 0)
+  const installmentTotal = schedules.length > 0 ? scheduleTotal : Number(plan.totalAmount || plan.amount || totalAmount)
+  const installmentPaid = schedules.length > 0 ? schedulePaid : Number(plan.totalPaidAmount || plan.paidAmount || paidAmount)
+  const installmentRemaining = Math.max(0, installmentTotal - installmentPaid)
+  const installmentRemainingCount = Math.max(0, installmentCount - installmentPaidCount)
+  const installmentPercent = installmentTotal > 0 ? Math.min(100, Math.round((installmentPaid / installmentTotal) * 100)) : 0
+  const installmentNextDue = nextDueSchedule?.dueDate || plan.nextDueDate || null
+
+  const scheduleBadge = (s: InstallmentScheduleItem) => {
+    if (isFullyPaidSchedule(s)) return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[9px]">پرداخت شده</Badge>
+    if (isOverdueSchedule(s)) return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-[9px]">معوق</Badge>
+    if (isPartialSchedule(s)) return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 text-[9px]">پرداخت جزئی</Badge>
+    return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100 text-[9px]">در انتظار</Badge>
+  }
+
+  const getMethodLabel = (pay: InvoicePayment) => {
+    const m = String(pay.paymentType || pay.method || '').toLowerCase().trim()
+    if (m === 'cash' || m === 'نقدی') return 'نقدی'
+    if (m === 'card' || m === 'pos' || m === 'کارتخوان') return 'کارتخوان'
+    if (m === 'bank' || m === 'بانکی') return 'بانکی'
+    if (m === 'check' || m === 'cheque' || m === 'چک') return 'چک'
+    if (m === 'online' || m === 'درگاه' || m === 'payment_gateway') return 'آنلاین'
+    if (m === 'installment' || m === 'قسطی') return 'قسط'
+    return m || 'نامشخص'
+  }
+
+  const sortedPayments = [...payments].sort((a, b) => {
+    const ta = a.paidAt ? new Date(a.paidAt).getTime() : 0
+    const tb = b.paidAt ? new Date(b.paidAt).getTime() : 0
+    return ta - tb
+  })
+
+  let cumulativePaid = 0
+  const paymentRows = sortedPayments.map((pay) => {
+    const amount = Number(pay.amount || 0)
+    cumulativePaid += amount
+    return {
+      ...pay,
+      amount,
+      cumulativePaid,
+      remainingAfter: Math.max(0, totalAmount - cumulativePaid),
+    }
+  })
+
+  return (
+    <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <DialogContent className="w-[calc(100%-1rem)] sm:w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl p-0 gap-0" dir="rtl">
+        <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+          <DialogTitle className="flex items-center gap-2 text-sm sm:text-base m-0">
+            <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold block truncate">فاکتور {inv.invoiceNumber || inv.number}</span>
+              <span className="text-[10px] text-gray-500 block leading-tight">{formatDate(inv.createdAt)}</span>
+            </div>
+          </DialogTitle>
+          <DialogClose className="rounded-full h-7 w-7 flex items-center justify-center hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors shrink-0">
+            <X className="h-4 w-4" />
+          </DialogClose>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: 'مشتری', value: <span className="text-xs font-medium truncate block">{inv.customerName || 'فروش عمومی'}</span> },
+              { label: 'نوع فاکتور', value: <div className="flex items-center gap-1 flex-wrap">{getInvoiceTypeBadge(inv.invoiceType)}</div> },
+              { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{isCheck && getCheckStatusBadge(inv.checkStatus)}</div> },
+              { label: 'صندوق‌دار', value: <span className="text-xs font-medium truncate block">{inv.cashierName || '—'}</span> },
+            ].map((item, i) => (
+              <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
+                <p className="text-[9px] text-gray-400 mb-0.5">{item.label}</p>
+                {item.value}
               </div>
-              <div className="min-w-0">
-                <span className="font-bold block truncate">فاکتور {inv.invoiceNumber || inv.number}</span>
-                <span className="text-[10px] text-gray-500 block leading-tight">{formatDate(inv.createdAt)}</span>
-              </div>
-            </DialogTitle>
-            <DialogClose className="rounded-full h-7 w-7 flex items-center justify-center hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors shrink-0">
-              <X className="h-4 w-4" />
-            </DialogClose>
+            ))}
           </div>
 
-          <div className="p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'مشتری', value: <span className="text-xs font-medium truncate block">{inv.customerName || 'فروش عمومی'}</span> },
-                { label: 'نوع فاکتور', value: <div className="flex items-center gap-1 flex-wrap">{getInvoiceTypeBadge(inv.invoiceType)}</div> },
-                { label: 'وضعیت', value: <div className="flex items-center gap-1 flex-wrap">{getStatusBadge(inv.status, inv.paymentStatus, inv.invoiceType)}{getPaymentTypeBadge(inv.paymentType)}{inv.paymentType?.toLowerCase() === 'check' && getCheckStatusBadge(inv.checkStatus)}</div> },
-              ].map((item, i) => (
-                <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
-                  <p className="text-[9px] text-gray-400 mb-0.5">{item.label}</p>
-                  {item.value}
-                </div>
-              ))}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* خلاصه مالی */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                <Wallet className="w-4 h-4 text-emerald-600" />
+                خلاصه تسویه
+              </p>
+              <Badge className={`${paymentPercent === 100 ? 'bg-emerald-100 text-emerald-700' : paymentPercent > 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'} text-[10px]`}>
+                {toFaNum(paymentPercent)}٪ تسویه شده
+              </Badge>
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
+                <p className="text-[9px] text-gray-500 font-medium">مبلغ کل</p>
+                <p className="text-xs font-bold text-gray-800 mt-0.5">{formatCurrencyShort(totalAmount)}</p>
+                <p className="text-[9px] text-gray-500">ریال</p>
+              </div>
               <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
-                <p className="text-[9px] text-emerald-700 font-medium">مبلغ کل</p>
-                <p className="text-xs font-bold text-emerald-700 mt-0.5">{formatCurrencyShort(inv.totalAmount)}</p>
+                <p className="text-[9px] text-emerald-700 font-medium">پرداخت شده</p>
+                <p className="text-xs font-bold text-emerald-700 mt-0.5">{formatCurrencyShort(paidAmount)}</p>
                 <p className="text-[9px] text-emerald-600">ریال</p>
               </div>
-              <div className="bg-sky-50 rounded-lg p-2 text-center border border-sky-100">
-                <p className="text-[9px] text-sky-700 font-medium">پرداخت</p>
-                <p className="text-xs font-bold text-sky-700 mt-0.5">{formatCurrencyShort(inv.paidAmount)}</p>
-                <p className="text-[9px] text-sky-600">ریال</p>
-              </div>
               <div className={`rounded-lg p-2 text-center border ${remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-emerald-50 border-emerald-100'}`}>
-                <p className={`text-[9px] font-medium ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>باقی</p>
+                <p className={`text-[9px] font-medium ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>باقیمانده</p>
                 <p className={`text-xs font-bold mt-0.5 ${remaining > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatCurrencyShort(remaining)}</p>
                 <p className={`text-[9px] ${remaining > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>ریال</p>
               </div>
             </div>
 
-            {items.length > 0 && (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200">
-                  <p className="text-[10px] font-semibold text-gray-600">آیتم‌های فاکتور ({toFaNum(items.length)})</p>
+            <div className="space-y-1">
+              <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${paymentPercent}%` }} />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-gray-500">
+                <span>پیشرفت پرداخت</span>
+                <span dir="ltr">{toFaNum(paidAmount)} / {toFaNum(totalAmount)}</span>
+              </div>
+            </div>
+
+            {isCredit && remaining > 0 && (
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>این فاکتور نسیه است و هنوز {formatCurrency(remaining)} دریافت نشده است.</span>
+              </div>
+            )}
+
+            {isCredit && remaining <= 0 && !isCancelled && (
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>این فاکتور نسیه به طور کامل تسویه شده است.</span>
+              </div>
+            )}
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* برنامه اقساط */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {hasInstallmentData && (
+            <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                  <Receipt className="w-4 h-4 text-purple-600" />
+                  برنامه اقساط
+                </p>
+                <Badge className="bg-purple-100 text-purple-700 text-[10px]">
+                  {toFaNum(installmentPaidCount)} از {toFaNum(installmentCount)} قسط
+                </Badge>
+              </div>
+
+              {installmentCount > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="bg-white rounded-lg p-2 text-center border border-purple-100">
+                    <p className="text-[9px] text-gray-500">تعداد اقساط</p>
+                    <p className="text-xs font-bold text-purple-800 mt-0.5">{toFaNum(installmentCount)}</p>
+                  </div>
+                  <div className="bg-white rounded-lg p-2 text-center border border-emerald-100">
+                    <p className="text-[9px] text-gray-500">پرداخت شده</p>
+                    <p className="text-xs font-bold text-emerald-700 mt-0.5">{toFaNum(installmentPaidCount)}</p>
+                  </div>
+                  <div className="bg-white rounded-lg p-2 text-center border border-amber-100">
+                    <p className="text-[9px] text-gray-500">باقیمانده</p>
+                    <p className="text-xs font-bold text-amber-700 mt-0.5">{toFaNum(installmentRemainingCount)}</p>
+                  </div>
+                  <div className={`bg-white rounded-lg p-2 text-center border ${overdueSchedulesCount > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+                    <p className="text-[9px] text-gray-500">معوق</p>
+                    <p className={`text-xs font-bold mt-0.5 ${overdueSchedulesCount > 0 ? 'text-red-700' : 'text-gray-500'}`}>{toFaNum(overdueSchedulesCount)}</p>
+                  </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
-                        <TableHead className="text-[10px] h-7 py-1">کالا</TableHead>
-                        <TableHead className="text-[10px] h-7 py-1 text-right">تعداد</TableHead>
-                        <TableHead className="text-[10px] h-7 py-1 text-right hidden sm:table-cell">قیمت</TableHead>
-                        <TableHead className="text-[10px] h-7 py-1 text-right">جمع</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item, idx) => (
-                        <TableRow key={item.id || idx}>
-                          <TableCell className="text-[10px] py-1.5">{item.productName}</TableCell>
-                          <TableCell className="text-[10px] py-1.5 text-right font-mono">{formatNumber(item.quantity)} {item.unitLabel || ''}</TableCell>
-                          <TableCell className="text-[10px] py-1.5 text-right font-mono hidden sm:table-cell">{formatCurrencyShort(item.unitPrice)}</TableCell>
-                          <TableCell className="text-[10px] py-1.5 text-right font-mono font-bold">{formatCurrencyShort(item.totalAmount || item.lineTotal)}</TableCell>
+              )}
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-white rounded-lg p-2 text-center border border-gray-100">
+                  <p className="text-[9px] text-gray-500">مبلغ کل اقساط</p>
+                  <p className="text-xs font-bold text-gray-800 mt-0.5">{formatCurrencyShort(installmentTotal)}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-emerald-100">
+                  <p className="text-[9px] text-gray-500">پرداخت اقساط</p>
+                  <p className="text-xs font-bold text-emerald-700 mt-0.5">{formatCurrencyShort(installmentPaid)}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-amber-100">
+                  <p className="text-[9px] text-gray-500">باقیمانده اقساط</p>
+                  <p className="text-xs font-bold text-amber-700 mt-0.5">{formatCurrencyShort(installmentRemaining)}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="h-2 w-full rounded-full bg-purple-100 overflow-hidden">
+                  <div className="h-full bg-purple-500 transition-all" style={{ width: `${installmentPercent}%` }} />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-purple-700">
+                  <span>پیشرفت اقساط</span>
+                  <span>{toFaNum(installmentPercent)}٪</span>
+                </div>
+              </div>
+
+              {installmentNextDue && (
+                <div className="flex items-center gap-2 text-[11px] text-purple-800 bg-white border border-purple-100 rounded-lg p-2">
+                  <CalendarDays className="w-4 h-4 text-purple-500 shrink-0" />
+                  <span>قسط بعدی: {formatDateShort(installmentNextDue)}</span>
+                </div>
+              )}
+
+              {schedules.length > 0 ? (
+                <div className="border border-purple-200 rounded-lg overflow-hidden bg-white">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-purple-50/70 hover:bg-purple-50/70">
+                          <TableHead className="text-[10px] h-7 py-1">قسط</TableHead>
+                          <TableHead className="text-[10px] h-7 py-1">سررسید</TableHead>
+                          <TableHead className="text-[10px] h-7 py-1 text-right">مبلغ</TableHead>
+                          <TableHead className="text-[10px] h-7 py-1 text-right">پرداخت</TableHead>
+                          <TableHead className="text-[10px] h-7 py-1 text-right">باقی</TableHead>
+                          <TableHead className="text-[10px] h-7 py-1 text-center">وضعیت</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {schedules.map((s) => {
+                          const sAmount = Number(s.amount || 0)
+                          const sPaid = Number(s.paidAmount || 0)
+                          const sRemaining = Math.max(0, sAmount - sPaid)
+                          return (
+                            <TableRow
+                              key={s.id}
+                              className={`${isFullyPaidSchedule(s) ? 'bg-emerald-50/30' : isOverdueSchedule(s) ? 'bg-red-50/30' : isPartialSchedule(s) ? 'bg-amber-50/30' : ''}`}
+                            >
+                              <TableCell className="text-[10px] py-1.5 font-bold text-purple-800">قسط {toFaNum(s.installmentNumber)}</TableCell>
+                              <TableCell className="text-[10px] py-1.5">{formatDateShort(s.dueDate)}</TableCell>
+                              <TableCell className="text-[10px] py-1.5 text-right font-mono">{formatCurrencyShort(sAmount)}</TableCell>
+                              <TableCell className="text-[10px] py-1.5 text-right font-mono text-emerald-700">{formatCurrencyShort(sPaid)}</TableCell>
+                              <TableCell className="text-[10px] py-1.5 text-right font-mono text-amber-700">{formatCurrencyShort(sRemaining)}</TableCell>
+                              <TableCell className="text-[10px] py-1.5 text-center">{scheduleBadge(s)}</TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                  <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>جزئیات تک‌تک اقساط از سرور دریافت نشده است، اما خلاصه پلن اقساط نمایش داده می‌شود.</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* اطلاعات چک */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {isCheck && (
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50/40 p-3 space-y-2">
+              <p className="text-xs font-bold text-cyan-900 flex items-center gap-1.5">
+                <ClipboardList className="w-4 h-4 text-cyan-600" />
+                اطلاعات چک
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="bg-white rounded-lg p-2 border border-cyan-100">
+                  <p className="text-[9px] text-gray-500">شماره چک</p>
+                  <p className="font-mono font-bold text-gray-800 mt-0.5" dir="ltr">{inv.checkInfo?.checkNumber || '—'}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-cyan-100">
+                  <p className="text-[9px] text-gray-500">بانک</p>
+                  <p className="font-bold text-gray-800 mt-0.5">{inv.checkInfo?.bankName || '—'}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-cyan-100">
+                  <p className="text-[9px] text-gray-500">سررسید</p>
+                  <p className="font-bold text-gray-800 mt-0.5">{inv.checkInfo?.dueDate ? formatDateShort(inv.checkInfo.dueDate) : '—'}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-cyan-100">
+                  <p className="text-[9px] text-gray-500">وضعیت</p>
+                  <div className="mt-0.5">{getCheckStatusBadge(inv.checkStatus) || <span className="text-gray-500">—</span>}</div>
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {payments.length > 0 && (
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200">
-                  <p className="text-[10px] font-semibold text-gray-600">پرداخت‌ها ({toFaNum(payments.length)})</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
-                        <TableHead className="text-[10px] h-7 py-1">مبلغ</TableHead>
-                        <TableHead className="text-[10px] h-7 py-1">روش</TableHead>
-                        <TableHead className="text-[10px] h-7 py-1">تاریخ</TableHead>
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* آیتم‌های فاکتور */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {items.length > 0 && (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200">
+                <p className="text-[10px] font-semibold text-gray-600">آیتم‌های فاکتور ({toFaNum(items.length)})</p>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
+                      <TableHead className="text-[10px] h-7 py-1">کالا</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right">تعداد</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right hidden sm:table-cell">قیمت</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right">جمع</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((item, idx) => (
+                      <TableRow key={item.id || idx}>
+                        <TableCell className="text-[10px] py-1.5">{item.productName}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono">{formatNumber(item.quantity)} {item.unitLabel || ''}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono hidden sm:table-cell">{formatCurrencyShort(item.unitPrice)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono font-bold">{formatCurrencyShort(item.totalAmount || item.lineTotal)}</TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {payments.map((pay, idx) => {
-                        const method = pay.paymentType || pay.method || 'cash'
-                        const methodLabel = method === 'cash' ? 'نقدی' : method === 'card' || method === 'pos' ? 'کارتخوان' : method === 'bank' ? 'بانکی' : method === 'credit' ? 'نسیه' : method === 'installment' ? 'قسطی' : method
-                        return (
-                          <TableRow key={pay.id || idx}>
-                            <TableCell className="text-[10px] py-1.5 font-mono">{formatCurrencyShort(pay.amount)}</TableCell>
-                            <TableCell className="text-[10px] py-1.5">{methodLabel}</TableCell>
-                            <TableCell className="text-[10px] py-1.5">{formatDateShort(pay.paidAt)}</TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-            )}
+            </div>
+          )}
 
-            {inv.installmentPlan && Array.isArray((inv as any).installmentPlan?.schedule) && (inv as any).installmentPlan.schedule.length > 0 && (
-              <div className="border border-purple-200 rounded-lg overflow-hidden">
-                <div className="bg-purple-50 px-3 py-1.5 border-b border-purple-200">
-                  <p className="text-[10px] font-semibold text-purple-700">برنامه اقساط</p>
-                </div>
-                <div className="divide-y divide-purple-100 max-h-40 overflow-y-auto">
-                  {(inv as any).installmentPlan.schedule.map((s: InstallmentScheduleItem) => (
-                    <div key={s.id} className="px-3 py-2 flex items-center justify-between gap-2 text-[10px]">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-bold text-purple-700">قسط {toFaNum(s.installmentNumber)}</span>
-                        <span className="text-gray-500">{formatDateShort(s.dueDate)}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-medium">{formatCurrencyShort(s.amount)}</span>
-                        <Badge className={`text-[8px] px-1 h-4 ${s.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {s.status === 'paid' ? 'پرداخت' : 'معوق'}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          {/* ═══════════════════════════════════════════════════════════ */}
+          {/* تاریخچه پرداخت‌ها */}
+          {/* ═══════════════════════════════════════════════════════════ */}
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="bg-gray-50 px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+              <p className="text-[10px] font-semibold text-gray-600">تاریخچه پرداخت‌ها ({toFaNum(paymentRows.length)})</p>
+              {paymentRows.length > 0 && (
+                <span className="text-[9px] text-gray-500">آخرین باقیمانده: {formatCurrencyShort(paymentRows[paymentRows.length - 1].remainingAfter)} ریال</span>
+              )}
+            </div>
+            {paymentRows.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50/50 hover:bg-gray-50/50">
+                      <TableHead className="text-[10px] h-7 py-1">تاریخ</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1">روش</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right">مبلغ</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right hidden sm:table-cell">تجمعی</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 text-right">باقی بعد از پرداخت</TableHead>
+                      <TableHead className="text-[10px] h-7 py-1 hidden md:table-cell">مرجع</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paymentRows.map((pay, idx) => (
+                      <TableRow key={pay.id || idx}>
+                        <TableCell className="text-[10px] py-1.5">{formatDateShort(pay.paidAt)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5">{getMethodLabel(pay)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono font-bold text-emerald-700">{formatCurrencyShort(pay.amount)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono hidden sm:table-cell">{formatCurrencyShort(pay.cumulativePaid)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 text-right font-mono text-amber-700">{formatCurrencyShort(pay.remainingAfter)}</TableCell>
+                        <TableCell className="text-[10px] py-1.5 font-mono hidden md:table-cell" dir="ltr">{(pay as any).paymentRef || (pay as any).reference || '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
+            ) : (
+              <div className="p-4 text-center text-[11px] text-gray-500">هنوز پرداختی برای این فاکتور ثبت نشده است.</div>
             )}
           </div>
+        </div>
 
-          <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
-            {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
-              <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
-            )}
-            <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
-            <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
-              بستن
+        <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+          {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
+            <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
+          )}
+          <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
+          {remaining > 0 && !isCancelled && !isReturn && planFeatures.canAccessCredit && (
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs gap-1.5"
+              onClick={() => {
+                setDetailOpen(false)
+                handleReceivePaymentClick(inv)
+              }}
+            >
+              <Wallet className="w-3.5 h-3.5" />
+              دریافت وجه
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    )
-  }
+          )}
+          <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
+            بستن
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
   const renderPaymentDialog = () => {
     if (!invoiceToPay) return null

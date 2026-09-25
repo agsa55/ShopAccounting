@@ -205,70 +205,78 @@ export function TrialBalanceTabV8() {
   }
 
   // ★★★ v9.0: تابع load data با پشتیبانی آفلاین
-  const fetchReport = useCallback(async () => {
-    if (!tenantId && isOnline) {
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    setError(null)
+const fetchReport = useCallback(async () => {
+  if (!tenantId && isOnline) {
+    setLoading(false)
+    return
+  }
 
-    // ── حالت آفلاین: محاسبه از کش ─────────────────────────
-    if (!isOnline) {
-      try {
-        const cachedEntries = await getCachedJournalEntries()
-        if (cachedEntries.length === 0) {
-          setData({
-            accountCount: 0,
-            flatRows: [],
-            groups: [],
-            grandDebit: 0,
-            grandCredit: 0,
-            difference: 0,
-            isBalanced: true,
-            dateRange: { from: dateFrom, to: dateTo },
-          })
-        } else {
-          const offlineData = calculateTrialBalanceFromCache(
-            cachedEntries,
-            dateFrom,
-            dateTo,
-            includeZero,
-            groupByType
-          )
-          setData(offlineData)
-        }
-      } catch (err: any) {
-        setError(err?.message || 'خطا در خواندن داده‌های کش')
-      } finally {
-        setLoading(false)
-      }
-      return
-    }
+  setLoading(true)
+  setError(null)
 
-    // ── حالت آنلاین: دریافت از سرور ───────────────────────
+  // ★ TEST MODE: موقتاً همیشه از سرور بخوان
+  const forceOnline = true
+
+  if (!isOnline && !forceOnline) {
     try {
-      const params = new URLSearchParams()
-      if (dateTo) params.set('dateTo', dateTo)
-      if (dateFrom) params.set('dateFrom', dateFrom)
-      if (includeZero) params.set('includeZero', 'true')
-      if (!groupByType) params.set('groupByType', 'false')
-
-      const res = await fetch(`/api/reports/trial-balance?${params.toString()}`, {
-        headers: { 'x-tenant-id': tenantId },
-      })
-      const json = await res.json()
-      if (json.success) {
-        setData(json.data)
+      const cachedEntries = await getCachedJournalEntries()
+      if (cachedEntries.length === 0) {
+        setData({
+          accountCount: 0,
+          flatRows: [],
+          groups: [],
+          grandDebit: 0,
+          grandCredit: 0,
+          difference: 0,
+          isBalanced: true,
+          dateRange: { from: dateFrom, to: dateTo },
+        })
       } else {
-        setError(json.error || 'خطا در بارگذاری')
+        const offlineData = calculateTrialBalanceFromCache(
+          cachedEntries,
+          dateFrom,
+          dateTo,
+          includeZero,
+          groupByType
+        )
+        setData(offlineData)
       }
     } catch (err: any) {
-      setError(err?.message || 'خطا در ارتباط با سرور')
+      setError(err?.message || 'خطا در خواندن داده‌های کش')
     } finally {
       setLoading(false)
     }
-  }, [tenantId, dateFrom, dateTo, includeZero, groupByType, isOnline])
+    return
+  }
+
+  try {
+    const params = new URLSearchParams()
+    if (dateTo) params.set('dateTo', dateTo)
+    if (dateFrom) params.set('dateFrom', dateFrom)
+    if (includeZero) params.set('includeZero', 'true')
+    if (!groupByType) params.set('groupByType', 'false')
+
+    const res = await fetch(`/api/reports/trial-balance?${params.toString()}`, {
+      headers: { 'x-tenant-id': tenantId },
+    })
+
+    const json = await res.json()
+
+    console.log('[TrialBalance] API URL:', res.url)
+    console.log('[TrialBalance] API status:', res.status)
+    console.log('[TrialBalance] API response:', json)
+
+    if (json.success) {
+      setData(json.data)
+    } else {
+      setError(json.error || 'خطا در بارگذاری')
+    }
+  } catch (err: any) {
+    setError(err?.message || 'خطا در ارتباط با سرور')
+  } finally {
+    setLoading(false)
+  }
+}, [tenantId, dateFrom, dateTo, includeZero, groupByType, isOnline])
 
   useEffect(() => {
     fetchReport()

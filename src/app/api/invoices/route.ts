@@ -100,7 +100,7 @@ console.log('[Invoices] 📝 Generated journal number:', jeNumber)
         console.log('[Invoices] 💳 Check payment - using account:', debitAccountId, '(1350 preferred)')
       } else if (isCreditOrInstallment) {
         debitAccountId = receivablesAccountId || cashAccountId
-        description = 'بدهکار: بدهکاران تجاری بابت فاکتور فروش'
+  description = 'بدهکار: حساب‌های دریافتنی بابت فاکتور فروش'
         console.log('[Invoices] 💰 Credit/Installment payment - using account:', debitAccountId)
       } else {
         console.log('[Invoices] 💵 Cash/Card payment - using account:', debitAccountId)
@@ -228,29 +228,336 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/invoices (v8.5)
+// ★ Helpers: نرمال‌سازی اقساط و فاکتور برای فرانت‌اند
 // ═══════════════════════════════════════════════════════════════
 
+function toIsoOrNull(value: any): string | null {
+  if (!value) return null
+  try {
+    if (value instanceof Date) return value.toISOString()
+    const d = new Date(value)
+    if (!isNaN(d.getTime())) return d.toISOString()
+  } catch {}
+  return String(value)
+}
+
+function isPaidSchedule(s: any): boolean {
+  const status = String(s?.status || '').toLowerCase().trim()
+  const amount = Number(s?.amount || 0)
+  const paid = Number(s?.paidAmount || 0)
+
+  return (
+    status === 'paid' ||
+    status === 'completed' ||
+    (amount > 0 && paid >= amount - 1)
+  )
+}
+
+function scheduleDueTime(s: any): number {
+  const due = s?.dueDate ? new Date(s.dueDate).getTime() : 0
+  return isNaN(due) ? 0 : due
+}
+
+function normalizeInstallmentPlan(plan: any) {
+  if (!plan) return null
+
+  const rawSchedules = Array.isArray(plan.schedules)
+    ? plan.schedules
+    : Array.isArray(plan.schedule)
+      ? plan.schedule
+      : Array.isArray(plan.installments)
+        ? plan.installments
+        : []
+
+  const schedule = rawSchedules
+    .map((s: any) => {
+      const amount = Number(s?.amount || 0)
+      const paidAmount = Number(s?.paidAmount || 0)
+
+      return {
+        id: s?.id || '',
+        installmentNumber: Number(s?.installmentNumber || 0),
+        amount,
+        paidAmount,
+        remainingAmount: Math.max(0, amount - paidAmount),
+        dueDate: toIsoOrNull(s?.dueDate),
+        status: String(s?.status || 'pending'),
+        paidAt: toIsoOrNull(s?.paidAt),
+        paymentRef: s?.paymentRef || s?.reference || null,
+        paymentType: s?.paymentType || s?.method || null,
+        notes: s?.notes || null,
+      }
+    })
+    .sort((a: any, b: any) => Number(a.installmentNumber || 0) - Number(b.installmentNumber || 0))
+
+  const paidCount = schedule.filter(isPaidSchedule).length
+  const scheduleTotal = schedule.reduce((sum: number, s: any) => sum + Number(s.amount || 0), 0)
+  const schedulePaid = schedule.reduce((sum: number, s: any) => sum + Number(s.paidAmount || 0), 0)
+  const scheduleRemaining = Math.max(0, scheduleTotal - schedulePaid)
+
+  const nextDueSchedule = schedule
+    .filter((s: any) => !isPaidSchedule(s))
+    .sort((a: any, b: any) => scheduleDueTime(a) - scheduleDueTime(b))[0] || null
+
+  return {
+    ...plan,
+
+    // ★ مهم‌ترین بخش: فرانت‌اند دنبال schedule است
+    schedule,
+
+    // برای سازگاری با نام‌های دیگر
+    schedules: schedule,
+    installments: schedule,
+
+    numberOfInstallments:
+      schedule.length > 0
+        ? schedule.length
+        : Number(plan.numberOfInstallments || 0),
+
+    paidInstallments:
+      schedule.length > 0
+        ? paidCount
+        : Number(plan.paidInstallments || 0),
+
+    scheduleTotal,
+    schedulePaidAmount: schedulePaid,
+    scheduleRemainingAmount: scheduleRemaining,
+
+    totalPaidAmount:
+      plan.totalPaidAmount !== undefined && plan.totalPaidAmount !== null
+        ? Number(plan.totalPaidAmount)
+        : schedulePaid,
+
+    nextDueDate:
+      toIsoOrNull(plan.nextDueDate) ||
+      nextDueSchedule?.dueDate ||
+      null,
+
+    status:
+      plan.status ||
+      (schedule.length > 0 && paidCount === schedule.length
+        ? 'completed'
+        : 'active'),
+  }
+}
+
+function normalizeInvoiceForApi(inv: any) {
+  const installmentPlan = normalizeInstallmentPlan(inv.installmentPlan)
+
+  const totalAmount = Number(inv.totalAmount || 0)
+  const paidAmount = Number(inv.paidAmount || 0)
+  const baseStatus = String(inv.status || '').toLowerCase()
+
+  let paymentStatus = 'PENDING'
+  if (baseStatus === 'cancelled' || baseStatus === 'canceled') {
+    paymentStatus = 'CANCELLED'
+  } else if (totalAmount > 0 && paidAmount >= totalAmount) {
+    paymentStatus = 'PAID'
+  } else if (paidAmount > 0) {
+    paymentStatus = 'PARTIAL'
+  }
+
+  const customerName = inv.customer
+    ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim()
+    : null
+
+  const cashierName = inv.cashier?.username || null
+
+  const items = (inv.items || []).map((item: any) => ({
+    ...item,
+    totalAmount: Number(item.lineTotal || item.totalAmount || 0),
+  }))
+
+  const payments = (inv.payments || []).map((pay: any) => {
+    const method = pay.paymentType || pay.method || 'cash'
+    return {
+      ...pay,
+      amount: Number(pay.amount || 0),
+      paymentType: method,
+      method,
+      paidAt: toIsoOrNull(pay.paidAt),
+      reference: pay.paymentRef || pay.reference || null,
+      paymentRef: pay.paymentRef || pay.reference || null,
+    }
+  })
+
+  const firstCheck = Array.isArray(inv.checks) ? inv.checks[0] : null
+
+  return {
+    ...inv,
+    invoiceNumber: inv.number,
+    customerName,
+    cashierName,
+    finalAmount: totalAmount,
+    paymentStatus,
+    status: String(inv.status || 'DRAFT').toUpperCase(),
+    items,
+    payments,
+    installmentPlan,
+    installmentSchedules: installmentPlan?.schedule || [],
+    customerPortalToken: inv.customer?.portalToken || null,
+    checkStatus: firstCheck?.status || null,
+    checkInfo: firstCheck
+      ? {
+          ...firstCheck,
+          dueDate: toIsoOrNull(firstCheck.dueDate),
+        }
+      : null,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/invoices (v8.5)
+// ═══════════════════════════════════════════════════════════════
 export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const { searchParams } = new URL(req.url)
-    
+
     const tenantId = searchParams.get('tenantId') || tenant.tenantId
+    const idParam = searchParams.get('id')
+
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
     const status = searchParams.get('status')
     const paymentType = searchParams.get('paymentType')
 
+ const baseInclude = {
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      mobile: true,
+      portalToken: true,
+    },
+  },
+  cashier: {
+    select: {
+      id: true,
+      username: true,
+    },
+  },
+  items: true,
+  payments: true,
+}
+
+const installmentInclude = {
+  installmentPlan: {
+    include: {
+      schedules: {
+        orderBy: {
+          installmentNumber: 'asc' as const,
+        },
+      },
+    },
+  },
+}
+
+const checkInclude = {
+  checks: {
+    select: {
+      id: true,
+      status: true,
+      checkNumber: true,
+      bankName: true,
+      dueDate: true,
+    },
+    orderBy: {
+      createdAt: 'desc' as const,
+    },
+    take: 1,
+  },
+}
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ حالت تک‌فاکتور از طریق query: /api/invoices?id=xxx
+    // ═══════════════════════════════════════════════════════════════
+    if (idParam) {
+      let invoice: any = null
+
+      try {
+        invoice = await db.client.invoice.findFirst({
+          where: {
+            id: idParam,
+            tenantId,
+          },
+          include: {
+            ...baseInclude,
+            ...installmentInclude,
+            ...checkInclude,
+          },
+        })
+      } catch (err: any) {
+        console.warn('[Invoices GET by id] Full include failed:', err?.message)
+
+        try {
+          invoice = await db.client.invoice.findFirst({
+            where: {
+              id: idParam,
+              tenantId,
+            },
+            include: {
+              ...baseInclude,
+              ...installmentInclude,
+            },
+          })
+        } catch (err2: any) {
+          console.warn('[Invoices GET by id] Installment include failed:', err2?.message)
+
+          invoice = await db.client.invoice.findFirst({
+            where: {
+              id: idParam,
+              tenantId,
+            },
+            include: baseInclude,
+          }).catch(() => null)
+        }
+      }
+
+      if (!invoice) {
+        return NextResponse.json(
+          { success: false, error: 'فاکتور یافت نشد' },
+          { status: 404 }
+        )
+      }
+
+      const normalized = normalizeInvoiceForApi(invoice)
+
+      console.log('[Invoices GET by id] ✅ Invoice loaded:', {
+        invoiceId: normalized.id,
+        invoiceNumber: normalized.invoiceNumber,
+        paymentType: normalized.paymentType,
+        hasInstallmentPlan: !!normalized.installmentPlan,
+        scheduleCount: normalized.installmentPlan?.schedule?.length || 0,
+        paidInstallments: normalized.installmentPlan?.paidInstallments || 0,
+        hasCheck: !!normalized.checkInfo,
+      })
+
+      return NextResponse.json({
+        success: true,
+        data: normalized,
+      })
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ★ حالت لیست فاکتورها
+    // ═══════════════════════════════════════════════════════════════
     const where: any = { tenantId }
-    
+
     if (status) {
       const statusUpper = status.toUpperCase()
       where.OR = [
         { status: statusUpper },
         { status: statusUpper.toLowerCase() },
-        ...(statusUpper === 'PENDING' ? [{ paymentType: 'credit', status: { in: ['confirmed', 'Confirmed'] } }] : []),
-        ...(statusUpper === 'PAID' ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card', 'check', 'Check'] }, paidAmount: { gt: 0 } }] : []),
-        ...(statusUpper === 'PARTIAL' ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }] : []),
+        ...(statusUpper === 'PENDING'
+          ? [{ paymentType: 'credit', status: { in: ['confirmed', 'Confirmed'] } }]
+          : []),
+        ...(statusUpper === 'PAID'
+          ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card', 'check', 'Check'] }, paidAmount: { gt: 0 } }]
+          : []),
+        ...(statusUpper === 'PARTIAL'
+          ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }]
+          : []),
       ]
     }
 
@@ -258,76 +565,63 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
       const ptLower = paymentType.toLowerCase()
       const ptUpper = paymentType.toUpperCase()
       const ptCapitalized = ptLower.charAt(0).toUpperCase() + ptLower.slice(1)
-      
+
       where.paymentType = {
-        in: [ptLower, ptUpper, ptCapitalized]
+        in: [ptLower, ptUpper, ptCapitalized],
       }
-      
+
       console.log('[Invoices GET] Filtering by paymentType:', where.paymentType)
     }
 
     let invoices: any[] = []
+
     try {
-         invoices = await db.client.invoice.findMany({
+      invoices = await db.client.invoice.findMany({
         where,
         include: {
-          customer: { select: { id: true, firstName: true, lastName: true, mobile: true, portalToken: true } },
-          cashier: { select: { id: true, username: true } },
-          items: true,
-          payments: true,
-          installmentPlan: { include: { schedules: { orderBy: { installmentNumber: 'asc' } } } },
-          checks: {
-            select: {
-              id: true,
-              status: true,
-              checkNumber: true,
-              bankName: true,
-              dueDate: true,
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
+          ...baseInclude,
+          ...installmentInclude,
+          ...checkInclude,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: {
+          createdAt: 'desc',
+        },
         skip: (page - 1) * limit,
         take: limit,
       })
     } catch (err: any) {
-      console.warn('[Invoices] Include failed, using fallback:', err?.message)
-      invoices = await db.client.invoice.findMany({
-        where,
-        include: {
-          customer: { select: { id: true, firstName: true, lastName: true, mobile: true, portalToken: true } },
-          cashier: { select: { id: true, username: true } },
-          items: true,
-          payments: true,
-          installmentPlan: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }).catch(() => [])
+      console.warn('[Invoices GET] Full include failed, trying installment-only include:', err?.message)
+
+      try {
+        invoices = await db.client.invoice.findMany({
+          where,
+          include: {
+            ...baseInclude,
+            ...installmentInclude,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          skip: (page - 1) * limit,
+          take: limit,
+        })
+      } catch (err2: any) {
+        console.warn('[Invoices GET] Installment include failed, using basic include:', err2?.message)
+
+        invoices = await db.client.invoice.findMany({
+          where,
+          include: baseInclude,
+          orderBy: {
+            createdAt: 'desc',
+          },
+          skip: (page - 1) * limit,
+          take: limit,
+        }).catch(() => [])
+      }
     }
 
-       const result = invoices.map((inv: any) => {
-      let paymentStatus = 'PENDING'
-      if (inv.paidAmount >= inv.totalAmount && inv.totalAmount > 0) paymentStatus = 'PAID'
-      else if (inv.paidAmount > 0) paymentStatus = 'PARTIAL'
+    const result = invoices.map(normalizeInvoiceForApi)
 
-      return {
-        ...inv,
-        invoiceNumber: inv.number,
-        customerName: inv.customer ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim() : null,
-        finalAmount: inv.totalAmount || 0,
-        paymentStatus,
-        status: (inv.status || 'DRAFT').toUpperCase(),
-        items: (inv.items || []).map((item: any) => ({ ...item, totalAmount: item.lineTotal || item.totalAmount || 0 })),
-        installmentPlan: inv.installmentPlan || null,
-        customerPortalToken: inv.customer?.portalToken || null,
-        checkStatus: inv.checks?.[0]?.status || null,
-        checkInfo: inv.checks?.[0] || null,
-      }
-    })
     const total = await db.client.invoice.count({ where })
 
     console.log('[Invoices GET] Found invoices:', result.length, 'with paymentType filter:', paymentType)
@@ -335,11 +629,19 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     return NextResponse.json({
       success: true,
       data: result,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     })
   } catch (error: any) {
     console.error('[Invoices] GET error:', error)
-    return NextResponse.json({ success: false, error: 'خطا در بارگذاری فاکتورها' }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: 'خطا در بارگذاری فاکتورها' },
+      { status: 500 }
+    )
   }
 })
 

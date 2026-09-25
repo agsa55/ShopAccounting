@@ -3,12 +3,14 @@
 // ============================================================================
 // src/components/settings/initial-balance-tab.tsx
 // ShopAccounting — تب راه‌اندازی اولیه (سند افتتاحیه)
+// ★ v11.9.2: لایه ۱ — هشدار قبل از ثبت نهایی (جلوگیری از خطای کاربر)
 // ★ v11.9.1: لاگ‌های سیستمی اضافه شد
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
+import { useStore } from '@/lib/store'
 import { getTenantIdFromStore } from '@/lib/tenant-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,8 +22,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
+import {
   Wallet, Plus, Pencil, Trash2, Loader2, CheckCircle2, AlertCircle,
-  AlertTriangle, Save, TrendingUp, TrendingDown,
+  AlertTriangle, Save, TrendingUp, TrendingDown, Package,
 } from 'lucide-react'
 
 export function InitialBalanceTab() {
@@ -35,6 +40,11 @@ export function InitialBalanceTab() {
 
   const [pendingItems, setPendingItems] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
+
+  // ★ v11.9.2: State برای هشدار قبل از ثبت نهایی
+  const [showWarningModal, setShowWarningModal] = useState(false)
+  const [warningReasons, setWarningReasons] = useState<string[]>([])
+  const [pendingPostAction, setPendingPostAction] = useState<(() => Promise<void>) | null>(null)
 
   const [form, setForm] = useState({
     type: 'cash',
@@ -530,6 +540,80 @@ export function InitialBalanceTab() {
     })
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.9.2: بررسی قبل از ثبت نهایی (لایه ۱ — هشدار)
+  // ═══════════════════════════════════════════════════════════════
+  const checkBeforePost = (): string[] => {
+    const warnings: string[] = []
+
+    const productCount = products.length
+
+    // بررسی ۱: آیا کالایی ثبت شده است؟
+    if (productCount === 0) {
+      warnings.push('هیچ کالایی در سیستم ثبت نشده است')
+    } else {
+      // بررسی ۲: آیا موجودی کالا در سند هست؟
+      const allItems = [...savedItems, ...pendingItems]
+      const hasInventoryInBalance = allItems.some(
+        (b) => b.type === 'inventory' && (Number(b.amount) || 0) > 0
+      )
+
+      if (!hasInventoryInBalance) {
+        warnings.push(
+          `شما ${productCount} کالا در سیستم دارید اما ارزش موجودی کالا در سند افتتاحیه وارد نشده است`
+        )
+      }
+    }
+
+    return warnings
+  }
+
+  // ★ v11.9.2: Wrapper برای ثبت نهایی پیش‌نویس
+  const handleFinalizeDraftWithCheck = async () => {
+    const warnings = checkBeforePost()
+    if (warnings.length > 0) {
+      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
+      setWarningReasons(warnings)
+      setPendingPostAction(() => handleFinalizeDraft)
+      setShowWarningModal(true)
+      return
+    }
+    await handleFinalizeDraft()
+  }
+
+  // ★ v11.9.2: Wrapper برای ثبت + صدور سند
+  const handleSaveWithCheck = async () => {
+    const warnings = checkBeforePost()
+    if (warnings.length > 0) {
+      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
+      setWarningReasons(warnings)
+      setPendingPostAction(() => () => handleSave(true))
+      setShowWarningModal(true)
+      return
+    }
+    await handleSave(true)
+  }
+
+  // ★ v11.9.2: تایید عملیات از مودال هشدار
+  const confirmPendingAction = async () => {
+    if (!pendingPostAction) return
+    setShowWarningModal(false)
+    const action = pendingPostAction
+    setPendingPostAction(null)
+    await action()
+  }
+
+  // ★ v11.9.2: هدایت کاربر به بخش کالاها
+  const goToProducts = () => {
+    setShowWarningModal(false)
+    setPendingPostAction(null)
+    useStore.getState().setCurrentView('products' as any)
+    toast({
+      title: '📦 بخش کالاها',
+      description: 'ابتدا کالاهای فروشگاه را ثبت کنید، سپس به این صفحه برگردید.',
+    })
+  }
+
   const formatNumber = (n: number) => (n || 0).toLocaleString('fa-IR')
 
   const TYPE_LABELS: Record<string, string> = {
@@ -629,7 +713,7 @@ export function InitialBalanceTab() {
                   <Button
                     size="sm"
                     className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
-                    onClick={handleFinalizeDraft}
+                    onClick={handleFinalizeDraftWithCheck}
                     disabled={submitting}
                   >
                     {submitting ? (
@@ -939,7 +1023,7 @@ export function InitialBalanceTab() {
               ذخیره موقت
             </Button>
             <Button
-              onClick={() => handleSave(true)}
+              onClick={handleSaveWithCheck}
               disabled={submitting}
               className="bg-violet-600 hover:bg-violet-700 text-white text-xs h-9 gap-1"
             >
@@ -1022,6 +1106,98 @@ export function InitialBalanceTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ★ v11.9.2: مودال هشدار قبل از ثبت نهایی                  */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
+        <DialogContent className="sm:max-w-md w-[calc(100%-2rem)]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <span className="text-gray-900">⚠️ هشدار قبل از ثبت نهایی</span>
+                <DialogDescription className="text-[11px] text-gray-500 font-normal mt-0.5">
+                  لطفاً موارد زیر را بررسی کنید
+                </DialogDescription>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {/* لیست هشدارها */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-bold text-amber-800 mb-2">
+                مواردی که باید بررسی شوند:
+              </p>
+              {warningReasons.map((reason, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2 text-xs text-amber-700"
+                >
+                  <span className="text-amber-500 mt-0.5 shrink-0">❌</span>
+                  <span>{reason}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* توصیه */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-800 leading-relaxed">
+                <span className="font-bold">💡 توصیه:</span>
+                {' '}برای داشتن گزارش‌های دقیق مالی، بهتر است ابتدا کالاهای موجود
+                در فروشگاه خود را در بخش <strong>"کالاها"</strong> ثبت کنید، سپس
+                موجودی اولیه کالاها را در این سند اضافه کنید و در نهایت سند را
+                ثبت نهایی نمایید.
+              </p>
+            </div>
+
+            {/* دکمه‌های عملیات */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+              <Button
+                onClick={goToProducts}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2 h-10"
+              >
+                <Package className="w-4 h-4" />
+                رفتن به بخش کالاها (توصیه می‌شود)
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={confirmPendingAction}
+                disabled={submitting}
+                className="w-full text-gray-700 gap-2 h-10"
+              >
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                به هر حال، سند را ثبت نهایی کن
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setShowWarningModal(false)
+                  setPendingPostAction(null)
+                }}
+                className="w-full text-gray-500 h-8"
+              >
+                انصراف
+              </Button>
+            </div>
+
+            {/* یادآوری */}
+            <p className="text-[10px] text-gray-400 text-center pt-1">
+              ⚠️ توجه: اگر سند را بدون ثبت کالاها ثبت نهایی کنید، موجودی
+              کالاها در سند افتتاحیه لحاظ نمی‌شود.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

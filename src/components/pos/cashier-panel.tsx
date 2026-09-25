@@ -1,7 +1,12 @@
 'use client';
 
 // ============================================================================
-// src/components/pos/cashier-panel.tsx — v11.9.8
+// src/components/pos/cashier-panel.tsx — v12.2.1 ★★★
+// ★ v12.2.1:
+//   - نمایش سود امروز و سود کل صندوق‌دار
+//   - نمایش صحیح‌تر موجودی واقعی صندوق
+//   - رنگ‌بندی سود منفی/مثبت
+// ★ v12.1.0: تفکیک پیش‌پرداخت فروش اقساطی
 // ★ پنل یکپارچه صندوق‌دار (نوار وضعیت + تراکنش دستی + گزارش)
 // ★ v11.7.2: نمایش موجودی اولیه و ابتدای روز
 // ★ v11.9.1: لاگ‌های سیستمی + API جدید cashier-dashboard
@@ -247,30 +252,43 @@ export default function CashierPanel() {
 // محاسبات — v11.9.9 سازگارتر با fallback
 // ═══════════════════════════════════════════════════════════════
 
-// ★ v11.9.8: موجودی فعلی از API دریافت می‌شود
-const currentBalance = summary?.currentBalance || 0;
+  // ★ v12.2.1: موجودی فعلی از API دریافت می‌شود (با fallback به realCashBalance)
+  const currentBalance = summary?.currentBalance || summary?.realCashBalance || 0;
 
-// ★ v11.9.9: fallback برای netSales — اگر نبود از totalSales استفاده کن
-const netSales = summary?.netSales !== undefined 
-  ? summary.netSales 
-  : (summary?.totalSales || 0);
+  // ★ v11.9.9: fallback برای netSales — اگر نبود از totalSales استفاده کن
+  const netSales = summary?.netSales !== undefined 
+    ? summary.netSales 
+    : (summary?.totalSales || 0);
 
-const returns = summary?.returns || 0;
-const returnsCount = summary?.returnsCount || 0;
+  const returns = summary?.returns || 0;
+  const returnsCount = summary?.returnsCount || 0;
 
-// ★ لاگ برای دیباگ
-console.log('[CashierPanel] Summary received:', {
-  hasNetSales: summary?.netSales !== undefined,
-  netSales: summary?.netSales,
-  totalSales: summary?.totalSales,
-  returns: summary?.returns,
-  returnsCount: summary?.returnsCount,
-  cashSales: summary?.cashSales,
-});
+  // ★ v12.2.1: سود
+  const profitToday = Number(summary?.profitToday || 0);
+  const profitTotal = Number(summary?.profitTotal || 0);
 
-const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
+  // ★ v12.2.1: لاگ کامل برای دیباگ
+  console.log('[CashierPanel] Summary received:', {
+    hasNetSales: summary?.netSales !== undefined,
+    netSales: summary?.netSales,
+    totalSales: summary?.totalSales,
+    returns: summary?.returns,
+    returnsCount: summary?.returnsCount,
+    cashSales: summary?.cashSales,
+    creditSales: summary?.creditSales,
+    installmentSales: summary?.installmentSales,
+    installmentPrepaid: summary?.installmentPrepaid,
+    installmentRemaining: summary?.installmentRemaining,
+    checkSales: summary?.checkSales,
+    currentBalance: summary?.currentBalance,
+    realCashBalance: summary?.realCashBalance,
+    profitToday: summary?.profitToday,
+    profitTotal: summary?.profitTotal,
+    revenueToday: summary?.revenueToday,
+    cogsToday: summary?.cogsToday,
+  });
 
-
+  const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
 
   const periodLabels: Record<string, string> = {
     today: 'امروز',
@@ -347,7 +365,7 @@ const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
             </div>
 
             {/* ═══════════════════════════════════════════════════════════ */}
-            {/* بخش وسط: آمار فروش با تفکیک نوع — v11.9.8 اصلاح شد */}
+            {/* بخش وسط: آمار فروش با تفکیک نوع — v12.2.1 */}
             {/* ═══════════════════════════════════════════════════════════ */}
             <div className="hidden md:flex items-center gap-3">
               {/* ═══ خالص فروش (به جای کل فروش) ═══ */}
@@ -361,7 +379,33 @@ const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
                 </div>
               </div>
 
-              {/* ═══ برگشتی‌ها (جدید!) ═══ */}
+              {/* ═══ سود امروز و سود کل ═══ */}
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1">
+                  <TrendingUp className={`w-3.5 h-3.5 ${profitToday >= 0 ? 'text-violet-600' : 'text-red-600'}`} />
+                  <div>
+                    <p className="text-[9px] text-slate-500">سود امروز</p>
+                    <p className={`text-[11px] font-bold ${profitToday >= 0 ? 'text-violet-700' : 'text-red-600'}`} dir="ltr">
+                      {formatPrice(profitToday)}
+                    </p>
+                  </div>
+                </div>
+
+                {profitTotal !== 0 && (
+                  <div
+                    className="flex items-center gap-1 cursor-help"
+                    title="سود کل این صندوق‌دار از ابتدای کار"
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full ${profitTotal >= 0 ? 'bg-violet-400' : 'bg-red-400'}`}></div>
+                    <span className="text-[8px] text-slate-500">سود کل:</span>
+                    <span className={`text-[9px] font-bold ${profitTotal >= 0 ? 'text-violet-600' : 'text-red-600'}`} dir="ltr">
+                      {formatPrice(profitTotal)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* ═══ برگشتی‌ها ═══ */}
               {returns > 0 && (
                 <div className="flex items-center gap-1 bg-red-50 px-2 py-1 rounded-lg border border-red-200">
                   <RotateCcw className="w-3.5 h-3.5 text-red-500" />
@@ -379,11 +423,18 @@ const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
                 </div>
               )}
 
-              {/* ═══ تفکیک بر اساس نوع پرداخت ═══ */}
+              {/* ═══ تفکیک بر اساس نوع پرداخت (v12.1.0 — با پیش‌پرداخت) ═══ */}
               <div className="flex items-center gap-1">
                 <div className="flex flex-col gap-0.5">
-                  {/* فروش نقدی */}
-                  <div className="flex items-center gap-1">
+                  {/* فروش نقدی — شامل پیش‌پرداخت اقساطی */}
+                  <div 
+                    className="flex items-center gap-1 cursor-help"
+                    title={
+                      (summary?.installmentPrepaid || 0) > 0
+                        ? `شامل ${formatPrice(Number(summary?.installmentPrepaid || 0))} پیش‌پرداخت اقساطی`
+                        : 'فروش نقدی'
+                    }
+                  >
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
                     <span className="text-[8px] text-slate-500">نقدی:</span>
                     <span className="text-[9px] font-bold text-emerald-600" dir="ltr">
@@ -402,13 +453,20 @@ const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
                     </div>
                   )}
                   
-                  {/* فروش اقساطی */}
-                  {(summary?.installmentSales || 0) > 0 && (
-                    <div className="flex items-center gap-1">
+                  {/* فروش اقساطی — فقط بخش اقساط (بدون پیش‌پرداخت) */}
+                  {((summary?.installmentRemaining || summary?.installmentSales) || 0) > 0 && (
+                    <div 
+                      className="flex items-center gap-1 cursor-help"
+                      title={
+                        (summary?.installmentPrepaid || 0) > 0
+                          ? `پیش‌پرداخت ${formatPrice(Number(summary?.installmentPrepaid || 0))} در نقدی لحاظ شده`
+                          : 'اقساط'
+                      }
+                    >
                       <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
                       <span className="text-[8px] text-slate-500">اقساطی:</span>
                       <span className="text-[9px] font-bold text-purple-600" dir="ltr">
-                        {formatPrice(summary?.installmentSales || 0)}
+                        {formatPrice(summary?.installmentRemaining || summary?.installmentSales || 0)}
                       </span>
                     </div>
                   )}
@@ -420,6 +478,20 @@ const selectedType = TRANSACTION_TYPES.find(t => t.value === transactionType);
                       <span className="text-[8px] text-slate-500">چکی:</span>
                       <span className="text-[9px] font-bold text-cyan-600" dir="ltr">
                         {formatPrice(summary?.checkSales || 0)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* ★ v12.1.0: پیش‌پرداخت اقساطی (نمایش جداگانه) */}
+                  {(summary?.installmentPrepaid || 0) > 0 && (
+                    <div 
+                      className="flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 cursor-help"
+                      title="پیش‌پرداخت فروش اقساطی — در بخش نقدی لحاظ شده است"
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 ring-2 ring-purple-300"></div>
+                      <span className="text-[7px] text-emerald-700">پیش‌پرداخت:</span>
+                      <span className="text-[8px] font-bold text-emerald-700" dir="ltr">
+                        {formatPrice(summary?.installmentPrepaid || 0)}
                       </span>
                     </div>
                   )}

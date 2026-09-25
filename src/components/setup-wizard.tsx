@@ -408,42 +408,49 @@ async function hasSetupEvidence(token: string): Promise<boolean> {
     fetchJsonSafe('/api/initial-balance?_t=' + Date.now(), headers),
   ])
 
-  let score = 0
+  // ★ v12.0: بررسی دقیق‌تر — سال مالی به تنهایی کافی نیست!
+  // فقط زمانی تکمیل شده تلقی می‌شود که:
+  // ۱) انبار وجود داشته باشد
+  // ۲) موجودی اولیه وجود داشته باشد (یا حساب‌های دائمی مانده داشته باشند)
 
-  // ─── سال مالی ───
-  if (fyData) {
-    const years = fyData?.data?.years || fyData?.data?.fiscalYears || fyData?.data || []
-
-    if (Array.isArray(years)) {
-      const hasActiveYear = years.some((y: any) => y?.isActive === true)
-      const hasAnyYear = years.length > 0
-
-      if (hasActiveYear) score += 2
-      else if (hasAnyYear) score += 1
-    }
-  }
+  let hasWarehouse = false
+  let hasInitialBalance = false
+  let hasPermanentAccountsWithBalance = false
 
   // ─── انبارها ───
   if (whData) {
     const warehouses = whData?.data?.warehouses || whData?.data || []
-
     if (Array.isArray(warehouses) && warehouses.length > 0) {
-      score += 1
+      hasWarehouse = true
     }
   }
 
   // ─── موجودی اولیه ───
   if (ibData) {
     const balances = ibData?.data || []
-
     if (Array.isArray(balances) && balances.length > 0) {
-      score += 1
+      hasInitialBalance = true
+    }
+    // بررسی summary برای permanent accounts
+    if (ibData?.summary?.permanentAccountsWithBalance > 0) {
+      hasPermanentAccountsWithBalance = true
     }
   }
 
-  return score >= 2
-}
+  // ★ v12.0: فقط وقتی تکمیل شده است که:
+  // - انبار وجود داشته باشد
+  // - و (موجودی اولیه یا حساب‌های دائمی با مانده)
+  const isComplete = hasWarehouse && (hasInitialBalance || hasPermanentAccountsWithBalance)
 
+  console.log('[hasSetupEvidence] v12.0:', {
+    hasWarehouse,
+    hasInitialBalance,
+    hasPermanentAccountsWithBalance,
+    isComplete,
+  })
+
+  return isComplete
+}
 // ─────────────────────────────────────────────────────────────────────────────
 //  نوع‌های موجودی اولیه
 // ─────────────────────────────────────────────────────────────────────────────
@@ -742,7 +749,19 @@ export function useSetupWizard() {
           return
         }
 
-        if (status === 'first_setup') {
+             if (status === 'first_setup') {
+          console.log('[useSetupWizard] 📥 Status is first_setup, checking completion...')
+
+          // ★ v12.0: بررسی wizardData برای سال موجود
+          const hasExistingYear = !!statusPayload?.wizardData?.existingYear
+          const hasExistingWarehouses = (statusPayload?.wizardData?.existingWarehouses?.length || 0) > 0
+
+          console.log('[useSetupWizard] 🔍 WizardData:', {
+            hasExistingYear,
+            hasExistingWarehouses,
+            wizardData: statusPayload?.wizardData,
+          })
+
           // ۱) اگر محلی تکمیل شده بود
           if (isWizardDoneAny(completionIds)) {
             console.log('[useSetupWizard] ✅ Local first_setup completion found')
@@ -765,18 +784,15 @@ export function useSetupWizard() {
 
           if (evidence) {
             console.log('[useSetupWizard] ✅ Server setup evidence found — marking first_setup done')
-
             markWizardDoneAny(completionIds)
-
-            // ★ سعی کن flag سرور هم ست شود
             postServerSetupCompleted(token).catch(() => {})
-
             finishCheck()
             return
           }
 
-          console.log('[useSetupWizard] 🆕 Opening first_setup wizard')
-          scheduleOpen('first_setup')
+          // ★ v12.0: اگر هیچ‌کدام تکمیل نشده، ویزارد را باز کن
+          console.log('[useSetupWizard] 🆕 Opening first_setup wizard (no completion evidence)')
+          scheduleOpen('first_setup', statusPayload?.wizardData)
           finishCheck()
           return
         }
@@ -2113,14 +2129,26 @@ export function SetupWizard(props: SetupWizardProps) {
             )}
 
             <div className="min-h-[260px] py-1">
-              {step === 0 && (
+                       {step === 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-violet-600" />
                     <h3 className="text-sm font-bold text-gray-900">تعریف سال مالی</h3>
                   </div>
 
-                  {fyExisting.some((y: any) => y.isActive) ? (
+                  {/* ★ v11.0: نمایش سال موجود از wizardData */}
+                  {props.renewalData?.existingYear ? (
+                    <Alert className="border-emerald-200 bg-emerald-50 py-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <AlertDescription className="text-xs text-emerald-800 mr-2">
+                        <p className="font-medium">سال مالی فعال موجود است:</p>
+                        <p className="mt-1">
+                          <strong>{props.renewalData.existingYear.name}</strong> — {isoToJalaliFa(props.renewalData.existingYear.startDate)} تا {isoToJalaliFa(props.renewalData.existingYear.endDate)}
+                        </p>
+                        <p className="mt-1.5 text-emerald-600 text-[11px]">می‌توانید ادامه دهید.</p>
+                      </AlertDescription>
+                    </Alert>
+                  ) : fyExisting.some((y: any) => y.isActive) ? (
                     <Alert className="border-emerald-200 bg-emerald-50 py-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                       <AlertDescription className="text-xs text-emerald-800 mr-2">

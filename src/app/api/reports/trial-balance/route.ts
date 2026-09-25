@@ -116,9 +116,11 @@ export const GET = withTenantAndPermission('accounting')(
       const dateFrom = searchParams.get('dateFrom')
       const dateTo = searchParams.get('dateTo')
       const includeZero = searchParams.get('includeZero') === 'true'
-      const groupByType = searchParams.get('groupByType') !== 'false' // پیش‌فرض true
+      const groupByType = searchParams.get('groupByType') !== 'false'
 
+      // ═══════════════════════════════════════════════════════════════
       // ★ تنظیم بازه تاریخ
+      // ═══════════════════════════════════════════════════════════════
       const now = new Date()
       const toDate = dateTo ? new Date(dateTo) : now
       if (isNaN(toDate.getTime())) {
@@ -127,6 +129,7 @@ export const GET = withTenantAndPermission('accounting')(
           { status: 400 }
         )
       }
+
       const toDateEnd = new Date(toDate)
       toDateEnd.setHours(23, 59, 59, 999)
 
@@ -150,34 +153,90 @@ export const GET = withTenantAndPermission('accounting')(
       })
 
       // ═══════════════════════════════════════════════════════════════
-      //  ۱. دریافت تمام اسناد حسابداری در بازه
+      // ★ DEBUG: آخرین اسناد این tenant را لاگ بگیر
+      // این کمک می‌کند بفهمیم JE-000012 اصلاً در دیتابیس وجود دارد یا نه
       // ═══════════════════════════════════════════════════════════════
-      const where: any = {
-        tenantId,
-        status: 'posted',
-        isCancelled: false,
-        date: { lte: toDateEnd },
-      }
-      if (fromDate) {
-        where.date.gte = fromDate
+      try {
+        const recentEntries = await tenantDb.journalEntry.findMany({
+          where: { tenantId },
+          select: {
+            id: true,
+            number: true,
+            status: true,
+            isCancelled: true,
+            date: true,
+            sourceType: true,
+            sourceId: true,
+          },
+          orderBy: { date: 'desc' },
+          take: 30,
+        })
+
+        console.log('[TrialBalance][DEBUG] Recent journal entries:', recentEntries.map((e: any) => ({
+          number: e.number,
+          status: e.status,
+          isCancelled: e.isCancelled,
+          date: e.date,
+          sourceType: e.sourceType,
+        })))
+      } catch (debugErr: any) {
+        console.warn('[TrialBalance][DEBUG] Recent entries query failed:', debugErr?.message)
       }
 
-      const journalEntries = await tenantDb.journalEntry.findMany({
+      // ═══════════════════════════════════════════════════════════════
+      //  ۱. دریافت اسناد حسابداری در بازه
+      //  ★ اصلاح مهم: isCancelled را اینجا فیلتر سخت نمی‌کنیم
+      // ═══════════════════════════════════════════════════════════════
+      const dateWhere: any = {
+        lte: toDateEnd,
+      }
+      if (fromDate) {
+        dateWhere.gte = fromDate
+      }
+
+      const where: any = {
+        tenantId,
+        status: {
+          in: ['posted', 'POSTED', 'confirmed', 'Confirmed'],
+        },
+        date: dateWhere,
+      }
+
+      const rawJournalEntries = await tenantDb.journalEntry.findMany({
         where,
         include: { lines: true },
         orderBy: { date: 'asc' },
       })
 
-      console.log('[TrialBalance] Found', journalEntries.length, 'journal entries')
+      console.log('[TrialBalance] Raw found journal entries:', rawJournalEntries.length)
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ فیلتر نرم لغوشده‌ها
+      // فقط اگر isCancelled دقیقاً true باشد حذف می‌شود.
+      // null یا undefined حذف نمی‌شود.
+      // ═══════════════════════════════════════════════════════════════
+      const journalEntries = rawJournalEntries.filter((je: any) => {
+        if (je.isCancelled === true) return false
+
+        const status = String(je.status || '').toLowerCase().trim()
+        return status === 'posted' || status === 'confirmed'
+      })
+
+      console.log('[TrialBalance] After cancelled filter:', journalEntries.length)
+      console.log('[TrialBalance] Included entry numbers:', journalEntries.map((je: any) => je.number))
 
       // ═══════════════════════════════════════════════════════════════
       //  ۲. دریافت تمام حساب‌ها (برای نام و کد)
       // ═══════════════════════════════════════════════════════════════
-      const accounts = await tenantDb.account.findMany({
+         const accountsRaw = await tenantDb.account.findMany({
         where: { tenantId, isActive: true },
       })
-      const accountMap = new Map(accounts.map(a => [a.id, a]))
 
+      const accounts = (accountsRaw || []) as any[]
+
+      const accountMap = new Map<string, any>(
+        accounts.map((a: any) => [String(a?.id || ''), a])
+      )
       // ═══════════════════════════════════════════════════════════════
       //  ۳. تجمیع مبالغ بر اساس حساب
       // ═══════════════════════════════════════════════════════════════
@@ -193,29 +252,39 @@ export const GET = withTenantAndPermission('accounting')(
         }
       >()
 
-      for (const je of journalEntries) {
-        const lines = je.lines || []
+         for (const je of journalEntries) {
+        const lines = (je as any).lines || []
+
         for (const line of lines) {
-          if (!line.accountId) continue
+          const accountId = String((line as any).accountId || '').trim()
 
-          const acc = accountMap.get(line.accountId)
-          if (!acc) continue // ★ حساب حذف‌شده یا غیرفعال را نادیده بگیر
+          if (!accountId) {
+            continue
+          }
 
-          const key = line.accountId
+          const acc = accountMap.get(accountId) as any | undefined
+
+          if (!acc) {
+            continue
+          }
+
+          const key = accountId
+
           if (!accountBalances.has(key)) {
             accountBalances.set(key, {
-              accountId: line.accountId,
-              accountCode: acc.code || '—',
-              accountName: acc.name || 'نامشخص',
-              accountType: (acc.type || '').toLowerCase(),
+              accountId,
+              accountCode: String(acc.code || '—'),
+              accountName: String(acc.name || 'نامشخص'),
+              accountType: String(acc.type || '').toLowerCase(),
               totalDebit: 0,
               totalCredit: 0,
             })
           }
 
           const row = accountBalances.get(key)!
-          row.totalDebit += Number(line.debit) || 0
-          row.totalCredit += Number(line.credit) || 0
+
+          row.totalDebit += Number((line as any).debit) || 0
+          row.totalCredit += Number((line as any).credit) || 0
         }
       }
 
@@ -223,7 +292,7 @@ export const GET = withTenantAndPermission('accounting')(
       //  ۴. محاسبه مانده و فیلتر
       // ═══════════════════════════════════════════════════════════════
       const flatRows = Array.from(accountBalances.values())
-        .map(row => {
+        .map((row) => {
           const balance = row.totalDebit - row.totalCredit
           const balanceLabel = balance > 0
             ? `${Math.abs(balance).toLocaleString('fa-IR')} بد`
@@ -237,8 +306,7 @@ export const GET = withTenantAndPermission('accounting')(
             classification: classifyAccount(row),
           }
         })
-        .filter(row => {
-          // ★ فیلتر حساب‌های صفر
+        .filter((row) => {
           if (!includeZero && Math.abs(row.balance) < 1 && row.totalDebit === 0 && row.totalCredit === 0) {
             return false
           }
@@ -247,7 +315,7 @@ export const GET = withTenantAndPermission('accounting')(
         .sort((a, b) => a.accountCode.localeCompare(b.accountCode))
 
       // ═══════════════════════════════════════════════════════════════
-      //  ۵. گروه‌بندی بر اساس نوع (اگر groupByType=true)
+      //  ۵. گروه‌بندی بر اساس نوع
       // ═══════════════════════════════════════════════════════════════
       let groups: any[] = []
       if (groupByType) {
@@ -301,7 +369,7 @@ export const GET = withTenantAndPermission('accounting')(
             to: toDateEnd.toISOString(),
           },
           groups,
-          flatRows: flatRows.map(r => ({
+          flatRows: flatRows.map((r) => ({
             accountId: r.accountId,
             accountCode: r.accountCode,
             accountName: r.accountName,

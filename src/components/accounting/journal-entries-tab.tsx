@@ -544,7 +544,7 @@ export function JournalEntriesTab() {
   const [cancelEntry, setCancelEntry] = useState<JournalEntry | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelSaving, setCancelSaving] = useState(false)
-
+  const [postSaving, setPostSaving] = useState(false)
   const [auditLogOpen, setAuditLogOpen] = useState(false)
   const [auditLogEntry, setAuditLogEntry] = useState<JournalEntry | null>(null)
   const [auditLogs, setAuditLogs] = useState<any[]>([])
@@ -766,8 +766,8 @@ logger.info('گزارش اسناد حسابداری چاپ شد', {
         description: manualDescription || 'سند دستی',
         totalDebit,
         totalCredit,
-        status: 'DRAFT',
-        isPosted: false,
+           status: 'POSTED',
+        isPosted: true,
         isManual: true,
         lines: validLines.map(l => {
           const acc = accounts.find(a => a.id === l.accountId)
@@ -906,6 +906,163 @@ if (res.ok) {
       setCancelSaving(false)
     }
   }, [cancelEntry, cancelReason, entries, isOnline, toast, loadEntries])
+
+   const isDraftEntry = (entry: JournalEntry): boolean => {
+    const status = entry.status?.toUpperCase()
+
+    const looksOffline =
+      entry._offline === true &&
+      String(entry.id || '').startsWith('offline-')
+
+    return (
+      !looksOffline &&
+      status !== 'CANCELLED' &&
+      (status === 'DRAFT' || entry.isPosted === false)
+    )
+  }
+  const handlePostEntry = useCallback(async (entry: JournalEntry) => {
+    if (!entry) return
+
+    const looksOffline =
+      entry._offline === true &&
+      String(entry.id || '').startsWith('offline-')
+
+    if (looksOffline) {
+      toast({
+        title: 'خطا',
+        description: 'سند آفلاین ابتدا باید همگام‌سازی شود تا امکان ثبت نهایی داشته باشد.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    const status = entry.status?.toUpperCase()
+
+    if (status === 'POSTED' || entry.isPosted === true) {
+      toast({
+        title: 'توجه',
+        description: 'این سند قبلاً ثبت نهایی شده است.',
+      })
+      return
+    }
+
+    if (status === 'CANCELLED') {
+      toast({
+        title: 'خطا',
+        description: 'سند لغوشده قابل ثبت نهایی نیست.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setPostSaving(true)
+
+    try {
+         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+
+      const tenantId =
+        user?.tenantId ||
+        (() => {
+          try {
+            const userStr = localStorage.getItem('user')
+            if (userStr) {
+              const parsed = JSON.parse(userStr)
+              return parsed?.tenantId || ''
+            }
+          } catch {}
+          return ''
+        })()
+
+      if (!tenantId) {
+        toast({
+          title: 'خطا',
+          description: 'شناسه کسب‌وکار یافت نشد. لطفاً دوباره وارد شوید.',
+          variant: 'destructive',
+        })
+        setPostSaving(false)
+        return
+      }
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }
+
+      // تلاش اول: endpoint اختصاصی post
+      let res = await fetch(
+        `/api/journal-entries/${entry.id}/post?tenantId=${encodeURIComponent(tenantId)}`,
+        {
+          method: 'POST',
+          headers,
+        }
+      )
+      // اگر endpoint اختصاصی وجود نداشت، fallback به PATCH
+          if (!res.ok && (res.status === 404 || res.status === 405)) {
+        res = await fetch(
+          `/api/journal-entries/${entry.id}?tenantId=${encodeURIComponent(tenantId)}`,
+          {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+              tenantId,
+              status: 'POSTED',
+              isPosted: true,
+            }),
+          }
+        )
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `خطا در ثبت نهایی سند (${res.status})`)
+      }
+
+      const updatedEntry: JournalEntry = {
+        ...entry,
+        status: 'POSTED',
+        isPosted: true,
+      }
+
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? updatedEntry : e))
+      )
+
+      if (detailEntry?.id === entry.id) {
+        setDetailEntry(updatedEntry)
+      }
+
+      logger.info('سند حسابداری ثبت نهایی شد', {
+        entryId: entry.id,
+        entryNumber: entry.entryNumber || entry.number,
+        description: entry.description,
+        date: entry.date,
+        totalDebit: entry.totalDebit,
+        totalCredit: entry.totalCredit,
+        previousStatus: entry.status,
+      })
+
+      toast({
+        title: '✓ سند ثبت نهایی شد',
+        description: 'اکنون این سند در تراز آزمایشی و دفاتر حسابداری اعمال می‌شود.',
+      })
+
+      await loadEntries()
+    } catch (err: any) {
+      logger.error('خطا در ثبت نهایی سند حسابداری', undefined, {
+        entryId: entry.id,
+        entryNumber: entry.entryNumber || entry.number,
+        error: err?.message || 'خطای نامشخص',
+      })
+
+      toast({
+        title: 'خطا',
+        description: err?.message || 'خطا در ثبت نهایی سند',
+        variant: 'destructive',
+      })
+    } finally {
+      setPostSaving(false)
+    }
+  }, [detailEntry, loadEntries, toast])
 
   const loadAuditLog = useCallback(async (entry: JournalEntry) => {
     setAuditLogEntry(entry)
@@ -1203,14 +1360,29 @@ if (res.ok) {
                         <TableCell className="text-xs text-red-600 font-semibold">{formatCurrency(entry.totalDebit)}</TableCell>
                         <TableCell className="text-xs text-emerald-800 font-semibold">{formatCurrency(entry.totalCredit)}</TableCell>
                         <TableCell>{getStatusBadge(entry.status, entry.isPosted)}</TableCell>
-                        <TableCell>
+                                             <TableCell>
                           <div className="flex items-center gap-1">
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setDetailEntry(entry)} title="مشاهده جزئیات">
                               <Eye className="w-3.5 h-3.5" />
                             </Button>
+
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => loadAuditLog(entry)} title="تاریخچه تغییرات">
                               <History className="w-3.5 h-3.5" />
                             </Button>
+
+                            {isDraftEntry(entry) && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-emerald-600"
+                                onClick={() => handlePostEntry(entry)}
+                                disabled={postSaving}
+                                title="ثبت نهایی سند"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+
                             {isManager && !entry._offline && entry.status?.toUpperCase() !== 'CANCELLED' && (
                               <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500" onClick={() => { setCancelEntry(entry); setCancelDialogOpen(true) }} title="لغو سند">
                                 <Ban className="w-3.5 h-3.5" />
@@ -1256,15 +1428,30 @@ if (res.ok) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                    <Button size="sm" variant="outline" className="text-xs h-8 flex-1" onClick={() => setDetailEntry(entry)}>
+                                <div className="flex items-center gap-2 pt-2 border-t border-gray-100 flex-wrap">
+                    <Button size="sm" variant="outline" className="text-xs h-8 flex-1 min-w-[90px]" onClick={() => setDetailEntry(entry)}>
                       <Eye className="w-3.5 h-3.5 ml-1" /> جزئیات
                     </Button>
-                    <Button size="sm" variant="outline" className="text-xs h-8 flex-1" onClick={() => loadAuditLog(entry)}>
+
+                    <Button size="sm" variant="outline" className="text-xs h-8 flex-1 min-w-[90px]" onClick={() => loadAuditLog(entry)}>
                       <History className="w-3.5 h-3.5 ml-1" /> تاریخچه
                     </Button>
+
+                    {isDraftEntry(entry) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs h-8 flex-1 min-w-[110px] text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                        onClick={() => handlePostEntry(entry)}
+                        disabled={postSaving}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 ml-1" />
+                        ثبت نهایی
+                      </Button>
+                    )}
+
                     {isManager && !entry._offline && entry.status?.toUpperCase() !== 'CANCELLED' && (
-                      <Button size="sm" variant="outline" className="text-xs h-8 text-red-600 border-red-200 hover:bg-red-50" onClick={() => { setCancelEntry(entry); setCancelDialogOpen(true) }}>
+                      <Button size="sm" variant="outline" className="text-xs h-8 flex-1 min-w-[80px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => { setCancelEntry(entry); setCancelDialogOpen(true) }}>
                         <Ban className="w-3.5 h-3.5 ml-1" /> لغو
                       </Button>
                     )}
@@ -1511,8 +1698,25 @@ if (res.ok) {
                 </div>
               </div>
 
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setDetailEntry(null)} className="w-full sm:w-auto">بستن</Button>
+                          <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+                {detailEntry && isDraftEntry(detailEntry) && (
+                  <Button
+                    onClick={() => handlePostEntry(detailEntry)}
+                    disabled={postSaving}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto"
+                  >
+                    {postSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin ml-1" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 ml-1" />
+                    )}
+                    {postSaving ? 'در حال ثبت نهایی...' : 'ثبت نهایی سند'}
+                  </Button>
+                )}
+
+                <Button variant="outline" onClick={() => setDetailEntry(null)} className="w-full sm:w-auto">
+                  بستن
+                </Button>
               </DialogFooter>
             </>
           )}
