@@ -139,6 +139,8 @@ model Tenant {
   lockedByAdmin             String?   @db.VarChar(100)
 requiresIdentityCompletion Boolean @default(false)
   lastActivityAt            DateTime  @default(now())
+    setupCompleted   Boolean   @default(false)
+  setupCompletedAt DateTime?
 
 @@index([isLocked])  
   @@index([createdAt])
@@ -151,6 +153,7 @@ requiresIdentityCompletion Boolean @default(false)
    @@index([ownerNationalCode])
   @@index([ownerMobile])
     @@index([lastActivityAt])  
+      @@index([setupCompleted])
 }
 
 model OtpCode {

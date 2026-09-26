@@ -103,7 +103,7 @@ export default function SubscriptionExpiredPage() {
             <div>
               <p className="text-xs font-bold text-emerald-900">داده‌های شما امن است</p>
               <p className="text-[11px] text-emerald-700 mt-0.5">
-                تمام اطلاعات فروشگاه شما (محصولات، فاکتورها، مشتریان) پس از تمدید قابل دسترسی خواهند بود.
+                تمام اطلاعات فروشگاه شما (کالاها، فاکتورها، مشتریان) پس از تمدید قابل دسترسی خواهند بود.
               </p>
             </div>
           </div>

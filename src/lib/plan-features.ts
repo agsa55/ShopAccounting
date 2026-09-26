@@ -194,7 +194,7 @@ export const PLANS: Record<PlanName, PlanInfo> = {
     description: 'حسابداری پایه با فروش نقدی، نسیه و اقساط (فقط پرداخت حضوری). مناسب خرده‌فروش‌های کوچک و مغازه‌های محلی.',
     annualPrice: PLAN_PRICES.simple.annual,
     lifetimePrice: PLAN_PRICES.simple.lifetime,
-    maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 2,  // ★ تغییر: محصولات و فاکتور نامحدود
+    maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 2,  // ★ تغییر: کالاها و فاکتور نامحدود
     billingCycles: ['annual', 'lifetime'],
   },
   professional: {
@@ -204,7 +204,7 @@ export const PLANS: Record<PlanName, PlanInfo> = {
     description: 'حسابداری دوطرفه کامل، ثبت خودکار بهای تمام شده، مدیریت طلب و بدهی، تراز آزمایشی، دفتر کل و روزنامه، اتصال به سامانه مودیان، انبارداری دوگانه، کارتخوان. مناسب فروشگاه‌های متوسط.',
     annualPrice: PLAN_PRICES.professional.annual,
     lifetimePrice: PLAN_PRICES.professional.lifetime,
-    maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 5,  // ★ تغییر: محصولات و فاکتور نامحدود
+    maxProducts: 0, maxInvoicesPerMonth: 0, maxUsers: 5,  // ★ تغییر: کالاها و فاکتور نامحدود
     billingCycles: ['annual', 'lifetime'],
   },
   enterprise: {

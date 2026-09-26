@@ -116,7 +116,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
     const productCount = await tenantDb.product.count({ where: { categoryId, tenantId } })
     if (productCount > 0) {
       return NextResponse.json(
-        { success: false, error: `این دسته‌بندی ${productCount} محصول دارد و قابل حذف نیست. ابتدا محصولات را انتقال دهید.` },
+        { success: false, error: `این دسته‌بندی ${productCount} محصول دارد و قابل حذف نیست. ابتدا کالاها را انتقال دهید.` },
         { status: 400 }
       )
     }

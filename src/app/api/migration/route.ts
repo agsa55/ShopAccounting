@@ -20,7 +20,7 @@ import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 // ─── جداول قابل مهاجرت ──────────────────────────────────────
 
 const MIGRATABLE_TABLES = [
-  { model: 'product', name: 'محصولات' },
+  { model: 'product', name: 'کالاها' },
   { model: 'category', name: 'دسته‌بندی‌ها' },
   { model: 'customer', name: 'مشتریان' },
   { model: 'account', name: 'حساب‌ها' },

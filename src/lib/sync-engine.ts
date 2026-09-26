@@ -4,7 +4,7 @@
  * موتور همگام‌سازی آفلاین/آنلاین
  * ارسال صف همگام‌سازی به سرور هنگام اتصال
  *
- * ★ v5.3: اصلاح preloadData — واکشی صحیح محصولات، مشتریان، دسته‌بندی‌ها، انبارها و فاکتورها
+ * ★ v5.3: اصلاح preloadData — واکشی صحیح کالاها، مشتریان، دسته‌بندی‌ها، انبارها و فاکتورها
  * ★ v5.4: FIX — جایگزینی navigator.onLine با isOnline() از connectivity module
  *          حالا بر اساس پینگ واقعی API تصمیم می‌گیرد، نه اتصال اینترنت مرورگر
  *
@@ -274,7 +274,7 @@ class SyncEngineClass {
 
       console.log('[SyncEngine] 🔄 Preloading data for offline use...')
 
-      // ── ۱. محصولات (همه، بدون pagination) ──────────────────────
+      // ── ۱. کالاها (همه، بدون pagination) ──────────────────────
       try {
         const res = await fetch(
           `/api/products?page=1&limit=1000&sort=recent${tidParam}`,

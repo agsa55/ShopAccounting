@@ -62,7 +62,7 @@ function getTenantId(): string {
   }
 }
 
-// ─── محصولات ───────────────────────────────────────────────
+// ─── کالاها ───────────────────────────────────────────────
 
 export async function fetchProducts(params?: FetchProductsParams): Promise<ApiResponse> {
   try {
@@ -78,7 +78,7 @@ export async function fetchProducts(params?: FetchProductsParams): Promise<ApiRe
     return data
   } catch (error) {
     console.error('[fetchProducts] Error:', error)
-    return { success: false, error: 'خطا در دریافت محصولات' }
+    return { success: false, error: 'خطا در دریافت کالاها' }
   }
 }
 

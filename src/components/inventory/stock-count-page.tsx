@@ -670,7 +670,7 @@ if (data.success) {
               انبار گردانی جدید
             </DialogTitle>
             <DialogDescription className="text-xs">
-              موجودی فیزیکی محصولات را شمارش کنید. اختلاف با موجودی سیستمی خودکار محاسبه می‌شود.
+              موجودی فیزیکی کالاها را شمارش کنید. اختلاف با موجودی سیستمی خودکار محاسبه می‌شود.
             </DialogDescription>
           </DialogHeader>
 
@@ -730,7 +730,7 @@ if (data.success) {
                 ) : paginatedProducts.length === 0 ? (
                   <div className="text-center py-8 text-gray-400">
                     <Package className="w-10 h-10 mx-auto mb-2 text-gray-300" />
-                    <p className="text-xs">محصولی یافت نشد</p>
+                    <p className="text-xs">کالایی یافت نشد</p>
                   </div>
                 ) : (
                   <>

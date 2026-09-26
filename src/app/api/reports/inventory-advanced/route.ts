@@ -239,7 +239,7 @@ export const GET = withTenantAndPermission('dashboard')(
           })
           .catch(() => [])
 
-        // ★ گرفتن نام محصولات و انبارها
+        // ★ گرفتن نام کالاها و انبارها
         const productIds = [...new Set(movements.map((m) => m.productId).filter(Boolean))]
         const warehouseIds = [
           ...new Set([

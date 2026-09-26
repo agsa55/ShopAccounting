@@ -135,7 +135,7 @@ export default function DemoPhonePage() {
               {[
                 { icon: ShoppingCart, text: 'صدور فاکتور' },
                 { icon: Zap, text: 'صندوق فروش (POS)' },
-                { icon: CheckCircle2, text: 'مدیریت محصولات' },
+                { icon: CheckCircle2, text: 'مدیریت کالاها' },
                 { icon: ShieldCheck, text: 'گزارش‌های مالی' },
               ].map((f, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs text-gray-700">

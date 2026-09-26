@@ -3,11 +3,14 @@
 // ============================================================================
 // src/components/settings/initial-balance-tab.tsx
 // ShopAccounting — تب راه‌اندازی اولیه (سند افتتاحیه)
+// ★ v11.9.2: لایه ۱ — هشدار قبل از ثبت نهایی (جلوگیری از خطای کاربر)
+// ★ v11.9.1: لاگ‌های سیستمی اضافه شد
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
+import { useStore } from '@/lib/store'
 import { getTenantIdFromStore } from '@/lib/tenant-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,8 +22,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
+import {
   Wallet, Plus, Pencil, Trash2, Loader2, CheckCircle2, AlertCircle,
-  AlertTriangle, Save, TrendingUp, TrendingDown,
+  AlertTriangle, Save, TrendingUp, TrendingDown, Package,
 } from 'lucide-react'
 
 export function InitialBalanceTab() {
@@ -35,6 +41,11 @@ export function InitialBalanceTab() {
   const [pendingItems, setPendingItems] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
 
+  // ★ v11.9.2: State برای هشدار قبل از ثبت نهایی
+  const [showWarningModal, setShowWarningModal] = useState(false)
+  const [warningReasons, setWarningReasons] = useState<string[]>([])
+  const [pendingPostAction, setPendingPostAction] = useState<(() => Promise<void>) | null>(null)
+
   const [form, setForm] = useState({
     type: 'cash',
     title: '',
@@ -44,7 +55,7 @@ export function InitialBalanceTab() {
     description: '',
   })
 
-   const loadData = useCallback(async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const tid = getTenantIdFromStore()
@@ -57,11 +68,9 @@ export function InitialBalanceTab() {
         ? { Authorization: `Bearer ${token}` }
         : undefined
 
-      // ★★★ اصلاح: حذف tenantId از URL محصولات
       const [balRes, prodRes, journalRes] = await Promise.all([
         fetch('/api/initial-balance', { ...(headers && { headers }) }),
         fetch('/api/products?limit=100', { ...(headers && { headers }) }),
-        // ★ v10.9.2: Fallback — fetch JournalEntries برای بازیابی InitialBalance
         fetch('/api/journal-entries?sourceType=initial_balance&limit=10', { ...(headers && { headers }) }),
       ])
       
@@ -72,10 +81,6 @@ export function InitialBalanceTab() {
       if (balData.success) {
         let apiItems = Array.isArray(balData.data) ? balData.data : []
         
-        // ═══════════════════════════════════════════════════════════════
-        // ★ v10.9.2: Fallback — اگر InitialBalances خالی است ولی JournalEntry هست
-        // از JournalEntry، InitialBalance را بازیابی کن
-        // ═══════════════════════════════════════════════════════════════
         if (apiItems.length === 0 && journalData.success && journalData.data?.entries?.length > 0) {
           console.log('[InitialBalanceTab] ⚠️ InitialBalances empty but JournalEntries found — recovering...')
           
@@ -84,10 +89,9 @@ export function InitialBalanceTab() {
           )
           
           if (openingJE && openingJE.lines && openingJE.lines.length > 0) {
-            // از lines سند، InitialBalance بساز
             apiItems = openingJE.lines.map((line: any, idx: number) => ({
               id: `recovered-${idx}`,
-              type: line.debit > 0 ? 'cash' : 'liability', // حدس نوع
+              type: line.debit > 0 ? 'cash' : 'liability',
               title: line.description || line.accountName || `آیتم ${idx + 1}`,
               amount: Math.abs(line.debit || line.credit || 0),
               debitAmount: line.debit || 0,
@@ -220,11 +224,19 @@ export function InitialBalanceTab() {
         ? localStorage.getItem('token')
         : null
 
-        // ★ v10.9.6: ارسال accountId برای حفظ ارتباط با حساب
-    const allItems = [
-      ...savedItems
-        .filter((b) => !summary?.isPosted)
-        .map((b) => ({
+      const allItems = [
+        ...savedItems
+          .filter((b) => !summary?.isPosted)
+          .map((b) => ({
+            type: b.type,
+            title: b.title,
+            amount: b.amount,
+            accountId: b.accountId || undefined,
+            productId: b.productId || undefined,
+            quantity: b.quantity || undefined,
+            description: b.description || undefined,
+          })),
+        ...pendingItems.map((b) => ({
           type: b.type,
           title: b.title,
           amount: b.amount,
@@ -233,16 +245,7 @@ export function InitialBalanceTab() {
           quantity: b.quantity || undefined,
           description: b.description || undefined,
         })),
-      ...pendingItems.map((b) => ({
-        type: b.type,
-        title: b.title,
-        amount: b.amount,
-        accountId: b.accountId || undefined,
-        productId: b.productId || undefined,
-        quantity: b.quantity || undefined,
-        description: b.description || undefined,
-      })),
-    ]
+      ]
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
@@ -257,52 +260,53 @@ export function InitialBalanceTab() {
       })
       const data = await res.json()
 
-   if (data.success) {
-  // ★ v11.9.1: لاغ ذخیره سند افتتاحیه
-  const assets = allItems
-    .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
-    .reduce((s, b) => s + (Number(b.amount) || 0), 0)
-  const liabs = allItems
-    .filter((b) => b.type === 'liability')
-    .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+      if (data.success) {
+        // ★ v11.9.1: لاگ ذخیره سند افتتاحیه
+        const assets = allItems
+          .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
+          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+        const liabs = allItems
+          .filter((b) => b.type === 'liability')
+          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
 
-  logger.info('سند افتتاحیه ذخیره شد', {
-    postToJournal: postToJournal,
-    itemsCount: allItems.length,
-    totalAssets: assets,
-    totalLiabilities: liabs,
-    equity: assets - liabs,
-    itemsBreakdown: {
-      cash: allItems.filter(b => b.type === 'cash').length,
-      bank: allItems.filter(b => b.type === 'bank').length,
-      inventory: allItems.filter(b => b.type === 'inventory').length,
-      fixedAsset: allItems.filter(b => b.type === 'fixed_asset').length,
-      liability: allItems.filter(b => b.type === 'liability').length,
-    },
-    journalEntryId: data.data?.journalEntryId || null,
-    isUpdate: savedItems.length > 0,
-  })
-  
-  toast({
-    title: postToJournal ? 'سند افتتاحیه صادر شد ✓' : 'ذخیره شد ✓',
-    description: data.message,
-  })
-  await loadData()
-} else {
-  // ★ v11.9.1: لاغ خطای ذخیره سند افتتاحیه
-  logger.error('خطا در ذخیره سند افتتاحیه', undefined, {
-    postToJournal: postToJournal,
-    itemsCount: allItems.length,
-    error: data.error,
-  })
-  
-  toast({
-    title: 'خطا',
-    description: data.error || 'ثبت ناموفق بود',
-    variant: 'destructive',
-  })
-}
+        logger.info('سند افتتاحیه ذخیره شد', {
+          postToJournal: postToJournal,
+          itemsCount: allItems.length,
+          totalAssets: assets,
+          totalLiabilities: liabs,
+          equity: assets - liabs,
+          itemsBreakdown: {
+            cash: allItems.filter(b => b.type === 'cash').length,
+            bank: allItems.filter(b => b.type === 'bank').length,
+            inventory: allItems.filter(b => b.type === 'inventory').length,
+            fixedAsset: allItems.filter(b => b.type === 'fixed_asset').length,
+            liability: allItems.filter(b => b.type === 'liability').length,
+          },
+          journalEntryId: data.data?.journalEntryId || null,
+          isUpdate: savedItems.length > 0,
+        })
+
+        toast({
+          title: postToJournal ? 'سند افتتاحیه صادر شد ✓' : 'ذخیره شد ✓',
+          description: data.message,
+        })
+        await loadData()
+      } else {
+        // ★ v11.9.1: لاگ خطای ذخیره سند افتتاحیه
+        logger.error('خطا در ذخیره سند افتتاحیه', undefined, {
+          postToJournal: postToJournal,
+          itemsCount: allItems.length,
+          error: data.error,
+        })
+
+        toast({
+          title: 'خطا',
+          description: data.error || 'ثبت ناموفق بود',
+          variant: 'destructive',
+        })
+      }
     } catch (err) {
+      logger.error('خطای شبکه در ذخیره سند افتتاحیه', err as Error)
       toast({
         title: 'خطا',
         description: 'ارتباط با سرور برقرار نشد',
@@ -320,52 +324,49 @@ export function InitialBalanceTab() {
         ? localStorage.getItem('token')
         : null
 
-      // ★ v10.9.7: اگر سند صادر شده، force=true ارسال کن
       const forceParam = summary?.isPosted ? '?force=true' : ''
 
-  // ذخیره اطلاعات قبلی برای لاغ
-const deletedInfo = {
-  itemsCount: savedItems.length,
-  isPosted: summary?.isPosted || false,
-  journalEntryId: summary?.journalEntryId || null,
-  totalAssets: summary?.totalAssets || 0,
-  totalLiabilities: summary?.totalLiabilities || 0,
-  equity: summary?.equity || 0,
-  forceUsed: !!forceParam,
-}
+      // ذخیره اطلاعات قبلی برای لاگ
+      const deletedInfo = {
+        itemsCount: savedItems.length,
+        isPosted: summary?.isPosted || false,
+        journalEntryId: summary?.journalEntryId || null,
+        totalAssets: summary?.totalAssets || 0,
+        totalLiabilities: summary?.totalLiabilities || 0,
+        equity: summary?.equity || 0,
+        forceUsed: !!forceParam,
+      }
 
-const res = await fetch(`/api/initial-balance${forceParam}`, {
-  method: 'DELETE',
-  headers: {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  },
-})
-const data = await res.json()
-if (data.success) {
-  // ★ v11.9.1: لاغ حذف سند افتتاحیه
-  logger.info('سند افتتاحیه حذف شد', {
-    itemsCount: deletedInfo.itemsCount,
-    wasPosted: deletedInfo.isPosted,
-    journalEntryId: deletedInfo.journalEntryId,
-    totalAssets: deletedInfo.totalAssets,
-    totalLiabilities: deletedInfo.totalLiabilities,
-    equity: deletedInfo.equity,
-    forceUsed: deletedInfo.forceUsed,
-  })
-  
-  toast({
-    title: 'حذف شد ✓',
-    description: data.message,
-  })
-  setSavedItems([])
-  setSummary(null)
-  setPendingItems([])
-  setDeleteDialogOpen(false)
-  await loadData()
+      const res = await fetch(`/api/initial-balance${forceParam}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+      const data = await res.json()
+      if (data.success) {
+        // ★ v11.9.1: لاگ حذف سند افتتاحیه
+        logger.info('سند افتتاحیه حذف شد', {
+          itemsCount: deletedInfo.itemsCount,
+          wasPosted: deletedInfo.isPosted,
+          journalEntryId: deletedInfo.journalEntryId,
+          totalAssets: deletedInfo.totalAssets,
+          totalLiabilities: deletedInfo.totalLiabilities,
+          equity: deletedInfo.equity,
+          forceUsed: deletedInfo.forceUsed,
+        })
 
+        toast({
+          title: 'حذف شد ✓',
+          description: data.message,
+        })
+        setSavedItems([])
+        setSummary(null)
+        setPendingItems([])
+        setDeleteDialogOpen(false)
+        await loadData()
       } else {
-        // ★ v10.9.7: اگر needsForce بود، دوباره با force=true تلاش کن
         if (data.needsForce) {
           console.log('[InitialBalanceTab] Retrying with force=true')
           const retryRes = await fetch('/api/initial-balance?force=true', {
@@ -376,36 +377,41 @@ if (data.success) {
             },
           })
           const retryData = await retryRes.json()
-      if (retryData.success) {
-  // ★ v11.9.1: لاغ حذف سند افتتاحیه با force (retry)
-  logger.info('سند افتتاحیه با force حذف شد', {
-    itemsCount: savedItems.length,
-    wasPosted: summary?.isPosted || false,
-    journalEntryId: summary?.journalEntryId || null,
-    forceUsed: true,
-    wasRetry: true,
-  })
-  
-  toast({
-    title: 'حذف شد ✓',
-    description: retryData.message,
-  })
-  setSavedItems([])
-  setSummary(null)
-  setPendingItems([])
-  setDeleteDialogOpen(false)
-  await loadData()
-  return
-}
+          if (retryData.success) {
+            // ★ v11.9.1: لاگ حذف سند افتتاحیه با force (retry)
+            logger.info('سند افتتاحیه با force حذف شد', {
+              itemsCount: savedItems.length,
+              wasPosted: summary?.isPosted || false,
+              journalEntryId: summary?.journalEntryId || null,
+              forceUsed: true,
+              wasRetry: true,
+            })
+
+            toast({
+              title: 'حذف شد ✓',
+              description: retryData.message,
+            })
+            setSavedItems([])
+            setSummary(null)
+            setPendingItems([])
+            setDeleteDialogOpen(false)
+            await loadData()
+            return
+          }
         }
         
+        logger.error('خطا در حذف سند افتتاحیه', undefined, {
+          error: data.error,
+        })
+
         toast({
           title: 'خطا',
           description: data.error || 'حذف ناموفق بود',
           variant: 'destructive',
         })
       }
-    } catch {
+    } catch (err) {
+      logger.error('خطای شبکه در حذف سند افتتاحیه', err as Error)
       toast({
         title: 'خطا',
         description: 'ارتباط با سرور برقرار نشد',
@@ -432,16 +438,15 @@ if (data.success) {
         ? localStorage.getItem('token')
         : null
 
-    // ★ v10.9.6: ارسال accountId برای حفظ ارتباط با حساب
-    const draftItems = savedItems.map((b: any) => ({
-      type: b.type,
-      title: b.title,
-      amount: b.amount,
-      accountId: b.accountId || undefined,
-      productId: b.productId || undefined,
-      quantity: b.quantity || undefined,
-      description: b.description || undefined,
-    }))
+      const draftItems = savedItems.map((b: any) => ({
+        type: b.type,
+        title: b.title,
+        amount: b.amount,
+        accountId: b.accountId || undefined,
+        productId: b.productId || undefined,
+        quantity: b.quantity || undefined,
+        description: b.description || undefined,
+      }))
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
@@ -456,43 +461,44 @@ if (data.success) {
       })
       const data = await res.json()
 
- if (data.success) {
-  // ★ v11.9.1: لاغ ثبت نهایی سند افتتاحیه (تبدیل پیش‌نویس به سند قطعی)
-  const assets = draftItems
-    .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
-    .reduce((s, b) => s + (Number(b.amount) || 0), 0)
-  const liabs = draftItems
-    .filter((b) => b.type === 'liability')
-    .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+      if (data.success) {
+        // ★ v11.9.1: لاگ ثبت نهایی سند افتتاحیه
+        const assets = draftItems
+          .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
+          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+        const liabs = draftItems
+          .filter((b) => b.type === 'liability')
+          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
 
-  logger.info('سند افتتاحیه پیش‌نویس به سند قطعی تبدیل شد', {
-    itemsCount: draftItems.length,
-    totalAssets: assets,
-    totalLiabilities: liabs,
-    equity: assets - liabs,
-    journalEntryId: data.data?.journalEntryId || null,
-    wasDraft: true,
-  })
-  
-  toast({
-    title: 'سند افتتاحیه صادر شد ✓',
-    description: data.message || 'سند قطعی افتتاحیه با موفقیت ثبت شد',
-  })
-  await loadData()
-} else {
-  // ★ v11.9.1: لاغ خطای ثبت نهایی
-  logger.error('خطا در ثبت نهایی سند افتتاحیه', undefined, {
-    itemsCount: draftItems.length,
-    error: data.error,
-  })
-  
-  toast({
-    title: 'خطا',
-    description: data.error || 'ثبت نهایی ناموفق بود',
-    variant: 'destructive',
-  })
-}
-    } catch {
+        logger.info('سند افتتاحیه پیش‌نویس به سند قطعی تبدیل شد', {
+          itemsCount: draftItems.length,
+          totalAssets: assets,
+          totalLiabilities: liabs,
+          equity: assets - liabs,
+          journalEntryId: data.data?.journalEntryId || null,
+          wasDraft: true,
+        })
+
+        toast({
+          title: 'سند افتتاحیه صادر شد ✓',
+          description: data.message || 'سند قطعی افتتاحیه با موفقیت ثبت شد',
+        })
+        await loadData()
+      } else {
+        // ★ v11.9.1: لاگ خطای ثبت نهایی
+        logger.error('خطا در ثبت نهایی سند افتتاحیه', undefined, {
+          itemsCount: draftItems.length,
+          error: data.error,
+        })
+
+        toast({
+          title: 'خطا',
+          description: data.error || 'ثبت نهایی ناموفق بود',
+          variant: 'destructive',
+        })
+      }
+    } catch (err) {
+      logger.error('خطای شبکه در ثبت نهایی سند افتتاحیه', err as Error)
       toast({
         title: 'خطا',
         description: 'ارتباط با سرور برقرار نشد',
@@ -503,36 +509,111 @@ if (data.success) {
     }
   }
 
-const handleEditDraft = () => {
-  if (savedItems.length === 0) return
+  const handleEditDraft = () => {
+    if (savedItems.length === 0) return
 
-  // ★ v11.9.1: لاغ ورود به حالت ویرایش پیش‌نویس
-  logger.info('ورود به حالت ویرایش سند افتتاحیه', {
-    itemsCount: savedItems.length,
-    previousTotalAssets: summary?.totalAssets || 0,
-    previousTotalLiabilities: summary?.totalLiabilities || 0,
-    wasPosted: summary?.isPosted || false,
-  })
+    // ★ v11.9.1: لاگ ورود به حالت ویرایش پیش‌نویس
+    logger.info('ورود به حالت ویرایش سند افتتاحیه', {
+      itemsCount: savedItems.length,
+      previousTotalAssets: summary?.totalAssets || 0,
+      previousTotalLiabilities: summary?.totalLiabilities || 0,
+      wasPosted: summary?.isPosted || false,
+    })
 
-  const editable = savedItems.map((b: any) => ({
-    type: b.type,
-    title: b.title,
-    amount: Number(b.amount) || 0,
-    productId: b.productId || null,
-    quantity: b.quantity != null ? Number(b.quantity) : null,
-    description: b.description || null,
-    Product: b.Product || null,
-  }))
+    const editable = savedItems.map((b: any) => ({
+      type: b.type,
+      title: b.title,
+      amount: Number(b.amount) || 0,
+      productId: b.productId || null,
+      quantity: b.quantity != null ? Number(b.quantity) : null,
+      description: b.description || null,
+      Product: b.Product || null,
+    }))
 
-  setPendingItems(editable)
-  setSavedItems([])
-  setSummary(null)
+    setPendingItems(editable)
+    setSavedItems([])
+    setSummary(null)
 
-  toast({
-    title: 'حالت ویرایش',
-    description: 'آیتم‌های سند برای ویرایش بارگذاری شدند. تغییرات را اعمال و سپس ثبت کنید.',
-  })
-}
+    toast({
+      title: 'حالت ویرایش',
+      description: 'آیتم‌های سند برای ویرایش بارگذاری شدند. تغییرات را اعمال و سپس ثبت کنید.',
+    })
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ v11.9.2: بررسی قبل از ثبت نهایی (لایه ۱ — هشدار)
+  // ═══════════════════════════════════════════════════════════════
+  const checkBeforePost = (): string[] => {
+    const warnings: string[] = []
+
+    const productCount = products.length
+
+    // بررسی ۱: آیا کالایی ثبت شده است؟
+    if (productCount === 0) {
+      warnings.push('هیچ کالایی در سیستم ثبت نشده است')
+    } else {
+      // بررسی ۲: آیا موجودی کالا در سند هست؟
+      const allItems = [...savedItems, ...pendingItems]
+      const hasInventoryInBalance = allItems.some(
+        (b) => b.type === 'inventory' && (Number(b.amount) || 0) > 0
+      )
+
+      if (!hasInventoryInBalance) {
+        warnings.push(
+          `شما ${productCount} کالا در سیستم دارید اما ارزش موجودی کالا در سند افتتاحیه وارد نشده است`
+        )
+      }
+    }
+
+    return warnings
+  }
+
+  // ★ v11.9.2: Wrapper برای ثبت نهایی پیش‌نویس
+  const handleFinalizeDraftWithCheck = async () => {
+    const warnings = checkBeforePost()
+    if (warnings.length > 0) {
+      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
+      setWarningReasons(warnings)
+      setPendingPostAction(() => handleFinalizeDraft)
+      setShowWarningModal(true)
+      return
+    }
+    await handleFinalizeDraft()
+  }
+
+  // ★ v11.9.2: Wrapper برای ثبت + صدور سند
+  const handleSaveWithCheck = async () => {
+    const warnings = checkBeforePost()
+    if (warnings.length > 0) {
+      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
+      setWarningReasons(warnings)
+      setPendingPostAction(() => () => handleSave(true))
+      setShowWarningModal(true)
+      return
+    }
+    await handleSave(true)
+  }
+
+  // ★ v11.9.2: تایید عملیات از مودال هشدار
+  const confirmPendingAction = async () => {
+    if (!pendingPostAction) return
+    setShowWarningModal(false)
+    const action = pendingPostAction
+    setPendingPostAction(null)
+    await action()
+  }
+
+  // ★ v11.9.2: هدایت کاربر به بخش کالاها
+  const goToProducts = () => {
+    setShowWarningModal(false)
+    setPendingPostAction(null)
+    useStore.getState().setCurrentView('products' as any)
+    toast({
+      title: '📦 بخش کالاها',
+      description: 'ابتدا کالاهای فروشگاه را ثبت کنید، سپس به این صفحه برگردید.',
+    })
+  }
+
   const formatNumber = (n: number) => (n || 0).toLocaleString('fa-IR')
 
   const TYPE_LABELS: Record<string, string> = {
@@ -632,7 +713,7 @@ const handleEditDraft = () => {
                   <Button
                     size="sm"
                     className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
-                    onClick={handleFinalizeDraft}
+                    onClick={handleFinalizeDraftWithCheck}
                     disabled={submitting}
                   >
                     {submitting ? (
@@ -942,7 +1023,7 @@ const handleEditDraft = () => {
               ذخیره موقت
             </Button>
             <Button
-              onClick={() => handleSave(true)}
+              onClick={handleSaveWithCheck}
               disabled={submitting}
               className="bg-violet-600 hover:bg-violet-700 text-white text-xs h-9 gap-1"
             >
@@ -973,7 +1054,7 @@ const handleEditDraft = () => {
         </Card>
       )}
 
-         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-red-700 text-sm">
@@ -987,7 +1068,6 @@ const handleEditDraft = () => {
                   <li>
                     تمام {savedItems.length} آیتم موجودی اولیه را حذف می‌کند
                   </li>
-                  {/* ★ v10.9.7: اگر سند صادر شده، هشدار اضافی */}
                   {summary?.isPosted && (
                     <li className="text-red-600 font-bold">
                       ⚠️ سند حسابداری صادر شده نیز حذف می‌شود
@@ -1026,6 +1106,98 @@ const handleEditDraft = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ★ v11.9.2: مودال هشدار قبل از ثبت نهایی                  */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
+        <DialogContent className="sm:max-w-md w-[calc(100%-2rem)]" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <span className="text-gray-900">⚠️ هشدار قبل از ثبت نهایی</span>
+                <DialogDescription className="text-[11px] text-gray-500 font-normal mt-0.5">
+                  لطفاً موارد زیر را بررسی کنید
+                </DialogDescription>
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {/* لیست هشدارها */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-bold text-amber-800 mb-2">
+                مواردی که باید بررسی شوند:
+              </p>
+              {warningReasons.map((reason, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-2 text-xs text-amber-700"
+                >
+                  <span className="text-amber-500 mt-0.5 shrink-0">❌</span>
+                  <span>{reason}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* توصیه */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-800 leading-relaxed">
+                <span className="font-bold">💡 توصیه:</span>
+                {' '}برای داشتن گزارش‌های دقیق مالی، بهتر است ابتدا کالاهای موجود
+                در فروشگاه خود را در بخش <strong>"کالاها"</strong> ثبت کنید، سپس
+                موجودی اولیه کالاها را در این سند اضافه کنید و در نهایت سند را
+                ثبت نهایی نمایید.
+              </p>
+            </div>
+
+            {/* دکمه‌های عملیات */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+              <Button
+                onClick={goToProducts}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white gap-2 h-10"
+              >
+                <Package className="w-4 h-4" />
+                رفتن به بخش کالاها (توصیه می‌شود)
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={confirmPendingAction}
+                disabled={submitting}
+                className="w-full text-gray-700 gap-2 h-10"
+              >
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                به هر حال، سند را ثبت نهایی کن
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setShowWarningModal(false)
+                  setPendingPostAction(null)
+                }}
+                className="w-full text-gray-500 h-8"
+              >
+                انصراف
+              </Button>
+            </div>
+
+            {/* یادآوری */}
+            <p className="text-[10px] text-gray-400 text-center pt-1">
+              ⚠️ توجه: اگر سند را بدون ثبت کالاها ثبت نهایی کنید، موجودی
+              کالاها در سند افتتاحیه لحاظ نمی‌شود.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

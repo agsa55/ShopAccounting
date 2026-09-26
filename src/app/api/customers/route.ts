@@ -1,14 +1,6 @@
 // ============================================================================
-// src/app/api/customers/route.ts — GET/POST/PUT/DELETE (v6.1 — Search Enhanced)
-// ============================================================================
-// ★★★ v6.1 بهبودها:
-//   ★ جستجوی ترکیبی: "علی احمدی" → firstName CONTAINS "علی" AND lastName CONTAINS "احمدی"
-//   ★ افزودن nationalCode به جستجو
-//   ★ افزودن lastPurchaseAt به orderBy (مشتریان اخیر اول)
-//   ★ مدیریت بهتر خطا با fallback کامل
-//   ★ حفظ ساختار withTenantAndPermission و tenantDb (مطابق معماری موجود)
-//   ★ حفظ planLimits در پاسخ (مطابق فرانت‌اند موجود)
-//   ★ حفظ displayName mapping (مطابق فرانت‌اند موجود)
+// src/app/api/customers/route.ts — GET/POST/PUT/DELETE (v6.2)
+// ★ v6.2: نرمال‌سازی فارسی برای جستجو (ي/ك عربی ↔ ی/ک فارسی)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -17,13 +9,26 @@ import { requireSubscriptionAndLimit } from '@/lib/plan-guard'
 import { checkPlanLimit } from '@/lib/plan-limits'
 
 // ═══════════════════════════════════════════════════════════════
-//  Helper: find customers با fallback برای column های ناقص
-//  اگر دیتابیس قدیمی باشد و بعضی ستون‌ها (مثل nationalCode, lastPurchaseAt,
-//  portalToken) وجود نداشته باشند، این تابع به‌صورت خودکار به select سبک‌تر
-//  برمی‌گردد.
+//  ★ v6.2: نرمال‌سازی فارسی سمت سرور
 // ═══════════════════════════════════════════════════════════════
+
+function normalizeFa(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\u064A/g, '\u06CC')  // ي → ی
+    .replace(/\u0643/g, '\u06A9')  // ك → ک
+    .replace(/\u0624/g, '\u0648')  // ؤ → و
+    .replace(/[\u0625\u0623\u0622]/g, '\u0627')  // إ أ آ → ا
+    .replace(/\u0629/g, '\u0647')  // ة → ه
+    .replace(/[\u064B-\u0652]/g, '')  // حذف اعراب
+    .replace(/\u0640/g, '')  // حذف کشیده
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Helper: find customers با fallback
+// ═══════════════════════════════════════════════════════════════
+
 async function findCustomers(tenantDb: any, where: any, take: number, orderBy: any[] = []) {
-  // ★ تلاش ۱: با تمام ستون‌ها
   try {
     const customers = await tenantDb.customer.findMany({ where, take, orderBy })
     return { customers, hasFullColumns: true }
@@ -35,7 +40,6 @@ async function findCustomers(tenantDb: any, where: any, take: number, orderBy: a
     console.warn('[Customers] Some columns missing, using fallback select:', msg.slice(0, 100))
   }
 
-  // ★ تلاش ۲: با select سبک‌تر (ستون‌های اصلی)
   try {
     const customers = await tenantDb.customer.findMany({
       where, take,
@@ -49,7 +53,6 @@ async function findCustomers(tenantDb: any, where: any, take: number, orderBy: a
     return { customers, hasFullColumns: false }
   } catch (err2: any) {
     console.warn('[Customers] Fallback also failed:', err2?.message)
-    // ★ تلاش ۳: حداقل ستون‌ها
     try {
       const customers = await tenantDb.customer.findMany({
         where, take,
@@ -63,46 +66,71 @@ async function findCustomers(tenantDb: any, where: any, take: number, orderBy: a
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Helper: ساخت شرط جستجوی سرور-ساید
-//  این تابع ۵ فیلد را جستجو می‌کند:
-//  - firstName (contains)
-//  - lastName (contains)
-//  - mobile (contains)
-//  - code (contains)
-//  - nationalCode (contains)
-//  + حالت ترکیبی: "علی احمدی" → firstName CONTAINS "علی" AND lastName CONTAINS "احمدی"
+//  ★ v6.2: buildSearchWhere با نرمال‌سازی فارسی
+//  استفاده از both forms (عربی + فارسی) برای هر ترم
 // ═══════════════════════════════════════════════════════════════
+
 function buildSearchWhere(search: string): any {
   const trimmed = search.trim()
   if (!trimmed) return null
+
+  // نرمال‌سازی به شکل فارسی استاندارد
+  const normalized = normalizeFa(trimmed)
+  
+  // همچنین شکل عربی را هم بسازیم (برای رکوردهایی که با ي/ك ثبت شده‌اند)
+  const arabicForm = normalized
+    .replace(/\u06CC/g, '\u064A')  // ی → ي
+    .replace(/\u06A9/g, '\u0643')  // ک → ك
+
+  // شکل‌های مختلف برای جستجو
+  const searchForms = Array.from(new Set([trimmed, normalized, arabicForm])).filter(Boolean)
 
   const parts = trimmed.split(/\s+/).filter(Boolean)
   const firstPart = parts[0] || trimmed
   const secondPart = parts[1] || ''
 
-  const orConditions: any[] = [
-    { firstName: { contains: trimmed } },
-    { lastName: { contains: trimmed } },
-    { mobile: { contains: trimmed } },
-    { code: { contains: trimmed } },
-    { nationalCode: { contains: trimmed } },
-  ]
+  const orConditions: any[] = []
 
-  // ★ حالت ترکیبی: "علی احمدی"
+  // ★ جستجو در هر فیلد با تمام شکل‌های عبارت
+  for (const form of searchForms) {
+    orConditions.push({ firstName: { contains: form } })
+    orConditions.push({ lastName: { contains: form } })
+    orConditions.push({ mobile: { contains: form } })
+    orConditions.push({ code: { contains: form } })
+    orConditions.push({ nationalCode: { contains: form } })
+  }
+
+  // ★ حالت ترکیبی: "رضا بخشی" با هر دو شکل
   if (parts.length >= 2) {
-    orConditions.push({
-      AND: [
-        { firstName: { contains: firstPart } },
-        { lastName: { contains: secondPart } },
-      ],
-    })
-    // برعکس هم ممکن است: lastName "علی" + firstName "احمدی" (نادر اما ممکن)
-    orConditions.push({
-      AND: [
-        { firstName: { contains: secondPart } },
-        { lastName: { contains: firstPart } },
-      ],
-    })
+    const firstForms = Array.from(new Set([
+      firstPart,
+      normalizeFa(firstPart),
+      normalizeFa(firstPart).replace(/\u06CC/g, '\u064A').replace(/\u06A9/g, '\u0643')
+    ])).filter(Boolean)
+    
+    const secondForms = Array.from(new Set([
+      secondPart,
+      normalizeFa(secondPart),
+      normalizeFa(secondPart).replace(/\u06CC/g, '\u064A').replace(/\u06A9/g, '\u0643')
+    ])).filter(Boolean)
+
+    // ترکیب همه حالت‌های ممکن
+    for (const first of firstForms) {
+      for (const second of secondForms) {
+        orConditions.push({
+          AND: [
+            { firstName: { contains: first } },
+            { lastName: { contains: second } },
+          ],
+        })
+        orConditions.push({
+          AND: [
+            { firstName: { contains: second } },
+            { lastName: { contains: first } },
+          ],
+        })
+      }
+    }
   }
 
   return { OR: orConditions }
@@ -110,12 +138,8 @@ function buildSearchWhere(search: string): any {
 
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/customers
-//  Query params:
-//    tenantId (required, via middleware)
-//    search   (optional) — جستجو در نام، موبایل، کد، کد ملی
-//    limit    (optional, default 200)
-//    activeOnly (optional, default false) — فقط مشتریان غیر لیست سیاه
 // ═══════════════════════════════════════════════════════════════
+
 export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant.tenantDb
@@ -125,19 +149,14 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     const search = searchParams.get('search') || ''
     const activeOnly = searchParams.get('activeOnly') === 'true'
 
-    // ★ ساخت شرط where
     const where: any = { tenantId }
     if (activeOnly) where.isBlacklisted = false
 
-    // ★ افزودن شرط جستجو
     const searchWhere = buildSearchWhere(search)
     if (searchWhere) {
       Object.assign(where, searchWhere)
     }
 
-    // ★★★ v6.1: orderBy با fallback
-    // اول بر اساس lastPurchaseAt (مشتریان اخیر اول)، سپس createdAt
-    // اگر lastPurchaseAt وجود نداشت، به createdAt برمی‌گردیم
     let orderBy: any[] = [
       { lastPurchaseAt: 'desc' },
       { createdAt: 'desc' },
@@ -146,7 +165,6 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
     const { customers: rawCustomers, hasFullColumns } = await findCustomers(tenantDb, where, limit + 1, orderBy)
 
-    // اگر orderBy خطا داد (مثلاً lastPurchaseAt موجود نبود)، با orderBy ساده تلاش کن
     let customers = rawCustomers
     if (customers.length === 0 && search && hasFullColumns === false) {
       const retry = await findCustomers(tenantDb, where, limit + 1, [{ createdAt: 'desc' }])
@@ -156,13 +174,11 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     const hasMore = customers.length > limit
     const result = hasMore ? customers.slice(0, limit) : customers
 
-    // ★★★ mapping: افزودن displayName برای فرانت‌اند
     const mapped = result.map((c: any) => ({
       ...c,
       displayName: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
     }))
 
-    // ★★★ plan limits برای نمایش در UI
     let planLimits: any = null
     try {
       const customerLimit = await checkPlanLimit(tenantId, 'customers')
@@ -189,7 +205,9 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/customers — ایجاد مشتری جدید
+//  ★ v6.2: نرمال‌سازی نام هنگام ذخیره (اختیاری ولی توصیه شده)
 // ═══════════════════════════════════════════════════════════════
+
 export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const limitCheck = await requireSubscriptionAndLimit(tenant.tenantId, 'customers')
@@ -204,11 +222,9 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
     const tenantId = tenant.tenantId
     const body = await req.json()
 
-    // ★ تولید کد خودکار اگر ارائه نشده
     const count = await tenantDb.customer.count({ where: { tenantId } })
     const code = body.code || `C-${(count + 1).toString().padStart(4, '0')}`
 
-    // ★★★ v6.1: تجزیه نام کامل اگر firstName/lastName ارائه نشد
     let firstName = body.firstName
     let lastName = body.lastName
     if ((!firstName || !lastName) && body.name) {
@@ -216,6 +232,10 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
       firstName = firstName || parts[0] || ''
       lastName = lastName || parts.slice(1).join(' ') || ''
     }
+
+    // ★ v6.2: نرمال‌سازی نام‌ها هنگام ذخیره (برای جلوگیری از مشکلات آتی)
+    firstName = normalizeFa(firstName || '')
+    lastName = normalizeFa(lastName || '')
 
     const customer = await tenantDb.customer.create({
       data: {
@@ -256,7 +276,9 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
 
 // ═══════════════════════════════════════════════════════════════
 //  PUT /api/customers — به‌روزرسانی مشتری
+//  ★ v6.2: نرمال‌سازی نام هنگام به‌روزرسانی
 // ═══════════════════════════════════════════════════════════════
+
 export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant.tenantDb
@@ -267,17 +289,17 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
       return NextResponse.json({ success: false, error: 'شناسه مشتری الزامی است' }, { status: 400 })
     }
 
-    // ★ بررسی مالکیت مشتری (tenant isolation)
     const where: any = { id: body.id, tenantId }
     const existing = await tenantDb.customer.findFirst({ where })
     if (!existing) {
       return NextResponse.json({ success: false, error: 'مشتری یافت نشد' }, { status: 404 })
     }
 
-    // ★ ساخت داده‌های به‌روزرسانی (فقط فیلدهای ارائه‌شده)
     const updateData: Record<string, any> = {}
-    if (body.firstName !== undefined) updateData.firstName = body.firstName
-    if (body.lastName !== undefined) updateData.lastName = body.lastName
+    
+    // ★ v6.2: نرمال‌سازی نام‌ها هنگام به‌روزرسانی
+    if (body.firstName !== undefined) updateData.firstName = normalizeFa(body.firstName)
+    if (body.lastName !== undefined) updateData.lastName = normalizeFa(body.lastName)
     if (body.mobile !== undefined) updateData.mobile = body.mobile || null
     if (body.nationalCode !== undefined) updateData.nationalCode = body.nationalCode || null
     if (body.address !== undefined) updateData.address = body.address || null
@@ -302,9 +324,9 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/customers — حذف نرم (soft delete)
-//  ★ به‌جای حذف فیزیکی، مشتری را blacklist می‌کند تا تاریخچه فاکتورها حفظ شود
+//  DELETE /api/customers — حذف نرم
 // ═══════════════════════════════════════════════════════════════
+
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant.tenantDb
@@ -316,14 +338,12 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
       return NextResponse.json({ success: false, error: 'شناسه مشتری الزامی است' }, { status: 400 })
     }
 
-    // ★ بررسی مالکیت مشتری
     const where: any = { id: customerId, tenantId }
     const existing = await tenantDb.customer.findFirst({ where })
     if (!existing) {
       return NextResponse.json({ success: false, error: 'مشتری یافت نشد' }, { status: 404 })
     }
 
-    // ★ soft delete: blacklist می‌کنیم تا تاریخچه فاکتورها حفظ شود
     await tenantDb.customer.update({
       where: { id: customerId },
       data: { isBlacklisted: true },

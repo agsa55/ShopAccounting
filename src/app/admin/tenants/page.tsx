@@ -1350,7 +1350,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
                     <strong className="font-black block mb-1">⚠️ هشدار جدی!</strong>
                     این عمل <strong>غیرقابل بازگشت</strong> است. تمام اطلاعات فروشگاه شامل:
                     <ul className="mt-2 space-y-0.5 text-[10px]">
-                      <li>• محصولات، مشتریان، فاکتورها</li>
+                      <li>• کالاها، مشتریان، فاکتورها</li>
                       <li>• حساب‌ها، چک‌ها، پرداخت‌ها</li>
                       <li>• کاربران و تنظیمات</li>
                       <li>• تمام رکوردهای مرتبط</li>

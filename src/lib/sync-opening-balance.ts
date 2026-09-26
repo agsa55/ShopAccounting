@@ -1,8 +1,9 @@
 // ============================================================================
-// src/lib/sync-opening-balance.ts — v11.0
+// src/lib/sync-opening-balance.ts — v11.1
 // ★ همگام‌سازی خودکار سند افتتاحیه با موجودی کالاها
 // ★ هر بار که کالایی با موجودی اولیه ثبت یا فاکتور خرید ثبت می‌شود،
 //   ارزش موجودی کالا در سند افتتاحیه به‌روزرسانی می‌شود
+// ★ v11.1: حذف چک سال مالی فعال (مشکل اصلی حل شد)
 // ============================================================================
 
 /**
@@ -12,7 +13,8 @@
  * 1. ارزش کل موجودی کالاها را محاسبه می‌کند (Σ currentStock × purchasePrice)
  * 2. آیتم inventory در InitialBalance را آپدیت یا ایجاد می‌کند
  * 3. فقط اگر سند posted نباشد (draft باشد) کار می‌کند
- * 4. فقط برای سال مالی فعال کار می‌کند
+ * 
+ * ★ v11.1: دیگر نیازی به سال مالی فعال ندارد
  * 
  * @param tenantId - شناسه فروشگاه
  * @param tenantDb - دیتابیس tenant (برای tenant isolation)
@@ -49,29 +51,14 @@ export async function syncOpeningBalanceWithInventory(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // ۲. پیدا کردن سال مالی فعال (اختیاری)
+    // ★ v11.1: چک سال مالی حذف شد
+    // قبلاً اینجا چک می‌کردیم سال مالی فعال وجود داشته باشد
+    // اما این چک باعث می‌شد برای فروشگاه‌هایی که هنوز ویزارد را
+    // کامل نکرده‌اند، موجودی کالا در سند افتتاحیه اضافه نشود.
     // ═══════════════════════════════════════════════════════════════
-    const activeFiscalYear = await tenantDb.fiscalYear.findFirst({
-      where: {
-        tenantId,
-        isActive: true,
-        isClosed: false,
-      },
-      orderBy: { startDate: 'desc' },
-    })
-
-    if (!activeFiscalYear) {
-      console.log('[SyncOpening] ⚠️ No active fiscal year found - skipping sync')
-      return {
-        success: true,
-        message: 'سال مالی فعال یافت نشد',
-      }
-    }
-
-    console.log('[SyncOpening] ✅ Active fiscal year:', activeFiscalYear.name)
 
     // ═══════════════════════════════════════════════════════════════
-    // ۳. محاسبه ارزش کل موجودی کالاها
+    // ۲. محاسبه ارزش کل موجودی کالاها
     // ═══════════════════════════════════════════════════════════════
     const productsWithStock = await tenantDb.product.findMany({
       where: {
@@ -99,7 +86,7 @@ export async function syncOpeningBalanceWithInventory(
     })
 
     // ═══════════════════════════════════════════════════════════════
-    // ۴. پیدا کردن آیتم inventory موجود (draft)
+    // ۳. پیدا کردن آیتم inventory موجود (draft)
     // ═══════════════════════════════════════════════════════════════
     const existingInventory = await tenantDb.initialBalance.findFirst({
       where: {
@@ -110,7 +97,7 @@ export async function syncOpeningBalanceWithInventory(
     })
 
     // ═══════════════════════════════════════════════════════════════
-    // ۵. آپدیت یا ایجاد آیتم inventory
+    // ۴. آپدیت یا ایجاد آیتم inventory
     // ═══════════════════════════════════════════════════════════════
     if (existingInventory) {
       // آیتم موجود است - فقط مقدار را آپدیت کن

@@ -68,6 +68,37 @@ export const GET = withTenantAndPermission('accounting')(async (
 
     console.log('[InitialBalance GET] found:', balances.length, 'balances, isPosted:', isPosted)
 
+      // ★ v10.9.9: شمارش کالاها و انبارها برای هشدار قبل از ثبت نهایی
+    let productCount = 0
+    let warehouseCount = 0
+    let totalInventoryValue = 0
+
+    try {
+      productCount = await tenantDb.product.count({
+        where: { tenantId, isActive: true },
+      })
+      warehouseCount = await tenantDb.warehouse.count({
+        where: { tenantId, isActive: true },
+      })
+      // محاسبه ارزش کل موجودی کالا
+      const inventoryProducts = await tenantDb.product.findMany({
+        where: { tenantId, isActive: true },
+        select: { currentStock: true, purchasePrice: true },
+      })
+      totalInventoryValue = inventoryProducts.reduce((sum: number, p: any) => {
+        return sum + (Number(p.currentStock) || 0) * (Number(p.purchasePrice) || 0)
+      }, 0)
+    } catch (err) {
+      console.warn('[InitialBalance GET] Failed to count products:', err)
+    }
+
+    console.log('[InitialBalance GET] 📊 Stats:', {
+      balances: balances.length,
+      products: productCount,
+      warehouses: warehouseCount,
+      inventoryValue: totalInventoryValue,
+    })
+
     return NextResponse.json({
       success: true,
       data: balances,
@@ -78,8 +109,13 @@ export const GET = withTenantAndPermission('accounting')(async (
         isPosted,
         journalEntryId,
         count: balances.length,
+        // ★ v10.9.9: فیلدهای جدید برای هشدار
+        productCount,
+        warehouseCount,
+        totalInventoryValue,
       },
     })
+    
   } catch (error: any) {
     console.error('[InitialBalance GET] Error:', error)
     return NextResponse.json(

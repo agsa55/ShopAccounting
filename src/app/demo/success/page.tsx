@@ -280,7 +280,7 @@ export default function DemoSuccessPage() {
             <ul className="space-y-1.5 text-xs text-gray-600">
               <li className="flex items-start gap-1.5">
                 <span className="text-emerald-500 mt-0.5">✓</span>
-                <span>از منوی «محصولات»، چند محصول نمونه اضافه کنید</span>
+                <span>از منوی «کالاها»، چند محصول نمونه اضافه کنید</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="text-emerald-500 mt-0.5">✓</span>

@@ -174,16 +174,84 @@ const isBasicPlan = rawTierName === 'simple' || rawTierName === 'basic' || rawTi
       }
 
       // ── تصمیم‌گیری نهایی ────────────────────────────────────
+        // ── تصمیم‌گیری نهایی ────────────────────────────────────
       let status: SetupStatus = 'ready'
       let wizardData: any = null
 
-      // ★★★ منطق اصلی تصمیم‌گیری (v3.0)
+      // ★★★ v4.0: بررسی کامل بودن راه‌اندازی
+      // بررسی موجودی اولیه (حساب‌های دائمی با مانده)
+      const permanentAccountsWithBalance = await tenantDb.account.count({
+        where: {
+          tenantId,
+          isActive: true,
+          type: { in: ['صندوق', 'بانک', 'موجودی', 'دریافتنی', 'دارایی', 'دارایی_ثابت', 'کاهنده_دارایی', 'پرداختنی', 'بدهی', 'سرمایه'] },
+        },
+      })
+
+      // بررسی وجود سند موجودی اولیه
+      const initialBalanceEntry = await tenantDb.journalEntry.findFirst({
+        where: {
+          tenantId,
+          sourceType: 'initial_balance',
+          status: { in: ['posted', 'draft'] },
+        },
+      })
+
+      const hasSetupCompleted = warehouses.length > 0 && (permanentAccountsWithBalance > 0 || initialBalanceEntry)
+
+      // ★★★ v4.0: منطق اصلاح‌شده
       if (activeYear) {
-        // ✅ سال فعال وجود دارد → آماده استفاده
-        status = 'ready'
-      } else if (allYears.length === 0 && !lastBasicClose) {
+        if (hasSetupCompleted) {
+          // ✅ سال فعال + انبار + موجودی اولیه → واقعاً آماده
+          status = 'ready'
+        } else {
+          // ⚠️ سال فعال وجود دارد اما راه‌اندازی کامل نیست
+          // → ویزارد باید باز شود
+          status = 'first_setup'
+          
+          wizardData = {
+            isBasicPlan,
+            existingYear: {
+              id: activeYear.id,
+              name: activeYear.name,
+              startDate: activeYear.startDate,
+              endDate: activeYear.endDate,
+            },
+            existingWarehouses: warehouses.map((w: any) => ({
+              id: w.id,
+              name: w.name,
+              code: w.code,
+              isDefault: w.isDefault,
+            })),
+            planLimits: {
+              maxWarehouses: features.maxWarehouses || 1,
+              currentWarehouses: warehouses.length,
+            },
+            suggestedNewYear: null,
+            closingDetails: null,
+          }
+        }
+      
+          } else if (allYears.length === 0 && !lastBasicClose) {
         // 🆕 هیچ سال مالی نیست و سند اختتامیه هم نیست → Wizard بار اول
         status = 'first_setup'
+        
+        wizardData = {
+          isBasicPlan,
+          existingYear: null,
+          existingWarehouses: warehouses.map((w: any) => ({
+            id: w.id,
+            name: w.name,
+            code: w.code,
+            isDefault: w.isDefault,
+          })),
+          planLimits: {
+            maxWarehouses: features.maxWarehouses || 1,
+            currentWarehouses: warehouses.length,
+          },
+          suggestedNewYear: null,
+          closingDetails: null,
+        }
       } else if (isBasicPlan && lastBasicClose) {
         // ★★★ پلن پایه با سند اختتامیه → basic_renewal_setup
         console.log('[SetupWizardStatus] 📦 Basic plan with closing entry → basic_renewal_setup')
@@ -261,12 +329,16 @@ const isBasicPlan = rawTierName === 'simple' || rawTierName === 'basic' || rawTi
         }
       }
 
-      console.log('[SetupWizardStatus] Decision:', {
+       console.log('[SetupWizardStatus] Decision:', {
         status,
         isBasicPlan,
         hasActiveYear: !!activeYear,
         hasLastClosedYear: !!lastClosedYear,
         hasLastBasicClose: !!lastBasicClose,
+        hasSetupCompleted,  // ★ v4.0
+        warehousesCount: warehouses.length,
+        permanentAccountsWithBalance,  // ★ v4.0
+        hasInitialBalanceEntry: !!initialBalanceEntry,  // ★ v4.0
         isLifetime: subStatus.isLifetime,
         isExpired: subStatus.isExpired,
       })

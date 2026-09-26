@@ -38,7 +38,7 @@ export const GET = withTenantAndPermission('dashboard')(
         }
       }
 
-      // ─── دریافت محصولات ─────────────────────────────────────
+      // ─── دریافت کالاها ─────────────────────────────────────
       const products = await tenantDb.product.findMany({
         where,
         include: {

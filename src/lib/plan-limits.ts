@@ -491,7 +491,7 @@ export async function checkPlanLimit(
 ): Promise<PlanLimitResult> {
   const defaults: Record<string, PlanLimitResult> = {
     users:     { allowed: true, current: 0, limit: 2,     resourceName: 'users',     resourceNameFa: 'کاربران',    remaining: 2,     percentUsed: 0 },
-    products:  { allowed: true, current: 0, limit: 200,   resourceName: 'products',  resourceNameFa: 'محصولات',    remaining: 200,   percentUsed: 0 },
+    products:  { allowed: true, current: 0, limit: 200,   resourceName: 'products',  resourceNameFa: 'کالاها',    remaining: 200,   percentUsed: 0 },
     invoices:  { allowed: true, current: 0, limit: 500,   resourceName: 'invoices',  resourceNameFa: 'فاکتورها',   remaining: 500,   percentUsed: 0 },
     customers: { allowed: true, current: 0, limit: 200,   resourceName: 'customers', resourceNameFa: 'مشتریان',    remaining: 200,   percentUsed: 0 },
   };

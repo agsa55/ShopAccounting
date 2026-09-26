@@ -546,7 +546,7 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
         </ChartCard>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="پرفروش‌ترین محصولات ماه" icon={<Package className="w-4 h-4 text-indigo-600" />}>
+        <ChartCard title="پرفروش‌ترین کالاها ماه" icon={<Package className="w-4 h-4 text-indigo-600" />}>
           {topProducts.length === 0 ? <EmptyState message="داده‌ای موجود نیست" /> : (
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={topProducts.map((p: any) => ({ name: p.name, فروش: p.totalSales, تعداد: p.totalQuantity }))} layout="vertical" margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -561,7 +561,7 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
         </ChartCard>
         <ChartCard title="کالاهای رو به اتمام" icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}>
           {lowStockProducts.length === 0 ? (
-            <div className="py-8 text-center"><CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500" /><p className="text-sm text-emerald-600">همه محصولات موجود هستند ✓</p></div>
+            <div className="py-8 text-center"><CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500" /><p className="text-sm text-emerald-600">همه کالاها موجود هستند ✓</p></div>
           ) : (
             <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
               {lowStockProducts.slice(0, 8).map((p: any, idx: number) => (

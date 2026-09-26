@@ -106,7 +106,7 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
 
   features: [
     { id: 'f1', iconName: 'ShoppingCart', title: 'صندوق فروش', desc: 'ثبت سریع فاکتور، مدیریت نقدی و نسیه با رابطی روان', color: 'bg-violet-100 text-violet-600', grad: 'from-violet-500 to-purple-600', light: 'bg-violet-50', order: 1 },
-    { id: 'f2', iconName: 'Package', title: 'مدیریت محصولات', desc: 'کنترل موجودی، قیمت‌گذاری و دسته‌بندی هوشمند', color: 'bg-blue-100 text-blue-600', grad: 'from-blue-500 to-indigo-600', light: 'bg-blue-50', order: 2 },
+    { id: 'f2', iconName: 'Package', title: 'مدیریت کالاها', desc: 'کنترل موجودی، قیمت‌گذاری و دسته‌بندی هوشمند', color: 'bg-blue-100 text-blue-600', grad: 'from-blue-500 to-indigo-600', light: 'bg-blue-50', order: 2 },
     { id: 'f3', iconName: 'Users', title: 'مشتریان', desc: 'مدیریت مشتریان، گردش حساب و تاریخچه خرید', color: 'bg-cyan-100 text-cyan-600', grad: 'from-cyan-500 to-sky-500', light: 'bg-cyan-50', order: 3 },
     { id: 'f4', iconName: 'CreditCard', title: 'اقساط', desc: 'مدیریت فروش قسطی، سررسیدها و یادآوری‌ها', color: 'bg-amber-100 text-amber-600', grad: 'from-amber-500 to-orange-500', light: 'bg-amber-50', order: 4 },
     { id: 'f5', iconName: 'BookOpen', title: 'حسابداری', desc: 'اسناد خودکار و دستی، تراز آزمایشی دقیق', color: 'bg-purple-100 text-purple-600', grad: 'from-purple-500 to-fuchsia-600', light: 'bg-purple-50', order: 5 },
