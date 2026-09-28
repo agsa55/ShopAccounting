@@ -1,12 +1,6 @@
 // ============================================================================
-// src/app/api/reports/designer/preview/route.ts — v12.5 ★★★
-// ShopAccounting — Report Preview API
-// ----------------------------------------------------------------------------
-// ★ v12.5: بازنویسی کامل بر اساس schema.prisma واقعی
-//   - پشتیبانی کامل از Decimal و روابط
-//   - مدیریت صحیح فیلدهای NOT NULL در فیلترها
-//   - پشتیبانی از فرمول‌های رشته‌ای و عددی
-//   - JS-side aggregation برای دور زدن محدودیت‌های Prisma
+// src/app/api/reports/designer/preview/route.ts — v12.9 ★★★
+// ShopAccounting — Report Preview API (Railway Compatible)
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -33,16 +27,6 @@ const MAX_PREVIEW_ROWS = 5000
 const DEFAULT_PREVIEW_ROWS = 100
 const MAX_SCAN_ROWS = 50000
 
-
-// ═══════════════════════════════════════════════════════════════
-//  Helper: تبدیل نام مدل به نام پراپرتی در Prisma Client
-//  مثال: 'InvoiceItem' → 'invoiceItem' (نه 'invoiceitem')
-// ═══════════════════════════════════════════════════════════════
-
-function getPrismaModelKey(modelName: string): string {
-  if (!modelName) return ''
-  return modelName.charAt(0).toLowerCase() + modelName.slice(1)
-}
 // ═══════════════════════════════════════════════════════════════
 //  Helper: Extract formula field names
 // ═══════════════════════════════════════════════════════════════
@@ -74,7 +58,6 @@ function evaluateFormula(formula: string, row: any, datasetId: string): any {
         value = value?.[part]
       }
 
-      // اگر فیلد رشته‌ای است یا مقدار رشته‌ای دارد
       if (fieldDef.type === 'string' || typeof value === 'string') {
         hasStringValue = true
         const strValue = String(value || '')
@@ -83,7 +66,6 @@ function evaluateFormula(formula: string, row: any, datasetId: string): any {
           JSON.stringify(strValue)
         )
       } else {
-        // فیلد عددی (شامل Decimal)
         const numValue =
           value && typeof value.toNumber === 'function'
             ? value.toNumber()
@@ -96,7 +78,6 @@ function evaluateFormula(formula: string, row: any, datasetId: string): any {
       }
     }
 
-    // اعتبارسنجی
     if (hasStringValue) {
       if (!/^("[^"]*"|'[^']*'|\+|\s|\(|\))+$/i.test(expression)) {
         return ''
@@ -117,6 +98,15 @@ function evaluateFormula(formula: string, row: any, datasetId: string): any {
   } catch {
     return 0
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Helper: Convert model name to Prisma client property
+// ═══════════════════════════════════════════════════════════════
+
+function getPrismaModelKey(modelName: string): string {
+  if (!modelName) return ''
+  return modelName.charAt(0).toLowerCase() + modelName.slice(1)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -164,7 +154,6 @@ function buildWhereClause(filters: any[], datasetId: string): any {
 
   const conditions: any[] = []
 
-  // فیلدهای NOT NULL که از schema می‌دانیم
   const notNullFields = [
     'id', 'number', 'status', 'paymentType', 'invoiceType',
     'subTotal', 'discountAmount', 'taxAmount', 'totalAmount',
@@ -186,7 +175,6 @@ function buildWhereClause(filters: any[], datasetId: string): any {
     const isRelation = source.includes('.')
     const parts = source.split('.')
 
-    // بررسی مقدار خالی
     const isEmpty =
       value === null ||
       value === undefined ||
@@ -197,7 +185,6 @@ function buildWhereClause(filters: any[], datasetId: string): any {
     const needsValue = !['isNull', 'isNotNull'].includes(operator)
     if (needsValue && isEmpty) continue
 
-    // تبدیل مقدار
     const convertValue = (v: any): any => {
       if (v === null || v === undefined || v === '') return null
       if (fieldDef.type === 'number' || fieldDef.type === 'currency') {
@@ -350,9 +337,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-       const definition: ReportDefinition = await req.json()
+    const definition: ReportDefinition = await req.json()
 
-    // ★ لاگ دیباگ - بعد از رفع مشکل حذف شود
+    // Debug log
     console.log('[Preview API] Received definition:', JSON.stringify({
       datasetId: definition.datasetId,
       columns: definition.columns?.map(c => ({ field: c.field, aggregate: c.aggregate })),
@@ -361,7 +348,6 @@ export async function POST(req: NextRequest) {
       orderBy: definition.orderBy,
     }, null, 2))
 
-    // Validation
     if (!definition.datasetId) {
       return NextResponse.json(
         { success: false, error: 'datasetId الزامی است' },
@@ -385,24 +371,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Build where clause
-    // Build where clause
     const filterConditions = buildWhereClause(
       definition.filters || [],
       definition.datasetId
     )
 
-    // ★ v12.7: ساخت فیلتر tenantId با پشتیبانی از مسیرهای تودرتو
-    // برای مدل‌هایی که مستقیم ندارند (مثل InvoiceItem)
     const where: any = { ...filterConditions }
 
     const tenantFilterPath = dataset.tenantFilterPath || 'tenantId'
     const tenantPathParts = tenantFilterPath.split('.')
 
     if (tenantPathParts.length === 1) {
-      // مسیر مستقیم: { tenantId: '...' }
       where[tenantPathParts[0]] = tenantId
     } else {
-      // مسیر تودرتو: { invoice: { tenantId: '...' } }
       let current = where
       for (let i = 0; i < tenantPathParts.length - 1; i++) {
         if (!current[tenantPathParts[i]]) {
@@ -433,12 +414,10 @@ export async function POST(req: NextRequest) {
     let rows: ReportResultRow[] = []
     let totalRows = 0
 
-    // Helper: خواندن مقدار از مسیر تودرتو
     const getValue = (obj: any, path: string): any => {
       return path.split('.').reduce((acc, part) => acc?.[part], obj)
     }
 
-    // Helper: تبدیل به عدد
     const toNum = (v: any): number => {
       if (v === null || v === undefined) return 0
       if (typeof v === 'number') return isNaN(v) ? 0 : v
@@ -451,6 +430,10 @@ export async function POST(req: NextRequest) {
     }
 
     const startTime = Date.now()
+
+    // ★ استفاده از db.client به جای prisma
+    const prismaClient = db.client as any
+    const modelKey = getPrismaModelKey(dataset.model)
 
     if (hasAggregates) {
       // ═══════════════════════════════════════════════════════
@@ -508,14 +491,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const rawRows = await (prisma as any)[getPrismaModelKey(dataset.model)].findMany(
-        {
-          where,
-          select: scanSelect,
-          take: scanLimit,
-          ...(scanOrderBy.length > 0 ? { orderBy: scanOrderBy } : {}),
-        }
-      )
+      const rawRows = await prismaClient[modelKey].findMany({
+        where,
+        select: scanSelect,
+        take: scanLimit,
+        ...(scanOrderBy.length > 0 ? { orderBy: scanOrderBy } : {}),
+      })
 
       const groupMap = new Map<string, any>()
       const SINGLE_GROUP_KEY = '__single_group__'
@@ -597,11 +578,10 @@ export async function POST(req: NextRequest) {
 
           const acc = group.__agg[aggKey]
 
-              if (value !== null && value !== undefined) {
+          if (value !== null && value !== undefined) {
             acc.count += 1
 
             const num = toNum(value)
-            // ★ اگر مقدار غیرعددی است (مثل id رشته‌ای)، تعداد را جمع کن
             const isNonNumeric = typeof value === 'string' && isNaN(Number(value)) && value.trim() !== ''
 
             if (col.aggregate === 'sum' || col.aggregate === 'avg') {
@@ -611,6 +591,7 @@ export async function POST(req: NextRequest) {
                 acc.sum += num
               }
             }
+
             if (col.aggregate === 'countDistinct') {
               acc.distinct.add(String(value))
             }
@@ -694,12 +675,7 @@ export async function POST(req: NextRequest) {
 
       if (definition.orderBy && definition.orderBy.length > 0) {
         const possibleAggregates: AggregateOperator[] = [
-          'sum',
-          'avg',
-          'count',
-          'countDistinct',
-          'min',
-          'max',
+          'sum', 'avg', 'count', 'countDistinct', 'min', 'max',
         ]
 
         const normalizeSortValue = (v: any): any => {
@@ -809,13 +785,9 @@ export async function POST(req: NextRequest) {
         simpleQuery.orderBy = orderByArr
       }
 
-      const simpleResult = await (prisma as any)[
-        getPrismaModelKey(dataset.model)
-      ].findMany(simpleQuery)
+      const simpleResult = await prismaClient[modelKey].findMany(simpleQuery)
 
-      totalRows = await (prisma as any)[getPrismaModelKey(dataset.model)].count({
-        where,
-      })
+      totalRows = await prismaClient[modelKey].count({ where })
 
       rows = simpleResult.map((row: any) => {
         const flatRow: ReportResultRow = {}
@@ -849,7 +821,6 @@ export async function POST(req: NextRequest) {
 
     const executionTimeMs = Date.now() - startTime
 
-    // Build response columns
     const responseColumns: ReportResultColumn[] = []
 
     for (const col of definition.columns) {
@@ -874,7 +845,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-       const meta: ReportResultMeta = {
+    const meta: ReportResultMeta = {
       returnedRows: rows.length,
       totalRows,
       executionTimeMs,
