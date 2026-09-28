@@ -1914,10 +1914,11 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
                     </Card>
                   </div>
 
-                  {/* ─── Actions: Preview + Save + Export + Print + Reset + Limit ─── */}
+                                 {/* ─── Actions: Preview + Save + Export + Print + Reset + Limit ─── */}
                   <Card className="border-gray-200">
                     <CardContent className="p-3">
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                      <div className="space-y-3">
+                        {/* ردیف اول: انتخاب حداکثر ردیف */}
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] text-gray-500 whitespace-nowrap">حداکثر ردیف:</span>
                           <Select
@@ -1937,67 +1938,68 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
                           </Select>
                         </div>
 
-                        <div className="flex-1" />
+                        {/* ردیف دوم: دکمه‌های اصلی (با grid responsive) */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                          <Button
+                            onClick={handlePreview}
+                            disabled={previewLoading || columns.length === 0}
+                            className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 text-xs h-9 w-full"
+                          >
+                            {previewLoading ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                در حال اجرا...
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3.5 h-3.5" />
+                                پیش‌نمایش
+                              </>
+                            )}
+                          </Button>
 
-                        <Button
-                          onClick={handlePreview}
-                          disabled={previewLoading || columns.length === 0}
-                          className="bg-blue-600 hover:bg-blue-700 text-white gap-2 text-xs h-9"
-                        >
-                          {previewLoading ? (
-                            <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              در حال اجرا...
-                            </>
-                          ) : (
-                            <>
-                              <Play className="w-3.5 h-3.5" />
-                              پیش‌نمایش گزارش
-                            </>
-                          )}
-                        </Button>
+                          <Button
+                            onClick={handleOpenSaveDialog}
+                            disabled={columns.length === 0}
+                            variant="outline"
+                            className="border-amber-300 text-amber-700 hover:bg-amber-50 gap-1.5 text-xs h-9 w-full"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            ذخیره
+                          </Button>
 
-                        <Button
-                          onClick={handleOpenSaveDialog}
-                          disabled={columns.length === 0}
-                          variant="outline"
-                          className="border-amber-300 text-amber-700 hover:bg-amber-50 gap-2 text-xs h-9"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          ذخیره
-                        </Button>
+                          <Button
+                            onClick={handleExportExcel}
+                            disabled={previewRows.length === 0}
+                            variant="outline"
+                            className="border-green-300 text-green-700 hover:bg-green-50 gap-1.5 text-xs h-9 w-full"
+                            title="خروجی اکسل"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            اکسل
+                          </Button>
 
-                        <Button
-                          onClick={handleExportExcel}
-                          disabled={previewRows.length === 0}
-                          variant="outline"
-                          className="border-green-300 text-green-700 hover:bg-green-50 gap-2 text-xs h-9"
-                          title="خروجی اکسل"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5" />
-                          اکسل
-                        </Button>
+                          <Button
+                            onClick={handlePrint}
+                            disabled={previewRows.length === 0}
+                            variant="outline"
+                            className="border-blue-300 text-blue-700 hover:bg-blue-50 gap-1.5 text-xs h-9 w-full"
+                            title="چاپ / ذخیره پی‌دی‌اف"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            چاپ
+                          </Button>
 
-                        <Button
-                          onClick={handlePrint}
-                          disabled={previewRows.length === 0}
-                          variant="outline"
-                          className="border-blue-300 text-blue-700 hover:bg-blue-50 gap-2 text-xs h-9"
-                          title="چاپ / ذخیره پی‌دی‌اف"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                          چاپ / PDF
-                        </Button>
-
-                        <Button
-                          onClick={handleReset}
-                          variant="outline"
-                          className="border-red-300 text-red-600 hover:bg-red-50 gap-2 text-xs h-9"
-                          title="پاک کردن همه چیز"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          پاک کردن
-                        </Button>
+                          <Button
+                            onClick={handleReset}
+                            variant="outline"
+                            className="border-red-300 text-red-600 hover:bg-red-50 gap-1.5 text-xs h-9 w-full col-span-2 sm:col-span-1"
+                            title="پاک کردن همه چیز"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            پاک کردن
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
