@@ -1,5 +1,11 @@
 'use client'
 
+// ============================================================================
+// UpgradePlanPage — نسخه هاردکد / قدیمی
+// ★ اصلاح‌شده برای همسان‌سازی عنوان پلن با Site Content / پنل مدیریت
+// ★ اگر این فایل در پروژه شما استفاده می‌شود، همین نسخه را جایگزین کنید.
+// ============================================================================
+
 import { useState } from 'react'
 import { useAppStore, AppView } from '@/lib/store'
 import {
@@ -9,6 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { useSiteContent } from '@/lib/site-content'
+import { getPlanTitle } from '@/lib/plan-display'
 
 /* ------------------------------------------------------------------ */
 /*  Plan tier definitions                                             */
@@ -163,11 +171,65 @@ const COLOR_MAPS: Record<string, { bg: string; border: string; text: string; rin
 
 export default function UpgradePlanPage() {
   const { currentTenant, setCurrentView } = useAppStore()
+  const { content: siteContent } = useSiteContent()
+
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const currentPlan = currentTenant?.planName || 'trial'
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ Helper: استخراج کلید اصلی پلن از id های ترکیبی
+  // مثال:
+  // simple_monthly -> simple
+  // professional_quarterly -> professional
+  // full_purchase -> enterprise
+  // ═══════════════════════════════════════════════════════════════
+  const getBasePlanKey = (id: string): string => {
+    const raw = String(id || '').toLowerCase().trim()
+
+    if (raw.startsWith('simple')) return 'simple'
+    if (raw.startsWith('professional')) return 'professional'
+    if (raw.startsWith('enterprise')) return 'enterprise'
+    if (raw.startsWith('full_purchase')) return 'enterprise'
+
+    if (raw === 'trial' || raw === 'demo' || raw === 'free') return 'simple'
+
+    return raw.split('_')[0] || 'simple'
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ Helper: ساخت عنوان محلی پلن از Site Content
+  // ═══════════════════════════════════════════════════════════════
+  const getLocalizedPlanTitle = (plan: PlanTier): string => {
+    const baseKey = getBasePlanKey(plan.id)
+
+    const fallback =
+      String(plan.nameFa || '')
+        .split(' - ')[0]
+        .trim() || 'پلن'
+
+    const title = getPlanTitle(siteContent, baseKey, fallback)
+
+    if (!plan.period || plan.period === 'سفارشی') {
+      return title
+    }
+
+    if (plan.id === 'full_purchase') {
+      return `${title} مادام‌العمر`
+    }
+
+    return `${title} - ${plan.period}`
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ★ عنوان پلن فعلی هم از Site Content خوانده شود
+  // ═══════════════════════════════════════════════════════════════
+  const currentPlanTitle =
+    currentPlan === 'trial'
+      ? 'آزمایشی'
+      : getPlanTitle(siteContent, getBasePlanKey(currentPlan), currentPlan)
 
   const handleUpgrade = async (planId: string) => {
     setSelectedPlan(planId)
@@ -232,7 +294,7 @@ export default function UpgradePlanPage() {
         <CardContent className="py-3 flex items-center gap-2">
           <CreditCard className="size-4 text-amber-600" />
           <span className="text-sm">
-            طرح فعلی: <strong>{currentPlan === 'trial' ? 'آزمایشی' : currentPlan}</strong>
+            طرح فعلی: <strong>{currentPlanTitle}</strong>
           </span>
         </CardContent>
       </Card>
@@ -278,7 +340,7 @@ export default function UpgradePlanPage() {
                     <Icon className="size-4" />
                   </div>
                   <div>
-                    <CardTitle className="text-sm font-semibold">{plan.nameFa}</CardTitle>
+                    <CardTitle className="text-sm font-semibold">{getLocalizedPlanTitle(plan)}</CardTitle>
                     <CardDescription className="text-[10px]">{plan.period}</CardDescription>
                   </div>
                 </div>

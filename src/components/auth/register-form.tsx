@@ -9,7 +9,7 @@
 // ★ ساده‌سازی UX برای دامنه تک‌نسخه‌ای (rahgooshasf.ir)
 // ============================================================================
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/lib/store'
 import { setAccessToken, setRefreshToken, setStoredUser } from '@/lib/auth-client'
@@ -23,7 +23,8 @@ import {
   Phone, User, Lock, Check, AlertCircle, RefreshCw,
   Zap, Crown, Building2, Sparkles, CreditCard, ShieldCheck,
 } from 'lucide-react'
-
+import { useSiteContent } from '@/lib/site-content'
+import { getPlanTitle, getPlanDescription, resolvePlanKey } from '@/lib/plan-display'
 const steps = [
   { id: 1, title: 'اطلاعات فروشگاه' },
   { id: 2, title: 'تأیید موبایل' },
@@ -118,6 +119,7 @@ const validateNationalCodeFormat = (code: string): { valid: boolean; message: st
 export default function RegisterForm() {
   const { selectedPlanId, setSelectedPlanId } = useAppStore()
   const router = useRouter()
+  const { content: siteContent } = useSiteContent()
   
   const [currentStep, setCurrentStep] = useState(1)
   const [error, setError] = useState('')
@@ -134,9 +136,24 @@ export default function RegisterForm() {
     }
   }, [setSelectedPlanId])
 
-  const planName = selectedPlanId || 'simple'
+   const planName = selectedPlanId || 'simple'
   const planInfo = PLAN_INFO[planName] || PLAN_INFO.simple
-  const effectiveTierName = planInfo.tierName || 'simple'
+  const effectiveTierName = planInfo.tierName || resolvePlanKey(planName)
+
+  // ★ عنوان پلن از محتوای سایت/پنل مدیریت خوانده می‌شود
+  const planTitle = useMemo(
+    () => getPlanTitle(siteContent, effectiveTierName, planInfo.title),
+    [siteContent, effectiveTierName, planInfo.title]
+  )
+  const planDescription = useMemo(
+    () =>
+      getPlanDescription(
+        siteContent,
+        effectiveTierName,
+        '۳ ماه استفاده رایگان — سپس فعال‌سازی مادام‌العمر'
+      ),
+    [siteContent, effectiveTierName]
+  )
 
   // ─── State های فرم ───────────────────────────────────────────────────
   const [storeName, setStoreName] = useState('')
@@ -596,11 +613,11 @@ if (finalToken && tenant?.id) {
                       پلن انتخابی شما
                     </span>
                   </div>
-                  <h3 className="text-lg font-black text-gray-900">
-                    {planInfo.title}
+                               <h3 className="text-lg font-black text-gray-900">
+                    {planTitle}
                   </h3>
-                  <p className="text-[11px] text-gray-600 mt-0.5">
-                    ۳ ماه استفاده رایگان — سپس فعال‌سازی مادام‌العمر
+                            <p className="text-[11px] text-gray-600 mt-0.5">
+                    {planDescription}
                   </p>
                 </div>
               </div>
@@ -951,7 +968,7 @@ if (finalToken && tenant?.id) {
                     </div>
                     <div className="text-[11px] text-emerald-700 space-y-0.5 pr-6">
                       <div>• فروشگاه <b>{storeName}</b> ایجاد می‌شود</div>
-                      <div>• دسترسی کامل به پلن <b>{planInfo.title}</b></div>
+                                <div>• دسترسی کامل به پلن <b>{planTitle}</b></div>
                       <div>• پشتیبانی و به‌روزرسانی فعال</div>
                     </div>
                   </div>
@@ -1015,7 +1032,7 @@ if (finalToken && tenant?.id) {
                   ? 'لطفاً چند لحظه صبر کنید. کد ملی و شماره موبایل شما در حال بررسی است.'
                   : otpVerifying && !activating 
                     ? 'لطفاً چند لحظه صبر کنید.'
-                    : <>فروشگاه <b className="text-gray-700">{storeName}</b> با پلن <b className="text-gray-700">{planInfo.title}</b> در حال ایجاد است.</>
+                              : <>فروشگاه <b className="text-gray-700">{storeName}</b> با پلن <b className="text-gray-700">{planTitle}</b> در حال ایجاد است.</>
                 }
               </p>
             </div>
@@ -1043,7 +1060,7 @@ if (finalToken && tenant?.id) {
                   <div className="flex items-center gap-2 text-violet-600">
                     <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin shrink-0" />
                     <span className="text-xs font-semibold">
-                      {otpVerifying && !activating ? 'در حال تأیید کد...' : `فعال‌سازی پلن ${planInfo.title}...`}
+                                {otpVerifying && !activating ? 'در حال تأیید کد...' : `فعال‌سازی پلن ${planTitle}...`}
                     </span>
                   </div>
                 </>

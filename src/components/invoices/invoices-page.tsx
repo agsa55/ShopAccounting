@@ -1230,26 +1230,46 @@ const summaryStats = useMemo(() => {
     }
   }
 
-  const handleReceivePaymentClick = (inv: Invoice, installment?: InstallmentScheduleItem | null) => {
-    const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
-    if (remaining <= 0) {
-      toast({ title: 'خطا', description: 'این فاکتور به طور کامل پرداخت شده است', variant: 'destructive' })
-      return
-    }
-    setReceivePayInvoice(inv)
-    setReceivePayInstallment(installment || null)
-    if (installment) {
-      const instRemaining = (installment.amount || 0) - (installment.paidAmount || 0)
-      setReceivePayAmount(String(instRemaining))
-    } else {
-      setReceivePayAmount(String(remaining))
-    }
-    setReceivePayMethod('cash')
-    setReceivePayRef('')
-    setReceivePayNotes('')
-    setReceivePayDialogOpen(true)
+ const handleReceivePaymentClick = (inv: Invoice, installment?: InstallmentScheduleItem | null) => {
+  const pt = String(inv.paymentType || '').toLowerCase().trim()
+
+  const isCheckInvoice =
+    pt === 'check' ||
+    pt === 'cheque' ||
+    pt.includes('check') ||
+    !!inv.checkInfo ||
+    !!inv.checkStatus
+
+  if (isCheckInvoice) {
+    toast({
+      title: 'امکان‌پذیر نیست',
+      description: 'برای فاکتورهای چکی از عملیات «وصول چک» در ماژول چک استفاده کنید. دریافت وجه معمولی برای چک مجاز نیست.',
+      variant: 'destructive',
+    })
+    return
   }
 
+  const remaining = (inv.totalAmount || 0) - (inv.paidAmount || 0)
+  if (remaining <= 0) {
+    toast({ title: 'خطا', description: 'این فاکتور به طور کامل پرداخت شده است', variant: 'destructive' })
+    return
+  }
+
+  setReceivePayInvoice(inv)
+  setReceivePayInstallment(installment || null)
+
+  if (installment) {
+    const instRemaining = (installment.amount || 0) - (installment.paidAmount || 0)
+    setReceivePayAmount(String(instRemaining))
+  } else {
+    setReceivePayAmount(String(remaining))
+  }
+
+  setReceivePayMethod('cash')
+  setReceivePayRef('')
+  setReceivePayNotes('')
+  setReceivePayDialogOpen(true)
+}
   const submitReceivePayment = async () => {
     if (!isOnline) {
       toast({ title: 'عدم دسترسی', description: 'ثبت دریافت وجه نیاز به اتصال اینترنت دارد.', variant: 'destructive' })
@@ -1916,12 +1936,14 @@ const renderDetailDialog = () => {
           </div>
         </div>
 
-        <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+            <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
           {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
             <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
           )}
           <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
-          {remaining > 0 && !isCancelled && !isReturn && planFeatures.canAccessCredit && (
+
+          {/* ★ دریافت وجه فقط برای فاکتورهای غیرچکی نمایش داده شود */}
+          {!isCheck && remaining > 0 && !isCancelled && !isReturn && planFeatures.canAccessCredit && (
             <Button
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs gap-1.5"
@@ -1934,6 +1956,15 @@ const renderDetailDialog = () => {
               دریافت وجه
             </Button>
           )}
+
+          {/* ★ راهنمای فاکتور چکی */}
+          {isCheck && remaining > 0 && !isCancelled && (
+            <Badge className="bg-cyan-100 text-cyan-700 hover:bg-cyan-100 text-[10px] gap-1">
+              <ClipboardList className="w-3 h-3" />
+              وصول چک از ماژول چک انجام شود
+            </Badge>
+          )}
+
           <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
             بستن
           </Button>
