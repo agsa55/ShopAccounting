@@ -1520,24 +1520,30 @@ const pricingCardRefs = [
           <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">حریم خصوصی</a></li>
         </ul>
       </div>
-
-  {/* ═══════════════════════════════════════════════════════════
+{/* ═══════════════════════════════════════════════════════════
     ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
-    ⚠️ طبق راهنمای اینماد، کد دقیقاً بدون تغییر قرار می‌گیرد
-    ⚠️ rel="noopener noreferrer" نباید باشد چون لوگو نمایش داده نمی‌شود
+    ⚠️ بدون rel="noopener noreferrer" (طبق راهنمای اینماد)
 ═══════════════════════════════════════════════════════════ */}
 <div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
   <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
     نماد اعتماد
   </h4>
   <div className="flex flex-col items-center gap-2 w-full">
-    {/* کد اصلی اینماد - بدون هیچ تغییری */}
-    <div 
-      className="flex items-center justify-center"
-      dangerouslySetInnerHTML={{
-        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
-      }}
-    />
+    {/* کد اینماد به صورت JSX خالص */}
+    <a
+      referrerPolicy="origin"
+      target="_blank"
+      href="https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
+    >
+      <img
+        referrerPolicy="origin"
+        src="https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
+        alt="نماد اعتماد الکترونیکی"
+        style={{ cursor: 'pointer' }}
+        // @ts-ignore - attribute سفارشی اینماد
+        code="0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
+      />
+    </a>
     <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
       نماد اعتماد الکترونیکی<br />
       <span className="text-violet-400 font-bold">مرکز توسعه تجارت الکترونیکی</span>
