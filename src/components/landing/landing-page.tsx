@@ -567,28 +567,7 @@ const tickerItems = [
   'گزارشات متنوع',
 ]
 
-// ═══════════════════════════════════════════════════════════
-// ★ کامپوننت لوگوی اینماد — نسخه دقیقاً خام و بدون تغییر
-// ⚠️ بدون rel
-// ⚠️ بدون onError
-// ⚠️ بدون استایل اضافه
-// ⚠️ بدون next/image
-// ⚠️ بدون iframe
-// ═══════════════════════════════════════════════════════════
 
-/* eslint-disable react/no-danger */
-
-const ENAMAD_EMBED_HTML = `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
-
-function EnamadTrustLogo() {
-  return (
-    <div
-      className="enamad-raw-embed"
-      dangerouslySetInnerHTML={{ __html: ENAMAD_EMBED_HTML }}
-      suppressHydrationWarning
-    />
-  )
-}
 
 export default function LandingPage() {
   const router = useRouter()
@@ -1543,28 +1522,7 @@ const pricingCardRefs = [
           <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">حریم خصوصی</a></li>
         </ul>
       </div>
-{/* ═══════════════════════════════════════════════════════════
-    ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
-═══════════════════════════════════════════════════════════ */}
-<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
-  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
-    نماد اعتماد
-  </h4>
 
-  <div className="flex flex-col items-center gap-2 w-full">
-    <div className="flex items-center justify-center bg-white rounded-xl p-2 border border-gray-200">
-      <EnamadTrustLogo />
-    </div>
-
-    <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
-      نماد اعتماد الکترونیکی
-      <br />
-      <span className="text-violet-400 font-bold">
-        مرکز توسعه تجارت الکترونیکی
-      </span>
-    </p>
-  </div>
-</div>
     </div>
 
     {/* ═══════ خط جداکننده و کپی‌رایت ═══════ */}

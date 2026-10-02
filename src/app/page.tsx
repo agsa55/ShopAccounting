@@ -3,6 +3,27 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useAppStore } from '@/lib/store'
 
+// ═══════════════════════════════════════════════════════════
+// ★ کد خام اینماد — بدون تغییر، بدون rel، بدون کامپوننت اضافه
+// ═══════════════════════════════════════════════════════════
+const ENAMAD_RAW_HTML = `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+
+function EnamadStaticBadge() {
+  return (
+    // eslint-disable-next-line react/no-danger
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: '16px',
+        background: '#ffffff',
+      }}
+      dangerouslySetInnerHTML={{ __html: ENAMAD_RAW_HTML }}
+      suppressHydrationWarning
+    />
+  )
+}
 // ============================================================================
 // ★ ماژول-لول فلگ
 // ============================================================================
@@ -441,9 +462,14 @@ export default function HomePage() {
     doVerify()
   }, [])
 
-  // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
+   // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
   if (!authCheckDone) {
-    return <AuthLoadingSplash />
+    return (
+      <>
+        <AuthLoadingSplash />
+        <EnamadStaticBadge />
+      </>
+    )
   }
 
   // ─── رندر AppShell فقط برای storeUser ──────────────────────────
@@ -454,11 +480,15 @@ export default function HomePage() {
       return <AuthLoadingSplash />
     }
     
-    return (
+   // پیش‌فرض همیشه لندینگ پیج
+  return (
+    <>
       <Suspense fallback={<AuthLoadingSplash />}>
-        <LazyAppShell />
+        <LazyLandingPage />
       </Suspense>
-    )
+      <EnamadStaticBadge />
+    </>
+  )
   }
 
   if (currentView === 'register') {
