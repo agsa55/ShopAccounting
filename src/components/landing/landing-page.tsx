@@ -1467,107 +1467,92 @@ const pricingCardRefs = [
   </div>
 </section>
 
-      {/* ═══════════════════════════ FOOTER ════════════════════════════ */}
-      <footer className="bg-gray-950 text-gray-500 pt-16 sm:pt-20 pb-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 sm:gap-10 mb-12 sm:mb-16">
+    {/* ═══════════════════════════ FOOTER ════════════════════════════ */}
+<footer className="bg-gray-950 text-gray-500 pt-16 sm:pt-20 pb-8 px-4 sm:px-6 lg:px-8">
+  <div className="max-w-7xl mx-auto">
+    {/* ═══════ Grid اصلی: ۲ ستون در موبایل → ۵ ستون در دسکتاپ ═══════ */}
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-8 sm:gap-10 mb-12 sm:mb-16">
 
-            <div className="col-span-2 sm:col-span-1 space-y-4">
-              <div className="flex items-center gap-3">
-                <a href="#" className="shrink-0 group" aria-label="صفحه اصلی">
-                  <div className="logo-container w-14 h-14 sm:w-16 sm:h-16">
-                    <img src="/logo.png" alt="رهگشا" className="logo-img" />
-                  </div>
-                </a>
-                <div>
-                  <span className="text-white font-black text-base block">رهگشا</span>
-                  <span className="text-[10px] text-violet-400">حسابداری هوشمند فروشگاهی</span>
-                </div>
-              </div>
-              <p className="text-sm leading-relaxed text-gray-500">
-                سیستم حسابداری فروشگاهی هوشمند و یکپارچه برای مدیریت کامل کسب‌وکار شما.
-              </p>
+      {/* ستون ۱: لوگو و توضیح (۲ ستون در موبایل) */}
+      <div className="col-span-2 sm:col-span-1 space-y-4">
+        <div className="flex items-center gap-3">
+          <a href="#" className="shrink-0 group" aria-label="صفحه اصلی">
+            <div className="logo-container w-14 h-14 sm:w-16 sm:h-16">
+              <img src="/logo.png" alt="رهگشا" className="logo-img" />
             </div>
-
-            {[
-              {
-                title: 'محصول',
-                links: [
-                  { label: 'امکانات', href: '#features' },
-                  { label: 'پلن‌ها', action: scrollToPricing },
-                  { label: 'نظرات', href: '#testimonials' },
-                ],
-              },
-              {
-                title: 'پشتیبانی',
-                links: [
-                  { label: 'راهنمای استفاده', href: '#' },
-                  { label: 'تماس با ما: 09377498180', href: '#' },
-                  { label: 'سوالات متداول', href: '#' },
-                ],
-              },
-              {
-                title: 'شرکت',
-                links: [
-                  { label: 'درباره ما', href: '#' },
-                  { label: 'قوانین و مقررات', href: '#' },
-                  { label: 'حریم خصوصی', href: '#' },
-                ],
-              },
-            ].map((col) => (
-              <div key={col.title}>
-                <h4 className="text-white font-black text-sm mb-4">{col.title}</h4>
-                <ul className="space-y-3">
-                  {col.links.map((link) => (
-                    <li key={link.label}>
-                      {'href' in link ? (
-                        <a href={link.href} className="text-sm hover:text-violet-400 transition-colors">
-                          {link.label}
-                        </a>
-                      ) : (
-                        <button onClick={link.action} className="text-sm hover:text-violet-400 transition-colors">
-                          {link.label}
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          </a>
+          <div>
+            <span className="text-white font-black text-base block">رهگشا</span>
+            <span className="text-[10px] text-violet-400">حسابداری هوشمند فروشگاهی</span>
           </div>
+        </div>
+        <p className="text-sm leading-relaxed text-gray-500">
+          سیستم حسابداری فروشگاهی هوشمند و یکپارچه برای مدیریت کامل کسب‌وکار شما.
+        </p>
+      </div>
 
-        {/* ═══════════════════════════════════════════════════════════
-    ★ نماد اعتماد الکترونیکی (اینماد) — وسط‌چین
+      {/* ستون ۲: محصول */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">محصول</h4>
+        <ul className="space-y-3">
+          <li><a href="#features" className="text-sm hover:text-violet-400 transition-colors">امکانات</a></li>
+          <li><button onClick={scrollToPricing} className="text-sm hover:text-violet-400 transition-colors">پلن‌ها</button></li>
+          <li><a href="#testimonials" className="text-sm hover:text-violet-400 transition-colors">نظرات</a></li>
+        </ul>
+      </div>
+
+      {/* ستون ۳: پشتیبانی */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">پشتیبانی</h4>
+        <ul className="space-y-3">
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">راهنمای استفاده</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">تماس با ما: 09377498180</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">سوالات متداول</a></li>
+        </ul>
+      </div>
+
+      {/* ستون ۴: شرکت */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">شرکت</h4>
+        <ul className="space-y-3">
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">درباره ما</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">قوانین و مقررات</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">حریم خصوصی</a></li>
+        </ul>
+      </div>
+
+  {/* ═══════════════════════════════════════════════════════════
+    ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
+    ⚠️ طبق راهنمای اینماد، کد دقیقاً بدون تغییر قرار می‌گیرد
+    ⚠️ rel="noopener noreferrer" نباید باشد چون لوگو نمایش داده نمی‌شود
 ═══════════════════════════════════════════════════════════ */}
-<div className="border-t border-gray-800 pt-8 space-y-6">
-  {/* لوگوی اینماد — دقیقاً وسط */}
-  <div className="flex justify-center">
-    <a
-      referrerPolicy="origin"
-      target="_blank"
-      rel="noopener noreferrer"
-      href="https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
-      className="inline-block transition-transform hover:scale-105"
-      title="نماد اعتماد الکترونیکی"
-    >
-      <img
-        referrerPolicy="origin"
-        src="https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
-        alt="نماد اعتماد الکترونیکی اینماد"
-        style={{ cursor: 'pointer' }}
-        className="h-24 sm:h-28 w-auto"
-      />
-    </a>
-  </div>
-
-  {/* متن‌های کپی‌رایت */}
-  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-    <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
-    <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
+<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
+  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
+    نماد اعتماد
+  </h4>
+  <div className="flex flex-col items-center gap-2 w-full">
+    {/* کد اصلی اینماد - بدون هیچ تغییری */}
+    <div 
+      className="flex items-center justify-center"
+      dangerouslySetInnerHTML={{
+        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+      }}
+    />
+    <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
+      نماد اعتماد الکترونیکی<br />
+      <span className="text-violet-400 font-bold">مرکز توسعه تجارت الکترونیکی</span>
+    </p>
   </div>
 </div>
-        </div>
-      </footer>
+    </div>
+
+    {/* ═══════ خط جداکننده و کپی‌رایت ═══════ */}
+    <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+      <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
+      <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
+    </div>
+  </div>
+</footer>
 
       {/* ═══════════════════════════════════════════════════════════════
           ★ Donation Modal
