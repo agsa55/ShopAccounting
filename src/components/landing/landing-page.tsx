@@ -568,47 +568,25 @@ const tickerItems = [
 ]
 
 // ═══════════════════════════════════════════════════════════
-// ★ کامپوننت لوگوی اینماد
-// ⚠️ طبق راهنمای اینماد: rel="noopener noreferrer" نداشته باشد
+// ★ کامپوننت لوگوی اینماد — نسخه دقیقاً خام و بدون تغییر
+// ⚠️ بدون rel
+// ⚠️ بدون onError
+// ⚠️ بدون استایل اضافه
+// ⚠️ بدون next/image
+// ⚠️ بدون iframe
 // ═══════════════════════════════════════════════════════════
-const ENAMAD_ID = '8004737'
-const ENAMAD_CODE = '0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'
 
-const ENAMAD_LOGO_URL = `https://trustseal.enamad.ir/logo.aspx?id=${ENAMAD_ID}&Code=${ENAMAD_CODE}`
-const ENAMAD_TRUST_URL = `https://trustseal.enamad.ir/?id=${ENAMAD_ID}&Code=${ENAMAD_CODE}`
+/* eslint-disable react/no-danger */
+
+const ENAMAD_EMBED_HTML = `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
 
 function EnamadTrustLogo() {
-  const [failed, setFailed] = useState(false)
-
-  if (failed) {
-    return (
-      <div className="flex flex-col items-center justify-center w-[100px] h-[110px] rounded-xl border border-gray-700 bg-gray-900/60 text-center p-2">
-        <ShieldCheck className="w-7 h-7 text-violet-400 mb-1" />
-        <p className="text-[9px] leading-tight text-gray-400">
-          نماد اعتماد
-          <br />
-          در حال فعال‌سازی
-        </p>
-      </div>
-    )
-  }
-
   return (
-    <a
-      referrerPolicy="origin"
-      target="_blank"
-      href={ENAMAD_TRUST_URL}
-      className="inline-block"
-    >
-      <img
-        referrerPolicy="origin"
-        src={ENAMAD_LOGO_URL}
-        alt="نماد اعتماد الکترونیکی"
-        style={{ cursor: 'pointer', width: 100, height: 'auto', display: 'block' }}
-        onError={() => setFailed(true)}
-        {...({ code: ENAMAD_CODE } as any)}
-      />
-    </a>
+    <div
+      className="enamad-raw-embed"
+      dangerouslySetInnerHTML={{ __html: ENAMAD_EMBED_HTML }}
+      suppressHydrationWarning
+    />
   )
 }
 
