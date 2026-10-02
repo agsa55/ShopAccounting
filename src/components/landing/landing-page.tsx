@@ -916,7 +916,7 @@ const pricingCardRefs = [
             <div className="inline-flex animate-fade-in-up">
               <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-bold backdrop-blur-sm relative overflow-hidden animate-shine">
                 <Sparkles className="w-3.5 h-3.5" />
-                سیستم حسابداری فروشگاهی هوشمند رهگشا
+             3779935
               </span>
             </div>
 
@@ -924,7 +924,7 @@ const pricingCardRefs = [
               className="hero-title font-black leading-tight text-white animate-fade-in-up"
               style={{ fontSize: 'clamp(1.2rem, 5vw, 2.8rem)', animationDelay: '0.1s' }}
             >
-              حسابداری فروشگاهی رهگشا 3779935
+            3779935
               <br />
               <HeroTypewriter />
             </h1>
