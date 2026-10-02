@@ -1523,6 +1523,35 @@ const pricingCardRefs = [
         </ul>
       </div>
 
+
+      {/* ═══════════════════════════════════════════════════════════
+    ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
+    کد خام اینماد بدون هیچ تغییری
+═══════════════════════════════════════════════════════════ */}
+<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
+  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
+    نماد اعتماد
+  </h4>
+
+  <div className="flex flex-col items-center gap-2 w-full">
+    <div
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{
+        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+      }}
+      suppressHydrationWarning
+    />
+
+    <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
+      نماد اعتماد الکترونیکی
+      <br />
+      <span className="text-violet-400 font-bold">
+        مرکز توسعه تجارت الکترونیکی
+      </span>
+    </p>
+  </div>
+</div>
+
     </div>
 
     {/* ═══════ خط جداکننده و کپی‌رایت ═══════ */}

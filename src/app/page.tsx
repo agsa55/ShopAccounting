@@ -3,6 +3,7 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useAppStore } from '@/lib/store'
 
+import LandingPage from '@/components/landing/landing-page'
 // ═══════════════════════════════════════════════════════════
 // ★ کد خام اینماد — بدون تغییر، بدون rel، بدون کامپوننت اضافه
 // ═══════════════════════════════════════════════════════════
@@ -284,9 +285,7 @@ function SimpleLanding() {
 // ⚠️⚠️⚠️ از اینجا به پایین، کد کاملاً دست‌نخورده و بدون تغییر باقی می‌ماند ⚠️⚠️⚠️
 // ════════════════════════════════════════════════════════════════════════════
 
-const LazyLandingPage = lazy(() =>
-  import('@/components/landing/landing-page').catch(() => ({ default: SimpleLanding }))
-)
+
 const LazyAppShell = lazy(() =>
   import('@/components/app-shell').catch(() => ({ default: SimpleLanding }))
 )
@@ -463,12 +462,17 @@ export default function HomePage() {
   }, [])
 
    // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
+  // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
+  // ★ مهم: لندینگ پیج همزمان رندر می‌شود تا فوتر و لوگوی اینماد در HTML اولیه باشند
   if (!authCheckDone) {
     return (
-      <>
-        <AuthLoadingSplash />
-        <EnamadStaticBadge />
-      </>
+      <div className="relative">
+        <LandingPage />
+
+        <div className="fixed inset-0 z-[9999] bg-white/95 backdrop-blur-sm flex items-center justify-center">
+          <AuthLoadingSplash />
+        </div>
+      </div>
     )
   }
 
@@ -480,15 +484,7 @@ export default function HomePage() {
       return <AuthLoadingSplash />
     }
     
-   // پیش‌فرض همیشه لندینگ پیج
-  return (
-    <>
-      <Suspense fallback={<AuthLoadingSplash />}>
-        <LazyLandingPage />
-      </Suspense>
-      <EnamadStaticBadge />
-    </>
-  )
+
   }
 
   if (currentView === 'register') {
@@ -508,9 +504,6 @@ export default function HomePage() {
   }
 
   // پیش‌فرض همیشه لندینگ پیج
-  return (
-    <Suspense fallback={<AuthLoadingSplash />}>
-      <LazyLandingPage />
-    </Suspense>
-  )
+  // پیش‌فرض همیشه لندینگ پیج
+  return <LandingPage />
 }
