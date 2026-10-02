@@ -1536,10 +1536,36 @@ const pricingCardRefs = [
             ))}
           </div>
 
-          <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
-            <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
-          </div>
+        {/* ═══════════════════════════════════════════════════════════
+    ★ نماد اعتماد الکترونیکی (اینماد) — وسط‌چین
+═══════════════════════════════════════════════════════════ */}
+<div className="border-t border-gray-800 pt-8 space-y-6">
+  {/* لوگوی اینماد — دقیقاً وسط */}
+  <div className="flex justify-center">
+    <a
+      referrerPolicy="origin"
+      target="_blank"
+      rel="noopener noreferrer"
+      href="https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
+      className="inline-block transition-transform hover:scale-105"
+      title="نماد اعتماد الکترونیکی"
+    >
+      <img
+        referrerPolicy="origin"
+        src="https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47"
+        alt="نماد اعتماد الکترونیکی اینماد"
+        style={{ cursor: 'pointer' }}
+        className="h-24 sm:h-28 w-auto"
+      />
+    </a>
+  </div>
+
+  {/* متن‌های کپی‌رایت */}
+  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+    <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
+    <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
+  </div>
+</div>
         </div>
       </footer>
 

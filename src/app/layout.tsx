@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://rahgooshasf.ir'),
   
   title: {
-    default: '3779935',
+    default: 'رهگشا | نرم افزار حسابداری فروشگاهی رایگان و ابری',
     template: '%s | رهگشا - سیستم حسابداری فروشگاهی هوشمند',
   },
   
