@@ -924,7 +924,7 @@ const pricingCardRefs = [
               className="hero-title font-black leading-tight text-white animate-fade-in-up"
               style={{ fontSize: 'clamp(1.2rem, 5vw, 2.8rem)', animationDelay: '0.1s' }}
             >
-              حسابداری فروشگاهی رهگشا
+              حسابداری فروشگاهی رهگشا 3779935
               <br />
               <HeroTypewriter />
             </h1>
