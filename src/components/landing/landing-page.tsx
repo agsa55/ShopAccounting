@@ -1524,16 +1524,16 @@ const pricingCardRefs = [
       </div>
 
 
-      {/* ═══════════════════════════════════════════════════════════
+{/* ═══════════════════════════════════════════════════════════
     ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
-    کد خام اینماد بدون هیچ تغییری
 ═══════════════════════════════════════════════════════════ */}
 <div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
   <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
     نماد اعتماد
   </h4>
 
-  <div className="flex flex-col items-center gap-2 w-full">
+ <div className="flex flex-col items-center gap-2 w-full">
+  <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center">
     <div
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{
@@ -1541,6 +1541,7 @@ const pricingCardRefs = [
       }}
       suppressHydrationWarning
     />
+  </div>
 
     <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
       نماد اعتماد الکترونیکی

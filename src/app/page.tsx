@@ -11,14 +11,18 @@ const ENAMAD_RAW_HTML = `<a referrerpolicy='origin' target='_blank' href='https:
 
 function EnamadStaticBadge() {
   return (
-    // eslint-disable-next-line react/no-danger
     <div
       style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: '16px',
+        position: 'fixed',
+        bottom: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 99999,
         background: '#ffffff',
+        padding: '10px 12px',
+        borderRadius: '14px',
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.12)',
       }}
       dangerouslySetInnerHTML={{ __html: ENAMAD_RAW_HTML }}
       suppressHydrationWarning
@@ -336,9 +340,13 @@ export default function HomePage() {
     return null
   }
 
-  useEffect(() => {
-    if (_globalInitDone) return
-    _globalInitDone = true
+useEffect(() => {
+  if (_globalInitDone) {
+    setAuthCheckDone(true)
+    return
+  }
+
+  _globalInitDone = true
 
     console.log('[HomePage] Auth check starting')
 
@@ -464,17 +472,14 @@ export default function HomePage() {
    // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
   // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
   // ★ مهم: لندینگ پیج همزمان رندر می‌شود تا فوتر و لوگوی اینماد در HTML اولیه باشند
-  if (!authCheckDone) {
-    return (
-      <div className="relative">
-        <LandingPage />
-
-        <div className="fixed inset-0 z-[9999] bg-white/95 backdrop-blur-sm flex items-center justify-center">
-          <AuthLoadingSplash />
-        </div>
-      </div>
-    )
-  }
+if (!authCheckDone) {
+  return (
+    <>
+      <AuthLoadingSplash />
+      <EnamadStaticBadge />
+    </>
+  )
+}
 
   // ─── رندر AppShell فقط برای storeUser ──────────────────────────
   if (isAuthenticated && user && !['landing', 'login', 'register'].includes(currentView)) {
