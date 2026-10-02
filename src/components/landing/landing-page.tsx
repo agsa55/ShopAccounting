@@ -78,8 +78,8 @@ function useCountUp(target: number, duration = 2000, start = false) {
 // ═══════════════════════════════════════════════════════════════
 // ★ Hero Typewriter
 // ═══════════════════════════════════════════════════════════════
-const HERO_TYPED_WORDS = ['ساده', 'سریع', 'هوشمند']
-const HERO_FINAL_PHRASE = 'کاملا رایگان'
+const HERO_TYPED_WORDS = ['ساده...', 'سریع...', 'هوشمند...']
+const HERO_FINAL_PHRASE = 'و کاملا رایگان'
 
 function HeroTypewriter() {
   const [wordIndex, setWordIndex] = useState(0)
@@ -935,6 +935,7 @@ const pricingCardRefs = [
             >
               مدیریت فروش، مشتریان، اقساط و حسابداری در یک پلتفرم یکپارچه.
               از صدور فاکتور تا گزارش مالی — همه‌چیز در یک‌جا.
+              میزبان امن داده های شما هستیم با استفاده از بهترین و به روزترین سرورها.
             </p>
 
             {/* ★ دکمه‌های Hero */}
@@ -1191,7 +1192,7 @@ const pricingCardRefs = [
               <span className="bg-gradient-to-l from-violet-600 to-purple-500 bg-clip-text text-transparent"> کسب‌وکار شما</span>
             </h2>
             <p className="text-gray-500 text-base sm:text-lg">
-              پلن متناسب با نیاز خود را انتخاب کنید. ۳ ماه استفاده رایگان، بدون نیاز به کارت بانکی.
+            پلن مناسب خود را انتخاب کنید،  ۳ ماه استفاده رایگان، بدون پرداخت هزینه
             </p>
           </div>
 
@@ -1314,7 +1315,7 @@ const pricingCardRefs = [
           </div>
 
           <div className="text-center mt-10 sm:mt-14 space-y-2">
-            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به کارت بانکی — ارتقا در هر زمان</p>
+            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
               پشتیبانی کامل در دوره رایگان
@@ -1395,7 +1396,7 @@ const pricingCardRefs = [
 
           <p className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
             همین الان ثبت‌نام کنید و ۳ ماه رایگان از تمام امکانات استفاده کنید.
-            بدون نیاز به کارت بانکی.
+            بدون نیاز به پرداخت هزینه.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
@@ -1454,7 +1455,7 @@ const pricingCardRefs = [
         },
         {
           q: 'چگونه می‌توانم با رهگشا شروع کنم؟',
-          a: 'کافی است روی دکمه "شروع رایگان" کلیک کرده و در کمتر از ۵ دقیقه ثبت نام کنید. نیازی به کارت اعتباری نیست.',
+          a: 'کافی است روی دکمه "شروع رایگان" کلیک کرده و در کمتر از ۵ دقیقه ثبت نام کنید. نیازی به پرداخت هزینه  نیست.',
         },
       ].map((faq, i) => (
         <div key={i} className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
