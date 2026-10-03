@@ -1526,22 +1526,23 @@ const pricingCardRefs = [
 
 {/* ═══════════════════════════════════════════════════════════
     ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
+    عنوان و لوگو هر دو وسط‌چین
 ═══════════════════════════════════════════════════════════ */}
-<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
-  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
+<div className="col-span-2 sm:col-span-1 flex flex-col items-center">
+  <h4 className="text-white font-black text-sm mb-4 text-center w-full">
     نماد اعتماد
   </h4>
 
- <div className="flex flex-col items-center gap-2 w-full">
-  <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center">
-    <div
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{
-        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
-      }}
-      suppressHydrationWarning
-    />
-  </div>
+  <div className="flex flex-col items-center gap-2 w-full">
+    <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center mx-auto">
+      <div
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+        }}
+        suppressHydrationWarning
+      />
+    </div>
 
     <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
       نماد اعتماد الکترونیکی
