@@ -1,39 +1,57 @@
 'use client'
 
 import { useEffect, useState, useRef, lazy, Suspense } from 'react'
-import { useAppStore } from '@/lib/store'
+import type { CSSProperties, ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
+import { useAppStore } from '@/lib/store'
 import LandingPage from '@/components/landing/landing-page'
+
 // ═══════════════════════════════════════════════════════════
-// ★ کد خام اینماد — بدون تغییر، بدون rel، بدون کامپوننت اضافه
+// ★ نماد اینماد برای HTML اولیه
+// ⚠️ بدون rel="noopener noreferrer"
+// ⚠️ بدون تغییر در کد اصلی اینماد
 // ═══════════════════════════════════════════════════════════
 const ENAMAD_RAW_HTML = `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
 
-function EnamadStaticBadge() {
+const enamadVisibleStyle: CSSProperties = {
+  position: 'fixed',
+  bottom: '16px',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 99999,
+  background: '#ffffff',
+  padding: '10px 12px',
+  borderRadius: '14px',
+  border: '1px solid #e5e7eb',
+  boxShadow: '0 10px 30px rgba(0,0,0,0.12)',
+}
+
+const enamadHiddenStyle: CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
+function EnamadSourceBadge({ visible }: { visible: boolean }) {
   return (
     <div
-      style={{
-        position: 'fixed',
-        bottom: '16px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 99999,
-        background: '#ffffff',
-        padding: '10px 12px',
-        borderRadius: '14px',
-        border: '1px solid #e5e7eb',
-        boxShadow: '0 10px 30px rgba(0,0,0,0.12)',
-      }}
+      aria-hidden={!visible}
+      style={visible ? enamadVisibleStyle : enamadHiddenStyle}
       dangerouslySetInnerHTML={{ __html: ENAMAD_RAW_HTML }}
       suppressHydrationWarning
     />
   )
 }
-// ============================================================================
-// ★ ماژول-لول فلگ
-// ============================================================================
 
-
+// ============================================================================
+// ★ Splash بارگذاری
+// ============================================================================
 function AuthLoadingSplash() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50" dir="rtl">
@@ -45,7 +63,9 @@ function AuthLoadingSplash() {
   )
 }
 
-// ★★★ بهبود یافته برای SEO - H1, H2, H3 مناسب و محتوای سئو شده
+// ============================================================================
+// ★ لندینگ ساده fallback برای SEO و شرایط خطای lazy import
+// ============================================================================
 function SimpleLanding() {
   const setCurrentView = useAppStore((s) => s.setCurrentView)
   const setSelectedPlanId = useAppStore((s) => s.setSelectedPlanId)
@@ -70,7 +90,7 @@ function SimpleLanding() {
           </div>
         </div>
       </header>
-      
+
       <main className="flex-1">
         {/* Hero Section - H1 اصلی صفحه */}
         <section className="py-20">
@@ -249,7 +269,7 @@ function SimpleLanding() {
           </div>
         </section>
       </main>
-      
+
       <footer className="bg-gray-900 text-gray-400 py-12">
         <div className="max-w-7xl mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
@@ -286,10 +306,8 @@ function SimpleLanding() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ⚠️⚠️⚠️ از اینجا به پایین، کد کاملاً دست‌نخورده و بدون تغییر باقی می‌ماند ⚠️⚠️⚠️
+// ★ Lazy imports برای صفحات داخلی
 // ════════════════════════════════════════════════════════════════════════════
-
-
 const LazyAppShell = lazy(() =>
   import('@/components/app-shell').catch(() => ({ default: SimpleLanding }))
 )
@@ -302,12 +320,14 @@ const LazyRegisterForm = lazy(() =>
 
 function clearAuthData() {
   if (typeof window === 'undefined') return
+
   localStorage.removeItem('token')
   localStorage.removeItem('refreshToken')
   localStorage.removeItem('user')
   localStorage.removeItem('storeName')
   localStorage.removeItem('tenant')
   localStorage.removeItem('planName')
+
   useAppStore.setState({
     isAuthenticated: false,
     user: null,
@@ -348,15 +368,16 @@ export default function HomePage() {
   useEffect(() => {
     let cancelled = false
 
-  const finish = (
-  view?: ReturnType<typeof useAppStore.getState>['currentView']
-) => {
-  if (cancelled) return
-  if (view) {
-    useAppStore.setState({ currentView: view })
-  }
-  setAuthCheckDone(true)
-}
+    type AppView = ReturnType<typeof useAppStore.getState>['currentView']
+
+    const finish = (view?: AppView) => {
+      if (cancelled) return
+      if (view) {
+        useAppStore.setState({ currentView: view })
+      }
+      setAuthCheckDone(true)
+    }
+
     const syncAuth = async () => {
       const localToken =
         typeof window !== 'undefined' ? localStorage.getItem('token') : null
@@ -379,13 +400,14 @@ export default function HomePage() {
       // ─── اگر همین توکن قبلاً بررسی شده، دوباره verify نکن ───
       if (lastCheckedTokenRef.current === token) {
         const state = useAppStore.getState()
+        const stateView = String(state.currentView ?? 'landing')
 
         // اگر کاربر واقعاً لاگین است ولی currentView هنوز landing/login/register است، اصلاح کن
         if (
           state.isAuthenticated &&
           state.user &&
           state.user.userType !== 'portalUser' &&
-          ['landing', 'login', 'register'].includes(state.currentView)
+          ['landing', 'login', 'register'].includes(stateView)
         ) {
           useAppStore.setState({ currentView: 'dashboard' })
         }
@@ -518,46 +540,53 @@ export default function HomePage() {
     }
   }, [storeToken, pathname])
 
-  // ─── splash screen هنگام بررسی اولیه ─────────────────────────
-  if (!authCheckDone) {
-    return (
-      <>
-        <AuthLoadingSplash />
-        <EnamadStaticBadge />
-      </>
-    )
-  }
+  const view = String(currentView ?? 'landing')
 
-  // ─── اگر کاربر لاگین است و currentView هم dashboard یا چیز داخلی است ──
-  if (
+  let content: ReactNode
+
+  if (!authCheckDone) {
+    content = <AuthLoadingSplash />
+  } else if (
     isAuthenticated &&
     user &&
     user.userType !== 'portalUser' &&
-    !['landing', 'login', 'register'].includes(currentView)
+    !['landing', 'login', 'register'].includes(view)
   ) {
-    return (
+    content = (
       <Suspense fallback={<AuthLoadingSplash />}>
         <LazyAppShell />
       </Suspense>
     )
-  }
-
-  if (currentView === 'register') {
-    return (
+  } else if (view === 'register') {
+    content = (
       <Suspense fallback={<AuthLoadingSplash />}>
         <LazyRegisterForm />
       </Suspense>
     )
-  }
-
-  if (currentView === 'login') {
-    return (
+  } else if (view === 'login') {
+    content = (
       <Suspense fallback={<AuthLoadingSplash />}>
         <LazyLoginPage />
       </Suspense>
     )
+  } else {
+    content = <LandingPage />
   }
 
-  // ─── پیش‌فرض لندینگ ───────────────────────────────────────────
-  return <LandingPage />
+  // ★ هنگام بارگذاری اولیه، نماد visible باشد تا در HTML اولیه قطعی باشد.
+  // ★ بعد از اتمام auth check، اگر صفحه لندینگ است، نماد مخفی اضافی نمایش داده نشود
+  //   چون فوتر لندینگ خودش نماد را دارد.
+  // ★ اگر کاربر در لاگین/ثبت‌نام/داشبورد است، نماد مخفی در DOM بماند.
+  const showEnamadFixed = !authCheckDone
+  const showEnamadHidden = authCheckDone && view !== 'landing'
+
+  return (
+    <>
+      {(showEnamadFixed || showEnamadHidden) && (
+        <EnamadSourceBadge visible={showEnamadFixed} />
+      )}
+
+      {content}
+    </>
+  )
 }
