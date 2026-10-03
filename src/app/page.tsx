@@ -573,18 +573,14 @@ export default function HomePage() {
     content = <LandingPage />
   }
 
-  // ★ هنگام بارگذاری اولیه، نماد visible باشد تا در HTML اولیه قطعی باشد.
-  // ★ بعد از اتمام auth check، اگر صفحه لندینگ است، نماد مخفی اضافی نمایش داده نشود
-  //   چون فوتر لندینگ خودش نماد را دارد.
-  // ★ اگر کاربر در لاگین/ثبت‌نام/داشبورد است، نماد مخفی در DOM بماند.
-  const showEnamadFixed = !authCheckDone
-  const showEnamadHidden = authCheckDone && view !== 'landing'
-
-  return (
+   return (
     <>
-      {(showEnamadFixed || showEnamadHidden) && (
-        <EnamadSourceBadge visible={showEnamadFixed} />
-      )}
+      {/*
+        ★ نماد اینماد فقط برای HTML اولیه / View Source / ربات اینماد
+        ★ visible نیست تا هنگام رفرش فلش نکند
+        ★ نماد اصلی و قابل مشاهده در فوتر لندینگ پیج قرار دارد
+      */}
+      <EnamadSourceBadge visible={false} />
 
       {content}
     </>
