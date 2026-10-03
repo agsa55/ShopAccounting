@@ -14,7 +14,7 @@ import {
   Loader2, AlertCircle, Printer, BookOpen, CheckCircle2, XCircle, Clock, AlertTriangle,
   Package, Percent, PieChart as PieIcon, Activity, Crown, ArrowLeft, Store,
   Receipt, CreditCard, Banknote, LayoutDashboard,
-  ChevronDown, RotateCcw, X,
+  ChevronDown, RotateCcw, X,Settings2,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
@@ -35,6 +35,7 @@ import { ProfitLossReport } from '@/components/reports/profit-loss-report'
 import { InventoryAdvancedReport } from '@/components/reports/inventory-advanced-report'
 import { BalanceSheetV8Report } from '@/components/reports/balance-sheet-v8-report'
 import { DailySalesReport } from '@/components/reports/daily-sales-report'
+import CustomReportDesignerPage from '@/components/reports/custom-report-designer-page'
 // ============================================================================
 //  Constants & Theme
 // ============================================================================
@@ -3417,6 +3418,7 @@ type ReportType =
   | 'aging'
   | 'sales-trend'
   | 'branch-consolidated'
+  | 'custom-report-designer'
   | null
 
 interface ReportMetaInfo {
@@ -3427,6 +3429,7 @@ interface ReportMetaInfo {
   color: string
   minTier: PlanTier
   requiresInstallments?: boolean
+  requiresCustomDesigner?: boolean
   category: 'overview' | 'sales' | 'financial' | 'analytics' | 'enterprise'
 }
 
@@ -3558,6 +3561,17 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
     minTier: 'enterprise',
     category: 'enterprise',
   },
+
+    {
+    id: 'custom-report-designer',
+    title: 'طراحی گزارش دلخواه',
+    description: 'ساخت گزارش اختصاصی با انتخاب فیلدها، فیلترها، گروه‌بندی، مرتب‌سازی و خروجی — مخصوص شما',
+    icon: Settings2,
+    color: 'bg-amber-100 text-amber-600',
+    minTier: 'professional',
+    requiresCustomDesigner: true,
+    category: 'analytics',
+  },
 ]
 
 // ★ فیلتر کردن گزارش‌ها بر اساس پلن فعلی (مخفی کردن کامل گزارش‌های غیرفعال)
@@ -3565,6 +3579,7 @@ function getAccessibleReports(tier: PlanTier, features: PlanFeatureSet): ReportM
   return REPORT_DEFINITIONS.filter((r) => {
     if (!isPlanAtLeast(tier, r.minTier)) return false
     if (r.requiresInstallments && !features.canAccessInstallments) return false
+    if (r.requiresCustomDesigner && !features.canUseCustomReportDesigner) return false
     return true
   })
 }
@@ -3864,8 +3879,11 @@ export default function ReportsPage() {
               {activeReport === 'sales-trend' && (
                 <SalesTrendAnalysisReport invoices={invoices} dashboardData={dashboardData} />
               )}
-              {activeReport === 'branch-consolidated' && (
+                    {activeReport === 'branch-consolidated' && (
                 <BranchConsolidatedReport tier={tier} invoices={invoices} dateRange={sharedDateRange} />
+              )}
+              {activeReport === 'custom-report-designer' && (
+                <CustomReportDesignerPage />
               )}
             </>
           )}

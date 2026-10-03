@@ -31,6 +31,8 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
 import { PurchaseInvoicePrintModal } from '@/components/purchases/purchase-invoice-print-modal'
+import { CheckPrinterModal } from '@/components/check-printer/CheckPrinterModal'
+import type { CheckPrintData } from '@/components/check-printer/CheckPrinterModal'
 
 // ============================================================================
 // Types
@@ -461,10 +463,11 @@ function getCheckStatusBadge(checkStatus: string | null | undefined) {
 }
 
 function MobileInvoiceCard({
-  inv, onPrint, onEdit, onReturn, onDelete,
+  inv, onPrint, onPrintCheck, onEdit, onReturn, onDelete,
 }: {
   inv: PurchaseInvoice
   onPrint: (inv: PurchaseInvoice) => void
+  onPrintCheck: (inv: PurchaseInvoice) => void
   onEdit: (inv: PurchaseInvoice) => void
   onReturn: (inv: PurchaseInvoice) => void
   onDelete: (inv: PurchaseInvoice) => void
@@ -545,10 +548,22 @@ function MobileInvoiceCard({
             </div>
           </div>
         )}
-        <div className="flex items-center justify-end gap-0.5 pt-2 border-t border-gray-100">
-          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-emerald-50 hover:text-emerald-600" onClick={() => onPrint(inv)} disabled={inv._isOffline} title="چاپ">
-            <Printer className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-emerald-600'}`} />
-          </Button>
+  <div className="flex items-center justify-end gap-0.5 pt-2 border-t border-gray-100">
+  {/* ★ v8.13: دکمه چاپ چک صیادی (فقط برای فاکتورهای چکی) */}
+  {inv.paymentType === 'check' && inv.checkInfo && (
+    <Button
+      variant="ghost" size="icon"
+      className="h-7 w-7 hover:bg-purple-50 hover:text-purple-600"
+      onClick={() => onPrintCheck(inv)}
+      disabled={inv._isOffline}
+      title="چاپ چک صیادی"
+    >
+      <CreditCard className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-purple-600'}`} />
+    </Button>
+  )}
+  <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-emerald-50 hover:text-emerald-600" onClick={() => onPrint(inv)} disabled={inv._isOffline} title="چاپ فاکتور">
+    <Printer className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-emerald-600'}`} />
+  </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600" onClick={() => onEdit(inv)} disabled={isCancelled || isOfflineDelete} title="ویرایش">
             <Edit2 className="w-3.5 h-3.5 text-blue-600" />
           </Button>
@@ -619,6 +634,9 @@ export function PurchaseInvoicesPage() {
   const [printModalOpen, setPrintModalOpen] = useState(false)
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null)
   const [printInvoiceNumber, setPrintInvoiceNumber] = useState<string>('')
+  // ★ v8.13: State برای مودال چاپ چک صیادی
+const [checkPrinterOpen, setCheckPrinterOpen] = useState(false)
+const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null)
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnInvoice, setReturnInvoice] = useState<PurchaseInvoice | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{
@@ -1245,6 +1263,14 @@ export function PurchaseInvoicesPage() {
     [tenantId, handleAddProduct, toast, productSearchResults, highlightedIndex]
   )
 
+    // ★ v8.13: باز کردن مودال چاپ چک صیادی
+  const openCheckPrinter = useCallback((data: CheckPrintData) => {
+    setCheckPrintData(data)
+    setCheckPrinterOpen(true)
+  }, [])
+
+  
+
   // ══════════════════════════════════════════════════════════════════════════
   // ★ ثبت فاکتور (آنلاین / آفلاین)
   // ══════════════════════════════════════════════════════════════════════════
@@ -1396,14 +1422,27 @@ export function PurchaseInvoicesPage() {
           isEdit: isEdit,
         })
         console.log('[handleSubmit] ✅ Invoice created successfully:', data.data)
-        if (paymentType === 'check' && data.data?.check) {
-          toast({
-            title: '✓ فاکتور و چک ثبت شد',
-            description: `فاکتور ${data.data.number} + چک شماره ${checkNumber} (${checkBank})`
-          })
-        } else {
-          toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
-        }
+    if (paymentType === 'check' && data.data?.check) {
+  toast({
+    title: '✓ فاکتور و چک ثبت شد',
+    description: `فاکتور ${data.data.number} + چک شماره ${checkNumber} (${checkBank})`
+  })
+  
+  // ★ v8.13: باز کردن خودکار مودال چاپ چک صیادی
+  openCheckPrinter({
+    checkNumber: checkNumber,
+    bankName: checkBank,
+    amount: totals.total,
+    dueDate: checkDueDate,
+    payee: checkPayee.trim() || suppliers.find(s => s.id === supplierId)?.name || '',
+    description: `بابت فاکتور خرید ${data.data.number}`,
+    invoiceNumber: data.data.number,
+    supplierName: suppliers.find(s => s.id === supplierId)?.name,
+   
+  })
+} else {
+  toast({ title: 'موفق', description: data.message || 'فاکتور با موفقیت ثبت شد' })
+}
         if (editingOfflineId) {
           const queue = loadSyncQueue()
           saveSyncQueue(queue.filter(q => q.offlineId !== editingOfflineId))
@@ -1458,7 +1497,7 @@ export function PurchaseInvoicesPage() {
     } finally {
       setSubmitting(false)
     }
-  }, [cart, warehouseId, tenantId, supplierId, paymentType, description, invoiceDate, totals, isOnline, trulyOnline, editingInvoiceId, editingOfflineId, suppliers, warehouses, loadOfflineInvoices, saveOfflineInvoices, addToSyncQueue, loadSyncQueue, saveSyncQueue, loadData, loadGlobalStats, toast, checkNumber, checkBank])
+ }, [cart, warehouseId, tenantId, supplierId, paymentType, description, invoiceDate, totals, isOnline, trulyOnline, editingInvoiceId, editingOfflineId, suppliers, warehouses, loadOfflineInvoices, saveOfflineInvoices, addToSyncQueue, loadSyncQueue, saveSyncQueue, loadData, loadGlobalStats, toast, checkNumber, checkBank, openCheckPrinter])
 
   // ══════════════════════════════════════════════════════════════════════════
   // ★ حذف فاکتور
@@ -1844,6 +1883,8 @@ export function PurchaseInvoicesPage() {
     setPrintInvoiceNumber(inv.number)
     setPrintModalOpen(true)
   }, [])
+
+
 
   // ══════════════════════════════════════════════════════════════════════════
   // Computed Values
@@ -2520,14 +2561,24 @@ export function PurchaseInvoicesPage() {
           <>
             <div className="md:hidden space-y-2">
               {filteredInvoices.map(inv => (
-                <MobileInvoiceCard
-                  key={inv.id}
-                  inv={inv}
-                  onPrint={(inv) => { setPrintInvoiceId(inv.id); setPrintInvoiceNumber(inv.number); setPrintModalOpen(true) }}
-                  onEdit={openEditDialog}
-                  onReturn={handleReturnClick}
-                  onDelete={(inv) => setDeletingInvoice(inv)}
-                />
+           <MobileInvoiceCard
+  key={inv.id}
+  inv={inv}
+  onPrint={(inv) => { setPrintInvoiceId(inv.id); setPrintInvoiceNumber(inv.number); setPrintModalOpen(true) }}
+  onPrintCheck={(inv) => openCheckPrinter({
+    checkNumber: inv.checkInfo?.checkNumber || '',
+    bankName: inv.checkInfo?.bankName || '',
+    amount: inv.totalAmount,
+    dueDate: inv.checkInfo?.dueDate || inv.invoiceDate,
+    payee: inv.checkInfo?.payeeName || inv.supplier?.name || '',
+    description: `بابت فاکتور خرید ${inv.number}`,
+    invoiceNumber: inv.number,
+    supplierName: inv.supplier?.name,
+  })}
+  onEdit={openEditDialog}
+  onReturn={handleReturnClick}
+  onDelete={(inv) => setDeletingInvoice(inv)}
+/>
               ))}
             </div>
             {totalPages > 1 && (
@@ -2674,17 +2725,39 @@ export function PurchaseInvoicesPage() {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell>
-                              <div className="flex items-center justify-center gap-0.5">
-                                <Button
-                                  variant="ghost" size="icon"
-                                  className="h-7 w-7 hover:bg-emerald-50"
-                                  onClick={() => { setPrintInvoiceId(inv.id); setPrintInvoiceNumber(inv.number); setPrintModalOpen(true) }}
-                                  disabled={inv._isOffline}
-                                  title="چاپ"
-                                >
-                                  <Printer className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-emerald-600'}`} />
-                                </Button>
+                          <TableCell>
+  <div className="flex items-center justify-center gap-0.5">
+    {/* ★ v8.13: دکمه چاپ چک صیادی (فقط برای فاکتورهای چکی) */}
+      {/* ★ v8.13: دکمه چاپ چک صیادی (فقط برای فاکتورهای چکی) */}
+    {inv.paymentType === 'check' && inv.checkInfo && (
+      <Button
+        variant="ghost" size="icon"
+        className="h-7 w-7 hover:bg-purple-50"
+        onClick={() => openCheckPrinter({
+          checkNumber: inv.checkInfo?.checkNumber || '',
+          bankName: inv.checkInfo?.bankName || '',
+          amount: inv.totalAmount,
+          dueDate: inv.checkInfo?.dueDate || inv.invoiceDate,
+          payee: inv.checkInfo?.payeeName || inv.supplier?.name || '',
+          description: `بابت فاکتور خرید ${inv.number}`,
+          invoiceNumber: inv.number,
+          supplierName: inv.supplier?.name,
+        })}
+        disabled={inv._isOffline}
+        title="چاپ چک صیادی"
+      >
+        <CreditCard className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-purple-600'}`} />
+      </Button>
+    )}
+    <Button
+      variant="ghost" size="icon"
+      className="h-7 w-7 hover:bg-emerald-50"
+      onClick={() => { setPrintInvoiceId(inv.id); setPrintInvoiceNumber(inv.number); setPrintModalOpen(true) }}
+      disabled={inv._isOffline}
+      title="چاپ فاکتور"
+    >
+      <Printer className={`w-3.5 h-3.5 ${inv._isOffline ? 'text-gray-300' : 'text-emerald-600'}`} />
+    </Button>
                                 <Button
                                   variant="ghost" size="icon"
                                   className="h-7 w-7 hover:bg-blue-50"
@@ -3186,6 +3259,20 @@ export function PurchaseInvoicesPage() {
         storeName={useAppStore.getState().storeName || 'فروشگاه'}
       />
 
+{/* ★ v8.13: مودال چاپ چک صیادی */}
+<CheckPrinterModal
+  open={checkPrinterOpen}
+  onOpenChange={setCheckPrinterOpen}
+  initialData={checkPrintData}
+  onSuccess={() => {
+    // بعد از چاپ موفق، می‌توانید لاگ ثبت کنید
+    logger.info('چک صیادی با موفقیت چاپ شد', {
+      invoiceNumber: checkPrintData?.invoiceNumber,
+      amount: checkPrintData?.amount,
+      payee: checkPrintData?.payee,
+    })
+  }}
+/>
       <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
         <DialogContent className="w-[calc(100%-0.5rem)] sm:w-full sm:max-w-3xl max-h-[92vh] overflow-y-auto rounded-xl" dir="rtl">
           <DialogHeader>
@@ -3504,4 +3591,4 @@ export function PurchaseInvoicesPage() {
       )}
     </div>
   )
-}
+    }

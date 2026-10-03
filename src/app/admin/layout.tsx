@@ -54,7 +54,6 @@ const navItems = [
       </svg>
     ),
   },
-  // ★ v11.5: حذف خودکار فروشگاه‌های بدون استفاده
   {
     href: '/admin/auto-cleanup',
     label: 'حذف خودکار',
@@ -91,6 +90,17 @@ const navItems = [
       </svg>
     ),
   },
+  // ★ v11.7: آیتم جدید — تنظیمات (شامل تب پشتیبان‌گیری)
+  {
+    href: '/admin/settings',
+    label: 'تنظیمات',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
   {
     href: '/admin/change-password',
     label: 'تغییر رمز عبور',
@@ -101,6 +111,7 @@ const navItems = [
     ),
   },
 ];
+
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -179,7 +190,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }, 100);
   };
 
-  const currentPageTitle = navItems.find(i => i.href === pathname)?.label || 'پنل مدیریت';
+  // ★ v11.7: پشتیبانی از مسیرهای زیرمجموعه تنظیمات (مثل /admin/settings?tab=backup)
+  const currentPageTitle = navItems.find(i => 
+    pathname === i.href || (i.href === '/admin/settings' && pathname.startsWith('/admin/settings'))
+  )?.label || 'پنل مدیریت';
+  
   const isCollapsed = !isDesktopSidebarOpen;
 
   return (
@@ -231,7 +246,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         }`}>
           <div className="space-y-1">
             {navItems.map(item => {
-              const isActive = pathname === item.href;
+              // ★ v11.7: تشخیص فعال بودن مسیر تنظیمات و زیرمجموعه‌هایش
+              const isActive = item.href === '/admin/settings' 
+                ? pathname.startsWith('/admin/settings')
+                : pathname === item.href;
+                
               return (
                 <Link
                   key={item.href}
@@ -284,10 +303,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       {/* ═══════════════════════ محتوای اصلی ═══════════════════════ */}
       <main className="flex-1 min-h-screen flex flex-col w-full min-w-0">
 
-        {/* ═══════════════════════ هدر اصلی (★ v11.3: هماهنگ با سایدبار) ═══════════════════════ */}
+        {/* ═══════════════════════ هدر اصلی ═══════════════════════ */}
         <header className="bg-gradient-to-l from-slate-800 via-slate-800 to-indigo-900 backdrop-blur-xl border-b border-white/10 px-4 sm:px-6 py-3 flex justify-between items-center sticky top-0 z-10 shadow-lg shadow-slate-900/10">
           <div className="flex items-center gap-3">
-            {/* دکمه toggle سایدبار */}
             <button
               onClick={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
               className={`hidden lg:flex w-10 h-10 items-center justify-center rounded-xl transition-all ${
@@ -306,7 +324,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </svg>
             </button>
 
-            {/* دکمه منو موبایل */}
             <button
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden w-10 h-10 flex items-center justify-center text-slate-300 hover:bg-white/10 hover:text-white rounded-xl transition"
@@ -316,7 +333,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </svg>
             </button>
 
-            {/* عنوان صفحه */}
             <div className="hidden sm:flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#7C7BEB] to-[#5B5AC7] flex items-center justify-center shrink-0 shadow-md shadow-purple-500/30">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -332,7 +348,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
           <div className="flex items-center gap-2 sm:gap-3">
 
-            {/* جستجو */}
             <div className="relative hidden md:block" ref={searchRef}>
               <button
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
@@ -359,7 +374,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   <div className="mt-2 pt-2 border-t border-gray-100">
                     <p className="text-[10px] text-gray-400 font-bold mb-1.5">دسترسی سریع</p>
                     <div className="space-y-0.5">
-                      {navItems.slice(0, 4).map(item => (
+                      {navItems.slice(0, 5).map(item => (
                         <Link
                           key={item.href}
                           href={item.href}
@@ -378,7 +393,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {/* ★ v11.3: تاریخ و ساعت با استایل تیره هماهنگ */}
             <div className="hidden lg:flex items-center gap-2 bg-white/5 backdrop-blur-sm px-3 py-2 rounded-xl border border-white/10 shadow-sm min-w-[240px]" dir="rtl">
               <div className="flex items-center gap-1.5 flex-1">
                 <svg className="w-3.5 h-3.5 text-purple-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -399,7 +413,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            {/* ★ v11.3: دکمه مشاهده سایت با رنگ هماهنگ */}
             <a
               href={siteUrl}
               target="_blank"
@@ -416,7 +429,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               </svg>
             </a>
 
-            {/* اعلان‌ها */}
             <button className="relative w-10 h-10 flex items-center justify-center text-slate-300 hover:bg-white/10 hover:text-white rounded-xl transition-all">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -424,7 +436,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-slate-800 animate-pulse"></span>
             </button>
 
-            {/* منوی کاربر */}
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
@@ -449,7 +460,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 </svg>
               </button>
 
-              {/* منوی کشویی کاربر (سفید برای خوانایی) */}
               {isUserDropdownOpen && (
                 <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl shadow-purple-500/10 border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200 overflow-hidden">
 
@@ -512,8 +522,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                       </svg>
                     </a>
 
+                    {/* ★ v11.7: لینک به تنظیمات (به جای site-content) */}
                     <Link
-                      href="/admin/site-content"
+                      href="/admin/settings"
                       onClick={() => setIsUserDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition group"
                     >
@@ -525,7 +536,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                       </div>
                       <div className="flex-1">
                         <p className="font-medium">تنظیمات</p>
-                        <p className="text-[10px] text-gray-500">پیکربندی سیستم</p>
+                        <p className="text-[10px] text-gray-500">پشتیبان‌گیری و پیکربندی</p>
                       </div>
                     </Link>
                   </div>
@@ -549,7 +560,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        {/* محتوای صفحه */}
         <div className="p-4 sm:p-6 flex-1">
           {children}
         </div>

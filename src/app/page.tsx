@@ -1,12 +1,38 @@
 'use client'
 
-import { useEffect, useState, lazy, Suspense } from 'react'
+import { useEffect, useState, useRef, lazy, Suspense } from 'react'
 import { useAppStore } from '@/lib/store'
+import { usePathname } from 'next/navigation'
+import LandingPage from '@/components/landing/landing-page'
+// ═══════════════════════════════════════════════════════════
+// ★ کد خام اینماد — بدون تغییر، بدون rel، بدون کامپوننت اضافه
+// ═══════════════════════════════════════════════════════════
+const ENAMAD_RAW_HTML = `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
 
+function EnamadStaticBadge() {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 99999,
+        background: '#ffffff',
+        padding: '10px 12px',
+        borderRadius: '14px',
+        border: '1px solid #e5e7eb',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.12)',
+      }}
+      dangerouslySetInnerHTML={{ __html: ENAMAD_RAW_HTML }}
+      suppressHydrationWarning
+    />
+  )
+}
 // ============================================================================
 // ★ ماژول-لول فلگ
 // ============================================================================
-let _globalInitDone = false
+
 
 function AuthLoadingSplash() {
   return (
@@ -263,9 +289,7 @@ function SimpleLanding() {
 // ⚠️⚠️⚠️ از اینجا به پایین، کد کاملاً دست‌نخورده و بدون تغییر باقی می‌ماند ⚠️⚠️⚠️
 // ════════════════════════════════════════════════════════════════════════════
 
-const LazyLandingPage = lazy(() =>
-  import('@/components/landing/landing-page').catch(() => ({ default: SimpleLanding }))
-)
+
 const LazyAppShell = lazy(() =>
   import('@/components/app-shell').catch(() => ({ default: SimpleLanding }))
 )
@@ -294,166 +318,223 @@ function clearAuthData() {
 }
 
 export default function HomePage() {
+  const pathname = usePathname() || '/'
+
   const currentView = useAppStore((s) => s.currentView)
   const isAuthenticated = useAppStore((s) => s.isAuthenticated)
   const user = useAppStore((s) => s.user)
+  const storeToken = useAppStore((s) => s.token)
 
   const [authCheckDone, setAuthCheckDone] = useState(false)
+  const lastCheckedTokenRef = useRef<string | null>(null)
 
-  // ★★★ v9.5.6: تشخیص مسیر پورتال در ابتدای رندر (قبل از هر useEffect)
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/'
-  const isPortalRoute = currentPath.startsWith('/portal')
-  const isSubscriptionRoute = currentPath.startsWith('/subscription')
-  const isPaymentResultRoute = currentPath.startsWith('/payment-result')
-    const isPortalViewRoute = currentPath.startsWith('/portal-view')
-  const isSpecialRoute = isPortalRoute || isSubscriptionRoute || isPaymentResultRoute
+  // ★★★ مسیرهای ویژه که توسط page‌های جداگانه مدیریت می‌شوند
+  const isPortalRoute = pathname.startsWith('/portal')
+  const isSubscriptionRoute = pathname.startsWith('/subscription')
+  const isPaymentResultRoute = pathname.startsWith('/payment-result')
+  const isPortalViewRoute = pathname.startsWith('/portal-view')
 
-  // ★★★ v9.5.6: اگر مسیر پورتال یا اشتراک است، هیچ کاری نکن
-  // فایل‌های مخصوص (portal/[token]/page.tsx, subscription/*/page.tsx) خودشان را مدیریت می‌کنند
+  const isSpecialRoute =
+    isPortalRoute ||
+    isSubscriptionRoute ||
+    isPaymentResultRoute ||
+    isPortalViewRoute
+
   if (isSpecialRoute) {
-    console.log('[HomePage] 🚫 Special route detected:', currentPath, '- rendering nothing, letting sub-routes handle it')
-    // بازگشت null تا Next.js فایل مربوطه را رندر کند
+    console.log('[HomePage] 🚫 Special route detected:', pathname)
     return null
   }
 
   useEffect(() => {
-    if (_globalInitDone) return
-    _globalInitDone = true
+    let cancelled = false
 
-    console.log('[HomePage] Auth check starting')
+  const finish = (
+  view?: ReturnType<typeof useAppStore.getState>['currentView']
+) => {
+  if (cancelled) return
+  if (view) {
+    useAppStore.setState({ currentView: view })
+  }
+  setAuthCheckDone(true)
+}
+    const syncAuth = async () => {
+      const localToken =
+        typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
-    // ─── پاک کردن currentView از store (فقط در browser) ──────────
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('shop-accounting-store')
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          if (parsed && 'currentView' in parsed) {
-            delete parsed.currentView
-            localStorage.setItem('shop-accounting-store', JSON.stringify(parsed))
-          }
+      const localRefreshToken =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('refreshToken')
+          : null
+
+      const token = storeToken || localToken
+
+      // ─── اگر توکنی وجود ندارد ───────────────────────────────
+      if (!token) {
+        lastCheckedTokenRef.current = null
+        clearAuthData()
+        finish(pathname.includes('/dashboard') ? 'login' : 'landing')
+        return
+      }
+
+      // ─── اگر همین توکن قبلاً بررسی شده، دوباره verify نکن ───
+      if (lastCheckedTokenRef.current === token) {
+        const state = useAppStore.getState()
+
+        // اگر کاربر واقعاً لاگین است ولی currentView هنوز landing/login/register است، اصلاح کن
+        if (
+          state.isAuthenticated &&
+          state.user &&
+          state.user.userType !== 'portalUser' &&
+          ['landing', 'login', 'register'].includes(state.currentView)
+        ) {
+          useAppStore.setState({ currentView: 'dashboard' })
         }
-      } catch {}
-    }
 
-    const currentPathInner = typeof window !== 'undefined' ? window.location.pathname : '/'
-    const isDashboardRoute = currentPathInner.includes('/dashboard')
-    
-    console.log('[HomePage] Current path:', currentPathInner, 'isDashboard:', isDashboardRoute)
-
-    // ─── بررسی وجود توکن ───────────────────────────────────────────
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-
-    if (!token) {
-      if (isDashboardRoute) {
-        useAppStore.setState({ currentView: 'login' })
-      } else {
-        useAppStore.setState({ currentView: 'landing' })
+        setAuthCheckDone(true)
+        return
       }
-      if (useAppStore.getState().isAuthenticated) {
-        useAppStore.setState({ isAuthenticated: false, user: null, token: null, refreshToken: null })
-      }
-      setAuthCheckDone(true)
-      return
-    }
 
-    // ─── بررسی و تأیید توکن ────────────────────────────────────────
-    const doVerify = async () => {
+      lastCheckedTokenRef.current = token
+
       try {
         const verifyRes = await fetch('/api/auth/verify', {
-          headers: { Authorization: `Bearer ${token}` },
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: 'include',
+          cache: 'no-store',
         })
 
         if (verifyRes.ok) {
-          const data = await verifyRes.json()
-          if (data?.success && data?.user) {
-            // ★★★ v9.5.6: اگر portalUser است، currentView را portal نگه دار
-            const userType = data?.user?.userType || data?.data?.userType
+          const data = await verifyRes.json().catch(() => ({}))
+
+          const verifiedUser = data?.user || data?.data?.user
+          const userType =
+            verifiedUser?.userType ||
+            data?.userType ||
+            data?.data?.userType
+
+          if (data?.success && verifiedUser) {
+            if (cancelled) return
+
+            useAppStore.getState().login(
+              verifiedUser,
+              token,
+              localRefreshToken || undefined
+            )
+
+            // پورتال‌ها خودشان مدیریت می‌شوند
             if (userType === 'portalUser') {
-              console.log('[HomePage] Portal user detected, not setting currentView')
-              // currentView را تنظیم نکن - فایل portal/[token] خودش مدیریت می‌کند
               setAuthCheckDone(true)
               return
             }
-            
-            useAppStore.getState().login(data.user, token)
-            if (isDashboardRoute) {
-              useAppStore.setState({ currentView: 'dashboard' })
-            } else {
-              useAppStore.setState({ currentView: 'landing' })
-            }
+
+            // ★ مهم‌ترین تغییر:
+            // بعد از لاگین معتبر، حتماً dashboard نمایش داده شود، نه landing
+            useAppStore.setState({ currentView: 'dashboard' })
+
             setAuthCheckDone(true)
             return
           }
         }
 
-        // ─── تلاش برای refresh توکن ───────────────────────────────
-        const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null
-        if (refreshToken) {
+        // ─── تلاش برای refresh توکن ─────────────────────────────
+        if (localRefreshToken) {
           try {
             const refreshRes = await fetch('/api/auth/refresh', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refreshToken }),
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                refreshToken: localRefreshToken,
+              }),
             })
 
             if (refreshRes.ok) {
-              const refreshData = await refreshRes.json()
+              const refreshData = await refreshRes.json().catch(() => ({}))
+
               if (refreshData?.success && refreshData?.data) {
-                const { token: newToken, refreshToken: newRefresh, user: refreshUser } = refreshData.data
-                
-                // ★★★ v9.5.6: اگر portalUser است، currentView را portal نگه دار
-                const userType = refreshUser?.userType
-                if (userType === 'portalUser') {
-                  console.log('[HomePage] Portal user detected after refresh, not setting currentView')
-                  setAuthCheckDone(true)
-                  return
-                }
-                
-                if (newToken && refreshUser) {
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem('token', newToken)
-                    localStorage.setItem('refreshToken', newRefresh || '')
-                    localStorage.setItem('user', JSON.stringify(refreshUser))
+                const {
+                  token: newToken,
+                  refreshToken: newRefreshToken,
+                  user: refreshedUser,
+                } = refreshData.data
+
+                const refreshedUserType = refreshedUser?.userType
+
+                if (newToken && refreshedUser) {
+                  if (cancelled) return
+
+                  localStorage.setItem('token', newToken)
+                  localStorage.setItem('refreshToken', newRefreshToken || '')
+                  localStorage.setItem('user', JSON.stringify(refreshedUser))
+
+                  useAppStore.getState().login(
+                    refreshedUser,
+                    newToken,
+                    newRefreshToken
+                  )
+
+                  lastCheckedTokenRef.current = newToken
+
+                  if (refreshedUserType === 'portalUser') {
+                    setAuthCheckDone(true)
+                    return
                   }
-                  useAppStore.getState().login(refreshUser, newToken, newRefresh)
-                  if (isDashboardRoute) {
-                    useAppStore.setState({ currentView: 'dashboard' })
-                  } else {
-                    useAppStore.setState({ currentView: 'landing' })
-                  }
+
+                  useAppStore.setState({ currentView: 'dashboard' })
                   setAuthCheckDone(true)
                   return
                 }
               }
             }
-          } catch { /* */ }
+          } catch {
+            // ignore refresh error
+          }
         }
 
-        clearAuthData()
-        setAuthCheckDone(true)
+        // ─── اگر همه ناموفق بود، لاگین را پاک کن ─────────────────
+        if (!cancelled) {
+          lastCheckedTokenRef.current = null
+          clearAuthData()
+          finish(pathname.includes('/dashboard') ? 'login' : 'landing')
+        }
       } catch {
-        clearAuthData()
-        setAuthCheckDone(true)
+        if (!cancelled) {
+          lastCheckedTokenRef.current = null
+          clearAuthData()
+          finish(pathname.includes('/dashboard') ? 'login' : 'landing')
+        }
       }
     }
 
-    doVerify()
-  }, [])
+    syncAuth()
 
-  // ─── نمایش splash screen در هنگام بارگذاری ──────────────────────
+    return () => {
+      cancelled = true
+    }
+  }, [storeToken, pathname])
+
+  // ─── splash screen هنگام بررسی اولیه ─────────────────────────
   if (!authCheckDone) {
-    return <AuthLoadingSplash />
+    return (
+      <>
+        <AuthLoadingSplash />
+        <EnamadStaticBadge />
+      </>
+    )
   }
 
-  // ─── رندر AppShell فقط برای storeUser ──────────────────────────
-  if (isAuthenticated && user && !['landing', 'login', 'register'].includes(currentView)) {
-    // ★★★ v9.5.6: اگر portalUser است، AppShell رندر نکن
-    if (user.userType === 'portalUser') {
-      console.log('[HomePage] Portal user detected, not rendering AppShell')
-      return <AuthLoadingSplash />
-    }
-    
+  // ─── اگر کاربر لاگین است و currentView هم dashboard یا چیز داخلی است ──
+  if (
+    isAuthenticated &&
+    user &&
+    user.userType !== 'portalUser' &&
+    !['landing', 'login', 'register'].includes(currentView)
+  ) {
     return (
       <Suspense fallback={<AuthLoadingSplash />}>
         <LazyAppShell />
@@ -477,10 +558,6 @@ export default function HomePage() {
     )
   }
 
-  // پیش‌فرض همیشه لندینگ پیج
-  return (
-    <Suspense fallback={<AuthLoadingSplash />}>
-      <LazyLandingPage />
-    </Suspense>
-  )
+  // ─── پیش‌فرض لندینگ ───────────────────────────────────────────
+  return <LandingPage />
 }

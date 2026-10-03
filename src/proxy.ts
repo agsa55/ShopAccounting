@@ -1,6 +1,11 @@
 // ============================================================================
-// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.5 ★★★ Renewal Route)
+// src/proxy.ts — Proxy (Middleware) — ShopAccounting (v3.6 ★★★ Admin API Protection)
 // ============================================================================
+// ★★★ v3.6 تغییرات نسبت به v3.5:
+//   ★ محافظت کامل از مسیرهای /api/admin/* با همان منطق admin pages
+//   ★ پشتیبانی از backup API و سایر admin APIs
+//   ★ جلوگیری از rewrite شدن admin API ها به لندینگ پیج
+//   ★ اضافه شدن بخش isAdminApiPath و مدیریت اختصاصی
 // ★★★ v3.5 تغییرات نسبت به v3.4:
 //   ★ اضافه شدن مسیر /renewal برای صفحه تمدید اشتراک
 //   ★ جلوگیری از rewrite شدن /renewal به لندینگ پیج
@@ -183,6 +188,13 @@ function isPublicPagePath(pathname: string): boolean {
   return false;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★★★ v3.6: تشخیص مسیرهای Admin API (مثل /api/admin/backup)
+// ════════════════════════════════════════════════════════════════════════════
+function isAdminApiPath(pathname: string): boolean {
+  return pathname.startsWith('/api/admin/');
+}
+
 function setTenantCookies(response: NextResponse, tenantSlug: string, tenantView?: string) {
   response.cookies.set('tenant-slug', tenantSlug, {
     path: '/',
@@ -228,11 +240,17 @@ function clearAdminCookies(response: NextResponse) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // ★★★ v3.3: دریافت توکن ادمین از کوکی (با پشتیبانی از چند نام)
+// ★★★ v3.6: اضافه شدن پشتیبانی از هدر Authorization
 // ════════════════════════════════════════════════════════════════════════════
 function getAdminToken(request: NextRequest): string | undefined {
   for (const name of ADMIN_COOKIE_NAMES) {
     const value = request.cookies.get(name)?.value;
     if (value) return value;
+  }
+  // ★★★ v3.6: همچنین از هدر Authorization هم چک کن
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.replace('Bearer ', '');
   }
   return undefined;
 }
@@ -397,6 +415,69 @@ export default function proxy(request: NextRequest) {
     }
 
     return response;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★★★ v3.6: محافظت از Admin API Routes (قبل از بخش API عمومی)
+  // این بخش مسیرهایی مثل /api/admin/backup, /api/admin/tenants را مدیریت می‌کند
+  // ══════════════════════════════════════════════════════════════════════════
+  if (isAdminApiPath(pathname)) {
+    // login API ادمین عمومی است (در PUBLIC_API_PATHS)
+    if (isPublicApiPath(pathname)) {
+      const response = NextResponse.next();
+      addSecurityHeaders(response);
+      return response;
+    }
+
+    // سایر admin APIs نیاز به توکن ادمین دارند
+    const adminToken = getAdminToken(request);
+
+    if (!adminToken) {
+      console.warn(`[Proxy] 🔒 No admin token for API ${pathname}`);
+      return NextResponse.json(
+        { success: false, error: 'دسترسی غیرمجاز - نیاز به ورود ادمین', errorCode: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
+
+    // اعتبارسنجی JWT
+    try {
+      const secret = process.env.JWT_ACCESS_SECRET;
+      if (!secret) {
+        console.error('[Proxy] ❌ JWT_ACCESS_SECRET not set');
+        return NextResponse.json(
+          { success: false, error: 'خطای سرور', errorCode: 'SERVER_ERROR' },
+          { status: 500 }
+        );
+      }
+
+      const decoded = jwt.verify(adminToken, secret) as any;
+      const isAdmin = decoded.userType === 'admin'
+        || decoded.role === 'SuperAdmin'
+        || decoded.role === 'Admin';
+
+      if (!isAdmin) {
+        console.warn(`[Proxy] ⛔ User is not admin for API ${pathname}`);
+        return NextResponse.json(
+          { success: false, error: 'دسترسی غیرمجاز - نقش ادمین لازم است', errorCode: 'FORBIDDEN' },
+          { status: 403 }
+        );
+      }
+
+      // ✅ توکن معتبر - اجازه دسترسی بده
+      const response = NextResponse.next();
+      addSecurityHeaders(response);
+      response.headers.set('x-authorization', `Bearer ${adminToken}`);
+      response.headers.set('x-admin-id', decoded.userId || decoded.id || '');
+      return response;
+
+    } catch (e: any) {
+      console.warn(`[Proxy] 🔒 Admin token invalid for API ${pathname}:`, e?.message);
+      return NextResponse.json(
+        { success: false, error: 'توکن نامعتبر یا منقضی شده', errorCode: 'TOKEN_EXPIRED' },
+        { status: 401 }
+      );
+    }
   }
 
   // ── ۴. تشخیص Tenant ───────────────────────────────────────────────────────

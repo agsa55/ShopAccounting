@@ -234,26 +234,6 @@ export const db = {
     }
   },
 
-  // ★★★ متدهای حذف‌شده در v3.0 (برای backward compat با خطای 명حقیر):
-  //   - reEncryptConnectionString → حذف شد
-  //   - reEncryptAllIsolatedTenants → حذف شد
-  //   اگه کدی این متدها رو صدا می‌زنه، باید حذف بشه
+ 
 }
 
-// ─── Graceful Shutdown ────────────────────────────────────────
-
-if (typeof process !== 'undefined' && process.on) {
-  process.on('SIGTERM', async () => {
-    console.log('[DB] SIGTERM received, disconnecting...')
-    await db.disconnectAll()
-    process.exit(0)
-  })
-
-  process.on('SIGINT', async () => {
-    console.log('[DB] SIGINT received, disconnecting...')
-    await db.disconnectAll()
-    process.exit(0)
-  })
-}
-
-export default db

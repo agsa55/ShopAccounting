@@ -2,8 +2,9 @@
 
 // ============================================================================
 // src/components/accounting/checks-tab.tsx — Checks Tab
-// ShopAccounting v29 — با قابلیت آفلاین کامل + ریسپانسیو + صفحه‌بندی
+// ShopAccounting v29.2 — با قابلیت آفلاین کامل + ریسپانسیو + صفحه‌بندی
 // ★ v29.1: اضافه شدن صفحه‌بندی با محدودیت ۱۰ رکورد در هر صفحه
+// ★ v29.2: اضافه شدن چاپ چک صیادی برای چک‌های پرداختنی
 // ============================================================================
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
@@ -30,10 +31,13 @@ import {
   Plus, Search, Loader2, WifiOff, CreditCard, Eye,
   CheckCircle2, AlertCircle, Save, Pencil, Trash2, Calendar,
   Ban, Clock, RefreshCw, Landmark, RotateCcw, XCircle,
-  ArrowLeft, ArrowRight,
+  ArrowLeft, ArrowRight, Printer,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
+// ★ v29.2: import مودال چاپ چک صیادی
+import { CheckPrinterModal } from '@/components/check-printer/CheckPrinterModal'
+import type { CheckPrintData } from '@/components/check-printer/CheckPrinterModal'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -214,7 +218,7 @@ function jalCal(jy: number): { leap: number; gy: number; march: number } {
     jp = jm
   }
   n = jy - jp
-  leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33) + 3, 4)
+  leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33), 3) * 4
   if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1
   const leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150
   const march = 20 + leapJ - leapG
@@ -468,6 +472,10 @@ export function ChecksTab() {
 
   // ─── State: Detail Dialog ─────────────────────────────────
   const [detailCheck, setDetailCheck] = useState<Check | null>(null)
+
+  // ★ v29.2: State برای مودال چاپ چک صیادی
+  const [checkPrinterOpen, setCheckPrinterOpen] = useState(false)
+  const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null)
 
   // ═══════════════════════════════════════════════════════════
   // ★★★ Load Data (Bulletproof Offline + IndexedDB)
@@ -771,6 +779,28 @@ export function ChecksTab() {
     }
   }, [deleteTarget, checks, isOnline, toast, loadChecks])
 
+ // ═══════════════════════════════════════════════════════════
+// ★ v29.2: باز کردن مودال چاپ چک صیادی
+// ═══════════════════════════════════════════════════════════
+
+const openCheckPrinter = useCallback((check: Check) => {
+  console.log('[ChecksTab] 🖨️ Print button clicked for check:', check.id)
+  
+  const printData: CheckPrintData = {
+    checkNumber: check.checkNumber,
+    bankName: check.bankName,
+    amount: check.amount,
+    dueDate: check.dueDate,
+    payee: check.payee || '',
+    description: `بابت چک شماره ${check.checkNumber}`,
+    nationalId: '',
+  }
+  
+  console.log('[ChecksTab] 📋 Print data prepared:', printData)
+  setCheckPrintData(printData)
+  setCheckPrinterOpen(true)
+  console.log('[ChecksTab] ✅ Modal should open now')
+}, [])
   // ═══════════════════════════════════════════════════════════
   // Filter & Stats & Pagination
   // ═══════════════════════════════════════════════════════════
@@ -1075,7 +1105,7 @@ export function ChecksTab() {
                       <TableHead className="text-right text-xs w-32">مبلغ</TableHead>
                       <TableHead className="text-right text-xs w-28">سررسید</TableHead>
                       <TableHead className="text-right text-xs w-28">وضعیت</TableHead>
-                      <TableHead className="text-right text-xs w-48">عملیات</TableHead>
+                      <TableHead className="text-right text-xs w-60">عملیات</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1098,7 +1128,22 @@ export function ChecksTab() {
                         <TableCell className="text-xs">{formatDate(chk.dueDate)}</TableCell>
                         <TableCell>{getStatusBadge(chk.status)}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {/* ★ v29.2: دکمه چاپ چک صیادی (فقط برای چک‌های پرداختنی) */}
+                         {chk.type === 'payable' && (
+  <Button
+    size="sm" 
+    variant="outline" 
+    className="text-xs h-7 text-purple-600 border-purple-200 hover:bg-purple-50"
+    onClick={() => {
+      console.log('[ChecksTab] 🖨️ Print button clicked')
+      openCheckPrinter(chk)
+    }}
+    title="چاپ چک صیادی"
+  >
+    <Printer className="w-3 h-3 ml-1" /> چاپ چک
+  </Button>
+)}
                             {chk.type === 'receivable' && (
                               <>
                                 {chk.status === 'pending' && (
@@ -1239,6 +1284,15 @@ export function ChecksTab() {
                     </div>
 
                     <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                      {/* ★ v29.2: دکمه چاپ چک صیادی (فقط برای چک‌های پرداختنی) */}
+                      {chk.type === 'payable' && (
+                        <Button size="sm" variant="outline" className="w-full h-9 text-xs text-purple-600 border-purple-200 hover:bg-purple-50"
+                          onClick={() => openCheckPrinter(chk)}
+                        >
+                          <Printer className="w-3.5 h-3.5 ml-1" />
+                          <span>چاپ چک صیادی</span>
+                        </Button>
+                      )}
                       {chk.status === 'pending' && (
                         <div className="grid grid-cols-2 gap-2">
                           {chk.type === 'receivable' ? (
@@ -1524,6 +1578,21 @@ export function ChecksTab() {
                     <div className="font-medium">{formatDate(detailCheck.dueDate)}</div>
                   </div>
                 </div>
+                {/* ★ v29.2: دکمه چاپ چک صیادی در مودال جزئیات (فقط برای چک‌های پرداختنی) */}
+                {detailCheck.type === 'payable' && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const checkToPrint = detailCheck
+                      setDetailCheck(null)
+                      setTimeout(() => openCheckPrinter(checkToPrint), 200)
+                    }}
+                    className="w-full text-purple-600 border-purple-200 hover:bg-purple-50"
+                  >
+                    <Printer className="w-4 h-4 ml-1" />
+                    چاپ چک صیادی
+                  </Button>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDetailCheck(null)} className="w-full sm:w-auto">بستن</Button>
@@ -1532,6 +1601,32 @@ export function ChecksTab() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ★ v29.2: مودال چاپ چک صیادی */}
+{checkPrinterOpen && (
+  <CheckPrinterModal
+    open={checkPrinterOpen}
+    onOpenChange={(open) => {
+      console.log('[ChecksTab] 🔄 Modal onOpenChange called with:', open)
+      setCheckPrinterOpen(open)
+      if (!open) {
+        setCheckPrintData(null)
+      }
+    }}
+    initialData={checkPrintData}
+    onSuccess={() => {
+      console.log('[ChecksTab] ✅ Print successful')
+      logger.info('چک صیادی با موفقیت چاپ شد', {
+        checkNumber: checkPrintData?.checkNumber,
+        amount: checkPrintData?.amount,
+        payee: checkPrintData?.payee,
+      })
+      setCheckPrinterOpen(false)
+      setCheckPrintData(null)
+      loadChecks()
+    }}
+  />
+)}
     </div>
   )
 }

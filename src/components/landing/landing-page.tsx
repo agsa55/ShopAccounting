@@ -1,8 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/landing/landing-page.tsx (v7.0 — پشتیبانی از showPrice)
-// ★ v7.0: نمایش شرطی قیمت بر اساس toggle در پنل مدیریت
+// src/components/landing/landing-page.tsx
+// ★ v12.0: Hero Typewriter + Golden Final Phrase + Donation Support Section
 // ============================================================================
 
 import { useState, useEffect, useRef } from 'react'
@@ -12,9 +12,21 @@ import {
   ShoppingCart, Package, Users, CreditCard, BookOpen, BarChart3,
   CheckCircle2, Crown, Zap, Building2, ChevronDown,
   Star, TrendingUp, ShieldCheck, Clock, ArrowLeft, Sparkles,
-  Menu, X, LogIn, Percent,Infinity,
+  Menu, X, LogIn, Percent, Infinity,
+  HeartHandshake, Copy, Check, Gift, Banknote, Loader2,
 } from 'lucide-react'
 import { useSiteContent } from '@/lib/site-content'
+
+// ═══════════════════════════════════════════════════════════════
+// ★ تنظیمات حمایت مالی — فقط شماره کارت برای پرداخت دستی
+// ★ پرداخت الکترونیکی از طریق زرین‌پال و API سمت سرور انجام می‌شود
+// ═══════════════════════════════════════════════════════════════
+const DONATION_CARD_NUMBER = '6063-7312-9723-0196'
+const DONATION_CARD_OWNER = 'سید عقیل سادات پور'
+const MIN_DONATION_TOMAN = 10000
+
+// Merchant ID زرین‌پال فقط در .env / env سرور قرار می‌گیرد.
+// هرگز آن را داخل این فایل فرانت‌اند نگذارید.
 
 function formatPrice(price: number): string {
   return new Intl.NumberFormat('fa-IR').format(price)
@@ -61,6 +73,97 @@ function useCountUp(target: number, duration = 2000, start = false) {
     return () => cancelAnimationFrame(raf)
   }, [target, duration, start])
   return value
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ Hero Typewriter
+// ═══════════════════════════════════════════════════════════════
+const HERO_TYPED_WORDS = ['ساده...', 'سریع...', 'هوشمند...']
+const HERO_FINAL_PHRASE = 'و کاملا رایگان'
+
+function HeroTypewriter() {
+  const [wordIndex, setWordIndex] = useState(0)
+  const [charCount, setCharCount] = useState(0)
+  const [phase, setPhase] = useState<
+    'typing' | 'hold' | 'fading' | 'final' | 'finalHold'
+  >('typing')
+
+  const currentWord = HERO_TYPED_WORDS[wordIndex] ?? ''
+
+  // ★ مهم: متن را به‌صورت یک رشته پیوسته بساز، نه span جدا برای هر حرف
+  const typedText = Array.from(currentWord)
+    .slice(0, charCount)
+    .join('')
+
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>
+
+    if (phase === 'typing') {
+      if (charCount < currentWord.length) {
+        timeout = setTimeout(
+          () => setCharCount((c) => c + 1),
+          95 + Math.random() * 85
+        )
+      } else {
+        timeout = setTimeout(() => setPhase('hold'), 550)
+      }
+    } else if (phase === 'hold') {
+      timeout = setTimeout(() => setPhase('fading'), 850)
+    } else if (phase === 'fading') {
+      timeout = setTimeout(() => {
+        if (wordIndex < HERO_TYPED_WORDS.length - 1) {
+          setWordIndex((i) => i + 1)
+          setCharCount(0)
+          setPhase('typing')
+        } else {
+          setPhase('final')
+        }
+      }, 520)
+    } else if (phase === 'final') {
+      timeout = setTimeout(() => setPhase('finalHold'), 3400)
+    } else if (phase === 'finalHold') {
+      timeout = setTimeout(() => {
+        setWordIndex(0)
+        setCharCount(0)
+        setPhase('typing')
+      }, 1000)
+    }
+
+    return () => clearTimeout(timeout)
+  }, [phase, charCount, currentWord.length, wordIndex])
+
+  const isFinal = phase === 'final' || phase === 'finalHold'
+
+  return (
+    <span
+      className="hero-type-wrap"
+      aria-label={`${HERO_TYPED_WORDS.join('، ')} و ${HERO_FINAL_PHRASE}`}
+    >
+      {!isFinal ? (
+        <span
+          className={`hero-type-line ${
+            phase === 'fading' ? 'hero-type-fading' : ''
+          }`}
+        >
+          {/* ★ اینجا متن پیوسته رندر می‌شود تا حفارسی به هم بچسبند */}
+          <span
+            key={`${wordIndex}-${charCount}`}
+            className="hero-type-text"
+          >
+            {typedText}
+          </span>
+
+          {phase === 'typing' && (
+            <span className="hero-caret" aria-hidden="true" />
+          )}
+        </span>
+      ) : (
+        <span key="final" className="hero-final-word">
+          {HERO_FINAL_PHRASE}
+        </span>
+      )}
+    </span>
+  )
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -228,6 +331,138 @@ html { scroll-behavior: smooth; }
   background: linear-gradient(145deg, #ffffff 0%, #f5f3ff 100%);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ Hero Typewriter Styles
+═══════════════════════════════════════════════════════════════ */
+.hero-type-wrap {
+  display: flex;
+  width: 100%;
+  min-height: clamp(2.6rem, 8vw, 4.3rem);
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 1024px) {
+  .hero-type-wrap {
+    justify-content: flex-start;
+  }
+}
+
+.hero-type-line {
+  display: inline-flex;
+  align-items: center;
+  color: #ede9fe;
+  text-shadow: 0 0 18px rgba(167, 139, 250, 0.35);
+  transition: all 0.45s ease;
+}
+.hero-type-text {
+  display: inline-block;
+  white-space: nowrap;
+  animation: hero-text-step 0.18s ease-out;
+}
+
+.hero-type-fading {
+  animation: hero-line-out 0.5s ease forwards;
+}
+
+.hero-caret {
+  display: inline-block;
+  width: 0.12em;
+  height: 1em;
+  margin-right: 0.08em;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 14px rgba(251, 191, 36, 0.75);
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+.hero-final-word {
+  display: inline-block;
+  font-size: clamp(1.8rem, 6vw, 3.4rem);
+  line-height: 1.1;
+  font-weight: 900;
+  background: linear-gradient(
+    90deg,
+    #fef3c7 0%,
+    #f59e0b 18%,
+    #fde68a 36%,
+    #d97706 54%,
+    #fffbeb 72%,
+    #f59e0b 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 22px rgba(245, 158, 11, 0.45));
+  animation:
+    hero-final-in 0.95s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+    gold-shimmer 3.2s linear infinite 0.95s;
+}
+
+@keyframes hero-text-step {
+  from {
+    opacity: 0.78;
+    transform: translateY(1.5px) scale(0.995);
+    filter: blur(0.35px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes hero-line-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.94);
+    filter: blur(10px);
+  }
+}
+
+@keyframes hero-final-in {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.82);
+    filter: blur(14px);
+    letter-spacing: 0.08em;
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.04);
+    filter: blur(0);
+    letter-spacing: normal;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+    letter-spacing: normal;
+  }
+}
+
+@keyframes gold-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
 @media (max-width: 640px) {
   .hero-title { font-size: 2.4rem !important; line-height: 1.25 !important; }
   .hero-sub   { font-size: 1rem !important; }
@@ -332,6 +567,8 @@ const tickerItems = [
   'گزارشات متنوع',
 ]
 
+
+
 export default function LandingPage() {
   const router = useRouter()
   const setSelectedPlanId = useStore((s) => s.setSelectedPlanId)
@@ -340,32 +577,53 @@ export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [activeFeature, setActiveFeature] = useState<number | null>(null)
 
+  // ★ Donation states
+ const [donateOpen, setDonateOpen] = useState(false)
+const [donateAmount, setDonateAmount] = useState('100000')
+const [copied, setCopied] = useState(false)
+const [donationNotice, setDonationNotice] = useState('')
+const [donationLoading, setDonationLoading] = useState(false)
+
   const pricingRef = useRef<HTMLDivElement>(null)
   const statsRef = useRef<HTMLDivElement>(null)
   const [statsStarted, setStatsStarted] = useState(false)
   
-  const { content: siteContent } = useSiteContent()
-  
-  // ★ v7.0: ساخت لیست پلن‌ها — با پشتیبانی از showPrice
-  const displayPlans = (siteContent.plans || []).map(plan => {
-    const ui = PLAN_UI_CONFIG[plan.name] || PLAN_UI_CONFIG.simple
-    return {
-      name: plan.name,
-      nameFa: plan.nameFa,
-      description: plan.description,
-      popular: plan.popular || false,
-      features: plan.features || [],
-      showPrice: (plan as any).showPrice || false,
-      annualPrice: (plan as any).annualPrice || 0,
-      lifetimePrice: (plan as any).lifetimePrice || 0,
-      discountPercent: (plan as any).discountPercent || 0,
-      icon: ui.icon,
-      color: ui.color,
-      bgColor: ui.bgColor,
-      borderColor: ui.borderColor,
-      gradient: ui.gradient,
-    }
-  })
+ const { content: siteContent } = useSiteContent()
+
+// ★ v10.1: فقط پلن‌هایی که isActive !== false هستند در لندینگ نمایش داده می‌شوند.
+// اگر فیلد isActive وجود نداشته باشد، به‌صورت پیش‌فرض فعال حساب می‌شود.
+const activePlans = (siteContent.plans || []).filter((plan: any) => {
+  return plan.isActive !== false
+})
+
+const displayPlans = activePlans.map(plan => {
+  const ui = PLAN_UI_CONFIG[plan.name] || PLAN_UI_CONFIG.simple
+  return {
+    name: plan.name,
+    nameFa: plan.nameFa,
+    description: plan.description,
+    popular: plan.popular || false,
+    features: plan.features || [],
+    showPrice: (plan as any).showPrice || false,
+    annualPrice: (plan as any).annualPrice || 0,
+    lifetimePrice: (plan as any).lifetimePrice || 0,
+    discountPercent: (plan as any).discountPercent || 0,
+    isActive: (plan as any).isActive !== false,
+    icon: ui.icon,
+    color: ui.color,
+    bgColor: ui.bgColor,
+    borderColor: ui.borderColor,
+    gradient: ui.gradient,
+  }
+})
+
+// ★ کلاس گرید بر اساس تعداد پلن‌های فعال
+const pricingGridClass =
+  displayPlans.length <= 1
+    ? 'grid-cols-1 md:grid-cols-1 max-w-md mx-auto'
+    : displayPlans.length === 2
+      ? 'grid-cols-1 md:grid-cols-2 max-w-4xl mx-auto'
+      : 'grid-cols-1 md:grid-cols-3'
 
   useEffect(() => {
     const id = 'landing-animations-v6'
@@ -399,6 +657,33 @@ export default function LandingPage() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+useEffect(() => {
+  if (typeof window === 'undefined') return
+
+  const params = new URLSearchParams(window.location.search)
+  const donation = params.get('donation')
+
+  if (!donation) return
+
+  const amountToman = Number(params.get('amountToman'))
+
+  if (donation === 'success') {
+    setDonationNotice(
+      amountToman > 0
+        ? `سپاس از حمایت گرم شما (${formatFaNumber(amountToman)} تومان). این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.`
+        : 'سپاس از حمایت گرم شما. این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.'
+    )
+  } else if (donation === 'cancelled') {
+    setDonationNotice('پرداخت لغو شد. در صورت تمایل می‌توانید دوباره تلاش کنید.')
+  } else {
+    setDonationNotice('پرداخت ناموفق بود. لطفاً دوباره تلاش کنید یا از شماره کارت استفاده کنید.')
+  }
+
+  setDonateOpen(true)
+
+  // پاک کردن query params از آدرس
+  window.history.replaceState({}, '', window.location.pathname)
+}, [])
 
   // ★ انتخاب پلن و رفتن به ثبت‌نام
   const handlePlanSelect = (tierName: string) => {
@@ -417,9 +702,79 @@ export default function LandingPage() {
     pricingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  // ★ Donation helpers
+  const copyDonationCard = async () => {
+    const rawCard = DONATION_CARD_NUMBER.replace(/[^\d]/g, '')
+    try {
+      await navigator.clipboard.writeText(rawCard)
+      setCopied(true)
+      setDonationNotice('شماره کارت با موفقیت کپی شد.')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setDonationNotice('کپی خودکار انجام نشد. لطفاً شماره کارت را دستی کپی کنید.')
+    }
+  }
+
+ const handleOnlineDonation = async () => {
+  const amount = Number(donateAmount)
+
+  if (!amount || amount < MIN_DONATION_TOMAN) {
+    setDonationNotice(
+      `حداقل مبلغ حمایت ${MIN_DONATION_TOMAN.toLocaleString('fa-IR')} تومان است.`
+    )
+    return
+  }
+
+  setDonationLoading(true)
+  setDonationNotice('')
+
+  try {
+    const res = await fetch('/api/donations/zarinpal/request', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amountToman: amount,
+        description: 'حمایت از توسعه رهگشا',
+      }),
+    })
+
+    const data = await res.json()
+
+    if (data.success && data.data?.url) {
+      window.location.href = data.data.url
+      return
+    }
+
+    setDonationNotice(
+      data.error || 'خطا در ایجاد پرداخت. لطفاً دوباره تلاش کنید.'
+    )
+  } catch (err: any) {
+    console.error('[Donation] ZarinPal request error:', err)
+    setDonationNotice('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.')
+  } finally {
+    setDonationLoading(false)
+  }
+}
+
   const heroRef = useScrollReveal()
   const featuresRef = useScrollReveal()
-  const pricingCardRefs = [useScrollReveal(), useScrollReveal(), useScrollReveal()]
+const pricingCardRef1 = useScrollReveal()
+const pricingCardRef2 = useScrollReveal()
+const pricingCardRef3 = useScrollReveal()
+const pricingCardRef4 = useScrollReveal()
+const pricingCardRef5 = useScrollReveal()
+const pricingCardRef6 = useScrollReveal()
+
+const pricingCardRefs = [
+  pricingCardRef1,
+  pricingCardRef2,
+  pricingCardRef3,
+  pricingCardRef4,
+  pricingCardRef5,
+  pricingCardRef6,
+]
   const testimonialsRef = useScrollReveal()
   const ctaRef = useScrollReveal()
 
@@ -571,11 +926,9 @@ export default function LandingPage() {
               className="hero-title font-black leading-tight text-white animate-fade-in-up"
               style={{ fontSize: 'clamp(1.2rem, 5vw, 2.8rem)', animationDelay: '0.1s' }}
             >
-              حسابداری فروشگاهی ابری رهگشا
+              حسابداری فروشگاهی رهگشا 
               <br />
-              <span className="bg-gradient-to-l from-violet-400 via-purple-300 to-fuchsia-400 bg-clip-text text-transparent animate-gradient">
-                ساده، سریع، هوشمند
-              </span>
+              <HeroTypewriter />
             </h1>
 
             <p
@@ -584,6 +937,7 @@ export default function LandingPage() {
             >
               مدیریت فروش، مشتریان، اقساط و حسابداری در یک پلتفرم یکپارچه.
               از صدور فاکتور تا گزارش مالی — همه‌چیز در یک‌جا.
+              میزبان امن داده های شما هستیم با استفاده از بهترین و به روزترین سرورها.
             </p>
 
             {/* ★ دکمه‌های Hero */}
@@ -619,6 +973,74 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
+
+            {/* ═══════════════════════════════════════════════════════════
+                ★ Donation Support Box
+            ═══════════════════════════════════════════════════════════ */}
+            <div
+              className="w-full max-w-xl animate-fade-in-up"
+              style={{ animationDelay: '0.58s' }}
+            >
+              <div className="relative overflow-hidden rounded-2xl border border-amber-400/25 bg-gradient-to-l from-amber-500/10 via-orange-500/5 to-transparent p-4 backdrop-blur-sm shadow-lg shadow-amber-900/10">
+                <div className="absolute -top-10 -left-10 h-32 w-32 rounded-full bg-amber-400/10 blur-2xl pointer-events-none" />
+
+                <div className="relative flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-amber-500/25">
+                    <HeartHandshake className="h-5 w-5 text-white" />
+                  </div>
+
+                  <div className="min-w-0 flex-1 text-right">
+                    <p className="text-sm font-black text-amber-100">
+                      رهگشا با همراهی شما بزرگ‌تر می‌شود
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-gray-300">
+                      برای بهتر شدن سیستم حسابداری، به حمایت و همراهی شما نیاز داریم.
+                      هر کمک شما، حتی کوچک، انرژی ما را برای توسعه، پشتیبانی و ساخت امکانات تازه‌تر بیشتر می‌کند.
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setDonationNotice('')
+                          setDonateOpen(true)
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-l from-amber-400 to-orange-500 px-3.5 py-2 text-xs font-black text-white shadow-lg shadow-amber-500/25 transition-all hover:scale-[1.02] hover:shadow-amber-400/40"
+                      >
+                        <Gift className="h-3.5 w-3.5" />
+                        پرداخت الکترونیکی و حمایت
+                      </button>
+
+                      <button
+                        onClick={copyDonationCard}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-amber-400/30 bg-white/5 px-3 py-2 text-[11px] font-bold text-amber-100 transition-all hover:bg-white/10"
+                      >
+                        {copied ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-emerald-300" />
+                            کپی شد
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            کپی شماره کارت
+                          </>
+                        )}
+                      </button>
+                    </div>
+<div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
+  <Banknote className="h-3.5 w-3.5 text-amber-300" />
+  <span>شماره کارت:</span>
+  <span dir="ltr" className="font-mono font-bold text-amber-200">
+    {DONATION_CARD_NUMBER}
+  </span>
+  <span className="font-bold text-amber-200">
+    به نام {DONATION_CARD_OWNER}
+  </span>
+</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* ★ Hero Visual */}
@@ -650,7 +1072,7 @@ export default function LandingPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { label: 'فاکتور', val: '۱٬۲۴۸', color: 'bg-violet-50 text-violet-700' },
+                        { label: 'فاکتور', val: '۱٬۴۸', color: 'bg-violet-50 text-violet-700' },
                         { label: 'مشتری', val: '۸۶۲', color: 'bg-blue-50 text-blue-700' },
                         { label: 'اقساط', val: '۳۴۰', color: 'bg-amber-50 text-amber-700' },
                       ].map((s) => (
@@ -772,19 +1194,36 @@ export default function LandingPage() {
               <span className="bg-gradient-to-l from-violet-600 to-purple-500 bg-clip-text text-transparent"> کسب‌وکار شما</span>
             </h2>
             <p className="text-gray-500 text-base sm:text-lg">
-              پلن متناسب با نیاز خود را انتخاب کنید. ۳ ماه استفاده رایگان، بدون نیاز به کارت بانکی.
+            پلن مناسب خود را انتخاب کنید،  ۳ ماه استفاده رایگان، بدون پرداخت هزینه
             </p>
           </div>
 
           {/* ★ کارت‌های پلن */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 items-stretch">
-            {displayPlans.map((plan, idx) => {
-              return (
-                <div
-                  key={plan.name}
-                  ref={pricingCardRefs[idx]}
-                  className={`sr-hidden flex flex-col transition-transform duration-300 ${plan.popular ? 'md:-mt-4 md:mb-0' : ''}`}
-                >
+       {/* ★ کارت‌های پلن */}
+<div className={`grid ${pricingGridClass} gap-6 sm:gap-8 items-stretch`}>
+  {displayPlans.length === 0 && (
+    <div className="col-span-full rounded-3xl border border-dashed border-gray-300 bg-gray-50 p-10 text-center">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100">
+        <Crown className="h-7 w-7 text-gray-400" />
+      </div>
+      <p className="text-sm font-black text-gray-700">
+        در حال حاضر پلن فعالی برای نمایش وجود ندارد.
+      </p>
+      <p className="mt-1 text-xs text-gray-500">
+        از پنل مدیریت سایت، حداقل یک پلن را برای نمایش در لندینگ پیج فعال کنید.
+      </p>
+    </div>
+  )}
+
+  {displayPlans.map((plan, idx) => {
+    return (
+      <div
+        key={plan.name}
+        ref={pricingCardRefs[idx]}
+        className={`sr-hidden flex flex-col transition-transform duration-300 ${
+          plan.popular && displayPlans.length > 1 ? 'md:-mt-4 md:mb-0' : ''
+        }`}
+      >
                   <div
                     className={`relative flex flex-col h-full rounded-3xl overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl
                       ${plan.popular
@@ -878,7 +1317,7 @@ export default function LandingPage() {
           </div>
 
           <div className="text-center mt-10 sm:mt-14 space-y-2">
-            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به کارت بانکی — ارتقا در هر زمان</p>
+            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
               پشتیبانی کامل در دوره رایگان
@@ -959,7 +1398,7 @@ export default function LandingPage() {
 
           <p className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
             همین الان ثبت‌نام کنید و ۳ ماه رایگان از تمام امکانات استفاده کنید.
-            بدون نیاز به کارت بانکی.
+            بدون نیاز به پرداخت هزینه.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
@@ -1018,7 +1457,7 @@ export default function LandingPage() {
         },
         {
           q: 'چگونه می‌توانم با رهگشا شروع کنم؟',
-          a: 'کافی است روی دکمه "شروع رایگان" کلیک کرده و در کمتر از ۵ دقیقه ثبت نام کنید. نیازی به کارت اعتباری نیست.',
+          a: 'کافی است روی دکمه "شروع رایگان" کلیک کرده و در کمتر از ۵ دقیقه ثبت نام کنید. نیازی به پرداخت هزینه  نیست.',
         },
       ].map((faq, i) => (
         <div key={i} className="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
@@ -1030,82 +1469,222 @@ export default function LandingPage() {
   </div>
 </section>
 
-      {/* ═══════════════════════════ FOOTER ════════════════════════════ */}
-      <footer className="bg-gray-950 text-gray-500 pt-16 sm:pt-20 pb-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 sm:gap-10 mb-12 sm:mb-16">
+    {/* ═══════════════════════════ FOOTER ════════════════════════════ */}
+<footer className="bg-gray-950 text-gray-500 pt-16 sm:pt-20 pb-8 px-4 sm:px-6 lg:px-8">
+  <div className="max-w-7xl mx-auto">
+    {/* ═══════ Grid اصلی: ۲ ستون در موبایل → ۵ ستون در دسکتاپ ═══════ */}
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-8 sm:gap-10 mb-12 sm:mb-16">
 
-            <div className="col-span-2 sm:col-span-1 space-y-4">
-              <div className="flex items-center gap-3">
-                <a href="#" className="shrink-0 group" aria-label="صفحه اصلی">
-                  <div className="logo-container w-14 h-14 sm:w-16 sm:h-16">
-                    <img src="/logo.png" alt="رهگشا" className="logo-img" />
-                  </div>
-                </a>
-                <div>
-                  <span className="text-white font-black text-base block">رهگشا</span>
-                  <span className="text-[10px] text-violet-400">حسابداری هوشمند فروشگاهی</span>
-                </div>
-              </div>
-              <p className="text-sm leading-relaxed text-gray-500">
-                سیستم حسابداری فروشگاهی هوشمند و یکپارچه برای مدیریت کامل کسب‌وکار شما.
-              </p>
+      {/* ستون ۱: لوگو و توضیح (۲ ستون در موبایل) */}
+      <div className="col-span-2 sm:col-span-1 space-y-4">
+        <div className="flex items-center gap-3">
+          <a href="#" className="shrink-0 group" aria-label="صفحه اصلی">
+            <div className="logo-container w-14 h-14 sm:w-16 sm:h-16">
+              <img src="/logo.png" alt="رهگشا" className="logo-img" />
             </div>
-
-            {[
-              {
-                title: 'محصول',
-                links: [
-                  { label: 'امکانات', href: '#features' },
-                  { label: 'پلن‌ها', action: scrollToPricing },
-                  { label: 'نظرات', href: '#testimonials' },
-                ],
-              },
-              {
-                title: 'پشتیبانی',
-                links: [
-                  { label: 'راهنمای استفاده', href: '#' },
-                  { label: 'تماس با ما: 09377498180', href: '#' },
-                  { label: 'سوالات متداول', href: '#' },
-                ],
-              },
-              {
-                title: 'شرکت',
-                links: [
-                  { label: 'درباره ما', href: '#' },
-                  { label: 'قوانین و مقررات', href: '#' },
-                  { label: 'حریم خصوصی', href: '#' },
-                ],
-              },
-            ].map((col) => (
-              <div key={col.title}>
-                <h4 className="text-white font-black text-sm mb-4">{col.title}</h4>
-                <ul className="space-y-3">
-                  {col.links.map((link) => (
-                    <li key={link.label}>
-                      {'href' in link ? (
-                        <a href={link.href} className="text-sm hover:text-violet-400 transition-colors">
-                          {link.label}
-                        </a>
-                      ) : (
-                        <button onClick={link.action} className="text-sm hover:text-violet-400 transition-colors">
-                          {link.label}
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-
-          <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
-            <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
+          </a>
+          <div>
+            <span className="text-white font-black text-base block">رهگشا</span>
+            <span className="text-[10px] text-violet-400">حسابداری هوشمند فروشگاهی</span>
           </div>
         </div>
-      </footer>
+        <p className="text-sm leading-relaxed text-gray-500">
+          سیستم حسابداری فروشگاهی هوشمند و یکپارچه برای مدیریت کامل کسب‌وکار شما.
+        </p>
+      </div>
 
+      {/* ستون ۲: محصول */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">محصول</h4>
+        <ul className="space-y-3">
+          <li><a href="#features" className="text-sm hover:text-violet-400 transition-colors">امکانات</a></li>
+          <li><button onClick={scrollToPricing} className="text-sm hover:text-violet-400 transition-colors">پلن‌ها</button></li>
+          <li><a href="#testimonials" className="text-sm hover:text-violet-400 transition-colors">نظرات</a></li>
+        </ul>
+      </div>
+
+      {/* ستون ۳: پشتیبانی */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">پشتیبانی</h4>
+        <ul className="space-y-3">
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">راهنمای استفاده</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">تماس با ما: 09377498180</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">سوالات متداول</a></li>
+        </ul>
+      </div>
+
+      {/* ستون ۴: شرکت */}
+      <div>
+        <h4 className="text-white font-black text-sm mb-4">شرکت</h4>
+        <ul className="space-y-3">
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">درباره ما</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">قوانین و مقررات</a></li>
+          <li><a href="#" className="text-sm hover:text-violet-400 transition-colors">حریم خصوصی</a></li>
+        </ul>
+      </div>
+
+
+{/* ═══════════════════════════════════════════════════════════
+    ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
+═══════════════════════════════════════════════════════════ */}
+<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
+  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
+    نماد اعتماد
+  </h4>
+
+ <div className="flex flex-col items-center gap-2 w-full">
+  <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center">
+    <div
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{
+        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+      }}
+      suppressHydrationWarning
+    />
+  </div>
+
+    <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
+      نماد اعتماد الکترونیکی
+      <br />
+      <span className="text-violet-400 font-bold">
+        مرکز توسعه تجارت الکترونیکی
+      </span>
+    </p>
+  </div>
+</div>
+
+    </div>
+
+    {/* ═══════ خط جداکننده و کپی‌رایت ═══════ */}
+    <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+      <p>رهگشا v1.0 — سیستم حسابداری فروشگاهی هوشمند</p>
+      <p>© ۱۴۰5 تمام حقوق محفوظ است.</p>
+    </div>
+  </div>
+</footer>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          ★ Donation Modal
+      ═══════════════════════════════════════════════════════════════ */}
+      {donateOpen && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setDonateOpen(false)}
+          dir="rtl"
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative bg-gradient-to-l from-amber-500 via-orange-500 to-rose-500 px-5 py-4 text-white">
+              <div className="absolute -top-10 -left-10 h-32 w-32 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+
+              <div className="relative flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
+                    <HeartHandshake className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black">حمایت از رهگشا</h3>
+                    <p className="text-[10px] text-white/80">هر مبلغی که راحت هستید، برای ما ارزشمند است</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setDonateOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/20"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-5">
+              {donationNotice && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
+                  {donationNotice}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-xs font-black text-gray-700">مبلغ حمایت (تومان)</label>
+                <input
+                  type="number"
+                  value={donateAmount}
+                  onChange={(e) => setDonateAmount(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+                  dir="ltr"
+                  placeholder="مثلاً: 100000"
+                />
+
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[50000, 100000, 200000, 500000].map((amount) => (
+                    <button
+                      key={amount}
+                      onClick={() => setDonateAmount(String(amount))}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-[10px] font-bold text-gray-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700"
+                    >
+                      {formatFaNumber(amount)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-black text-gray-700">شماره کارت</span>
+                  <button
+                    onClick={copyDonationCard}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[10px] font-bold text-gray-600 transition hover:border-amber-300 hover:text-amber-700"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-500" />
+                        کپی شد
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" />
+                        کپی
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <p dir="ltr" className="text-center font-mono text-sm font-black tracking-wider text-gray-800">
+                  {DONATION_CARD_NUMBER}
+                </p>
+                <p className="mt-1 text-center text-[10px] text-gray-500">
+                  به نام: {DONATION_CARD_OWNER}
+                </p>
+              </div>
+
+             <button
+  onClick={handleOnlineDonation}
+  disabled={donationLoading}
+  className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-l from-amber-500 to-orange-500 px-4 py-3 text-sm font-black text-white shadow-lg shadow-amber-500/25 transition-all hover:scale-[1.01] hover:shadow-amber-400/40 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+>
+  {donationLoading ? (
+    <>
+      <Loader2 className="h-4 w-4 animate-spin" />
+      در حال انتقال به زرین‌پال...
+    </>
+  ) : (
+    <>
+      <CreditCard className="h-4 w-4" />
+      پرداخت الکترونیکی با زرین‌پال
+    </>
+  )}
+</button>
+
+              <p className="text-center text-[10px] leading-relaxed text-gray-500">
+                اگر درگاه آنلاین فعال نباشد، می‌توانید از طریق شماره کارت فوق حمایت کنید.
+                سپاس از همراهی گرم شما.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

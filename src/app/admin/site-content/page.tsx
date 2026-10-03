@@ -74,6 +74,19 @@ const setShowPrice = (plan: PlanTierData, value: boolean): PlanTierData => {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  ★ v10.1: دسترسی ایمن به isActive
+//  اگر فیلد وجود نداشته باشد، پیش‌فرض فعال در نظر گرفته می‌شود.
+// ═══════════════════════════════════════════════════════════════
+const getIsActive = (plan: PlanTierData): boolean => {
+  const value = (plan as any).isActive
+  return value === undefined ? true : Boolean(value)
+}
+
+const setIsActive = (plan: PlanTierData, value: boolean): PlanTierData => {
+  return { ...plan, isActive: value } as PlanTierData
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ★ v7.3: Modern Toggle Switch - اصلاح شده برای RTL
 // ═══════════════════════════════════════════════════════════════
 function ModernToggle({
@@ -465,6 +478,19 @@ export default function AdminSiteContentPage() {
     updatePlans(content.plans.map(p => p.id === planId ? updatedPlan : p))
   }
 
+// ═══════════════════════════════════════════════════════════════
+//  ★ v10.1: تغییر وضعیت فعال/غیرفعال بودن پلن در لندینگ پیج
+// ═══════════════════════════════════════════════════════════════
+const toggleActivePlan = (planId: string) => {
+  const plan = content.plans.find(p => p.id === planId)
+  if (!plan) return
+
+  const currentActive = getIsActive(plan)
+  const updatedPlan = setIsActive(plan, !currentActive)
+
+  updatePlans(content.plans.map(p => p.id === planId ? updatedPlan : p))
+}
+
   const handleSave = async () => {
     const ok = await saveContent(content)
     if (ok) {
@@ -589,11 +615,12 @@ export default function AdminSiteContentPage() {
           </div>
 
           <div className="p-5 space-y-3">
-            {content.plans.map((plan) => {
-              const isExpanded = expandedPlans.includes(plan.id)
-              const style = getPlanStyle(plan.name)
-              const PlanIcon = style.Icon
-              const showPrice = getShowPrice(plan)
+          {content.plans.map((plan) => {
+  const isExpanded = expandedPlans.includes(plan.id)
+  const style = getPlanStyle(plan.name)
+  const PlanIcon = style.Icon
+  const showPrice = getShowPrice(plan)
+  const isActivePlan = getIsActive(plan)
 
               return (
                 <div
@@ -615,26 +642,41 @@ export default function AdminSiteContentPage() {
                     </div>
 
                     <div className="flex-1 min-w-0 text-right">
-                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <h4 className="text-base font-black text-gray-900">{plan.nameFa}</h4>
-                        {plan.popular && (
-                          <span className="px-1.5 py-0.5 bg-gradient-to-l from-amber-400 to-orange-500 text-white text-[9px] font-black rounded-md shadow-sm">
-                            محبوب
-                          </span>
-                        )}
-                        {/* ★ v8.0: نشانگر وضعیت نمایش قیمت */}
-                        {showPrice ? (
-                          <span className="px-1.5 py-0.5 bg-gradient-to-l from-indigo-500 to-blue-500 text-white text-[9px] font-black rounded-md shadow-sm flex items-center gap-0.5">
-                            <Eye className="w-2.5 h-2.5" />
-                            قیمت فعال
-                          </span>
-                        ) : (
-                          <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[9px] font-black rounded-md flex items-center gap-0.5">
-                            <EyeOff className="w-2.5 h-2.5" />
-                            بدون قیمت
-                          </span>
-                        )}
-                      </div>
+                   <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+  <h4 className="text-base font-black text-gray-900">{plan.nameFa}</h4>
+
+  {plan.popular && (
+    <span className="px-1.5 py-0.5 bg-gradient-to-l from-amber-400 to-orange-500 text-white text-[9px] font-black rounded-md shadow-sm">
+      محبوب
+    </span>
+  )}
+
+  {/* ★ v10.1: نشانگر فعال/غیرفعال بودن پلن در لندینگ */}
+  {isActivePlan ? (
+    <span className="px-1.5 py-0.5 bg-gradient-to-l from-emerald-500 to-teal-500 text-white text-[9px] font-black rounded-md shadow-sm flex items-center gap-0.5">
+      <Eye className="w-2.5 h-2.5" />
+      نمایش در لندینگ
+    </span>
+  ) : (
+    <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[9px] font-black rounded-md flex items-center gap-0.5">
+      <EyeOff className="w-2.5 h-2.5" />
+      مخفی از لندینگ
+    </span>
+  )}
+
+  {/* ★ v8.0: نشانگر وضعیت نمایش قیمت */}
+  {showPrice ? (
+    <span className="px-1.5 py-0.5 bg-gradient-to-l from-indigo-500 to-blue-500 text-white text-[9px] font-black rounded-md shadow-sm flex items-center gap-0.5">
+      <Eye className="w-2.5 h-2.5" />
+      قیمت فعال
+    </span>
+  ) : (
+    <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-[9px] font-black rounded-md flex items-center gap-0.5">
+      <EyeOff className="w-2.5 h-2.5" />
+      بدون قیمت
+    </span>
+  )}
+</div>
                       <div className="flex items-center gap-2 flex-wrap">
                         {/* ★ v8.0: فقط قیمت مادام‌العمر */}
                         <span className={`text-sm font-black ${style.text} flex items-center gap-1`}>
@@ -672,94 +714,234 @@ export default function AdminSiteContentPage() {
                     <div className="overflow-hidden">
                       <div className="p-5 pt-0 space-y-4 border-t border-gray-100">
 
-                        <div className="pt-4">
-                          <p className="text-xs text-gray-600 leading-relaxed">{plan.description}</p>
-                        </div>
+                      <div className="pt-4 space-y-3">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {/* عنوان فارسی */}
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
+        <FileText className="w-3.5 h-3.5 text-violet-600" />
+        عنوان فارسی پلن
+      </label>
+      <input
+        type="text"
+        value={plan.nameFa}
+        onChange={e => updatePlan(plan.id, 'nameFa', e.target.value)}
+        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition"
+        placeholder="مثلاً: پلن حرفه‌ای"
+      />
+      <p className="text-[9px] text-gray-400">
+        این عنوان در لندینگ پیج و کارت پلن نمایش داده می‌شود.
+      </p>
+    </div>
 
-                        {/* ═══════════════════════════════════════════════════
-                            ★ v7.2: Toggle نمایش قیمت در لندینگ پیج
-                        ═══════════════════════════════════════════════════ */}
-                        <div
-                          className={`
-                            relative rounded-2xl border-2 p-4 transition-all duration-500 overflow-hidden
-                            ${showPrice
-                              ? 'bg-gradient-to-br from-indigo-50 via-blue-50 to-violet-50 border-indigo-300 shadow-md shadow-indigo-100'
-                              : 'bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200'
-                            }
-                          `}
-                        >
-                          {showPrice && (
-                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none" />
-                          )}
+    {/* کلید داخلی پلن — فقط نمایشی */}
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
+        <Settings className="w-3.5 h-3.5 text-gray-500" />
+        کلید داخلی پلن
+      </label>
+      <input
+        type="text"
+        value={plan.name}
+        disabled
+        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500 cursor-not-allowed"
+        dir="ltr"
+      />
+      <p className="text-[9px] text-gray-400">
+        این مقدار برای اتصال به سیستم پلن‌ها، دسترسی‌ها و مسیر ثبت‌نام استفاده می‌شود و نباید تغییر کند.
+      </p>
+    </div>
+  </div>
 
-                          <div className="relative flex items-center justify-between gap-4">
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                              <div
-                                className={`
-                                  relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0
-                                  transition-all duration-500
-                                  ${showPrice
-                                    ? 'bg-gradient-to-br from-indigo-500 via-blue-500 to-violet-500 shadow-lg shadow-indigo-300/50'
-                                    : 'bg-gray-200 shadow-inner'
-                                  }
-                                `}
-                              >
-                                {showPrice ? (
-                                  <>
-                                    <Eye className="w-5 h-5 text-white relative z-10" />
-                                    <span className="absolute inset-0 rounded-xl bg-indigo-400 animate-ping opacity-20" />
-                                  </>
-                                ) : (
-                                  <EyeOff className="w-5 h-5 text-gray-500" />
-                                )}
-                              </div>
+  {/* توضیح پلن */}
+  <div className="space-y-1.5">
+    <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1.5">
+      <Info className="w-3.5 h-3.5 text-blue-600" />
+      توضیح / زیرعنوان پلن
+    </label>
+    <textarea
+      value={plan.description}
+      onChange={e => updatePlan(plan.id, 'description', e.target.value)}
+      rows={2}
+      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition resize-none"
+      placeholder="توضیح کوتاه پلن برای لندینگ پیج..."
+    />
+    <p className="text-[9px] text-gray-400">
+      این متن زیر عنوان پلن در لندینگ پیج نمایش داده می‌شود.
+    </p>
+  </div>
+</div>
 
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                                  <span className="text-sm font-black text-gray-900">
-                                    نمایش قیمت در لندینگ پیج
-                                  </span>
-                                  <span
-                                    className={`
-                                      px-2 py-0.5 rounded-md text-[10px] font-black
-                                      transition-all duration-300
-                                      ${showPrice
-                                        ? 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-sm'
-                                        : 'bg-gray-200 text-gray-600'
-                                      }
-                                    `}
-                                  >
-                                    {showPrice ? '🟢 ON' : '⚪ OFF'}
-                                  </span>
-                                </div>
-                                <p className={`text-[11px] leading-relaxed transition-colors duration-300 ${
-                                  showPrice ? 'text-indigo-700' : 'text-gray-500'
-                                }`}>
-                                  {showPrice
-                                    ? '💰 قیمت این پلن در صفحه اصلی سایت به کاربران نمایش داده می‌شود.'
-                                    : '🔒 قیمت مخفی است و فقط دکمه «شروع رایگان» نمایش داده می‌شود.'}
-                                </p>
-                              </div>
-                            </div>
+                      {/* ═══════════════════════════════════════════════════
+    ★ v7.2: Toggle نمایش قیمت در لندینگ پیج
+═══════════════════════════════════════════════════ */}
+<div
+  className={`
+    relative rounded-2xl border-2 p-4 transition-all duration-500 overflow-hidden
+    ${showPrice
+      ? 'bg-gradient-to-br from-indigo-50 via-blue-50 to-violet-50 border-indigo-300 shadow-md shadow-indigo-100'
+      : 'bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200'
+    }
+  `}
+>
+  {showPrice && (
+    <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none" />
+  )}
 
-                            <div className="shrink-0">
-                              <ModernToggle
-                                checked={showPrice}
-                                onChange={() => toggleShowPrice(plan.id)}
-                                activeLabel="✓ فعال"
-                                inactiveLabel="✗ غیرفعال"
-                              />
-                            </div>
-                          </div>
+  <div className="relative flex items-center justify-between gap-4">
+    <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div
+        className={`
+          relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0
+          transition-all duration-500
+          ${showPrice
+            ? 'bg-gradient-to-br from-indigo-500 via-blue-500 to-violet-500 shadow-lg shadow-indigo-300/50'
+            : 'bg-gray-200 shadow-inner'
+          }
+        `}
+      >
+        {showPrice ? (
+          <>
+            <Eye className="w-5 h-5 text-white relative z-10" />
+            <span className="absolute inset-0 rounded-xl bg-indigo-400 animate-ping opacity-20" />
+          </>
+        ) : (
+          <EyeOff className="w-5 h-5 text-gray-500" />
+        )}
+      </div>
 
-                          <div className={`
-                            absolute bottom-0 left-0 right-0 h-1 transition-all duration-500
-                            ${showPrice
-                              ? 'bg-gradient-to-r from-indigo-500 via-blue-500 to-violet-500 opacity-100'
-                              : 'bg-gray-300 opacity-30'
-                            }
-                          `} />
-                        </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+          <span className="text-sm font-black text-gray-900">
+            نمایش قیمت در لندینگ پیج
+          </span>
+          <span
+            className={`
+              px-2 py-0.5 rounded-md text-[10px] font-black
+              transition-all duration-300
+              ${showPrice
+                ? 'bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-sm'
+                : 'bg-gray-200 text-gray-600'
+              }
+            `}
+          >
+            {showPrice ? '🟢 ON' : '⚪ OFF'}
+          </span>
+        </div>
+        <p className={`text-[11px] leading-relaxed transition-colors duration-300 ${
+          showPrice ? 'text-indigo-700' : 'text-gray-500'
+        }`}>
+          {showPrice
+            ? '💰 قیمت این پلن در صفحه اصلی سایت به کاربران نمایش داده می‌شود.'
+            : '🔒 قیمت مخفی است و فقط دکمه «شروع رایگان» نمایش داده می‌شود.'}
+        </p>
+      </div>
+    </div>
+
+    <div className="shrink-0">
+      <ModernToggle
+        checked={showPrice}
+        onChange={() => toggleShowPrice(plan.id)}
+        activeLabel="✓ فعال"
+        inactiveLabel="✗ غیرفعال"
+      />
+    </div>
+  </div>
+
+  <div className={`
+    absolute bottom-0 left-0 right-0 h-1 transition-all duration-500
+    ${showPrice
+      ? 'bg-gradient-to-r from-indigo-500 via-blue-500 to-violet-500 opacity-100'
+      : 'bg-gray-300 opacity-30'
+    }
+  `} />
+</div>
+
+{/* ═══════════════════════════════════════════════════
+    ★ v10.1: Toggle فعال/غیرفعال بودن پلن در لندینگ پیج
+═══════════════════════════════════════════════════ */}
+<div
+  className={`
+    relative rounded-2xl border-2 p-4 transition-all duration-500 overflow-hidden
+    ${isActivePlan
+      ? 'bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 border-emerald-300 shadow-md shadow-emerald-100'
+      : 'bg-gradient-to-br from-gray-50 to-slate-50 border-gray-200'
+    }
+  `}
+>
+  {isActivePlan && (
+    <div className="absolute -top-10 -right-10 w-32 h-32 bg-emerald-400/20 rounded-full blur-2xl pointer-events-none" />
+  )}
+
+  <div className="relative flex items-center justify-between gap-4">
+    <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div
+        className={`
+          relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0
+          transition-all duration-500
+          ${isActivePlan
+            ? 'bg-gradient-to-br from-emerald-500 via-teal-500 to-green-500 shadow-lg shadow-emerald-300/50'
+            : 'bg-gray-200 shadow-inner'
+          }
+        `}
+      >
+        {isActivePlan ? (
+          <>
+            <Eye className="w-5 h-5 text-white relative z-10" />
+            <span className="absolute inset-0 rounded-xl bg-emerald-400 animate-ping opacity-20" />
+          </>
+        ) : (
+          <EyeOff className="w-5 h-5 text-gray-500" />
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+          <span className="text-sm font-black text-gray-900">
+            نمایش پلن در لندینگ پیج
+          </span>
+          <span
+            className={`
+              px-2 py-0.5 rounded-md text-[10px] font-black
+              transition-all duration-300
+              ${isActivePlan
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-sm'
+                : 'bg-gray-200 text-gray-600'
+              }
+            `}
+          >
+            {isActivePlan ? '🟢 ON' : '⚪ OFF'}
+          </span>
+        </div>
+        <p className={`text-[11px] leading-relaxed transition-colors duration-300 ${
+          isActivePlan ? 'text-emerald-700' : 'text-gray-500'
+        }`}>
+          {isActivePlan
+            ? '✅ این پلن در صفحه اصلی سایت به کاربران نمایش داده می‌شود.'
+            : '🚫 این پلن فعلاً در لندینگ پیج مخفی است، اما در پنل مدیریت باقی می‌ماند.'}
+        </p>
+      </div>
+    </div>
+
+    <div className="shrink-0">
+      <ModernToggle
+        checked={isActivePlan}
+        onChange={() => toggleActivePlan(plan.id)}
+        activeColor="from-emerald-500 to-teal-500"
+        activeLabel="✓ نمایش"
+        inactiveLabel="✗ مخفی"
+      />
+    </div>
+  </div>
+
+  <div className={`
+    absolute bottom-0 left-0 right-0 h-1 transition-all duration-500
+    ${isActivePlan
+      ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-green-500 opacity-100'
+      : 'bg-gray-300 opacity-30'
+    }
+  `} />
+</div>
 
                         {/* ═══════════════════════════════════════════════════
                             ★ v8.0: قیمت‌گذاری — فقط مادام‌العمر

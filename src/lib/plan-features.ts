@@ -77,8 +77,16 @@ export interface PlanFeatureSet {
   canPurchaseInvoice: boolean       // فاکتور خرید + تامین‌کنندگان
   canMultiWarehouse: boolean        // چند انبار
   canStockTransfer: boolean         // انتقال بین انبارها
-  canStockCount: boolean            // ★★★ v6.5: انبار گردانی
+   canStockCount: boolean            // ★★★ v6.5: انبار گردانی
   maxWarehouses: number             // ۱=پایه، ۲=پیشرفته، ۰=نامحدود (حرفه‌ای)
+
+  // ★★★ v12.0: طراحی گزارش دلخواه
+  canUseCustomReportDesigner: boolean
+  maxSavedCustomReports: number
+  customReportPreviewLimit: number
+  customReportExportLimit: number
+  canUseReportCharts: boolean
+  canUseReportPivot: boolean
 
   upgradeMessage: string
 }
@@ -107,8 +115,17 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
     canPurchaseInvoice: true,       // ★ پایه هم فاکتور خرید دارد
     canMultiWarehouse: false,       // ★ فقط ۱ انبار
     canStockTransfer: false,        // ★ انتقال ندارد
-    canStockCount: false,           // ★★★ v6.5: انبار گردانی ندارد
+       canStockCount: false,           // ★★★ v6.5: انبار گردانی ندارد
     maxWarehouses: 1,
+
+    // ★★★ v12.0: پلن پایه به طراحی گزارش دلخواه دسترسی ندارد
+    canUseCustomReportDesigner: false,
+    maxSavedCustomReports: 0,
+    customReportPreviewLimit: 0,
+    customReportExportLimit: 0,
+    canUseReportCharts: false,
+    canUseReportPivot: false,
+
     upgradeMessage: 'این قابلیت در پلن پیشرفته یا حرفه‌ای در دسترس است',
   },
   professional: {
@@ -133,8 +150,17 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
     canPurchaseInvoice: true,
     canMultiWarehouse: true,        // ★ ۲ انبار
     canStockTransfer: true,         // ★ انتقال بین ۲ انبار
-    canStockCount: true,            // ★★★ v6.5: انبار گردانی
+      canStockCount: true,            // ★★★ v6.5: انبار گردانی
     maxWarehouses: 2,
+
+    // ★★★ v12.0: پلن پیشرفته می‌تواند گزارش دلخواه طراحی کند
+    canUseCustomReportDesigner: true,
+    maxSavedCustomReports: 10,
+    customReportPreviewLimit: 2000,
+    customReportExportLimit: 10000,
+    canUseReportCharts: true,
+    canUseReportPivot: false,
+
     upgradeMessage: 'این قابلیت در پلن حرفه‌ای در دسترس است',
   },
   enterprise: {
@@ -156,8 +182,17 @@ const PLAN_FEATURES: Record<PlanTier, PlanFeatureSet> = {
     canPurchaseInvoice: true,
     canMultiWarehouse: true,        // ★ نامحدود
     canStockTransfer: true,
-    canStockCount: true,            // ★★★ v6.5: انبار گردانی
+       canStockCount: true,            // ★★★ v6.5: انبار گردانی
     maxWarehouses: 0,               // 0 = نامحدود
+
+    // ★★★ v12.0: پلن حرفه‌ای دسترسی کامل به گزارش دلخواه دارد
+    canUseCustomReportDesigner: true,
+    maxSavedCustomReports: 50,
+    customReportPreviewLimit: 5000,
+    customReportExportLimit: 50000,
+    canUseReportCharts: true,
+    canUseReportPivot: true,
+
     upgradeMessage: '',
   },
 }
@@ -342,8 +377,16 @@ export function getFeatureLabel(feature: keyof PlanFeatureSet): string {
     canPurchaseInvoice: 'فاکتور خرید و تامین‌کنندگان',
     canMultiWarehouse: 'چند انباری',
     canStockTransfer: 'انتقال بین انبارها',
-    canStockCount: 'انبار گردانی',
+       canStockCount: 'انبار گردانی',
     maxWarehouses: 'حداکثر تعداد انبار',
+
+    canUseCustomReportDesigner: 'طراحی گزارش دلخواه',
+    maxSavedCustomReports: 'حداکثر گزارش ذخیره‌شده',
+    customReportPreviewLimit: 'سقف پیش‌نمایش گزارش',
+    customReportExportLimit: 'سقف خروجی گزارش',
+    canUseReportCharts: 'نمودار در گزارش دلخواه',
+    canUseReportPivot: 'جدول محوری / Pivot',
+
     upgradeMessage: 'پیام ارتقا',
   }
   return labels[feature] || feature

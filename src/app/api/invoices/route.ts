@@ -969,6 +969,14 @@ export const POST = withTenantAndPermission('pos')(async (
 
       console.log('[Invoices POST] Total COGS calculated:', totalCogs)
 
+            // ★ v12.4: ذخیره cogsAmount در خود فاکتور برای گزارش‌ها
+      if (totalCogs > 0) {
+        await tx.invoice.update({
+          where: { id: inv.id },
+          data: { cogsAmount: totalCogs },
+        })
+        console.log('[Invoices POST] ✅ cogsAmount saved to invoice:', totalCogs)
+      }
       // ثبت پرداخت‌ها
       const payments = invoiceData.payments || []
 
@@ -1024,6 +1032,14 @@ export const POST = withTenantAndPermission('pos')(async (
           where: { id: invoiceData.customerId },
           data: { currentBalance: { increment: remainingAmount } },
         }).catch((err: any) => console.warn(`[Invoices POST] Failed to update customer balance:`, err?.message))
+      }
+
+            // ★ v12.6: به‌روزرسانی تاریخ آخرین خرید مشتری
+      if (invoiceData.customerId) {
+        await tx.customer.update({
+          where: { id: invoiceData.customerId },
+          data: { lastPurchaseAt: new Date() },
+        }).catch((err: any) => console.warn(`[Invoices POST] Failed to update lastPurchaseAt:`, err?.message))
       }
 
       return inv

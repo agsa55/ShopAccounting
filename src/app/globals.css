@@ -71,6 +71,33 @@
   font-display: swap;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   فونت فارسی وزیرمتن برای چاپ چک صیادی
+   ═══════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn-Black.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    متغیرهای رنگ — تم بنفش-آبی ملایم
    ═══════════════════════════════════════════════════════════════ */
@@ -143,8 +170,21 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* قانون اصلی — فونت پیش‌فرض همه صفحات (بازگردانده شد) */
 * {
   font-family: 'Peyda', 'Vazirmatn', system-ui, -apple-system, sans-serif !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   استثناء برای مودال چاپ چک صیادی
+   این قانون اختصاصی‌تر از * است و بر آن غلبه می‌کند
+   از متغیرهای CSS برای فونت دلخواه استفاده می‌کند
+   ═══════════════════════════════════════════════════════════════ */
+.check-print-font-area,
+.check-print-font-area * {
+  font-family: var(--check-font-family, 'Peyda', 'Vazirmatn', sans-serif) !important;
+  color: var(--check-font-color, inherit) !important;
+  font-weight: var(--check-font-weight, inherit) !important;
 }
 
 input[type="number"],

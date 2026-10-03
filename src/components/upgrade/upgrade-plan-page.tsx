@@ -1,7 +1,8 @@
 'use client'
 
 // ============================================================================
-// src/components/upgrade/upgrade-plan-page.tsx (v11.0 ★★★)
+// src/components/upgrade/upgrade-plan-page.tsx (v11.1 ★★★)
+// ★ v11.1: همسان‌سازی planLabel با helper مشترک getPlanTitle
 // ★ v11.0: دریافت ویژگی‌ها و قیمت به‌روزرسانی از Site Content
 // ★ v10.4: تشخیص SUBSCRIPTION_EXPIRED از middleware
 // ★ v10.4: مخفی کردن "بعداً پرداخت" در حالت قفل
@@ -12,6 +13,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useStore } from '@/lib/store'
 import { PLANS, resolvePlan, type PlanName } from '@/lib/plan-features'
 import { useSiteContent } from '@/lib/site-content'
+import { getPlanTitle } from '@/lib/plan-display'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -148,8 +150,8 @@ export default function UpgradePlanPage() {
     return DEFAULT_FEATURES[currentPlanName]
   }, [planContent, currentPlanName])
 
-  // نام فارسی پلن از Site Content (با fallback)
-  const planLabel = planContent?.nameFa || currentPlan.label
+  // ★ v11.1: نام فارسی پلن از طریق helper مشترک از Site Content خوانده می‌شود
+  const planLabel = getPlanTitle(siteContent, currentPlanName, currentPlan.label)
 
   // توضیحات پلن از Site Content
   const planDescription = planContent?.description || ''

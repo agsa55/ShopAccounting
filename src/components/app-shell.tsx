@@ -13,7 +13,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStore, type AppView } from '@/lib/store'
 import { resolvePlan, getFeaturesByPlanName, type PlanFeatureSet } from '@/lib/plan-features'
 import { SidebarPlanCard } from '@/components/shared/sidebar-plan-card'
-
+import { useSiteContent } from '@/lib/site-content'
+import { getPlanTitle } from '@/lib/plan-display'
 // ★ PWA
 import { usePWAInstall } from '@/components/pwa-register'
 
@@ -634,7 +635,7 @@ function AppSidebar() {
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
 
   const { isDemo, status: demoStatus } = useDemoStatus()
-
+  const { content: siteContent } = useSiteContent()
   // ★ v10.1: وضعیت اشتراک
    // ★ v10.6: وضعیت اشتراک — تشخیص دقیق دمو از API (نه hook)
   const [daysRemaining, setDaysRemaining] = useState(0)
@@ -800,13 +801,41 @@ function AppSidebar() {
     return parts[0]?.[0] || 'م'
   }, [user])
 
-  const getPlanLabel = (name: string) => {
-    const n = (name || '').toString().toLowerCase();
+   const getPlanLabel = (name: string) => {
+    const n = (name || '').toString().toLowerCase().trim();
+
+    // برای دمو/تست، همان برچسب قبلی حفظ می‌شود
     if (n === 'trial' || n === 'demo') return 'تست ۳ روزه';
-    if (n === 'simple' || n === 'basic') return 'پلن پایه';
-    if (n === 'professional' || n === 'advanced') return 'پلن پیشرفته';
-    if (n === 'enterprise' || n === 'professional_plus' || n === 'ultimate') return 'پلن حرفه‌ای';
-    return name || 'پلن پایه';
+
+    // fallback های امن برای حالتی که محتوای سایت هنوز لود نشده باشد
+    let fallback = 'پلن پایه';
+
+    if (
+      n === 'simple' ||
+      n === 'basic' ||
+      n === 'starter' ||
+      n === 'free'
+    ) {
+      fallback = 'پلن پایه';
+    } else if (
+      n === 'professional' ||
+      n === 'advanced' ||
+      n === 'pro'
+    ) {
+      fallback = 'پلن پیشرفته';
+    } else if (
+      n === 'enterprise' ||
+      n === 'business' ||
+      n === 'corporate' ||
+      n === 'organization' ||
+      n === 'professional_plus' ||
+      n === 'ultimate'
+    ) {
+      fallback = 'پلن حرفه‌ای';
+    }
+
+    // ★ عنوان واقعی از محتوای سایت / پنل مدیریت خوانده می‌شود
+    return getPlanTitle(siteContent, n, fallback);
   };
 
   return (
@@ -1496,7 +1525,7 @@ export default function AppShell() {
   const setCurrentView = useStore((s) => s.setCurrentView)
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
-
+  const { content: siteContent } = useSiteContent()
   // ★ v11.9.0: پاکسازی خودکار لاگ‌های قدیمی
   useAutoCleanup()
 
@@ -1681,7 +1710,7 @@ useEffect(() => {
   if (paymentStatus === 'success') {
     useStore.getState().addNotification({
       title: '🎉 پرداخت موفق!',
-      message: `اشتراک شما با موفقیت فعال شد. شناسه پرداخت: ${refId || '—'}${tierName ? ` — پلن: ${tierName}` : ''}`,
+         message: `اشتراک شما با موفقیت فعال شد. شناسه پرداخت: ${refId || '—'}${tierName ? ` — پلن: ${getPlanTitle(siteContent, tierName, tierName)}` : ''}`,
       type: 'success',
     })
     

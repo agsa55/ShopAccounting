@@ -22,12 +22,13 @@
         "عملکرد بصورت آفلاین/ آنلاین"
       ],
       "showPrice": false,
-      "updatePrice": 1750000
+      "updatePrice": 1750000,
+      "isActive": false
     },
     {
       "id": "professional",
       "name": "professional",
-      "nameFa": "پیشرفته",
+      "nameFa": "فرشگاهی",
       "description": "فروشگاه‌های متوسط و در حال رشد",
       "annualPrice": 2760000,
       "lifetimePrice": 28000000,
@@ -55,7 +56,7 @@
     {
       "id": "enterprise",
       "name": "enterprise",
-      "nameFa": "حرفه‌ای",
+      "nameFa": "شرکتی",
       "description": "کسب‌وکارهای بزرگ و سازمان‌ها",
       "annualPrice": 3550000,
       "lifetimePrice": 36000000,
@@ -246,5 +247,5 @@
     "کتاب‌فروشی",
     "لوازم‌التحریر"
   ],
-  "updatedAt": "2026-09-07T10:39:06.012Z"
+  "updatedAt": "2026-09-27T06:34:44.886Z"
 }
