@@ -1,5 +1,12 @@
 'use client';
 
+// ============================================================================
+// src/components/admin/admin-tenants-page.tsx (v12.0 ★★★)
+// ★ v12.0: نمایش وضعیت پرداخت، قفل، انقضا، مادام‌العمر و درخواست‌های کارت‌به‌کارت
+// ★ v12.0: فیلترهای جدید: در انتظار بررسی، منقضی شده، مادام‌العمر
+// ★ v12.0: افزودن آمار پرداخت‌ها به کارت‌های فروشگاه
+// ============================================================================
+
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -9,13 +16,13 @@ import {
   Eye, MoreVertical, Download, ChevronDown,
   ChevronRight, ChevronLeft,
   Rocket, BadgeCheck, Lock, Unlock, Trash2, Edit,
-  Info, ShieldAlert, X
+  Info, ShieldAlert, X, Banknote
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
 const toFaNum = (n: number | string | null | undefined): string => {
   if (n === null || n === undefined) return '۰';
-  return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)]);
+  return String(n).replace(/\d/g, (d) => '۰۱۳۴۵۶۷۸۹'[parseInt(d)]);
 };
 
 // ★ فرمت عدد با جداکننده هزارگان فارسی
@@ -74,26 +81,44 @@ const formatPersianDateTime = (dateStr: string | null): string => {
 // ★ تعیین پلن بر اساس نام
 const getPlanInfo = (planName: string) => {
   const p = (planName || '').toLowerCase();
-  if (p.includes('enterprise') || p.includes('سازمانی')) return {
-    label: 'حرفه‌ای', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200', icon: '🥇'
+  if (p.includes('enterprise') || p.includes('سازمانی') || p.includes('حرفه') || p.includes('شرکتی')) return {
+    label: 'شرکتی', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200', icon: '🥇'
   };
-  if (p.includes('professional') || p.includes('حرفه') || p.includes('پیشرفته')) return {
-    label: 'پیشرفته', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200', icon: '🥈'
+  if (p.includes('professional') || p.includes('پیشرفته') || p.includes('فروشگاهی')) return {
+    label: 'فروشگاهی', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200', icon: '🥈'
   };
   return {
     label: 'پایه', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200', icon: '🥉'
   };
 };
 
-// ★ وضعیت فروشگاه
+// ★ وضعیت فروشگاه — v12.0
 const getStatusInfo = (tenant: any) => {
   if (tenant.isLocked) {
     return { label: 'قفل شده', color: 'text-red-700', bg: 'bg-red-100', icon: '🔒' };
   }
+
+  if (tenant.pendingManualCount > 0) {
+    return { label: 'در انتظار بررسی', color: 'text-amber-700', bg: 'bg-amber-100', icon: '⏳' };
+  }
+
+  if (tenant.billingCycle === 'lifetime' || tenant.remainingDays >= 9999) {
+    return { label: 'مادام‌العمر', color: 'text-emerald-700', bg: 'bg-emerald-100', icon: '♾️' };
+  }
+
+  if (tenant.remainingDays <= 0) {
+    return { label: 'منقضی شده', color: 'text-red-700', bg: 'bg-red-100', icon: '⌛' };
+  }
+
+  if (tenant.isPaid) {
+    return { label: 'پرداخت شده', color: 'text-blue-700', bg: 'bg-blue-100', icon: '✅' };
+  }
+
   const usageDays = tenant.usageDays || 0;
   if (usageDays <= 90) {
     return { label: 'سه ماهه شروع', color: 'text-emerald-700', bg: 'bg-emerald-100', icon: '🚀' };
   }
+
   return { label: 'به روز رسانی شده', color: 'text-blue-700', bg: 'bg-blue-100', icon: '✅' };
 };
 
@@ -231,6 +256,12 @@ export default function AdminTenantsPage() {
         matchStatus = usageDays > 90 && !t.isLocked;
       } else if (statusFilter === 'locked') {
         matchStatus = t.isLocked === true;
+      } else if (statusFilter === 'pending_manual') {
+        matchStatus = (t.pendingManualCount || 0) > 0;
+      } else if (statusFilter === 'expired') {
+        matchStatus = !t.isLocked && (t.remainingDays || 0) <= 0 && t.billingCycle !== 'lifetime';
+      } else if (statusFilter === 'lifetime') {
+        matchStatus = !t.isLocked && (t.billingCycle === 'lifetime' || (t.remainingDays || 0) >= 9999);
       }
 
       return matchSearch && matchPlan && matchStatus;
@@ -263,15 +294,16 @@ export default function AdminTenantsPage() {
       t.planName === 'simple' || t.planName === 'basic' || t.planName === 'پایه'
     ).length;
     const proCount = tenants.filter(t =>
-      t.planName === 'professional' || t.planName === 'پیشرفته'
+      t.planName === 'professional' || t.planName === 'پیشرفته' || t.planName === 'فروشگاهی'
     ).length;
     const enterpriseCount = tenants.filter(t =>
-      t.planName === 'enterprise' || t.planName === 'حرفه‌ای'
+      t.planName === 'enterprise' || t.planName === 'حرفه‌ای' || t.planName === 'شرکتی'
     ).length;
     const trialCount = tenants.filter(t => (t.usageDays || 0) <= 90 && !t.isLocked).length;
     const renewedCount = tenants.filter(t => (t.usageDays || 0) > 90 && !t.isLocked).length;
     const lockedCount = tenants.filter(t => t.isLocked === true).length;
     const verifiedCount = tenants.filter(t => t.identityVerified === true).length;
+    const pendingManualCount = tenants.reduce((sum, t) => sum + (t.pendingManualCount || 0), 0);
 
     const expiringSoonCount = tenants.filter(t => {
       const days = t.remainingDays !== undefined 
@@ -298,6 +330,7 @@ export default function AdminTenantsPage() {
       enterprise: enterpriseCount,
       locked: lockedCount,
       verified: verifiedCount,
+      pendingManual: pendingManualCount,
       expiringSoon: expiringSoonCount,
       expired: expiredCount,
       renewedPaid: renewedPaidCount,
@@ -526,7 +559,8 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
   const handleExportCSV = () => {
     const headers = [
       'نام فروشگاه', 'ساب‌دامین', 'شماره تماس', 'کد ملی', 'احراز هویت',
-      'پلن', 'وضعیت', 'روزهای باقی‌مانده', 'مدت استفاده', 'کل روزهای استفاده'
+      'پلن', 'وضعیت', 'روزهای باقی‌مانده', 'مدت استفاده', 'کل روزهای استفاده',
+      'مجموع پرداخت (تومان)', 'آخرین پرداخت', 'درخواست کارت‌به‌کارت'
     ];
     const rows = filteredTenants.map(t => [
       t.companyName || '',
@@ -539,6 +573,9 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
       t.remainingDays || getDaysRemaining(t.subscriptionEnd || t.expiresAt || t.planEndDate || ''),
       t.usageText || '',
       t.usageDays || 0,
+      Number(t.totalPaidAmount) || 0,
+      t.lastPaidAt ? formatPersianDateTime(t.lastPaidAt) : '—',
+      t.pendingManualCount || 0,
     ]);
 
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
@@ -596,8 +633,9 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
     { title: 'کل فروشگاه‌ها', value: stats.total, icon: Store, gradient: 'from-[#7C7BEB] to-[#5B5AC7]', subtitle: 'مجموع کل' },
     { title: 'سه ماهه شروع', value: stats.trial, icon: Rocket, gradient: 'from-emerald-500 to-teal-600', subtitle: 'در دوره سه ماهه اول' },
     { title: 'به روز رسانی شده', value: stats.renewed, icon: BadgeCheck, gradient: 'from-blue-500 to-indigo-600', subtitle: 'ادامه‌دهندگان سیستم' },
-    { title: 'احراز هویت شده', value: apiStats?.identity?.verified || stats.verified || 0, icon: BadgeCheck, gradient: 'from-emerald-500 to-green-600', subtitle: 'تأیید شده با شاهکار' },
+    { title: 'در انتظار بررسی', value: stats.pendingManual, icon: Banknote, gradient: 'from-amber-500 to-orange-600', subtitle: 'درخواست‌های کارت‌به‌کارت' },
     { title: 'قفل شده', value: stats.locked, icon: Lock, gradient: 'from-red-500 to-rose-600', subtitle: 'غیرفعال توسط ادمین' },
+    { title: 'احراز هویت شده', value: apiStats?.identity?.verified || stats.verified || 0, icon: BadgeCheck, gradient: 'from-emerald-500 to-green-600', subtitle: 'تأیید شده با شاهکار' },
   ];
 
   return (
@@ -646,7 +684,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
         </div>
 
         {/* ═══════════════════════ کارت‌های آماری ═══════════════════════ */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {statCards.map((card, idx) => {
             const Icon = card.icon;
             return (
@@ -705,7 +743,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
                 <div className="w-7 h-7 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-base">🥈</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-blue-700 font-medium">پیشرفته</p>
+                    <p className="text-[10px] text-blue-700 font-medium">فروشگاهی</p>
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm font-black text-blue-800" dir="ltr">{formatNumberFa(stats.professional)}</p>
                       <span className="text-[9px] text-blue-600 font-bold">({toFaNum(getPlanPercentage(stats.professional))}٪)</span>
@@ -723,7 +761,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
                 <div className="w-7 h-7 rounded-lg bg-white/80 flex items-center justify-center shrink-0 text-base">🥇</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-purple-700 font-medium">حرفه‌ای</p>
+                    <p className="text-[10px] text-purple-700 font-medium">شرکتی</p>
                     <div className="flex items-center gap-1.5">
                       <p className="text-sm font-black text-purple-800" dir="ltr">{formatNumberFa(stats.enterprise)}</p>
                       <span className="text-[9px] text-purple-600 font-bold">({toFaNum(getPlanPercentage(stats.enterprise))}٪)</span>
@@ -815,8 +853,8 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
               >
                 <option value="all">همه پلن‌ها</option>
                 <option value="simple">پایه</option>
-                <option value="professional">پیشرفته</option>
-                <option value="enterprise">حرفه‌ای</option>
+                <option value="professional">فروشگاهی</option>
+                <option value="enterprise">شرکتی</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -826,11 +864,14 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full md:w-48 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
+                className="w-full md:w-52 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#7C7BEB]/20 focus:border-[#7C7BEB] outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
               >
                 <option value="all">همه وضعیت‌ها</option>
                 <option value="trial">🚀 سه ماهه شروع</option>
                 <option value="renewed">✅ به روز رسانی شده</option>
+                <option value="pending_manual">⏳ در انتظار بررسی</option>
+                <option value="expired">⌛ منقضی شده</option>
+                <option value="lifetime">♾️ مادام‌العمر</option>
                 <option value="locked">🔒 قفل شده</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -992,9 +1033,29 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
                           <span className="text-xs">{status.icon}</span>
                           {status.label}
                         </span>
+
                         {isLocked && tenant.lockReason && (
                           <p className="text-[9px] text-red-600 mt-1 truncate max-w-[150px]" title={tenant.lockReason}>
                             علت: {tenant.lockReason}
+                          </p>
+                        )}
+
+                        {tenant.pendingManualCount > 0 && (
+                          <p className="text-[9px] text-amber-700 mt-1 flex items-center gap-1">
+                            <Banknote className="w-3 h-3" />
+                            {toFaNum(tenant.pendingManualCount)} درخواست کارت‌به‌کارت
+                          </p>
+                        )}
+
+                        {tenant.lastPaidAt && (
+                          <p className="text-[9px] text-gray-400 mt-1">
+                            آخرین پرداخت: {formatPersianDateTime(tenant.lastPaidAt)}
+                          </p>
+                        )}
+
+                        {Number(tenant.totalPaidAmount) > 0 && (
+                          <p className="text-[9px] text-emerald-600 mt-0.5" dir="ltr">
+                            مجموع: {formatNumberFa(tenant.totalPaidAmount)} تومان
                           </p>
                         )}
                       </td>
@@ -1085,7 +1146,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
                             </button>
                           )}
 
-                          {/* ═══════════════════════ دکمه منوی بیشتر (برگشت!) ═══════════════════════ */}
+                          {/* ═══════════════════════ دکمه منوی بیشتر ═══════════════════════ */}
                           <button
                             onClick={(e) => handleMenuClick(e, tenant.id)}
                             className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
@@ -1202,7 +1263,7 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
         </div>
 
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('11.6.0')}</p>
+          <p>مدیریت فروشگاه‌ها — نسخه {toFaNum('12.0.0')}</p>
         </div>
 
       </div>
@@ -1475,7 +1536,6 @@ const handleMenuClick = (e: React.MouseEvent, tenantId: string) => {
           }`}
         >
           <Eye className="w-4 h-4" />
-          {/* Tooltip سفارشی */}
           <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-900 text-white text-[10px] rounded-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
             ورود به داشبورد
           </span>

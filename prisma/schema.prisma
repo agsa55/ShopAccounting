@@ -339,6 +339,7 @@ model PlanPrice {
 
   planTier PlanTier @relation(fields: [planTierId], references: [id], onDelete: Cascade)
 
+  @@unique([planTierId, billingCycle])
   @@index([planTierId])
   @@map("PlanPrices")
 }

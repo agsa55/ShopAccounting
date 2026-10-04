@@ -417,31 +417,35 @@ export async function applySubscriptionPayment(
     // ★★★ v9.3: اضافه شدن isPaid و paidAt برای سازگاری با trial-utils
     //   قبلاً این فیلدها آپدیت نمی‌شدند و isLifetime همیشه false محاسبه می‌شد
     //   که باعث قفل ماندن سیستم پس از پرداخت موفق می‌شد
-    await db.client.tenant.update({
-      where: { id: payment.tenantId },
-      data: {
-        planTierId: planTier.id,
-        planName: tierName,
-        billingCycle,
-        expiresAt: newExpiresAt,
-        status: 'active',
-        // ★★★ v9.3: فیلدهای حیاتی برای تشخیص مادام‌العمر
-        isPaid: true,
-        paidAt: now,
-        discountApplied: discountPercent || 0,
-      },
-    })
-
+ await db.client.tenant.update({
+  where: { id: payment.tenantId },
+  data: {
+    planTierId: planTier.id,
+    planName: tierName,
+    billingCycle,
+    expiresAt: newExpiresAt,
+    status: 'active',
+    isPaid: true,
+    paidAt: now,
+    discountApplied: discountPercent || 0,
+    // ★★ این خط را اضافه کنید ★★
+    isLocked: false, 
+    lockedAt: null,
+    lockReason: null,
+    lockedByAdmin: null,
+  },
+})
     console.log('[SubscriptionUtils] ✅ Tenant updated with isPaid=true')
 
-    // ─── ۶. به‌روزرسانی SubscriptionPayments ──────────────────────
+      // ─── . به‌روزرسانی SubscriptionPayments ──────────────────────
+    // ★ مهم: paymentRef باید همان authority باقی بماند تا callback های تکراری
+    //   بتوانند دوباره همان رکورد را پیدا کنند. refId واقعی در OnlinePayments ذخیره می‌شود.
     await db.client.subscriptionPayments.update({
       where: { id: payment.id },
       data: {
         isPaid: true,
         status: 'paid',
         paidAt: now,
-        paymentRef: String(refId), // ★ حالا refId واقعی زرین‌پال را ذخیره می‌کنیم
       },
     })
 

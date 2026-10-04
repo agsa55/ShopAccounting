@@ -1,12 +1,19 @@
 'use client';
 
+// ============================================================================
+// src/components/admin/admin-transactions-page.tsx (v12.0 ★★★)
+// ★ v12.0: نمایش تراکنش‌های یکپارچه زرین‌پال، کارت‌به‌کارت و بعداًّ حمایت
+// ★ v12.0: تأیید / رد پرداخت کارت‌به‌کارت از داخل صفحه تراکنش‌ها
+// ★ v12.0: امکان باز کردن قفل فروشگاه همزمان با تأیید پرداخت
+// ============================================================================
+
 import { useEffect, useState } from 'react';
 import {
   Wallet, CreditCard, DollarSign, RefreshCw, Calendar, Clock,
   Search, Download, ChevronDown, Filter, TrendingUp, CheckCircle2,
   XCircle, Clock3, Banknote, Store, X,
   Activity, Zap, Shield, ChevronRight, ChevronLeft,
-  Award
+  Heart, Ban, ClipboardCheck, Loader2,
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
@@ -54,61 +61,104 @@ const formatPersianDateTime = (isoDate: string | Date | null | undefined): { dat
   }
 };
 
-// ★ v11.3: پلن‌ها (پایه، پیشرفته، حرفه‌ای)
+// ★ پلن‌ها
 const getPlanInfo = (planName: string): { label: string; icon: string; color: string; bg: string; border: string } => {
   const p = (planName || '').toLowerCase();
-  if (p.includes('enterprise') || p.includes('حرفه') || p.includes('سازمانی')) return {
-    label: 'حرفه‌ای', icon: '🥇', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200'
+  if (p.includes('enterprise') || p.includes('حرفه') || p.includes('سازمانی') || p.includes('شرکتی')) return {
+    label: 'شرکتی', icon: '🥇', color: 'text-purple-700', bg: 'bg-purple-100', border: 'border-purple-200'
   };
-  if (p.includes('professional') || p.includes('پیشرفته')) return {
-    label: 'پیشرفته', icon: '🥈', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200'
+  if (p.includes('professional') || p.includes('پیشرفته') || p.includes('فروشگاهی')) return {
+    label: 'فروشگاهی', icon: '🥈', color: 'text-blue-700', bg: 'bg-blue-100', border: 'border-blue-200'
   };
   return {
     label: 'پایه', icon: '🥉', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200'
   };
 };
 
+// ★ نوع تراکنش
+const getTypeInfo = (t: any): { label: string; icon: any; color: string; bg: string; border: string } => {
+  const type = String(t?.type || '').toLowerCase();
+
+  if (type === 'manual_card') {
+    return { label: 'کارت‌به‌کارت', icon: Banknote, color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' };
+  }
+
+  if (type === 'donation') {
+    return { label: 'حمایت', icon: Heart, color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' };
+  }
+
+  if (type === 'subscription_update') {
+    return { label: 'به‌روزرسانی اشتراک', icon: RefreshCw, color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' };
+  }
+
+  return { label: 'نامشخص', icon: Wallet, color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200' };
+};
+
 // ★ وضعیت تراکنش
 const getStatusInfo = (t: any): { label: string; color: string; bg: string; border: string; icon: any } => {
-  if (t.isPaid) return {
+  if (t.isPaid || t.status === 'paid') return {
     label: 'موفق', color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200', icon: CheckCircle2
   };
+
+  if (t.status === 'waiting_review') return {
+    label: 'در انتظار بررسی', color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: Clock3
+  };
+
+  if (t.status === 'rejected') return {
+    label: 'رد شده', color: 'text-red-700', bg: 'bg-red-100', border: 'border-red-200', icon: Ban
+  };
+
   if (t.status === 'failed') return {
     label: 'ناموفق', color: 'text-red-700', bg: 'bg-red-100', border: 'border-red-200', icon: XCircle
   };
+
   if (t.status === 'cancelled') return {
     label: 'لغو شده', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200', icon: XCircle
   };
+
   return {
     label: 'در انتظار', color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: Clock3
   };
 };
 
 // ★ تشخیص درگاه پرداخت
-const getGatewayInfo = (gateway: string, method: string): { label: string; icon: any; color: string; bg: string } => {
+const getGatewayInfo = (gateway: string, method: string, description?: string): { label: string; icon: any; color: string; bg: string } => {
   const g = (gateway || '').toLowerCase();
   const m = (method || '').toLowerCase();
+  const d = (description || '').toLowerCase();
+
+  if (g === 'manual_card' || m.includes('manual_card') || d.includes('manual_card')) {
+    return { label: 'کارت‌به‌کارت', icon: Banknote, color: 'text-amber-600', bg: 'bg-amber-50' };
+  }
 
   if (g === 'zarinpal' || m.includes('zarinpal')) {
     return { label: 'زرین‌پال', icon: CreditCard, color: 'text-blue-600', bg: 'bg-blue-50' };
   }
+
+  if (g === 'donation' || d.includes('donation')) {
+    return { label: 'حمایت', icon: Heart, color: 'text-rose-600', bg: 'bg-rose-50' };
+  }
+
   if (g === 'idpay' || m.includes('idpay')) {
     return { label: 'آی‌دی‌پی', icon: CreditCard, color: 'text-purple-600', bg: 'bg-purple-50' };
   }
+
   if (m.includes('wallet') || m.includes('کیف پول')) {
     return { label: 'کیف پول', icon: Wallet, color: 'text-purple-600', bg: 'bg-purple-50' };
   }
+
   if (m.includes('transfer') || m.includes('حواله') || m.includes('bank')) {
     return { label: 'حواله بانکی', icon: Banknote, color: 'text-emerald-600', bg: 'bg-emerald-50' };
   }
-  return { label: method || 'نامشخص', icon: CreditCard, color: 'text-gray-600', bg: 'bg-gray-50' };
+
+  return { label: method || gateway || 'نامشخص', icon: CreditCard, color: 'text-gray-600', bg: 'bg-gray-50' };
 };
 
 export default function AdminTransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({
     totalRevenue: 0, monthlyRevenue: 0, todayRevenue: 0,
-    todayCount: 0, totalCount: 0, avgTransaction: 0,
+    todayCount: 0, totalCount: 0, avgTransaction: 0, pendingReviewCount: 0,
   });
   const [pagination, setPagination] = useState({
     page: 1, pageSize: 20, totalCount: 0, totalPages: 0,
@@ -121,12 +171,18 @@ export default function AdminTransactionsPage() {
   const [timeFilter, setTimeFilter] = useState<string>('all');
   const [currentTime, setCurrentTime] = useState(getPersianTime());
 
+  // ★ review modal state
+  const [reviewPayment, setReviewPayment] = useState<any | null>(null);
+  const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
+  const [reviewNote, setReviewNote] = useState('');
+  const [reviewUnlock, setReviewUnlock] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
     return () => clearInterval(timer);
   }, []);
 
-  // ★ v11.3: بارگذاری با پشتیبانی از صفحه‌بندی و فیلتر
   const loadData = async (pageNum = 1, size = pagination.pageSize) => {
     try {
       const params = new URLSearchParams({
@@ -157,7 +213,6 @@ export default function AdminTransactionsPage() {
 
   useEffect(() => { loadData() }, []);
 
-  // ★ v11.3: بارگذاری مجدد هنگام تغییر فیلترها (با ریست به صفحه ۱)
   useEffect(() => {
     if (!loading) loadData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -168,23 +223,78 @@ export default function AdminTransactionsPage() {
     loadData(pagination.page);
   };
 
+  const openReviewModal = (payment: any, action: 'approve' | 'reject') => {
+    setReviewPayment(payment);
+    setReviewAction(action);
+    setReviewNote('');
+    setReviewUnlock(Boolean(payment?.tenantIsLocked));
+  };
+
+  const closeReviewModal = () => {
+    setReviewPayment(null);
+    setReviewNote('');
+    setReviewUnlock(false);
+    setReviewLoading(false);
+  };
+
+  const submitReview = async () => {
+    if (!reviewPayment) return;
+
+    setReviewLoading(true);
+    try {
+      const res = await fetch(`/api/admin/payments/${reviewPayment.id}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: reviewAction,
+          note: reviewNote,
+          unlock: reviewAction === 'approve' ? reviewUnlock : false,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert(data.message || 'عملیات با موفقیت انجام شد.');
+        closeReviewModal();
+        loadData(pagination.page);
+      } else {
+        alert(data.error || 'خطا در انجام عملیات.');
+      }
+    } catch (err) {
+      console.error('[Review Payment] Error:', err);
+      alert('خطای شبکه. لطفاً دوباره تلاش کنید.');
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   const handleExportCSV = () => {
-    // ★ v11.3: حذف ستون "دوره" از CSV
     const headers = [
-      'فروشگاه', 'ساب‌دامین', 'موبایل', 'پلن',
-      'مبلغ (تومان)', 'درگاه پرداخت', 'وضعیت', 'تاریخ', 'کد پیگیری زرین‌پال'
+      'فروشگاه', 'ساب‌دامین', 'موبایل', 'پلن', 'نوع تراکنش', 'منبع',
+      'مبلغ (تومان)', 'درگاه پرداخت', 'وضعیت', 'تاریخ', 'کد پیگیری', 'توضیحات'
     ];
-    const rows = transactions.map(t => [
-      t.tenantName || '',
-      t.tenantSubdomain || '',
-      t.tenantMobile || '',
-      getPlanInfo(t.tierName).label,
-      Number(t.amount) || 0,
-      getGatewayInfo(t.gateway, t.paymentMethod).label,
-      getStatusInfo(t).label,
-      formatPersianDateTime(t.paidAt || t.createdAt).date,
-      t.paymentRef || ''
-    ]);
+
+    const rows = transactions.map(t => {
+      const type = getTypeInfo(t);
+      const gateway = getGatewayInfo(t.gatewayType, t.paymentMethod, t.description);
+      const status = getStatusInfo(t);
+
+      return [
+        t.tenantName || '',
+        t.tenantSubdomain || '',
+        t.tenantMobile || '',
+        getPlanInfo(t.tierName || t.tenantPlanName || '').label,
+        type.label,
+        t.source === 'online' ? 'OnlinePayments' : 'SubscriptionPayments',
+        Number(t.amount) || 0,
+        gateway.label,
+        status.label,
+        formatPersianDateTime(t.paidAt || t.createdAt).date,
+        t.paymentRef || '',
+        (t.description || '').replace(/\n/g, ' '),
+      ];
+    });
 
     const csv = [headers, ...rows].map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -196,8 +306,14 @@ export default function AdminTransactionsPage() {
     URL.revokeObjectURL(url);
   };
 
-  // ★ کارت‌های آماری اصلی
-  const mainStatCards = [
+  const mainStatCards: Array<{
+    title: string;
+    value: number | string;
+    icon: any;
+    gradient: string;
+    subtitle: string;
+    isCount?: boolean;
+  }> = [
     {
       title: 'درآمد کل',
       value: stats.totalRevenue,
@@ -228,6 +344,14 @@ export default function AdminTransactionsPage() {
       isCount: true,
     },
     {
+      title: 'در انتظار بررسی',
+      value: stats.pendingReviewCount || 0,
+      icon: Clock3,
+      gradient: 'from-orange-500 to-amber-600',
+      subtitle: 'پرداخت‌های کارت‌به‌کارت',
+      isCount: true,
+    },
+    {
       title: 'میانگین هر تراکنش',
       value: stats.avgTransaction,
       icon: Activity,
@@ -236,11 +360,9 @@ export default function AdminTransactionsPage() {
     },
   ];
 
-  // ★ v11.3: محاسبه startIndex و endIndex
   const startIndex = (pagination.page - 1) * pagination.pageSize;
   const endIndex = Math.min(startIndex + pagination.pageSize, pagination.totalCount);
 
-  // ★ تولید شماره صفحات
   const getPageNumbers = () => {
     const { totalPages, page } = pagination;
     const pages: (number | string)[] = [];
@@ -283,7 +405,7 @@ export default function AdminTransactionsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 p-4 sm:p-6" dir="rtl">
-      <div className="max-w-[1600px] mx-auto space-y-5">
+      <div className="max-w-[1700px] mx-auto space-y-5">
 
         {/* ═══════════════════════ هدر ═══════════════════════ */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
@@ -292,9 +414,18 @@ export default function AdminTransactionsPage() {
               <Wallet className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-gray-900">
-                تراکنش‌های <span className="bg-gradient-to-l from-emerald-600 to-teal-600 bg-clip-text text-transparent">مالی</span>
-              </h1>
+            <h1 className="text-xl sm:text-2xl font-black text-gray-900">
+  درآمد <span className="bg-gradient-to-l from-emerald-600 to-teal-600 bg-clip-text text-transparent">پلتفرم</span>
+</h1>
+<p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+  <Calendar className="w-3 h-3" />
+  {getPersianDate()}
+  <span className="text-gray-300">•</span>
+  <Clock className="w-3 h-3" />
+  {currentTime}
+  <span className="text-gray-300">•</span>
+  <span className="text-gray-600">{toFaNum(pagination.totalCount)} تراکنش اشتراک</span>
+</p>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
                 <Calendar className="w-3 h-3" />
                 {getPersianDate()}
@@ -327,7 +458,7 @@ export default function AdminTransactionsPage() {
         </div>
 
         {/* ═══════════════════════ کارت‌های آماری ═══════════════════════ */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {mainStatCards.map((card, idx) => {
             const Icon = card.icon;
             return (
@@ -360,7 +491,7 @@ export default function AdminTransactionsPage() {
           })}
         </div>
 
-        {/* ═══════════════════════ فیلترها (★ v11.3: بدون فیلتر دوره) ═══════════════════════ */}
+        {/* ═══════════════════════ فیلترها ═══════════════════════ */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">
@@ -388,13 +519,15 @@ export default function AdminTransactionsPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full md:w-40 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
+                className="w-full md:w-48 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
               >
                 <option value="all">همه وضعیت‌ها</option>
                 <option value="paid">✅ موفق</option>
+                <option value="waiting_review">⏳ در انتظار بررسی</option>
                 <option value="pending">⏳ در انتظار</option>
                 <option value="failed">❌ ناموفق</option>
                 <option value="cancelled">🚫 لغو شده</option>
+                <option value="rejected">⛔ رد شده</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -408,8 +541,8 @@ export default function AdminTransactionsPage() {
               >
                 <option value="all">همه پلن‌ها</option>
                 <option value="simple">🥉 پایه</option>
-                <option value="professional">🥈 پیشرفته</option>
-                <option value="enterprise">🥇 حرفه‌ای</option>
+                <option value="professional">🥈 فروشگاهی</option>
+                <option value="enterprise">🥇 شرکتی</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -440,7 +573,7 @@ export default function AdminTransactionsPage() {
                 <div className="h-3 w-px bg-gray-200"></div>
                 <p className="text-[11px] text-gray-600">
                   مجموع این صفحه: <span className="font-bold text-gray-900" dir="ltr">
-                    {formatNumberFa(transactions.filter(t => t.isPaid).reduce((s, t) => s + (t.amount || 0), 0))}
+                    {formatNumberFa(transactions.filter(t => t.isPaid || t.status === 'paid').reduce((s, t) => s + (t.amount || 0), 0))}
                   </span> تومان
                 </p>
               </div>
@@ -467,30 +600,40 @@ export default function AdminTransactionsPage() {
               <thead className="bg-gradient-to-l from-slate-50 to-emerald-50/50 border-b border-gray-100">
                 <tr>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">فروشگاه</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden md:table-cell">پلن</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden md:table-cell">نوع</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden lg:table-cell">پلن</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">مبلغ</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden lg:table-cell">درگاه</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden xl:table-cell">درگاه</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">وضعیت</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden xl:table-cell">تاریخ</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">تاریخ</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">کد پیگیری</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 text-center">عملیات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {transactions.map(t => {
-                  const plan = getPlanInfo(t.tierName || '');
+                  const plan = getPlanInfo(t.tierName || t.tenantPlanName || '');
                   const status = getStatusInfo(t);
-                  const gateway = getGatewayInfo(t.gateway, t.paymentMethod);
+                  const type = getTypeInfo(t);
+                  const gateway = getGatewayInfo(t.gatewayType, t.paymentMethod, t.description);
                   const StatusIcon = status.icon;
+                  const TypeIcon = type.icon;
                   const GatewayIcon = gateway.icon;
                   const { date, time } = formatPersianDateTime(t.paidAt || t.createdAt);
 
+                  const canReview =
+                    t.source === 'online' &&
+                    t.gatewayType === 'manual_card' &&
+                    t.status === 'waiting_review';
+
                   return (
-                    <tr key={t.id} className="hover:bg-gray-50/70 transition-colors group">
+                    <tr key={`${t.source}-${t.id}`} className="hover:bg-gray-50/70 transition-colors group">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${
-                            t.isPaid ? 'from-emerald-500 to-teal-600' :
-                            t.status === 'failed' ? 'from-red-500 to-rose-600' :
+                            t.isPaid || t.status === 'paid' ? 'from-emerald-500 to-teal-600' :
+                            t.status === 'failed' || t.status === 'rejected' ? 'from-red-500 to-rose-600' :
+                            t.status === 'waiting_review' ? 'from-amber-500 to-orange-500' :
                             'from-amber-500 to-orange-500'
                           } flex items-center justify-center text-white font-bold text-xs shrink-0`}>
                             {(t.tenantName || 'ف')[0]}
@@ -505,8 +648,14 @@ export default function AdminTransactionsPage() {
                         </div>
                       </td>
 
-                      {/* ★ v11.3: ستون فقط پلن (بدون دوره) */}
                       <td className="px-4 py-3 hidden md:table-cell">
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border w-fit ${type.bg} ${type.color} ${type.border}`}>
+                          <TypeIcon className="w-3 h-3" />
+                          {type.label}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 hidden lg:table-cell">
                         <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border w-fit ${plan.bg} ${plan.color} ${plan.border}`}>
                           <span className="text-xs">{plan.icon}</span>
                           {plan.label}
@@ -522,7 +671,7 @@ export default function AdminTransactionsPage() {
                         </div>
                       </td>
 
-                      <td className="px-4 py-3 hidden lg:table-cell">
+                      <td className="px-4 py-3 hidden xl:table-cell">
                         <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border ${gateway.bg}`}>
                           <GatewayIcon className={`w-3.5 h-3.5 ${gateway.color}`} />
                           <span className={`text-[11px] font-medium ${gateway.color}`}>{gateway.label}</span>
@@ -534,9 +683,12 @@ export default function AdminTransactionsPage() {
                           <StatusIcon className="w-3 h-3" />
                           {status.label}
                         </span>
+                        {t.tenantIsLocked && (
+                          <p className="text-[9px] text-red-600 mt-1">فروشگاه قفل است</p>
+                        )}
                       </td>
 
-                      <td className="px-4 py-3 hidden xl:table-cell">
+                      <td className="px-4 py-3 hidden 2xl:table-cell">
                         <div className="flex flex-col">
                           <span className="text-[11px] text-gray-700 font-medium">{date}</span>
                           <span className="text-[9px] text-gray-400">{time}</span>
@@ -544,7 +696,7 @@ export default function AdminTransactionsPage() {
                       </td>
 
                       <td className="px-4 py-3 hidden 2xl:table-cell">
-                        {t.paymentRef && t.isPaid ? (
+                        {t.paymentRef && (t.isPaid || t.status === 'paid') ? (
                           <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-mono bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
                             <Shield className="w-3 h-3" />
                             {t.paymentRef}
@@ -552,8 +704,31 @@ export default function AdminTransactionsPage() {
                         ) : t.paymentRef ? (
                           <span className="inline-flex items-center gap-1 text-[10px] text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
                             <Clock3 className="w-3 h-3" />
-                            {t.paymentRef.substring(0, 12)}...
+                            {String(t.paymentRef).substring(0, 12)}...
                           </span>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">—</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-3 text-center">
+                        {canReview ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              onClick={() => openReviewModal(t, 'approve')}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 hover:shadow-md"
+                              title="تأیید پرداخت"
+                            >
+                              <ClipboardCheck className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openReviewModal(t, 'reject')}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-red-700 hover:text-white bg-red-50 hover:bg-red-600 hover:shadow-md"
+                              title="رد پرداخت"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[10px] text-gray-400">—</span>
                         )}
@@ -655,20 +830,150 @@ export default function AdminTransactionsPage() {
                   ? 'تراکنشی با این فیلترها یافت نشد'
                   : 'هنوز هیچ تراکنشی ثبت نشده است'}
               </p>
-              <p className="text-gray-500 text-xs">
-                {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || timeFilter !== 'all'
-                  ? 'لطفاً فیلترها را تغییر دهید یا پاک کنید'
-                  : 'به محض اولین پرداخت از طریق درگاه زرین‌پال، تراکنش‌ها در اینجا نمایش داده می‌شوند'}
-              </p>
+        <p className="text-gray-500 text-xs">
+  {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || timeFilter !== 'all'
+    ? 'لطفاً فیلترها را تغییر دهید یا پاک کنید'
+    : 'هنوز هیچ پرداخت اشتراکی از سوی فروشگاه‌داران ثبت نشده است'}
+</p>
             </div>
           )}
         </div>
 
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>مدیریت تراکنش‌های مالی — نسخه {toFaNum('11.3.0')} — درگاه زرین‌پال</p>
+          <p>مدیریت تراکنش‌های مالی — نسخه {toFaNum('12.0.0')} — زرین‌پال + کارت‌به‌کارت</p>
         </div>
 
       </div>
+
+      {/* ═══════════════════════ مودال تأیید / رد پرداخت ═══════════════════════ */}
+      {reviewPayment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={reviewLoading ? undefined : closeReviewModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={`px-4 py-3 text-white ${reviewAction === 'approve' ? 'bg-gradient-to-l from-emerald-500 to-teal-600' : 'bg-gradient-to-l from-red-500 to-rose-600'}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {reviewAction === 'approve' ? <ClipboardCheck className="w-5 h-5" /> : <Ban className="w-5 h-5" />}
+                  <h3 className="text-sm font-black">
+                    {reviewAction === 'approve' ? 'تأیید پرداخت کارت‌به‌کارت' : 'رد پرداخت کارت‌به‌کارت'}
+                  </h3>
+                </div>
+                <button
+                  onClick={closeReviewModal}
+                  disabled={reviewLoading}
+                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors disabled:opacity-50"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-[11px] font-bold text-gray-600">فروشگاه</span>
+                  <span className="text-xs font-black text-gray-900">{reviewPayment.tenantName}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-[11px] font-bold text-gray-600">ساب‌دامین</span>
+                  <span className="text-[11px] font-mono text-gray-700" dir="ltr">{reviewPayment.tenantSubdomain || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-gray-600">مبلغ</span>
+                  <span className="text-sm font-black text-gray-900" dir="ltr">
+                    {formatNumberFa(reviewPayment.amount)} تومان
+                  </span>
+                </div>
+              </div>
+
+              {reviewPayment.description && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-blue-800 mb-1">توضیحات ثبت‌شده</p>
+                  <p className="text-[11px] text-blue-900 leading-relaxed whitespace-pre-line break-words">
+                    {reviewPayment.description}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+                  یادداشت ادمین (اختیاری)
+                </label>
+                <textarea
+                  value={reviewNote}
+                  onChange={(e) => setReviewNote(e.target.value)}
+                  rows={3}
+                  placeholder="مثلاً: رسید بانکی بررسی شد و مبلغ صحیح واریز شده است."
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-xs resize-none"
+                />
+              </div>
+
+              {reviewAction === 'approve' && reviewPayment.tenantIsLocked && (
+                <label className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={reviewUnlock}
+                    onChange={(e) => setReviewUnlock(e.target.checked)}
+                    className="mt-0.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span className="text-[11px] text-amber-900 leading-relaxed">
+                    همزمان قفل این فروشگاه باز شود.
+                    {reviewPayment.tenantLockReason && (
+                      <span className="block mt-1 text-[10px] text-amber-700">
+                        دلیل قفل: {reviewPayment.tenantLockReason}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              )}
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-[10px] text-gray-600 leading-relaxed">
+                  {reviewAction === 'approve'
+                    ? 'با تأیید، این پرداخت به وضعیت موفق تغییر می‌کند و اشتراک فروشگاه فعال می‌شود.'
+                    : 'با رد، این درخواست به وضعیت رد شده تغییر می‌کند و اشتراک فعال نمی‌شود.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="px-4 pb-4 flex items-center gap-2">
+              <button
+                onClick={closeReviewModal}
+                disabled={reviewLoading}
+                className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold disabled:opacity-50"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={submitReview}
+                disabled={reviewLoading}
+                className={`flex-1 px-3 py-2.5 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5 ${
+                  reviewAction === 'approve'
+                    ? 'bg-gradient-to-l from-emerald-500 to-teal-600'
+                    : 'bg-gradient-to-l from-red-500 to-rose-600'
+                }`}
+              >
+                {reviewLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>در حال...</span>
+                  </>
+                ) : (
+                  <>
+                    {reviewAction === 'approve' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                    <span>{reviewAction === 'approve' ? 'تأیید پرداخت' : 'رد پرداخت'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
