@@ -1014,7 +1014,7 @@ model FiscalYear {
 
 model OnlinePayment {
   id          String    @id @default(uuid()) @db.VarChar(450)
-  tenantId    String    @db.VarChar(1000)
+   tenantId String?     @db.VarChar(1000)
   invoiceId   String?   @db.VarChar(450) // ← باید علامت ? داشته باشد
   customerId  String?
   amount      Decimal   @db.Decimal(18, 2)
@@ -1024,6 +1024,7 @@ model OnlinePayment {
   gatewayType String    @default("zarinpal") @db.VarChar(30)
   gatewayId   String?   @db.VarChar(450)
   gatewayUrl  String?
+  
   description String?
   paidAt      DateTime?
   createdAt   DateTime  @default(now())
@@ -1031,7 +1032,7 @@ model OnlinePayment {
 
   installmentId String?
 
-  Tenant  Tenant   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  Tenant      Tenant?   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: SetNull)
   Invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull) // ← باید Invoice? باشد
 
   @@index([tenantId])
