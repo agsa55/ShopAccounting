@@ -1,7 +1,11 @@
 // ============================================================================
 // src/app/api/donations/zarinpal/callback/route.ts
-// ★ بازگشت از زرین‌پال و تأیید نهایی پرداخت حمایتی
-// ★ پشتیبانی از Sandbox و Production
+// ★ v12.1: بازگشت از زرین‌پال و تأیید نهایی پرداخت حمایتی — مطابق مستندات رسمی
+// ★ پشتیبانی از Authority با حرف بزرگ و کوچک
+// ★ پشتیبانی از code=100 و code=101 به‌عنوان موفق
+// ★ بازگرداندن refId به فرانت‌اند
+// ★ استفاده از amountRial ارسالی از request برای جلوگیری از mismatch
+// ★ اضافه شدن timeout و پیام‌های خطای دقیق‌تر
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -15,23 +19,66 @@ import {
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function redirectWithStatus(
-  req: NextRequest,
-  status: 'success' | 'failed' | 'cancelled',
-  amountToman?: number
-) {
-  const base = getPublicBaseUrl(req)
-  const params = new URLSearchParams()
+// ═══════════════════════════════════════════════════════════════
+//  ★ fetch با timeout
+// ═══════════════════════════════════════════════════════════════
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 15000
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-  params.set('donation', status)
-
-  if (typeof amountToman === 'number' && Number.isFinite(amountToman) && amountToman > 0) {
-    params.set('amountToman', String(amountToman))
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  return NextResponse.redirect(`${base}/?${params.toString()}`)
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ★ خواندن پارامتر به‌صورت case-insensitive برای نام‌های محدود
+// ═══════════════════════════════════════════════════════════════
+function getParam(url: URL, names: string[]): string | null {
+  for (const name of names) {
+    const value = url.searchParams.get(name)
+    if (value !== null) return value
+  }
+  return null
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ تبدیل امن عدد صحیح مثبت
+// ═══════════════════════════════════════════════════════════════
+function parsePositiveInteger(value: string | null | undefined): number | null {
+  if (!value) return null
+
+  const n = Number(value)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return null
+
+  return n
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ پاک‌سازی پیام خطا برای ارسال در URL
+// ═══════════════════════════════════════════════════════════════
+function sanitizeMessage(message?: string | null): string | undefined {
+  if (!message) return undefined
+
+  return String(message)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ استخراج پیام خطا از پاسخ زرین‌پال
+// ═══════════════════════════════════════════════════════════════
 function getErrorMessage(payload: any): string | undefined {
   if (!payload) return undefined
 
@@ -50,6 +97,68 @@ function getErrorMessage(payload: any): string | undefined {
   return undefined
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ★ ریدایرکت به لندینگ با وضعیت پرداخت
+// ═══════════════════════════════════════════════════════════════
+function redirectWithStatus(
+  req: NextRequest,
+  status: 'success' | 'failed' | 'cancelled',
+  extra: {
+    amountToman?: number | null
+    amountRial?: number | null
+    orderId?: string | null
+    refId?: string | null
+    errorCode?: number | null
+    errorMessage?: string | null
+  } = {}
+) {
+  const base = getPublicBaseUrl(req)
+  const params = new URLSearchParams()
+
+  params.set('donation', status)
+
+  if (
+    typeof extra.amountToman === 'number' &&
+    Number.isFinite(extra.amountToman) &&
+    extra.amountToman > 0
+  ) {
+    params.set('amountToman', String(extra.amountToman))
+  }
+
+  if (
+    typeof extra.amountRial === 'number' &&
+    Number.isFinite(extra.amountRial) &&
+    extra.amountRial > 0
+  ) {
+    params.set('amountRial', String(extra.amountRial))
+  }
+
+  if (extra.orderId) {
+    params.set('orderId', String(extra.orderId))
+  }
+
+  if (extra.refId) {
+    params.set('refId', String(extra.refId))
+  }
+
+  if (
+    typeof extra.errorCode === 'number' &&
+    Number.isFinite(extra.errorCode)
+  ) {
+    params.set('errorCode', String(extra.errorCode))
+  }
+
+  const safeMessage = sanitizeMessage(extra.errorMessage)
+  if (safeMessage) {
+    params.set('errorMessage', safeMessage)
+  }
+
+  return NextResponse.redirect(`${base}/?${params.toString()}`, 302)
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ★ GET: دریافت بازگشت از زرین‌پال و verify
+// ═══════════════════════════════════════════════════════════════
 export async function GET(req: NextRequest) {
   try {
     const sandbox = isZarinpalSandbox()
@@ -58,23 +167,42 @@ export async function GET(req: NextRequest) {
 
     if (!merchantId) {
       console.error('[ZarinPal Donation Callback] Merchant ID is missing')
-      return redirectWithStatus(req, 'failed')
+      return redirectWithStatus(req, 'failed', {
+        errorMessage: 'پیکربندی درگاه پرداخت کامل نیست.',
+      })
     }
 
     const url = req.nextUrl
 
-    const authority = url.searchParams.get('authority')
-    const statusFromZarinPal =
-      url.searchParams.get('Status') || url.searchParams.get('status')
+    // ★ مهم: زرین‌پال معمولاً Authority را با A بزرگ می‌فرستد
+    const authority = getParam(url, ['Authority', 'authority'])
 
-    const amountTomanParam = url.searchParams.get('amountToman')
-    const amountToman = Number(amountTomanParam)
+    // ★ Status هم ممکن است با S بزرگ بیاید
+    const statusFromZarinPal = getParam(url, ['Status', 'status'])
+
+    const orderId = url.searchParams.get('orderId')
+
+    // ★ اول amountRial را می‌خوانیم چون دقیق‌تر است
+    let amountRial = parsePositiveInteger(url.searchParams.get('amountRial'))
+
+    const amountTomanFromQuery = parsePositiveInteger(
+      url.searchParams.get('amountToman')
+    )
+
+    // اگر amountRial نبود، از amountToman محاسبه کن
+    if (!amountRial && amountTomanFromQuery) {
+      amountRial = amountTomanFromQuery * 10
+    }
+
+    const amountToman = amountRial ? Math.round(amountRial / 10) : null
 
     console.log('[ZarinPal Donation Callback] Received:', {
       sandbox,
       authority,
       statusFromZarinPal,
+      orderId,
       amountToman,
+      amountRial,
     })
 
     // اگر کاربر پرداخت را لغو کرد یا Status_OK نبود
@@ -82,44 +210,80 @@ export async function GET(req: NextRequest) {
       return redirectWithStatus(
         req,
         statusFromZarinPal === 'NOK' ? 'cancelled' : 'failed',
-        Number.isFinite(amountToman) ? amountToman : undefined
+        {
+          amountToman,
+          amountRial,
+          orderId,
+          errorMessage:
+            statusFromZarinPal === 'NOK'
+              ? 'پرداخت لغو شد.'
+              : 'پاسخ معتبر از درگاه پرداخت دریافت نشد.',
+        }
       )
     }
 
-    if (!Number.isFinite(amountToman) || amountToman <= 0) {
-      return redirectWithStatus(req, 'failed')
+    if (!amountRial || !Number.isSafeInteger(amountRial) || amountRial <= 0) {
+      return redirectWithStatus(req, 'failed', {
+        amountToman,
+        orderId,
+        errorMessage: 'مبلغ پرداخت قابل اعتبارسنجی نیست.',
+      })
     }
 
-    // زرین‌پال مبلغ را به ریال می‌گیرد
-    const amountRial = Math.round(amountToman * 10)
+    let verifyRes: Response
+    try {
+      verifyRes = await fetchWithTimeout(
+        urls.verify,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            merchant_id: merchantId,
+            authority,
+            amount: amountRial,
+          }),
+          cache: 'no-store',
+        },
+        15000
+      )
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError'
 
-    const verifyRes = await fetch(urls.verify, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        merchant_id: merchantId,
-        authority,
-        amount: amountRial,
-      }),
-      cache: 'no-store',
-    })
+      console.error('[ZarinPal Donation Callback] Verify fetch error:', {
+        isTimeout,
+        message: err?.message,
+      })
+
+      return redirectWithStatus(req, 'failed', {
+        amountToman,
+        amountRial,
+        orderId,
+        errorMessage: isTimeout
+          ? 'ارتباط با زرین‌پال برای تأیید پرداخت به timeout خورد.'
+          : 'خطا در ارتباط با سرویس تأیید پرداخت.',
+      })
+    }
 
     const verifyJson = await verifyRes.json().catch(() => null)
 
-    if (!verifyRes.ok || !verifyJson) {
-      console.error('[ZarinPal Donation Callback] Verify HTTP error:', {
+    if (!verifyJson) {
+      console.error('[ZarinPal Donation Callback] Empty verify response:', {
         status: verifyRes.status,
-        json: verifyJson,
       })
 
-      return redirectWithStatus(req, 'failed', amountToman)
+      return redirectWithStatus(req, 'failed', {
+        amountToman,
+        amountRial,
+        orderId,
+        errorMessage: 'پاسخ نامعتبر از سرویس تأیید پرداخت دریافت شد.',
+      })
     }
 
-    const code = verifyJson.data?.code
-    const refId = verifyJson.data?.ref_id
+    const code = Number(verifyJson.data?.code)
+    const refId = verifyJson.data?.ref_id ? String(verifyJson.data.ref_id) : null
 
     console.log('[ZarinPal Donation Callback] Verify response:', {
       code,
@@ -127,29 +291,49 @@ export async function GET(req: NextRequest) {
       authority,
       amountToman,
       amountRial,
+      httpStatus: verifyRes.status,
     })
 
     /**
      * کدهای موفق زرین‌پال:
      * 100 = تأیید موفق
-     * 101 = قبلاً تأیید شده
-     * 200 = در برخی پاسخ‌ها به‌عنوان موفق در نظر گرفته می‌شود
+     * 101 = قبلاً تأیید شده و همچنان موفق محسوب می‌شود
+     * 200 = در برخی پاسخ‌ها/نسخه‌ها به‌عنوان موفق دیده می‌شود
      */
-    if (code === 100 || code === 101 || code === 200) {
-      return redirectWithStatus(req, 'success', amountToman)
+    const isSuccess = code === 100 || code === 101 || code === 200
+
+    if (isSuccess) {
+      return redirectWithStatus(req, 'success', {
+        amountToman,
+        amountRial,
+        orderId,
+        refId,
+      })
     }
 
-    const errorMessage = getErrorMessage(verifyJson)
+    const errorMessage =
+      getErrorMessage(verifyJson) ||
+      (Number.isFinite(code) ? `کد پاسخ زرین‌پال: ${code}` : 'تأیید پرداخت ناموفق بود.')
 
     console.warn('[ZarinPal Donation Callback] Verification failed:', {
       code,
       errorMessage,
+      httpStatus: verifyRes.status,
       verifyJson,
     })
 
-    return redirectWithStatus(req, 'failed', amountToman)
-  } catch (err) {
+    return redirectWithStatus(req, 'failed', {
+      amountToman,
+      amountRial,
+      orderId,
+      errorCode: Number.isFinite(code) ? code : undefined,
+      errorMessage,
+    })
+  } catch (err: any) {
     console.error('[ZarinPal Donation Callback] Unexpected error:', err)
-    return redirectWithStatus(req, 'failed')
+
+    return redirectWithStatus(req, 'failed', {
+      errorMessage: err?.message || 'خطای غیرمنتظره در تأیید پرداخت.',
+    })
   }
 }

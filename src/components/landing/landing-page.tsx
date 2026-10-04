@@ -23,7 +23,8 @@ import { useSiteContent } from '@/lib/site-content'
 // ═══════════════════════════════════════════════════════════════
 const DONATION_CARD_NUMBER = '6063-7312-9723-0196'
 const DONATION_CARD_OWNER = 'سید عقیل سادات پور'
-const MIN_DONATION_TOMAN = 10000
+const MIN_DONATION_TOMAN = 10_000
+const MAX_DONATION_TOMAN = 100_000_000
 
 // Merchant ID زرین‌پال فقط در .env / env سرور قرار می‌گیرد.
 // هرگز آن را داخل این فایل فرانت‌اند نگذارید.
@@ -34,6 +35,38 @@ function formatPrice(price: number): string {
 
 function formatFaNumber(n: number): string {
   return new Intl.NumberFormat('fa-IR').format(n)
+}
+
+const FA_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
+
+function toFaDigits(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  return String(value).replace(/\d/g, (d) => FA_DIGITS[Number(d)])
+}
+
+function convertPersianDigitsToEnglish(value: string): string {
+  return value
+    .replace(/[\u06F0-\u06F9]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x06f0 + 0x0030))
+    .replace(/[\u0660-\u0669]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 0x0030))
+}
+
+function parseNumericValue(value: string | null | undefined): number {
+  if (!value) return 0
+
+  const english = convertPersianDigitsToEnglish(String(value))
+  const cleaned = english.replace(/[^\d]/g, '')
+
+  if (!cleaned) return 0
+
+  const parsed = parseInt(cleaned, 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function formatDonationAmount(value: string | number | null | undefined): string {
+  const num = parseNumericValue(String(value ?? ''))
+  if (!num) return ''
+
+  return toFaDigits(num.toLocaleString('en-US'))
 }
 
 function useScrollReveal<T extends HTMLElement = HTMLDivElement>(threshold = 0.15) {
@@ -579,7 +612,7 @@ export default function LandingPage() {
 
   // ★ Donation states
  const [donateOpen, setDonateOpen] = useState(false)
-const [donateAmount, setDonateAmount] = useState('100000')
+const [donateAmount, setDonateAmount] = useState(() => formatDonationAmount('100000'))
 const [copied, setCopied] = useState(false)
 const [donationNotice, setDonationNotice] = useState('')
 const [donationLoading, setDonationLoading] = useState(false)
@@ -665,18 +698,48 @@ useEffect(() => {
 
   if (!donation) return
 
-  const amountToman = Number(params.get('amountToman'))
+  const refId = params.get('refId') || params.get('ref_id')
+  const errorCode = params.get('errorCode')
+  const errorMessage = params.get('errorMessage')
+
+  const amountTomanParam = params.get('amountToman')
+  const amountRialParam = params.get('amountRial')
+
+  const parsedAmountRial = parseNumericValue(amountRialParam)
+  const parsedAmountToman = parseNumericValue(amountTomanParam)
+
+  const amountToman =
+    parsedAmountToman > 0
+      ? parsedAmountToman
+      : parsedAmountRial > 0
+      ? Math.round(parsedAmountRial / 10)
+      : 0
 
   if (donation === 'success') {
+    const amountText =
+      amountToman > 0 ? ` (${formatFaNumber(amountToman)} تومان)` : ''
+
+    const refText = refId
+      ? ` — کد تراکنش: ${toFaDigits(refId)}`
+      : ''
+
     setDonationNotice(
-      amountToman > 0
-        ? `سپاس از حمایت گرم شما (${formatFaNumber(amountToman)} تومان). این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.`
-        : 'سپاس از حمایت گرم شما. این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.'
+      `سپاس از حمایت گرم شما${amountText}.${refText} این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.`
     )
   } else if (donation === 'cancelled') {
-    setDonationNotice('پرداخت لغو شد. در صورت تمایل می‌توانید دوباره تلاش کنید.')
+    setDonationNotice(
+      errorMessage
+        ? `پرداخت لغو شد: ${errorMessage}`
+        : 'پرداخت لغو شد. در صورت تمایل می‌توانید دوباره تلاش کنید.'
+    )
   } else {
-    setDonationNotice('پرداخت ناموفق بود. لطفاً دوباره تلاش کنید یا از شماره کارت استفاده کنید.')
+    const codeText = errorCode ? ` (کد خطا: ${toFaDigits(errorCode)})` : ''
+
+    setDonationNotice(
+      errorMessage
+        ? `پرداخت ناموفق بود: ${errorMessage}${codeText}`
+        : `پرداخت ناموفق بود${codeText}. لطفاً دوباره تلاش کنید یا از شماره کارت استفاده کنید.`
+    )
   }
 
   setDonateOpen(true)
@@ -715,12 +778,21 @@ useEffect(() => {
     }
   }
 
- const handleOnlineDonation = async () => {
-  const amount = Number(donateAmount)
+const handleOnlineDonation = async () => {
+  if (donationLoading) return
+
+  const amount = parseNumericValue(donateAmount)
 
   if (!amount || amount < MIN_DONATION_TOMAN) {
     setDonationNotice(
-      `حداقل مبلغ حمایت ${MIN_DONATION_TOMAN.toLocaleString('fa-IR')} تومان است.`
+      `حداقل مبلغ حمایت ${formatFaNumber(MIN_DONATION_TOMAN)} تومان است.`
+    )
+    return
+  }
+
+  if (amount > MAX_DONATION_TOMAN) {
+    setDonationNotice(
+      `حداکثر مبلغ حمایت مجاز ${formatFaNumber(MAX_DONATION_TOMAN)} تومان است.`
     )
     return
   }
@@ -999,7 +1071,7 @@ const pricingCardRefs = [
                     </p>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
+                                          <button
                         onClick={() => {
                           setDonationNotice('')
                           setDonateOpen(true)
@@ -1007,7 +1079,7 @@ const pricingCardRefs = [
                         className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-l from-amber-400 to-orange-500 px-3.5 py-2 text-xs font-black text-white shadow-lg shadow-amber-500/25 transition-all hover:scale-[1.02] hover:shadow-amber-400/40"
                       >
                         <Gift className="h-3.5 w-3.5" />
-                        پرداخت الکترونیکی و حمایت
+                        پرداخت امن با زرین‌پال
                       </button>
 
                       <button
@@ -1607,22 +1679,34 @@ const pricingCardRefs = [
                 </div>
               )}
 
-              <div className="space-y-2">
+                        <div className="space-y-2">
                 <label className="text-xs font-black text-gray-700">مبلغ حمایت (تومان)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={donateAmount}
-                  onChange={(e) => setDonateAmount(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-                  dir="ltr"
-                  placeholder="مثلاً: 100000"
+                  onChange={(e) => setDonateAmount(formatDonationAmount(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleOnlineDonation()
+                    }
+                  }}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-right"
+                  dir="rtl"
+                  placeholder="مثلاً: ۱۰۰,۰۰۰"
                 />
+
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  حداقل: {formatFaNumber(MIN_DONATION_TOMAN)} تومان — حداکثر: {formatFaNumber(MAX_DONATION_TOMAN)} تومان
+                </p>
 
                 <div className="grid grid-cols-4 gap-1.5">
                   {[50000, 100000, 200000, 500000].map((amount) => (
                     <button
                       key={amount}
-                      onClick={() => setDonateAmount(String(amount))}
+                      onClick={() => setDonateAmount(formatDonationAmount(String(amount)))}
                       className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-[10px] font-bold text-gray-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700"
                     >
                       {formatFaNumber(amount)}
@@ -1630,7 +1714,6 @@ const pricingCardRefs = [
                   ))}
                 </div>
               </div>
-
               <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-black text-gray-700">شماره کارت</span>
