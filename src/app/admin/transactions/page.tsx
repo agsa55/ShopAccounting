@@ -97,30 +97,61 @@ const getTypeInfo = (t: any): { label: string; icon: any; color: string; bg: str
   return { label: 'نامشخص', icon: Wallet, color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200' };
 };
 
-// ★ وضعیت تراکنش
 const getStatusInfo = (t: any): { label: string; color: string; bg: string; border: string; icon: any } => {
   if (t.isPaid || t.status === 'paid') return {
-    label: 'موفق', color: 'text-emerald-700', bg: 'bg-emerald-100', border: 'border-emerald-200', icon: CheckCircle2
+    label: 'موفق',
+    color: 'text-emerald-700',
+    bg: 'bg-emerald-100',
+    border: 'border-emerald-200',
+    icon: CheckCircle2,
   };
 
   if (t.status === 'waiting_review') return {
-    label: 'در انتظار بررسی', color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: Clock3
+    label: 'در انتظار بررسی',
+    color: 'text-amber-700',
+    bg: 'bg-amber-100',
+    border: 'border-amber-200',
+    icon: Clock3,
   };
 
   if (t.status === 'rejected') return {
-    label: 'رد شده', color: 'text-red-700', bg: 'bg-red-100', border: 'border-red-200', icon: Ban
+    label: 'رد شده',
+    color: 'text-red-700',
+    bg: 'bg-red-100',
+    border: 'border-red-200',
+    icon: Ban,
   };
 
   if (t.status === 'failed') return {
-    label: 'ناموفق', color: 'text-red-700', bg: 'bg-red-100', border: 'border-red-200', icon: XCircle
+    label: 'ناموفق',
+    color: 'text-red-700',
+    bg: 'bg-red-100',
+    border: 'border-red-200',
+    icon: XCircle,
   };
 
   if (t.status === 'cancelled') return {
-    label: 'لغو شده', color: 'text-gray-700', bg: 'bg-gray-100', border: 'border-gray-200', icon: XCircle
+    label: 'لغو شده',
+    color: 'text-gray-700',
+    bg: 'bg-gray-100',
+    border: 'border-gray-200',
+    icon: XCircle,
+  };
+
+  if (t.status === 'reversed') return {
+    label: 'برگشت خورده',
+    color: 'text-orange-700',
+    bg: 'bg-orange-100',
+    border: 'border-orange-200',
+    icon: Undo2,
   };
 
   return {
-    label: 'در انتظار', color: 'text-amber-700', bg: 'bg-amber-100', border: 'border-amber-200', icon: Clock3
+    label: 'در انتظار',
+    color: 'text-amber-700',
+    bg: 'bg-amber-100',
+    border: 'border-amber-200',
+    icon: Clock3,
   };
 };
 
@@ -309,12 +340,25 @@ const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
   };
 
   const handleExportCSV = () => {
-    const headers = [
-      'فروشگاه', 'ساب‌دامین', 'موبایل', 'نوع تراکنش', 'پلن/هدف',
-      'محیط', 'مبلغ ناخالص (تومان)', 'کارمزد (تومان)', 'مبلغ خالص (تومان)',
-      'درگاه', 'وضعیت', 'تاریخ', 'ساعت', 'کد پیگیری', 'Authority',
-      'کارت واریزکننده', 'توضیحات'
-    ];
+ const headers = [
+  'فروشگاه',
+  'ساب‌دامین',
+  'موبایل',
+  'نوع تراکنش',
+  'پلن/هدف',
+  'محیط',
+  'مبلغ ناخالص (تومان)',
+  'کارمزد (تومان)',
+  'مبلغ خالص (تومان)',
+  'درگاه',
+  'وضعیت',
+  'تاریخ',
+  'ساعت',
+  'RefID',
+  'Authority',
+  'کارت واریزکننده',
+  'توضیحات',
+];
 
     const rows = transactions.map(t => {
       const type = getTypeInfo(t);
@@ -337,8 +381,8 @@ const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
         status.label,
         date,
         time,
-        t.paymentRef || '',
-        t.paymentRef && t.source === 'online' ? t.paymentRef : '',
+       t.refId || t.paymentRef || '',
+        t.authority || '',
         t.cardPan || '',
         (t.description || '').replace(/\n/g, ' '),
       ];
