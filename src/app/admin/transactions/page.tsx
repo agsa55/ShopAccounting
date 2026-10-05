@@ -1,10 +1,10 @@
 'use client';
 
 // ============================================================================
-// src/components/admin/admin-transactions-page.tsx (v12.0 ★★★)
-// ★ v12.0: نمایش تراکنش‌های یکپارچه زرین‌پال، کارت‌به‌کارت و بعداًّ حمایت
-// ★ v12.0: تأیید / رد پرداخت کارت‌به‌کارت از داخل صفحه تراکنش‌ها
-// ★ v12.0: امکان باز کردن قفل فروشگاه همزمان با تأیید پرداخت
+// src/components/admin/admin-transactions-page.tsx (v13.0 ★★★)
+// ★ v13.0: نمایش مبلغ خالص، ناخالص، کارمزد، نوع تراکنش، وضعیت تست
+// ★ v13.0: نمایش حمایت به‌جای پلن برای تراکنش‌های donation
+// ★ v13.0: مودال جزئیات برای کارت، refId، authority، تسویه و توضیحات
 // ============================================================================
 
 import { useEffect, useState } from 'react';
@@ -13,7 +13,8 @@ import {
   Search, Download, ChevronDown, Filter, TrendingUp, CheckCircle2,
   XCircle, Clock3, Banknote, Store, X,
   Activity, Zap, Shield, ChevronRight, ChevronLeft,
-  Heart, Ban, ClipboardCheck, Loader2,
+  Heart, Ban, ClipboardCheck, Loader2, FlaskConical, Receipt,
+  Hash, Smartphone, Info,
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
@@ -24,7 +25,7 @@ const toFaNum = (n: number | string | null | undefined): string => {
 
 // ★ فرمت عدد با جداکننده هزارگان فارسی
 const formatNumberFa = (num: number | string | null | undefined): string => {
-  const n = typeof num === 'string' ? parseInt(num, 10) || 0 : (num || 0);
+  const n = typeof num === 'string' ? parseInt(num, 10) || 0 : Math.round(Number(num) || 0);
   return toFaNum(n.toLocaleString('en-US'));
 };
 
@@ -122,43 +123,65 @@ const getStatusInfo = (t: any): { label: string; color: string; bg: string; bord
 };
 
 // ★ تشخیص درگاه پرداخت
-const getGatewayInfo = (gateway: string, method: string, description?: string): { label: string; icon: any; color: string; bg: string } => {
-  const g = (gateway || '').toLowerCase();
-  const m = (method || '').toLowerCase();
-  const d = (description || '').toLowerCase();
+const getGatewayInfo = (t: any): { label: string; icon: any; color: string; bg: string } => {
+  const gateway = String(t?.gatewayType || '').toLowerCase();
+  const method = String(t?.paymentMethod || '').toLowerCase();
+  const description = String(t?.description || '').toLowerCase();
 
-  if (g === 'manual_card' || m.includes('manual_card') || d.includes('manual_card')) {
+  if (gateway === 'manual_card' || method.includes('manual_card') || description.includes('manual_card')) {
     return { label: 'کارت‌به‌کارت', icon: Banknote, color: 'text-amber-600', bg: 'bg-amber-50' };
   }
 
-  if (g === 'zarinpal' || m.includes('zarinpal')) {
+  if (gateway === 'zarinpal' || method.includes('zarinpal')) {
     return { label: 'زرین‌پال', icon: CreditCard, color: 'text-blue-600', bg: 'bg-blue-50' };
   }
 
-  if (g === 'donation' || d.includes('donation')) {
+  if (gateway === 'donation' || description.includes('donation')) {
     return { label: 'حمایت', icon: Heart, color: 'text-rose-600', bg: 'bg-rose-50' };
   }
 
-  if (g === 'idpay' || m.includes('idpay')) {
-    return { label: 'آی‌دی‌پی', icon: CreditCard, color: 'text-purple-600', bg: 'bg-purple-50' };
-  }
-
-  if (m.includes('wallet') || m.includes('کیف پول')) {
-    return { label: 'کیف پول', icon: Wallet, color: 'text-purple-600', bg: 'bg-purple-50' };
-  }
-
-  if (m.includes('transfer') || m.includes('حواله') || m.includes('bank')) {
-    return { label: 'حواله بانکی', icon: Banknote, color: 'text-emerald-600', bg: 'bg-emerald-50' };
-  }
-
-  return { label: method || gateway || 'نامشخص', icon: CreditCard, color: 'text-gray-600', bg: 'bg-gray-50' };
+  return { label: t?.gatewayType || method || 'نامشخص', icon: CreditCard, color: 'text-gray-600', bg: 'bg-gray-50' };
 };
+
+// ★ برچسب پلن/هدف تراکنش
+function getPlanOrPurposeLabel(t: any) {
+  if (String(t?.type || '').toLowerCase() === 'donation') {
+    return {
+      label: 'حمایت',
+      icon: '❤️',
+      color: 'text-rose-700',
+      bg: 'bg-rose-100',
+      border: 'border-rose-200',
+    };
+  }
+
+  if (String(t?.type || '').toLowerCase() === 'manual_card') {
+    const plan = getPlanInfo(t.tierName || t.tenantPlanName || '');
+    return {
+      label: plan.label && plan.label !== 'پایه' ? plan.label : 'کارت‌به‌کارت',
+      icon: '🏦',
+      color: 'text-amber-700',
+      bg: 'bg-amber-100',
+      border: 'border-amber-200',
+    };
+  }
+
+  const plan = getPlanInfo(t.tierName || t.tenantPlanName || '');
+  return {
+    label: plan.label,
+    icon: plan.icon,
+    color: plan.color,
+    bg: plan.bg,
+    border: plan.border,
+  };
+}
 
 export default function AdminTransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({
     totalRevenue: 0, monthlyRevenue: 0, todayRevenue: 0,
-    todayCount: 0, totalCount: 0, avgTransaction: 0, pendingReviewCount: 0,
+    todayCount: 0, totalCount: 0, avgTransaction: 0,
+    pendingReviewCount: 0, totalFee: 0,
   });
   const [pagination, setPagination] = useState({
     page: 1, pageSize: 20, totalCount: 0, totalPages: 0,
@@ -168,6 +191,7 @@ export default function AdminTransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [planFilter, setPlanFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [timeFilter, setTimeFilter] = useState<string>('all');
   const [currentTime, setCurrentTime] = useState(getPersianTime());
 
@@ -177,6 +201,9 @@ export default function AdminTransactionsPage() {
   const [reviewNote, setReviewNote] = useState('');
   const [reviewUnlock, setReviewUnlock] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
+
+  // ★ details modal state
+  const [detailPayment, setDetailPayment] = useState<any | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
@@ -192,6 +219,7 @@ export default function AdminTransactionsPage() {
 
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (planFilter !== 'all') params.set('plan', planFilter);
+      if (typeFilter !== 'all') params.set('type', typeFilter);
       if (timeFilter !== 'all') params.set('time', timeFilter);
       if (searchTerm.trim()) params.set('search', searchTerm.trim());
 
@@ -216,7 +244,7 @@ export default function AdminTransactionsPage() {
   useEffect(() => {
     if (!loading) loadData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, planFilter, timeFilter]);
+  }, [statusFilter, planFilter, typeFilter, timeFilter]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -269,29 +297,46 @@ export default function AdminTransactionsPage() {
     }
   };
 
+  const openDetails = (payment: any) => {
+    setDetailPayment(payment);
+  };
+
+  const closeDetails = () => {
+    setDetailPayment(null);
+  };
+
   const handleExportCSV = () => {
     const headers = [
-      'فروشگاه', 'ساب‌دامین', 'موبایل', 'پلن', 'نوع تراکنش', 'منبع',
-      'مبلغ (تومان)', 'درگاه پرداخت', 'وضعیت', 'تاریخ', 'کد پیگیری', 'توضیحات'
+      'فروشگاه', 'ساب‌دامین', 'موبایل', 'نوع تراکنش', 'پلن/هدف',
+      'محیط', 'مبلغ ناخالص (تومان)', 'کارمزد (تومان)', 'مبلغ خالص (تومان)',
+      'درگاه', 'وضعیت', 'تاریخ', 'ساعت', 'کد پیگیری', 'Authority',
+      'کارت واریزکننده', 'توضیحات'
     ];
 
     const rows = transactions.map(t => {
       const type = getTypeInfo(t);
-      const gateway = getGatewayInfo(t.gatewayType, t.paymentMethod, t.description);
+      const purpose = getPlanOrPurposeLabel(t);
+      const gateway = getGatewayInfo(t);
       const status = getStatusInfo(t);
+      const { date, time } = formatPersianDateTime(t.paidAt || t.verifiedAt || t.createdAt);
 
       return [
         t.tenantName || '',
         t.tenantSubdomain || '',
         t.tenantMobile || '',
-        getPlanInfo(t.tierName || t.tenantPlanName || '').label,
         type.label,
-        t.source === 'online' ? 'OnlinePayments' : 'SubscriptionPayments',
-        Number(t.amount) || 0,
+        purpose.label,
+        t.isSandbox ? 'تستی' : 'عملیاتی',
+        Number(t.grossAmount || t.amount) || 0,
+        Number(t.fee) || 0,
+        Number(t.netAmount || t.amount) || 0,
         gateway.label,
         status.label,
-        formatPersianDateTime(t.paidAt || t.createdAt).date,
+        date,
+        time,
         t.paymentRef || '',
+        t.paymentRef && t.source === 'online' ? t.paymentRef : '',
+        t.cardPan || '',
         (t.description || '').replace(/\n/g, ' '),
       ];
     });
@@ -301,7 +346,7 @@ export default function AdminTransactionsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `transactions-${Date.now()}.csv`;
+    a.download = `platform-transactions-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -315,21 +360,21 @@ export default function AdminTransactionsPage() {
     isCount?: boolean;
   }> = [
     {
-      title: 'درآمد کل',
+      title: 'درآمد خالص کل',
       value: stats.totalRevenue,
       icon: DollarSign,
       gradient: 'from-emerald-500 to-teal-600',
-      subtitle: 'مجموع همه پرداخت‌های موفق',
+      subtitle: 'مجموع مبالغ واریزی به حساب پس از کسر کارمزد',
     },
     {
-      title: 'درآمد ماه جاری',
+      title: 'درآمد خالص ماه',
       value: stats.monthlyRevenue,
       icon: TrendingUp,
       gradient: 'from-blue-500 to-indigo-600',
-      subtitle: 'پرداخت‌های این ماه',
+      subtitle: 'پرداخت‌های موفق این ماه',
     },
     {
-      title: 'درآمد امروز',
+      title: 'درآمد خالص امروز',
       value: stats.todayRevenue,
       icon: Zap,
       gradient: 'from-amber-500 to-orange-500',
@@ -352,11 +397,11 @@ export default function AdminTransactionsPage() {
       isCount: true,
     },
     {
-      title: 'میانگین هر تراکنش',
-      value: stats.avgTransaction,
-      icon: Activity,
-      gradient: 'from-purple-500 to-pink-500',
-      subtitle: 'میانگین مبلغ پرداختی',
+      title: 'مجموع کارمزد',
+      value: stats.totalFee || 0,
+      icon: Receipt,
+      gradient: 'from-rose-500 to-pink-600',
+      subtitle: 'کارمزد کسرشده از تراکنش‌های موفق',
     },
   ];
 
@@ -405,7 +450,7 @@ export default function AdminTransactionsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 p-4 sm:p-6" dir="rtl">
-      <div className="max-w-[1700px] mx-auto space-y-5">
+      <div className="max-w-[1800px] mx-auto space-y-5">
 
         {/* ═══════════════════════ هدر ═══════════════════════ */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
@@ -414,18 +459,9 @@ export default function AdminTransactionsPage() {
               <Wallet className="w-6 h-6 text-white" />
             </div>
             <div>
-            <h1 className="text-xl sm:text-2xl font-black text-gray-900">
-  درآمد <span className="bg-gradient-to-l from-emerald-600 to-teal-600 bg-clip-text text-transparent">پلتفرم</span>
-</h1>
-<p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
-  <Calendar className="w-3 h-3" />
-  {getPersianDate()}
-  <span className="text-gray-300">•</span>
-  <Clock className="w-3 h-3" />
-  {currentTime}
-  <span className="text-gray-300">•</span>
-  <span className="text-gray-600">{toFaNum(pagination.totalCount)} تراکنش اشتراک</span>
-</p>
+              <h1 className="text-xl sm:text-2xl font-black text-gray-900">
+                درآمد <span className="bg-gradient-to-l from-emerald-600 to-teal-600 bg-clip-text text-transparent">پلتفرم</span>
+              </h1>
               <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
                 <Calendar className="w-3 h-3" />
                 {getPersianDate()}
@@ -470,7 +506,7 @@ export default function AdminTransactionsPage() {
                 <div className="p-3.5">
                   <div className="flex items-start justify-between mb-2">
                     <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${card.gradient} flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-300`}>
-                      <Icon className="w-4.5 h-4.5 text-white" style={{ width: '18px', height: '18px' }} />
+                      <Icon className="text-white" style={{ width: '18px', height: '18px' }} />
                     </div>
                   </div>
                   <div className="space-y-0.5">
@@ -498,7 +534,7 @@ export default function AdminTransactionsPage() {
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="جستجوی فروشگاه، ساب‌دامین، موبایل یا کد پیگیری..."
+                placeholder="جستجوی فروشگاه، ساب‌دامین، موبایل، کد پیگیری یا کارت..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && loadData(1)}
@@ -528,6 +564,21 @@ export default function AdminTransactionsPage() {
                 <option value="failed">❌ ناموفق</option>
                 <option value="cancelled">🚫 لغو شده</option>
                 <option value="rejected">⛔ رد شده</option>
+              </select>
+              <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+
+            <div className="relative shrink-0">
+              <Heart className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="w-full md:w-48 pr-10 pl-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition text-sm bg-gray-50/50 focus:bg-white appearance-none cursor-pointer"
+              >
+                <option value="all">همه انواع</option>
+                <option value="donation">❤️ حمایت</option>
+                <option value="subscription_update">🔄 به‌روزرسانی اشتراک</option>
+                <option value="manual_card">🏦 کارت‌به‌کارت</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -564,7 +615,7 @@ export default function AdminTransactionsPage() {
             </div>
           </div>
 
-          {(searchTerm || statusFilter !== 'all' || planFilter !== 'all' || timeFilter !== 'all') && (
+          {(searchTerm || statusFilter !== 'all' || planFilter !== 'all' || typeFilter !== 'all' || timeFilter !== 'all') && (
             <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3 flex-wrap">
                 <p className="text-[11px] text-gray-600">
@@ -572,8 +623,8 @@ export default function AdminTransactionsPage() {
                 </p>
                 <div className="h-3 w-px bg-gray-200"></div>
                 <p className="text-[11px] text-gray-600">
-                  مجموع این صفحه: <span className="font-bold text-gray-900" dir="ltr">
-                    {formatNumberFa(transactions.filter(t => t.isPaid || t.status === 'paid').reduce((s, t) => s + (t.amount || 0), 0))}
+                  مجموع خالص این صفحه: <span className="font-bold text-gray-900" dir="ltr">
+                    {formatNumberFa(transactions.filter(t => t.isPaid || t.status === 'paid').reduce((s, t) => s + Number(t.netAmount || t.amount || 0), 0))}
                   </span> تومان
                 </p>
               </div>
@@ -582,6 +633,7 @@ export default function AdminTransactionsPage() {
                   setSearchTerm('');
                   setStatusFilter('all');
                   setPlanFilter('all');
+                  setTypeFilter('all');
                   setTimeFilter('all');
                 }}
                 className="text-[10px] font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
@@ -599,31 +651,35 @@ export default function AdminTransactionsPage() {
             <table className="w-full text-right">
               <thead className="bg-gradient-to-l from-slate-50 to-emerald-50/50 border-b border-gray-100">
                 <tr>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700">فروشگاه</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700">فروشگاه / حمایت</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden md:table-cell">نوع</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden lg:table-cell">پلن</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700">مبلغ</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden lg:table-cell">پلن / هدف</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700">مبلغ خالص</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden xl:table-cell">درگاه</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700">وضعیت</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">تاریخ</th>
-                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">کد پیگیری</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">تاریخ و ساعت</th>
+                  <th className="px-4 py-3 font-bold text-[11px] text-gray-700 hidden 2xl:table-cell">کد پیگیری / کارت</th>
                   <th className="px-4 py-3 font-bold text-[11px] text-gray-700 text-center">عملیات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {transactions.map(t => {
-                  const plan = getPlanInfo(t.tierName || t.tenantPlanName || '');
-                  const status = getStatusInfo(t);
                   const type = getTypeInfo(t);
-                  const gateway = getGatewayInfo(t.gatewayType, t.paymentMethod, t.description);
+                  const purpose = getPlanOrPurposeLabel(t);
+                  const status = getStatusInfo(t);
+                  const gateway = getGatewayInfo(t);
                   const StatusIcon = status.icon;
                   const TypeIcon = type.icon;
                   const GatewayIcon = gateway.icon;
-                  const { date, time } = formatPersianDateTime(t.paidAt || t.createdAt);
+                  const { date, time } = formatPersianDateTime(t.paidAt || t.verifiedAt || t.createdAt);
+
+                  const gross = Number(t.grossAmount || t.amount || 0);
+                  const net = Number(t.netAmount || t.amount || 0);
+                  const fee = Number(t.fee || 0);
 
                   const canReview =
                     t.source === 'online' &&
-                    t.gatewayType === 'manual_card' &&
+                    String(t.gatewayType || '').toLowerCase() === 'manual_card' &&
                     t.status === 'waiting_review';
 
                   return (
@@ -636,13 +692,30 @@ export default function AdminTransactionsPage() {
                             t.status === 'waiting_review' ? 'from-amber-500 to-orange-500' :
                             'from-amber-500 to-orange-500'
                           } flex items-center justify-center text-white font-bold text-xs shrink-0`}>
-                            {(t.tenantName || 'ف')[0]}
+                            {(t.tenantName || 'ح')[0]}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-bold text-gray-900 truncate">{t.tenantName || 'بدون نام'}</p>
-                            <p className="text-[10px] text-gray-500 font-mono truncate">{t.tenantSubdomain || '—'}</p>
-                            {t.tenantMobile && (
-                              <p className="text-[9px] text-gray-400 font-mono truncate" dir="ltr">{t.tenantMobile}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-bold text-gray-900 truncate">
+                                {t.type === 'donation' ? 'حمایت عمومی' : (t.tenantName || 'بدون نام')}
+                              </p>
+                              {t.isSandbox && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 bg-purple-100 border border-purple-200 px-1.5 py-0.5 rounded">
+                                  <FlaskConical className="w-3 h-3" />
+                                  تستی
+                                </span>
+                              )}
+                            </div>
+                            {t.type !== 'donation' && (
+                              <>
+                                <p className="text-[10px] text-gray-500 font-mono truncate">{t.tenantSubdomain || '—'}</p>
+                                {t.tenantMobile && (
+                                  <p className="text-[9px] text-gray-400 font-mono truncate" dir="ltr">{t.tenantMobile}</p>
+                                )}
+                              </>
+                            )}
+                            {t.type === 'donation' && (
+                              <p className="text-[10px] text-gray-500">پرداخت حمایتی از لندینگ پیج</p>
                             )}
                           </div>
                         </div>
@@ -656,18 +729,25 @@ export default function AdminTransactionsPage() {
                       </td>
 
                       <td className="px-4 py-3 hidden lg:table-cell">
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border w-fit ${plan.bg} ${plan.color} ${plan.border}`}>
-                          <span className="text-xs">{plan.icon}</span>
-                          {plan.label}
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold border w-fit ${purpose.bg} ${purpose.color} ${purpose.border}`}>
+                          <span className="text-xs">{purpose.icon}</span>
+                          {purpose.label}
                         </span>
                       </td>
 
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
                           <span className="text-xs font-black text-gray-900" dir="ltr">
-                            {formatNumberFa(t.amount)}
+                            {formatNumberFa(net)}
                           </span>
-                          <span className="text-[9px] text-gray-400">تومان</span>
+                          <span className="text-[9px] text-gray-400">تومان خالص</span>
+                          {fee > 0 && (
+                            <div className="mt-1 text-[9px] text-gray-500 leading-tight">
+                              <span dir="ltr">کل: {formatNumberFa(gross)}</span>
+                              {' • '}
+                              <span className="text-rose-600" dir="ltr">کارمزد: {formatNumberFa(fee)}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -683,9 +763,12 @@ export default function AdminTransactionsPage() {
                           <StatusIcon className="w-3 h-3" />
                           {status.label}
                         </span>
-                        {t.tenantIsLocked && (
+                        {t.tenantIsLocked && t.type !== 'donation' && (
                           <p className="text-[9px] text-red-600 mt-1">فروشگاه قفل است</p>
                         )}
+                        <p className="text-[9px] text-gray-400 mt-1 2xl:hidden">
+                          {date} {time}
+                        </p>
                       </td>
 
                       <td className="px-4 py-3 hidden 2xl:table-cell">
@@ -696,42 +779,54 @@ export default function AdminTransactionsPage() {
                       </td>
 
                       <td className="px-4 py-3 hidden 2xl:table-cell">
-                        {t.paymentRef && (t.isPaid || t.status === 'paid') ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-mono bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
-                            <Shield className="w-3 h-3" />
-                            {t.paymentRef}
-                          </span>
-                        ) : t.paymentRef ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded-md border border-gray-200">
-                            <Clock3 className="w-3 h-3" />
-                            {String(t.paymentRef).substring(0, 12)}...
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-gray-400">—</span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {t.paymentRef ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-mono bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 max-w-[160px] truncate">
+                              <Shield className="w-3 h-3 shrink-0" />
+                              {t.paymentRef}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">—</span>
+                          )}
+
+                          {t.cardPan && (
+                            <span className="inline-flex items-center gap-1 text-[9px] text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded-md border border-gray-200 max-w-[160px] truncate" dir="ltr">
+                              <Smartphone className="w-3 h-3 shrink-0" />
+                              {t.cardPan}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-4 py-3 text-center">
-                        {canReview ? (
-                          <div className="inline-flex items-center gap-1">
-                            <button
-                              onClick={() => openReviewModal(t, 'approve')}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 hover:shadow-md"
-                              title="تأیید پرداخت"
-                            >
-                              <ClipboardCheck className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openReviewModal(t, 'reject')}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-red-700 hover:text-white bg-red-50 hover:bg-red-600 hover:shadow-md"
-                              title="رد پرداخت"
-                            >
-                              <Ban className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-gray-400">—</span>
-                        )}
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => openDetails(t)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-gray-600 hover:text-white bg-gray-100 hover:bg-gray-700 hover:shadow-md"
+                            title="جزئیات تراکنش"
+                          >
+                            <Info className="w-4 h-4" />
+                          </button>
+
+                          {canReview ? (
+                            <>
+                              <button
+                                onClick={() => openReviewModal(t, 'approve')}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 hover:shadow-md"
+                                title="تأیید پرداخت"
+                              >
+                                <ClipboardCheck className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => openReviewModal(t, 'reject')}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-red-700 hover:text-white bg-red-50 hover:bg-red-600 hover:shadow-md"
+                                title="رد پرداخت"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -826,24 +921,133 @@ export default function AdminTransactionsPage() {
                 <Wallet className="w-8 h-8 text-emerald-600" />
               </div>
               <p className="text-gray-700 text-sm font-bold mb-1">
-                {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || timeFilter !== 'all'
+                {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || typeFilter !== 'all' || timeFilter !== 'all'
                   ? 'تراکنشی با این فیلترها یافت نشد'
-                  : 'هنوز هیچ تراکنشی ثبت نشده است'}
+                  : 'هنوز هیچ تراکنش پلتفرمی ثبت نشده است'}
               </p>
-        <p className="text-gray-500 text-xs">
-  {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || timeFilter !== 'all'
-    ? 'لطفاً فیلترها را تغییر دهید یا پاک کنید'
-    : 'هنوز هیچ پرداخت اشتراکی از سوی فروشگاه‌داران ثبت نشده است'}
-</p>
+              <p className="text-gray-500 text-xs">
+                {searchTerm || statusFilter !== 'all' || planFilter !== 'all' || typeFilter !== 'all' || timeFilter !== 'all'
+                  ? 'لطفاً فیلترها را تغییر دهید یا پاک کنید'
+                  : 'به محض اولین پرداخت حمایتی، اشتراکی یا کارت‌به‌کارت، تراکنش‌ها در اینجا نمایش داده می‌شوند'}
+              </p>
             </div>
           )}
         </div>
 
         <div className="text-center text-[9px] text-gray-400 pt-3 border-t border-gray-100">
-          <p>مدیریت تراکنش‌های مالی — نسخه {toFaNum('12.0.0')} — زرین‌پال + کارت‌به‌کارت</p>
+          <p>مدیریت درآمد پلتفرم — نسخه {toFaNum('13.0.0')} — زرین‌پال + کارت‌به‌کارت + حمایت</p>
         </div>
 
       </div>
+
+      {/* ═══════════════════════ مودال جزئیات تراکنش ═══════════════════════ */}
+      {detailPayment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={closeDetails}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-gradient-to-l from-slate-700 to-slate-900 px-4 py-3 text-white z-10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  <h3 className="text-sm font-black">جزئیات تراکنش</h3>
+                </div>
+                <button
+                  onClick={closeDetails}
+                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DetailRow label="نوع تراکنش" value={getTypeInfo(detailPayment).label} />
+                <DetailRow label="محیط" value={detailPayment.isSandbox ? 'تستی / سندباکس' : 'عملیاتی / واقعی'} />
+                <DetailRow label="فروشگاه" value={detailPayment.type === 'donation' ? 'حمایت عمومی' : detailPayment.tenantName} />
+                <DetailRow label="ساب‌دامین" value={detailPayment.tenantSubdomain || '—'} mono />
+                <DetailRow label="موبایل" value={detailPayment.tenantMobile || '—'} mono />
+                <DetailRow label="پلن / هدف" value={getPlanOrPurposeLabel(detailPayment).label} />
+              </div>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <p className="text-[11px] font-black text-emerald-900 mb-2">خلاصه مالی</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                  <div>
+                    <p className="text-gray-600">مبلغ ناخالص</p>
+                    <p className="font-black text-gray-900" dir="ltr">
+                      {formatNumberFa(detailPayment.grossAmount || detailPayment.amount)} تومان
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">کارمزد</p>
+                    <p className="font-black text-rose-700" dir="ltr">
+                      {formatNumberFa(detailPayment.fee || 0)} تومان
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">مبلغ خالص دریافتی</p>
+                    <p className="font-black text-emerald-700" dir="ltr">
+                      {formatNumberFa(detailPayment.netAmount || detailPayment.amount)} تومان
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DetailRow label="وضعیت" value={getStatusInfo(detailPayment).label} />
+                <DetailRow label="درگاه" value={getGatewayInfo(detailPayment).label} />
+                <DetailRow label="کد پیگیری / RefID" value={detailPayment.paymentRef || '—'} mono />
+                <DetailRow label="Authority" value={detailPayment.source === 'online' ? detailPayment.paymentRef : '—'} mono />
+                <DetailRow label="کارت واریزکننده" value={detailPayment.cardPan || 'در دسترس نیست'} mono />
+                <DetailRow label="نوع کارمزد" value={detailPayment.feeType || '—'} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DetailRow label="تاریخ ایجاد" value={formatPersianDateTime(detailPayment.createdAt).date} />
+                <DetailRow label="ساعت ایجاد" value={formatPersianDateTime(detailPayment.createdAt).time} />
+                <DetailRow label="تاریخ پرداخت" value={formatPersianDateTime(detailPayment.paidAt).date} />
+                <DetailRow label="ساعت پرداخت" value={formatPersianDateTime(detailPayment.paidAt).time} />
+                <DetailRow label="تاریخ تأیید" value={formatPersianDateTime(detailPayment.verifiedAt).date} />
+                <DetailRow label="ساعت تأیید" value={formatPersianDateTime(detailPayment.verifiedAt).time} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DetailRow label="وضعیت تسویه" value={detailPayment.settlementStatus || 'pending'} />
+                <DetailRow label="تاریخ تسویه" value={formatPersianDateTime(detailPayment.settlementDate).date} />
+                <DetailRow label="کد تسویه" value={detailPayment.settlementReferenceId || '—'} mono />
+                <DetailRow label="شماره حساب واریزکننده" value={detailPayment.payerAccount || 'زرین‌پال شماره حساب دقیق واریزکننده را نمی‌دهد'} />
+              </div>
+
+              {detailPayment.cardHash && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-gray-600 mb-1 flex items-center gap-1">
+                    <Hash className="w-3 h-3" />
+                    Card Hash
+                  </p>
+                  <p className="text-[10px] font-mono text-gray-700 break-all" dir="ltr">
+                    {detailPayment.cardHash}
+                  </p>
+                </div>
+              )}
+
+              {detailPayment.description && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-blue-800 mb-1">توضیحات / متادیتا</p>
+                  <p className="text-[11px] text-blue-900 leading-relaxed whitespace-pre-line break-words">
+                    {detailPayment.description}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════════ مودال تأیید / رد پرداخت ═══════════════════════ */}
       {reviewPayment && (
@@ -884,9 +1088,9 @@ export default function AdminTransactionsPage() {
                   <span className="text-[11px] font-mono text-gray-700" dir="ltr">{reviewPayment.tenantSubdomain || '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-bold text-gray-600">مبلغ</span>
+                  <span className="text-[11px] font-bold text-gray-600">مبلغ خالص</span>
                   <span className="text-sm font-black text-gray-900" dir="ltr">
-                    {formatNumberFa(reviewPayment.amount)} تومان
+                    {formatNumberFa(reviewPayment.netAmount || reviewPayment.amount)} تومان
                   </span>
                 </div>
               </div>
@@ -974,6 +1178,17 @@ export default function AdminTransactionsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
+      <p className="text-[10px] font-bold text-gray-500 mb-0.5">{label}</p>
+      <p className={`text-[11px] font-bold text-gray-900 break-words ${mono ? 'font-mono' : ''}`} dir={mono ? 'ltr' : 'rtl'}>
+        {value || '—'}
+      </p>
     </div>
   );
 }

@@ -1014,33 +1014,106 @@ model FiscalYear {
 
 model OnlinePayment {
   id          String    @id @default(uuid()) @db.VarChar(450)
-   tenantId String?     @db.VarChar(1000)
-  invoiceId   String?   @db.VarChar(450) // ← باید علامت ? داشته باشد
+
+  // ★ فروشگاهی که پرداخت مربوط به آن است؛ برای حمایت عمومی null است
+  tenantId    String?   @db.VarChar(1000)
+
+  // ★ اگر پرداخت مربوط به فاکتور مشتری باشد؛ برای اشتراک/حمایت null است
+  invoiceId   String?   @db.VarChar(450)
+
   customerId  String?
+
+  // ★ مبلغ نهایی/خالص دریافتی به تومان
+  //   برای پرداخت‌های موفق زرین‌پال: netAmount
+  //   برای کارت‌به‌کارت: مبلغ توافق‌شده
   amount      Decimal   @db.Decimal(18, 2)
+
+  // =========================
+  // ★ متادیتای نوع تراکنش
+  // =========================
+  // donation | subscription_update | manual_card | unknown
+  type        String?   @db.VarChar(50)
+
+  // ★ آیا این تراکنش در محیط سندباکس/تستی انجام شده؟
+  isSandbox   Boolean   @default(false)
+
+  // =========================
+  // ★ اطلاعات مالی دقیق
+  // =========================
+  // مبلغ کل پرداختی مشتری/فروشگاه‌دار به تومان، قبل از کسر کارمزد
+  grossAmount Decimal?  @db.Decimal(18, 2)
+
+  // مبلغ خالص واریزی به حساب پذیرنده به تومان، بعد از کسر کارمزد
+  netAmount   Decimal?  @db.Decimal(18, 2)
+
+  // کارمزد کسرشده به تومان
+  fee         Decimal?  @db.Decimal(18, 2)
+
+  // نوع کارمزد: Merchant / Buyer و ...
+  feeType     String?   @db.VarChar(30)
+
+  // =========================
+  // ★ اطلاعات کارت واریزکننده از زرین‌پال
+  // =========================
+  // شماره کارت mask شده، مثلا: 6037****4321
+  cardPan     String?   @db.VarChar(30)
+
+  // هش کارت برای تطبیق امن
+  cardHash    String?   @db.VarChar(200)
+
+  // شماره حساب واریزکننده؛ زرین‌پال معمولاً این را نمی‌دهد، برای آینده نگه داشته شده
+  payerAccount String?  @db.VarChar(30)
+
+  // =========================
+  // ★ وضعیت درگاه و تأیید
+  // =========================
   authority   String?
   refId       String?
   status      String    @default("pending")
   gatewayType String    @default("zarinpal") @db.VarChar(30)
   gatewayId   String?   @db.VarChar(450)
   gatewayUrl  String?
-  
+
   description String?
+
+  // ★ زمان پرداخت/تأیید نهایی
   paidAt      DateTime?
+
+  // ★ زمان verify شدن در زرین‌پال
+  verifiedAt  DateTime?
+
+  // =========================
+  // ★ وضعیت تسویه حساب
+  // =========================
+  // pending | settled | failed | rejected
+  settlementStatus      String?   @default("pending") @db.VarChar(30)
+  settlementDate        DateTime?
+  settlementReferenceId String?   @db.VarChar(100)
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   installmentId String?
 
-  Tenant      Tenant?   @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: SetNull)
-  Invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull) // ← باید Invoice? باشد
+  // =========================
+  // ★ روابط
+  // =========================
+  Tenant  Tenant?  @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  Invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
+  // =========================
+  // ★ ایندکس‌ها
+  // =========================
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([invoiceId])
   @@index([authority])
   @@index([installmentId])
   @@index([gatewayId])
+  @@index([type])
+  @@index([isSandbox])
+  @@index([settlementStatus])
+  @@index([status, createdAt])
   @@map("OnlinePayments")
 }
 

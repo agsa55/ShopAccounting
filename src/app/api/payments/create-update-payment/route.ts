@@ -470,18 +470,27 @@ export const POST = withTenantIsolation(
 
         // ── ۶. ثبت در OnlinePayments برای صفحه تراکنش‌ها ──
         try {
-          await db.client.onlinePayment.create({
-            data: {
-              tenantId,
-              amount: amountToman,
-              authority,
-              status: 'pending',
-              gatewayType: 'zarinpal',
-              gatewayId: pending.paymentId,
-              description: `${description} | orderId=${orderId} | discount=${pricing.discountPercent}%`,
-              paidAt: null,
-            },
-          })
+      await db.client.onlinePayment.create({
+  data: {
+    tenantId,
+    type: 'subscription_update',
+    isSandbox: sandbox,
+
+    amount: amountToman,
+    grossAmount: amountToman,
+    netAmount: amountToman,
+    fee: 0,
+
+    authority,
+    status: 'pending',
+    gatewayType: 'zarinpal',
+    gatewayId: pending.paymentId,
+    description: `${description} | orderId=${orderId} | discount=${pricing.discountPercent}%`,
+    paidAt: null,
+    verifiedAt: null,
+    settlementStatus: 'pending',
+  },
+})
           console.log('[CreatePayment v3.0] ✅ OnlinePayment record created')
         } catch (onlineErr: any) {
           console.warn('[CreatePayment v3.0] ⚠️ Failed to create OnlinePayment record:', onlineErr?.message)

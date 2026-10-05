@@ -120,13 +120,17 @@ export async function POST(req: NextRequest, context: any) {
       const appended =
         `${payment.description || ''}\n[ADMIN_REJECTED] ${now.toISOString()}${note ? ` | ${note}` : ''}`.trim()
 
-      await db.client.onlinePayment.update({
-        where: { id },
-        data: {
-          status: 'rejected',
-          description: appended.slice(0, 1000),
-        },
-      })
+await db.client.onlinePayment.update({
+  where: { id },
+  data: {
+    status: 'rejected',
+    type: 'manual_card',
+    isSandbox: false,
+    netAmount: 0,
+    settlementStatus: 'rejected',
+    description: appended.slice(0, 1000),
+  },
+})
 
       return NextResponse.json({
         success: true,
@@ -196,15 +200,25 @@ export async function POST(req: NextRequest, context: any) {
     const appendedDescription =
       `${payment.description || ''}\n[ADMIN_APPROVED] ${now.toISOString()}${note ? ` | ${note}` : ''}`.trim()
 
-    await db.client.onlinePayment.update({
-      where: { id },
-      data: {
-        status: 'paid',
-        paidAt: now,
-        refId: `MANUAL-${id.slice(-8)}`,
-        description: appendedDescription.slice(0, 1000),
-      },
-    })
+await db.client.onlinePayment.update({
+  where: { id },
+  data: {
+    status: 'paid',
+    paidAt: now,
+    verifiedAt: now,
+    refId: `MANUAL-${id.slice(-8)}`,
+    type: 'manual_card',
+    isSandbox: false,
+    amount: amountToman,
+    grossAmount: amountToman,
+    netAmount: amountToman,
+    fee: 0,
+    settlementStatus: 'settled',
+    settlementDate: now,
+    settlementReferenceId: `MANUAL-${id.slice(-8)}`,
+    description: appendedDescription.slice(0, 1000),
+  },
+})
 
     // ۲. فعال‌سازی Tenant
     const tenantUpdateData: any = {

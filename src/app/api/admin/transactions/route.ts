@@ -1,11 +1,10 @@
 // ============================================================================
-// src/app/api/admin/transactions/route.ts (v12.1 ★★★)
-// ShopAccounting — Admin Platform Revenue Transactions ONLY
+// src/app/api/admin/transactions/route.ts (v13.0 ★★★)
+// ShopAccounting — Admin Platform Revenue Transactions with Financial Detail
 // ----------------------------------------------------------------------------
-// ★ v12.1: اصلاح حیاتی — حذف پرداخت‌های مشتریان (Invoice Payments)
-//   - فقط تراکنش‌های SubscriptionPayments نمایش داده می‌شوند.
-//   - فقط تراکنش‌های OnlinePayments که مربوط به اشتراک هستند (بدون invoiceId یا با تگ SUBSCRIPTION) نمایش داده می‌شوند.
-//   - پرداخت‌های فاکتور مشتریان کاملاً فیلتر شده‌اند.
+// ★ v13.0: نمایش مبلغ خالص، ناخالص، کارمزد، نوع تراکنش، وضعیت سندباکس
+// ★ v13.0: پشتیبانی از حمایت، اشتراک، کارت‌به‌کارت
+// ★ v13.0: حذف پرداخت‌های مشتریان/فاکتور از گزارش درآمد پلتفرم
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -24,15 +23,35 @@ type RawPayment = {
   tenantPlanName: string | null
   tenantIsLocked: boolean | null
   tenantLockReason: string | null
+
+  type: string | null
+  isSandbox: boolean | null
+
   amount: number
+  grossAmount: number
+  netAmount: number
+  fee: number
+  feeType: string | null
+
   status: string
   isPaid: boolean
+
   gatewayType: string | null
   paymentMethod: string | null
   paymentRef: string | null
   description: string | null
+
+  cardPan: string | null
+  cardHash: string | null
+  payerAccount: string | null
+
   createdAt: Date
   paidAt: Date | null
+  verifiedAt: Date | null
+
+  settlementStatus: string | null
+  settlementDate: Date | null
+  settlementReferenceId: string | null
 }
 
 function normalizePlan(value: string | null | undefined): string | null {
@@ -77,30 +96,13 @@ function extractTier(row: RawPayment): string {
   return ''
 }
 
-function deriveType(row: RawPayment): string {
-  const description = String(row.description || '')
-  const paymentMethod = String(row.paymentMethod || '')
-  const gatewayType = String(row.gatewayType || '').toLowerCase()
-
-  if (gatewayType === 'manual_card' || description.includes('MANUAL_CARD')) {
-    return 'manual_card'
-  }
-
-  if (gatewayType === 'donation' || description.includes('DONATION')) {
-    return 'donation'
-  }
-
-  // ★ چون اینجا فقط تراکنش‌های اشتراک هستند، پیش‌فرض subscription_update است
-  return 'subscription_update'
-}
-
 // ═══════════════════════════════════════════════════════════════
-//  CTE اصلی: ترکیب دقیق و فیلترشده تراکنش‌های پلتفرم
+//  CTE اصلی: فقط تراکنش‌های پلتفرم
 // ═══════════════════════════════════════════════════════════════
-const baseCte = Prisma.sql`
+const platformCte = Prisma.sql`
 WITH platform_payments AS (
-  
-  -- ۱. تراکنش‌های قدیمی و جدید اشتراک از جدول SubscriptionPayments
+
+  -- ۱. تراکنش‌های اشتراک از SubscriptionPayments
   SELECT
     'subscription'::text AS source,
     sp.id,
@@ -111,25 +113,51 @@ WITH platform_payments AS (
     t."planName" AS "tenantPlanName",
     t."isLocked" AS "tenantIsLocked",
     t."lockReason" AS "tenantLockReason",
+
+    CASE
+      WHEN sp."paymentMethod" LIKE 'manual_card%' THEN 'manual_card'
+      ELSE 'subscription_update'
+    END AS type,
+
+    false AS "isSandbox",
+
     COALESCE(sp.amount, 0)::float8 AS amount,
+    COALESCE(sp.amount, 0)::float8 AS "grossAmount",
+    COALESCE(sp.amount, 0)::float8 AS "netAmount",
+    0::float8 AS fee,
+    NULL::text AS "feeType",
+
     sp.status,
     sp."isPaid",
+
     CASE
       WHEN sp."paymentMethod" LIKE 'zarinpal:%' THEN 'zarinpal'
       WHEN sp."paymentMethod" LIKE 'manual_card:%' THEN 'manual_card'
       ELSE 'unknown'
     END AS "gatewayType",
+
     sp."paymentMethod",
     COALESCE(sp."paymentRef", '') AS "paymentRef",
     NULL::text AS description,
+
+    NULL::text AS "cardPan",
+    NULL::text AS "cardHash",
+    NULL::text AS "payerAccount",
+
     sp."createdAt",
-    sp."paidAt"
+    sp."paidAt",
+    sp."paidAt" AS "verifiedAt",
+
+    NULL::text AS "settlementStatus",
+    NULL::timestamp AS "settlementDate",
+    NULL::text AS "settlementReferenceId"
+
   FROM "SubscriptionPayments" sp
   LEFT JOIN "Tenants" t ON t.id = sp."tenantId"
 
   UNION ALL
 
-  -- ۲. تراکنش‌های جدید اشتراک از جدول OnlinePayments (با فیلتر سخت‌گیرانه)
+  -- ۲. تراکنش‌های پلتفرم از OnlinePayments
   SELECT
     'online'::text AS source,
     op.id,
@@ -140,48 +168,70 @@ WITH platform_payments AS (
     t."planName" AS "tenantPlanName",
     t."isLocked" AS "tenantIsLocked",
     t."lockReason" AS "tenantLockReason",
-    COALESCE(op.amount, 0)::float8 AS amount,
+
+    COALESCE(
+      op."type",
+      CASE
+        WHEN op."gatewayType" = 'manual_card' THEN 'manual_card'
+        WHEN LOWER(COALESCE(op.description, '')) LIKE '%donation%' THEN 'donation'
+        WHEN LOWER(COALESCE(op.description, '')) LIKE '%subscription%' THEN 'subscription_update'
+        ELSE 'unknown'
+      END
+    ) AS type,
+
+    COALESCE(op."isSandbox", false) AS "isSandbox",
+
+    COALESCE(op."netAmount", op.amount, 0)::float8 AS amount,
+    COALESCE(op."grossAmount", op.amount, 0)::float8 AS "grossAmount",
+    COALESCE(op."netAmount", op.amount, 0)::float8 AS "netAmount",
+    COALESCE(op."fee", 0)::float8 AS fee,
+    op."feeType",
+
     op.status,
     (op.status = 'paid') AS "isPaid",
+
     op."gatewayType",
     NULL::text AS "paymentMethod",
     COALESCE(op."refId", op.authority, '') AS "paymentRef",
     op.description,
+
+    op."cardPan",
+    op."cardHash",
+    op."payerAccount",
+
     op."createdAt",
-    op."paidAt"
+    op."paidAt",
+    op."verifiedAt",
+
+    op."settlementStatus",
+    op."settlementDate",
+    op."settlementReferenceId"
+
   FROM "OnlinePayments" op
   LEFT JOIN "Tenants" t ON t.id = op."tenantId"
-  WHERE 
-    -- ★ شرط حیاتی: فقط تراکنش‌هایی که مربوط به اشتراک هستند
-    (
-      -- الف) دارای invoiceId نباشند (پرداشت فاکتور مشتری نیست)
-      op."invoiceId" IS NULL
-      
-      OR
-      
-      -- ب) یا در توضیحاتشان تگ مخصوص اشتراک داشته باشند
-      LOWER(COALESCE(op.description, '')) LIKE '%subscription%'
+
+  WHERE
+    -- ★ فقط تراکنش‌های پلتفرم، نه پرداخت فاکتور مشتری
+    op."invoiceId" IS NULL
+    AND (
+      op."type" IN ('donation', 'subscription_update', 'manual_card')
+      OR op."gatewayType" = 'manual_card'
+      OR LOWER(COALESCE(op.description, '')) LIKE '%donation%'
+      OR LOWER(COALESCE(op.description, '')) LIKE '%subscription%'
       OR LOWER(COALESCE(op.description, '')) LIKE '%به‌روزرسانی%'
       OR LOWER(COALESCE(op.description, '')) LIKE '%اشتراک%'
-      
-      OR
-      
-      -- ج) یا نوع گیت‌وی دستی کارت‌به‌کارت برای اشتراک باشد
-      op."gatewayType" = 'manual_card'
+      OR LOWER(COALESCE(op.description, '')) LIKE '%حمایت%'
     )
-    
-    AND
-    
-    -- ★ جلوگیری از تکراری شدن رکوردهایی که هم در Subscription و هم در Online وجود دارند
-    NOT EXISTS (
-      SELECT 1 
+
+    -- ★ جلوگیری از تکراری شدن با SubscriptionPayments
+    AND NOT EXISTS (
+      SELECT 1
       FROM "SubscriptionPayments" sp_check
       WHERE sp_check."paymentRef" = op.authority
          OR sp_check."paymentRef" = op."refId"
          OR sp_check.id = op."gatewayId"
     )
 )
-SELECT * FROM platform_payments
 `
 
 export async function GET(request: NextRequest) {
@@ -194,6 +244,7 @@ export async function GET(request: NextRequest) {
 
     const status = searchParams.get('status')
     const planFilter = searchParams.get('plan')
+    const typeFilter = searchParams.get('type')
     const timeFilter = searchParams.get('time')
     const search = searchParams.get('search')
 
@@ -216,6 +267,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── فیلتر نوع تراکنش ──────────────────────────────────
+    if (typeFilter && typeFilter !== 'all') {
+      whereFrags.push(Prisma.sql`type = ${typeFilter}`)
+    }
+
     // ── فیلتر جستجو ───────────────────────────────────────
     if (search && search.trim()) {
       const term = search.trim()
@@ -228,6 +284,7 @@ export async function GET(request: NextRequest) {
             OR "tenantSubdomain" ILIKE ${like}
             OR "tenantMobile" ILIKE ${like}
             OR "paymentRef" ILIKE ${like}
+            OR COALESCE("cardPan", '') ILIKE ${like}
             OR COALESCE(description, '') ILIKE ${like}
             OR COALESCE("paymentMethod", '') ILIKE ${like}
           )
@@ -251,7 +308,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (since) {
-        whereFrags.push(Prisma.sql`"createdAt" >= ${since}`)
+        whereFrags.push(Prisma.sql`COALESCE("paidAt", "verifiedAt", "createdAt") >= ${since}`)
       }
     }
 
@@ -278,29 +335,26 @@ export async function GET(request: NextRequest) {
 
     // ── دریافت صفحه ───────────────────────────────────────
     const rows = await db.client.$queryRaw<RawPayment[]>`
-      WITH filtered_payments AS (
-        ${baseCte}
-        WHERE ${whereSql}
-      )
-      SELECT * FROM filtered_payments
-      ORDER BY "createdAt" DESC
+      ${platformCte}
+      SELECT *
+      FROM platform_payments
+      WHERE ${whereSql}
+      ORDER BY COALESCE("paidAt", "verifiedAt", "createdAt") DESC
       LIMIT ${pageSize}
       OFFSET ${skip}
     `
 
     // ── شمارش کل ──────────────────────────────────────────
     const countResult = await db.client.$queryRaw<{ count: number }[]>`
-      WITH filtered_payments AS (
-        ${baseCte}
-        WHERE ${whereSql}
-      )
+      ${platformCte}
       SELECT COUNT(*)::int AS count
-      FROM filtered_payments
+      FROM platform_payments
+      WHERE ${whereSql}
     `
 
     const totalCount = Number(countResult[0]?.count || 0)
 
-    // ── آمار کلی (فقط برای تراکنش‌های پلتفرم) ─────────────
+    // ── آمار کلی بر اساس مبلغ خالص ────────────────────────
     const now = new Date()
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -314,38 +368,41 @@ export async function GET(request: NextRequest) {
         todayCount: number
         todayRevenue: number
         pendingReviewCount: number
+        totalFee: number
       }[]
     >`
-      WITH all_platform_payments AS (
-        ${baseCte}
-      )
+      ${platformCte}
       SELECT
         COUNT(*) FILTER (WHERE "isPaid" = true OR status = 'paid')::int AS "paidCount",
         COALESCE(
-          SUM(amount) FILTER (WHERE "isPaid" = true OR status = 'paid'),
+          SUM("netAmount") FILTER (WHERE "isPaid" = true OR status = 'paid'),
           0
         )::float8 AS "totalRevenue",
         COALESCE(
-          SUM(amount) FILTER (
+          SUM("netAmount") FILTER (
             WHERE ("isPaid" = true OR status = 'paid')
-              AND COALESCE("paidAt", "createdAt") >= ${monthStart}
-              AND COALESCE("paidAt", "createdAt") < ${nextMonthStart}
+              AND COALESCE("paidAt", "verifiedAt", "createdAt") >= ${monthStart}
+              AND COALESCE("paidAt", "verifiedAt", "createdAt") < ${nextMonthStart}
           ),
           0
         )::float8 AS "monthlyRevenue",
         COUNT(*) FILTER (
           WHERE ("isPaid" = true OR status = 'paid')
-            AND COALESCE("paidAt", "createdAt") >= ${todayStart}
+            AND COALESCE("paidAt", "verifiedAt", "createdAt") >= ${todayStart}
         )::int AS "todayCount",
         COALESCE(
-          SUM(amount) FILTER (
+          SUM("netAmount") FILTER (
             WHERE ("isPaid" = true OR status = 'paid')
-              AND COALESCE("paidAt", "createdAt") >= ${todayStart}
+              AND COALESCE("paidAt", "verifiedAt", "createdAt") >= ${todayStart}
           ),
           0
         )::float8 AS "todayRevenue",
-        COUNT(*) FILTER (WHERE status = 'waiting_review')::int AS "pendingReviewCount"
-      FROM all_platform_payments
+        COUNT(*) FILTER (WHERE status = 'waiting_review')::int AS "pendingReviewCount",
+        COALESCE(
+          SUM(fee) FILTER (WHERE "isPaid" = true OR status = 'paid'),
+          0
+        )::float8 AS "totalFee"
+      FROM platform_payments
     `
 
     const stats = statsResult[0] || {
@@ -355,16 +412,17 @@ export async function GET(request: NextRequest) {
       todayCount: 0,
       todayRevenue: 0,
       pendingReviewCount: 0,
+      totalFee: 0,
     }
 
     // ── فرمت خروجی ────────────────────────────────────────
     const formatted = rows.map((r) => {
       const tierName = extractTier(r)
-      const type = deriveType(r)
 
       return {
         id: r.id,
         source: r.source,
+
         tenantId: r.tenantId,
         tenantName: r.tenantName || 'نامشخص',
         tenantSubdomain: r.tenantSubdomain || '',
@@ -372,16 +430,36 @@ export async function GET(request: NextRequest) {
         tenantPlanName: r.tenantPlanName || '',
         tenantIsLocked: Boolean(r.tenantIsLocked),
         tenantLockReason: r.tenantLockReason || null,
+
+        type: r.type || 'unknown',
+        isSandbox: Boolean(r.isSandbox),
+
         amount: Number(r.amount) || 0,
+        grossAmount: Number(r.grossAmount) || Number(r.amount) || 0,
+        netAmount: Number(r.netAmount) || Number(r.amount) || 0,
+        fee: Number(r.fee) || 0,
+        feeType: r.feeType || null,
+
         status: r.status,
         isPaid: Boolean(r.isPaid),
+
         gatewayType: r.gatewayType || 'unknown',
         paymentMethod: r.paymentMethod || '',
         paymentRef: r.paymentRef || '',
         description: r.description || '',
+
+        cardPan: r.cardPan || null,
+        cardHash: r.cardHash || null,
+        payerAccount: r.payerAccount || null,
+
         createdAt: r.createdAt,
         paidAt: r.paidAt,
-        type,
+        verifiedAt: r.verifiedAt,
+
+        settlementStatus: r.settlementStatus || null,
+        settlementDate: r.settlementDate,
+        settlementReferenceId: r.settlementReferenceId || null,
+
         tierName,
       }
     })
@@ -402,6 +480,7 @@ export async function GET(request: NextRequest) {
         todayCount: Number(stats.todayCount) || 0,
         totalCount: Number(stats.paidCount) || 0,
         pendingReviewCount: Number(stats.pendingReviewCount) || 0,
+        totalFee: Number(stats.totalFee) || 0,
         avgTransaction:
           Number(stats.paidCount) > 0
             ? Math.round(Number(stats.totalRevenue) / Number(stats.paidCount))
@@ -409,7 +488,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('[Admin Transactions v12.1] Error:', error)
+    console.error('[Admin Transactions v13.0] Error:', error)
     return NextResponse.json(
       { success: false, error: error?.message || 'خطا در بارگذاری تراکنش‌ها' },
       { status: 500 }

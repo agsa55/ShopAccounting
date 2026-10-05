@@ -148,7 +148,7 @@ function buildDashboardUrl(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  همگام‌سازی رکورد در OnlinePayments
+//  همگام‌سازی رکورد در OnlinePayments با جزئیات مالی
 // ═══════════════════════════════════════════════════════════════
 async function syncOnlinePayment(params: {
   tenantId: string
@@ -158,8 +158,27 @@ async function syncOnlinePayment(params: {
   refId?: string | null
   subscriptionPaymentId?: string | null
   description?: string | null
+  feeRial?: number | null
+  feeType?: string | null
+  cardPan?: string | null
+  cardHash?: string | null
+  isSandbox?: boolean
 }): Promise<void> {
   try {
+    const feeRial = Math.max(0, Math.round(Number(params.feeRial || 0)))
+    const grossAmountToman = Math.round(Number(params.amountToman || 0))
+    const feeToman = Math.round(feeRial / 10)
+
+    const normalizedFeeType = String(params.feeType || '').toLowerCase().trim()
+    const deductFeeFromSettlement =
+      !normalizedFeeType ||
+      normalizedFeeType === 'merchant' ||
+      normalizedFeeType === 'پذیرنده'
+
+    const netAmountToman = deductFeeFromSettlement
+      ? Math.max(0, grossAmountToman - feeToman)
+      : grossAmountToman
+
     const existing = await db.client.onlinePayment.findFirst({
       where: {
         authority: params.authority,
@@ -167,8 +186,20 @@ async function syncOnlinePayment(params: {
       },
     })
 
+    const baseData: any = {
+      type: 'subscription_update',
+      isSandbox: Boolean(params.isSandbox),
+      grossAmount: grossAmountToman,
+      netAmount: netAmountToman,
+      fee: feeToman,
+      feeType: params.feeType || null,
+      cardPan: params.cardPan || null,
+      cardHash: params.cardHash || null,
+    }
+
     if (existing) {
       const data: any = {
+        ...baseData,
         status: params.status,
       }
 
@@ -177,7 +208,10 @@ async function syncOnlinePayment(params: {
       }
 
       if (params.status === 'paid') {
+        data.amount = netAmountToman
         data.paidAt = new Date()
+        data.verifiedAt = new Date()
+        data.settlementStatus = 'pending'
       }
 
       if (params.subscriptionPaymentId && !existing.gatewayId) {
@@ -193,32 +227,34 @@ async function syncOnlinePayment(params: {
         data,
       })
 
-      console.log(`[Subscription Verify v11.0] ✅ OnlinePayment updated → ${params.status}`)
+      console.log(`[Subscription Verify v13.0] ✅ OnlinePayment updated → ${params.status}`)
       return
     }
 
     await db.client.onlinePayment.create({
       data: {
         tenantId: params.tenantId,
-        amount: params.amountToman,
+        amount: params.status === 'paid' ? netAmountToman : grossAmountToman,
         authority: params.authority,
+        refId: params.refId ? String(params.refId) : null,
         status: params.status,
         gatewayType: 'zarinpal',
         gatewayId: params.subscriptionPaymentId || null,
         description:
           params.description ||
           `[SUBSCRIPTION_UPDATE] authority=${params.authority}`,
-        refId: params.refId ? String(params.refId) : null,
         paidAt: params.status === 'paid' ? new Date() : null,
+        verifiedAt: params.status === 'paid' ? new Date() : null,
+        settlementStatus: params.status === 'paid' ? 'pending' : params.status,
+        ...baseData,
       },
     })
 
-    console.log(`[Subscription Verify v11.0] ✅ OnlinePayment created → ${params.status}`)
+    console.log(`[Subscription Verify v13.0] ✅ OnlinePayment created → ${params.status}`)
   } catch (err: any) {
-    console.warn('[Subscription Verify v11.0] ⚠️ Failed to sync OnlinePayment:', err?.message)
+    console.warn('[Subscription Verify v13.0] ⚠️ Failed to sync OnlinePayment:', err?.message)
   }
 }
-
 // ═══════════════════════════════════════════════════════════════
 //  GET callback
 // ═══════════════════════════════════════════════════════════════
@@ -492,17 +528,22 @@ export async function GET(req: NextRequest) {
       if (result.success) {
         console.log('[Subscription Verify v11.0] ✅ Payment applied successfully:', result)
 
-        await syncOnlinePayment({
-          tenantId,
-          authority,
-          amountToman,
-          status: 'paid',
-          refId,
-          subscriptionPaymentId: payment.id,
-          description: orderId
-            ? `[SUBSCRIPTION_UPDATE] paid | orderId=${orderId} | refId=${refId || ''}`
-            : `[SUBSCRIPTION_UPDATE] paid | refId=${refId || ''}`,
-        })
+   await syncOnlinePayment({
+  tenantId,
+  authority,
+  amountToman,
+  status: 'paid',
+  refId,
+  subscriptionPaymentId: payment.id,
+  feeRial: Number(verifyJson.data?.fee || 0),
+  feeType: verifyJson.data?.fee_type ? String(verifyJson.data.fee_type) : null,
+  cardPan: verifyJson.data?.card_pan ? String(verifyJson.data.card_pan) : null,
+  cardHash: verifyJson.data?.card_hash ? String(verifyJson.data.card_hash) : null,
+  isSandbox: sandbox,
+  description: orderId
+    ? `[SUBSCRIPTION_UPDATE] paid | orderId=${orderId} | refId=${refId || ''}`
+    : `[SUBSCRIPTION_UPDATE] paid | refId=${refId || ''}`,
+})
 
         const isLifetime = isLifetimeCycle(result.newBillingCycle)
 

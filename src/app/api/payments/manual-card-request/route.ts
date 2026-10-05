@@ -180,20 +180,29 @@ export const POST = withTenantIsolation(
         `${MANUAL_TAG} به‌روزرسانی پلن ${planName} (${pricing.cycleLabel}) | ` +
         `discount=${pricing.discountPercent}% | amount=${amountToman} تومان`
 
-      const created = await db.client.onlinePayment.create({
-        data: {
-          tenantId,
-          amount: amountToman,
-          authority: null,
-          refId: null,
-          status: 'waiting_review',
-          gatewayType: 'manual_card',
-          gatewayId: null,
-          gatewayUrl: null,
-          description,
-          paidAt: null,
-        },
-      })
+ const created = await db.client.onlinePayment.create({
+  data: {
+    tenantId,
+    type: 'manual_card',
+    isSandbox: false,
+
+    amount: amountToman,
+    grossAmount: amountToman,
+    netAmount: amountToman,
+    fee: 0,
+
+    authority: null,
+    refId: null,
+    status: 'waiting_review',
+    gatewayType: 'manual_card',
+    gatewayId: null,
+    gatewayUrl: null,
+    description,
+    paidAt: null,
+    verifiedAt: null,
+    settlementStatus: 'pending',
+  },
+})
 
       console.log('[ManualCardRequest] ✅ Manual payment request created:', created.id)
 
