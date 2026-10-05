@@ -55,6 +55,8 @@ type RawPayment = {
   gatewayType: string | null
   paymentMethod: string | null
   paymentRef: string | null
+  authority: string | null
+refId: string | null
   description: string | null
 
   cardPan: string | null
@@ -151,6 +153,8 @@ WITH platform_payments AS (
 
     sp."paymentMethod",
     COALESCE(sp."paymentRef", '') AS "paymentRef",
+    NULL::text AS authority,
+NULL::text AS refId,
     NULL::text AS description,
 
     NULL::text AS "cardPan",
@@ -224,6 +228,8 @@ WITH platform_payments AS (
     op."gatewayType",
     NULL::text AS "paymentMethod",
     COALESCE(op."refId", op.authority, '') AS "paymentRef",
+    op.authority,
+op."refId",
     op.description,
 
     op."cardPan",
@@ -496,6 +502,8 @@ export async function GET(request: NextRequest) {
         gatewayType: r.gatewayType || 'unknown',
         paymentMethod: r.paymentMethod || '',
         paymentRef: r.paymentRef || '',
+        authority: r.authority || '',
+refId: r.refId || '',
         description: r.description || '',
 
         cardPan: r.cardPan || null,
