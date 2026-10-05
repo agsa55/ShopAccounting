@@ -23,7 +23,23 @@ type RawPayment = {
   tenantPlanName: string | null
   tenantIsLocked: boolean | null
   tenantLockReason: string | null
+  verifyCode: number | null
+  verifyMessage: string | null
+  autoVerify: boolean | null
 
+  inquiryStatus: string | null
+  inquiryCode: number | null
+  inquiryMessage: string | null
+  inquiryAt: Date | null
+
+  reverseCode: number | null
+  reverseMessage: string | null
+  reversedAt: Date | null
+
+  payerName: string | null
+  payerMobile: string | null
+  payerEmail: string | null
+  payerNote: string | null
   type: string | null
   isSandbox: boolean | null
 
@@ -96,9 +112,6 @@ function extractTier(row: RawPayment): string {
   return ''
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  CTE اصلی: فقط تراکنش‌های پلتفرم
-// ═══════════════════════════════════════════════════════════════
 const platformCte = Prisma.sql`
 WITH platform_payments AS (
 
@@ -143,6 +156,24 @@ WITH platform_payments AS (
     NULL::text AS "cardPan",
     NULL::text AS "cardHash",
     NULL::text AS "payerAccount",
+
+    NULL::int AS "verifyCode",
+    NULL::text AS "verifyMessage",
+    NULL::boolean AS "autoVerify",
+
+    NULL::text AS "inquiryStatus",
+    NULL::int AS "inquiryCode",
+    NULL::text AS "inquiryMessage",
+    NULL::timestamp AS "inquiryAt",
+
+    NULL::int AS "reverseCode",
+    NULL::text AS "reverseMessage",
+    NULL::timestamp AS "reversedAt",
+
+    NULL::text AS "payerName",
+    NULL::text AS "payerMobile",
+    NULL::text AS "payerEmail",
+    NULL::text AS "payerNote",
 
     sp."createdAt",
     sp."paidAt",
@@ -199,6 +230,24 @@ WITH platform_payments AS (
     op."cardHash",
     op."payerAccount",
 
+    op."verifyCode",
+    op."verifyMessage",
+    op."autoVerify",
+
+    op."inquiryStatus",
+    op."inquiryCode",
+    op."inquiryMessage",
+    op."inquiryAt",
+
+    op."reverseCode",
+    op."reverseMessage",
+    op."reversedAt",
+
+    op."payerName",
+    op."payerMobile",
+    op."payerEmail",
+    op."payerNote",
+
     op."createdAt",
     op."paidAt",
     op."verifiedAt",
@@ -211,7 +260,6 @@ WITH platform_payments AS (
   LEFT JOIN "Tenants" t ON t.id = op."tenantId"
 
   WHERE
-    -- ★ فقط تراکنش‌های پلتفرم، نه پرداخت فاکتور مشتری
     op."invoiceId" IS NULL
     AND (
       op."type" IN ('donation', 'subscription_update', 'manual_card')
@@ -223,7 +271,6 @@ WITH platform_payments AS (
       OR LOWER(COALESCE(op.description, '')) LIKE '%حمایت%'
     )
 
-    -- ★ جلوگیری از تکراری شدن با SubscriptionPayments
     AND NOT EXISTS (
       SELECT 1
       FROM "SubscriptionPayments" sp_check
@@ -264,7 +311,10 @@ export async function GET(request: NextRequest) {
         whereFrags.push(Prisma.sql`status = 'cancelled'`)
       } else if (status === 'rejected') {
         whereFrags.push(Prisma.sql`status = 'rejected'`)
+            } else if (status === 'reversed') {
+        whereFrags.push(Prisma.sql`status = 'reversed'`)
       }
+      
     }
 
     // ── فیلتر نوع تراکنش ──────────────────────────────────
@@ -451,7 +501,23 @@ export async function GET(request: NextRequest) {
         cardPan: r.cardPan || null,
         cardHash: r.cardHash || null,
         payerAccount: r.payerAccount || null,
+        verifyCode: r.verifyCode ?? null,
+        verifyMessage: r.verifyMessage || '',
+        autoVerify: r.autoVerify ?? null,
 
+        inquiryStatus: r.inquiryStatus || '',
+        inquiryCode: r.inquiryCode ?? null,
+        inquiryMessage: r.inquiryMessage || '',
+        inquiryAt: r.inquiryAt,
+
+        reverseCode: r.reverseCode ?? null,
+        reverseMessage: r.reverseMessage || '',
+        reversedAt: r.reversedAt,
+
+        payerName: r.payerName || '',
+        payerMobile: r.payerMobile || '',
+        payerEmail: r.payerEmail || '',
+        payerNote: r.payerNote || '',
         createdAt: r.createdAt,
         paidAt: r.paidAt,
         verifiedAt: r.verifiedAt,

@@ -240,6 +240,19 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    const donorName = url.searchParams.get('donorName')
+const donorMobile = url.searchParams.get('donorMobile')
+const donorEmail = url.searchParams.get('donorEmail')
+const donorNote = url.searchParams.get('donorNote')
+const autoVerifyParam = url.searchParams.get('autoVerify')
+
+const autoVerify =
+  autoVerifyParam === 'true'
+    ? true
+    : autoVerifyParam === 'false'
+      ? false
+      : null
+
     // ─── فراخوانی Verify ───
     let verifyRes: Response
     try {
@@ -356,6 +369,15 @@ export async function GET(req: NextRequest) {
         verifiedAt: now,
 
         settlementStatus: 'pending',
+
+        verifyCode: code,
+verifyMessage: String(verifyJson.data?.message || '').slice(0, 500) || null,
+autoVerify,
+
+payerName: donorName ? String(donorName).slice(0, 255) : null,
+payerMobile: donorMobile ? String(donorMobile).slice(0, 20) : null,
+payerEmail: donorEmail ? String(donorEmail).slice(0, 255) : null,
+payerNote: donorNote ? String(donorNote).slice(0, 1000) : null,
       }
 
       try {
@@ -425,6 +447,15 @@ export async function GET(req: NextRequest) {
           `[DONATION_FAILED] حمایت مالی ناموفق | Code: ${code} | ${errorMessage}`,
         verifiedAt: new Date(),
         settlementStatus: 'failed',
+verifyCode: Number.isFinite(code) ? code : null,
+verifyMessage: String(errorMessage || '').slice(0, 500),
+autoVerify,
+
+payerName: donorName ? String(donorName).slice(0, 255) : null,
+payerMobile: donorMobile ? String(donorMobile).slice(0, 20) : null,
+payerEmail: donorEmail ? String(donorEmail).slice(0, 255) : null,
+payerNote: donorNote ? String(donorNote).slice(0, 1000) : null,
+
       }
 
       if (existing) {

@@ -163,6 +163,9 @@ async function syncOnlinePayment(params: {
   cardPan?: string | null
   cardHash?: string | null
   isSandbox?: boolean
+  verifyCode?: number | null
+verifyMessage?: string | null
+autoVerify?: boolean | null
 }): Promise<void> {
   try {
     const feeRial = Math.max(0, Math.round(Number(params.feeRial || 0)))
@@ -195,6 +198,9 @@ async function syncOnlinePayment(params: {
       feeType: params.feeType || null,
       cardPan: params.cardPan || null,
       cardHash: params.cardHash || null,
+      verifyCode: params.verifyCode ?? null,
+verifyMessage: params.verifyMessage ? String(params.verifyMessage).slice(0, 500) : null,
+autoVerify: params.autoVerify ?? null,
     }
 
     if (existing) {
@@ -528,7 +534,7 @@ export async function GET(req: NextRequest) {
       if (result.success) {
         console.log('[Subscription Verify v11.0] ✅ Payment applied successfully:', result)
 
-   await syncOnlinePayment({
+ await syncOnlinePayment({
   tenantId,
   authority,
   amountToman,
@@ -536,9 +542,20 @@ export async function GET(req: NextRequest) {
   refId,
   subscriptionPaymentId: payment.id,
   feeRial: Number(verifyJson.data?.fee || 0),
-  feeType: verifyJson.data?.fee_type ? String(verifyJson.data.fee_type) : null,
-  cardPan: verifyJson.data?.card_pan ? String(verifyJson.data.card_pan) : null,
-  cardHash: verifyJson.data?.card_hash ? String(verifyJson.data.card_hash) : null,
+  feeType: verifyJson.data?.fee_type
+    ? String(verifyJson.data.fee_type)
+    : null,
+  cardPan: verifyJson.data?.card_pan
+    ? String(verifyJson.data.card_pan)
+    : null,
+  cardHash: verifyJson.data?.card_hash
+    ? String(verifyJson.data.card_hash)
+    : null,
+  verifyCode: Number.isFinite(Number(verifyJson.data?.code))
+    ? Number(verifyJson.data?.code)
+    : null,
+  verifyMessage: String(verifyJson.data?.message || ''),
+  autoVerify: false,
   isSandbox: sandbox,
   description: orderId
     ? `[SUBSCRIPTION_UPDATE] paid | orderId=${orderId} | refId=${refId || ''}`

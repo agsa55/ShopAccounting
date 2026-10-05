@@ -14,7 +14,9 @@ import {
   XCircle, Clock3, Banknote, Store, X,
   Activity, Zap, Shield, ChevronRight, ChevronLeft,
   Heart, Ban, ClipboardCheck, Loader2, FlaskConical, Receipt,
-  Hash, Smartphone, Info,
+  Hash, Smartphone, Info, Undo2,
+  ScanSearch,
+  Copy,
 } from 'lucide-react';
 
 // ★ تابع کمکی برای تبدیل اعداد به فارسی
@@ -204,7 +206,8 @@ export default function AdminTransactionsPage() {
 
   // ★ details modal state
   const [detailPayment, setDetailPayment] = useState<any | null>(null);
-
+  const [inquiryBusyId, setInquiryBusyId] = useState<string | null>(null);
+  const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
     return () => clearInterval(timer);
@@ -448,6 +451,118 @@ export default function AdminTransactionsPage() {
     );
   }
 
+    const getInquiryStatusLabel = (status: string | null | undefined): string => {
+    const s = String(status || '').toUpperCase();
+
+    if (s === 'VERIFIED') return 'تأیید شده';
+    if (s === 'PAID') return 'پرداخت شده / تأیید نشده';
+    if (s === 'IN_BANK') return 'در بانک / در حال پردازش';
+    if (s === 'FAILED') return 'ناموفق';
+    if (s === 'REVERSED') return 'برگشت خورده';
+
+    return '—';
+  };
+
+  const canReversePayment = (t: any): boolean => {
+    if (String(t?.gatewayType || '').toLowerCase() !== 'zarinpal') return false;
+    if (!t?.authority) return false;
+    if (!(t.isPaid || t.status === 'paid')) return false;
+    if (t.status === 'reversed') return false;
+
+    const candidates = [t.paidAt, t.verifiedAt, t.createdAt].filter(Boolean);
+    if (candidates.length === 0) return false;
+
+    const latest = candidates
+      .map((d) => new Date(d as string))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+
+    const diffMinutes = Math.floor((Date.now() - latest.getTime()) / 60000);
+    return diffMinutes <= 30;
+  };
+
+  const handleInquiry = async (payment: any) => {
+    if (!payment?.id) return;
+
+    setInquiryBusyId(payment.id);
+    try {
+      const res = await fetch(`/api/admin/payments/${payment.id}/inquiry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert(
+          `استعلام انجام شد\n\n` +
+          `وضعیت زرین‌پال: ${data.data?.inquiryStatusLabel || data.data?.inquiryStatus || '—'}\n` +
+          `کد: ${data.data?.inquiryCode ?? '—'}\n` +
+          `پیام: ${data.data?.inquiryMessage || '—'}`
+        );
+        loadData(pagination.page);
+      } else {
+        alert(data.error || 'خطا در استعلام وضعیت.');
+      }
+    } catch (err) {
+      console.error('[Inquiry] Error:', err);
+      alert('خطای شبکه در استعلام وضعیت.');
+    } finally {
+      setInquiryBusyId(null);
+    }
+  };
+
+  const handleReverse = async (payment: any) => {
+    if (!payment?.id) return;
+
+    const ok = confirm(
+      `⚠️ ریورس تراکنش\n\n` +
+      `این عمل فقط تا ۳۰ دقیقه بعد از پرداخت موفق ممکن است.\n` +
+      `مبلغ به حساب خریدار برگشت می‌خورد.\n\n` +
+      `آیا مطمئن هستید؟`
+    );
+
+    if (!ok) return;
+
+    const confirmText = prompt('برای تأیید نهایی، عبارت REVERSE را تایپ کنید:');
+
+    if (!confirmText || confirmText.trim() !== 'REVERSE') {
+      alert('عملیات لغو شد.');
+      return;
+    }
+
+    setReverseBusyId(payment.id);
+    try {
+      const res = await fetch(`/api/admin/payments/${payment.id}/reverse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmText: 'REVERSE' }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert(data.message || 'تراکنش با موفقیت برگشت خورد.');
+        loadData(pagination.page);
+      } else {
+        alert(data.error || 'خطا در ریورس تراکنش.');
+      }
+    } catch (err) {
+      console.error('[Reverse] Error:', err);
+      alert('خطای شبکه در ریورس تراکنش.');
+    } finally {
+      setReverseBusyId(null);
+    }
+  };
+
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`${label} کپی شد.`);
+    } catch {
+      alert('کپی ممکن نبود.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 p-4 sm:p-6" dir="rtl">
       <div className="max-w-[1800px] mx-auto space-y-5">
@@ -564,6 +679,7 @@ export default function AdminTransactionsPage() {
                 <option value="failed">❌ ناموفق</option>
                 <option value="cancelled">🚫 لغو شده</option>
                 <option value="rejected">⛔ رد شده</option>
+                <option value="reversed">↩️ برگشت خورده</option>
               </select>
               <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
@@ -798,36 +914,66 @@ export default function AdminTransactionsPage() {
                         </div>
                       </td>
 
-                      <td className="px-4 py-3 text-center">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => openDetails(t)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-gray-600 hover:text-white bg-gray-100 hover:bg-gray-700 hover:shadow-md"
-                            title="جزئیات تراکنش"
-                          >
-                            <Info className="w-4 h-4" />
-                          </button>
+                 <td className="px-4 py-3 text-center">
+  <div className="inline-flex items-center gap-1">
+    <button
+      onClick={() => openDetails(t)}
+      className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-gray-600 hover:text-white bg-gray-100 hover:bg-gray-700 hover:shadow-md"
+      title="جزئیات کامل تراکنش"
+    >
+      <Info className="w-4 h-4" />
+    </button>
 
-                          {canReview ? (
-                            <>
-                              <button
-                                onClick={() => openReviewModal(t, 'approve')}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 hover:shadow-md"
-                                title="تأیید پرداخت"
-                              >
-                                <ClipboardCheck className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => openReviewModal(t, 'reject')}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-red-700 hover:text-white bg-red-50 hover:bg-red-600 hover:shadow-md"
-                                title="رد پرداخت"
-                              >
-                                <Ban className="w-4 h-4" />
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      </td>
+    {String(t.gatewayType || '').toLowerCase() === 'zarinpal' && t.authority && (
+      <button
+        onClick={() => handleInquiry(t)}
+        disabled={inquiryBusyId === t.id}
+        className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 hover:shadow-md disabled:opacity-50"
+        title="استعلام وضعیت از زرین‌پال"
+      >
+        {inquiryBusyId === t.id ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <ScanSearch className="w-4 h-4" />
+        )}
+      </button>
+    )}
+
+    {canReversePayment(t) && (
+      <button
+        onClick={() => handleReverse(t)}
+        disabled={reverseBusyId === t.id}
+        className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-orange-700 hover:text-white bg-orange-50 hover:bg-orange-600 hover:shadow-md disabled:opacity-50"
+        title="ریورس / برگشت تراکنش (تا ۳۰ دقیقه)"
+      >
+        {reverseBusyId === t.id ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Undo2 className="w-4 h-4" />
+        )}
+      </button>
+    )}
+
+    {canReview && (
+      <>
+        <button
+          onClick={() => openReviewModal(t, 'approve')}
+          className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 hover:shadow-md"
+          title="تأیید پرداخت کارت‌به‌کارت"
+        >
+          <ClipboardCheck className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => openReviewModal(t, 'reject')}
+          className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-red-700 hover:text-white bg-red-50 hover:bg-red-600 hover:shadow-md"
+          title="رد پرداخت کارت‌به‌کارت"
+        >
+          <Ban className="w-4 h-4" />
+        </button>
+      </>
+    )}
+  </div>
+</td>
                     </tr>
                   );
                 })}
@@ -941,113 +1087,287 @@ export default function AdminTransactionsPage() {
       </div>
 
       {/* ═══════════════════════ مودال جزئیات تراکنش ═══════════════════════ */}
-      {detailPayment && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={closeDetails}
-        >
-          <div
-            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+   {detailPayment && (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+    onClick={closeDetails}
+  >
+    <div
+      className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="sticky top-0 bg-gradient-to-l from-slate-800 to-slate-950 px-4 py-3 text-white z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Receipt className="w-5 h-5" />
+            <h3 className="text-sm font-black">جزئیات کامل تراکنش</h3>
+          </div>
+          <button
+            onClick={closeDetails}
+            className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
           >
-            <div className="sticky top-0 bg-gradient-to-l from-slate-700 to-slate-900 px-4 py-3 text-white z-10">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Receipt className="w-5 h-5" />
-                  <h3 className="text-sm font-black">جزئیات تراکنش</h3>
-                </div>
-                <button
-                  onClick={closeDetails}
-                  className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* ═══ خلاصه وضعیت ═══ */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <DetailRow label="نوع تراکنش" value={getTypeInfo(detailPayment).label} />
+          <DetailRow label="وضعیت داخلی" value={getStatusInfo(detailPayment).label} />
+          <DetailRow
+            label="محیط"
+            value={detailPayment.isSandbox ? 'تستی / سندباکس' : 'عملیاتی / واقعی'}
+          />
+        </div>
+
+        {/* ═══ مالی ═══ */}
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-emerald-900 mb-2">خلاصه مالی</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+            <div>
+              <p className="text-gray-600">مبلغ ناخالص</p>
+              <p className="font-black text-gray-900" dir="ltr">
+                {formatNumberFa(detailPayment.grossAmount || detailPayment.amount)} تومان
+              </p>
             </div>
-
-            <div className="p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DetailRow label="نوع تراکنش" value={getTypeInfo(detailPayment).label} />
-                <DetailRow label="محیط" value={detailPayment.isSandbox ? 'تستی / سندباکس' : 'عملیاتی / واقعی'} />
-                <DetailRow label="فروشگاه" value={detailPayment.type === 'donation' ? 'حمایت عمومی' : detailPayment.tenantName} />
-                <DetailRow label="ساب‌دامین" value={detailPayment.tenantSubdomain || '—'} mono />
-                <DetailRow label="موبایل" value={detailPayment.tenantMobile || '—'} mono />
-                <DetailRow label="پلن / هدف" value={getPlanOrPurposeLabel(detailPayment).label} />
-              </div>
-
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                <p className="text-[11px] font-black text-emerald-900 mb-2">خلاصه مالی</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                  <div>
-                    <p className="text-gray-600">مبلغ ناخالص</p>
-                    <p className="font-black text-gray-900" dir="ltr">
-                      {formatNumberFa(detailPayment.grossAmount || detailPayment.amount)} تومان
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">کارمزد</p>
-                    <p className="font-black text-rose-700" dir="ltr">
-                      {formatNumberFa(detailPayment.fee || 0)} تومان
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">مبلغ خالص دریافتی</p>
-                    <p className="font-black text-emerald-700" dir="ltr">
-                      {formatNumberFa(detailPayment.netAmount || detailPayment.amount)} تومان
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DetailRow label="وضعیت" value={getStatusInfo(detailPayment).label} />
-                <DetailRow label="درگاه" value={getGatewayInfo(detailPayment).label} />
-                <DetailRow label="کد پیگیری / RefID" value={detailPayment.paymentRef || '—'} mono />
-                <DetailRow label="Authority" value={detailPayment.source === 'online' ? detailPayment.paymentRef : '—'} mono />
-                <DetailRow label="کارت واریزکننده" value={detailPayment.cardPan || 'در دسترس نیست'} mono />
-                <DetailRow label="نوع کارمزد" value={detailPayment.feeType || '—'} />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DetailRow label="تاریخ ایجاد" value={formatPersianDateTime(detailPayment.createdAt).date} />
-                <DetailRow label="ساعت ایجاد" value={formatPersianDateTime(detailPayment.createdAt).time} />
-                <DetailRow label="تاریخ پرداخت" value={formatPersianDateTime(detailPayment.paidAt).date} />
-                <DetailRow label="ساعت پرداخت" value={formatPersianDateTime(detailPayment.paidAt).time} />
-                <DetailRow label="تاریخ تأیید" value={formatPersianDateTime(detailPayment.verifiedAt).date} />
-                <DetailRow label="ساعت تأیید" value={formatPersianDateTime(detailPayment.verifiedAt).time} />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DetailRow label="وضعیت تسویه" value={detailPayment.settlementStatus || 'pending'} />
-                <DetailRow label="تاریخ تسویه" value={formatPersianDateTime(detailPayment.settlementDate).date} />
-                <DetailRow label="کد تسویه" value={detailPayment.settlementReferenceId || '—'} mono />
-                <DetailRow label="شماره حساب واریزکننده" value={detailPayment.payerAccount || 'زرین‌پال شماره حساب دقیق واریزکننده را نمی‌دهد'} />
-              </div>
-
-              {detailPayment.cardHash && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                  <p className="text-[10px] font-bold text-gray-600 mb-1 flex items-center gap-1">
-                    <Hash className="w-3 h-3" />
-                    Card Hash
-                  </p>
-                  <p className="text-[10px] font-mono text-gray-700 break-all" dir="ltr">
-                    {detailPayment.cardHash}
-                  </p>
-                </div>
-              )}
-
-              {detailPayment.description && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-[10px] font-bold text-blue-800 mb-1">توضیحات / متادیتا</p>
-                  <p className="text-[11px] text-blue-900 leading-relaxed whitespace-pre-line break-words">
-                    {detailPayment.description}
-                  </p>
-                </div>
-              )}
+            <div>
+              <p className="text-gray-600">کارمزد</p>
+              <p className="font-black text-rose-700" dir="ltr">
+                {formatNumberFa(detailPayment.fee || 0)} تومان
+              </p>
+            </div>
+            <div>
+              <p className="text-gray-600">مبلغ خالص دریافتی</p>
+              <p className="font-black text-emerald-700" dir="ltr">
+                {formatNumberFa(detailPayment.netAmount || detailPayment.amount)} تومان
+              </p>
             </div>
           </div>
         </div>
-      )}
+
+        {/* ═══ هویت پرداخت‌کننده ═══ */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-gray-900 mb-2">هویت پرداخت‌کننده</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <DetailRow
+              label="فروشگاه / حامی"
+              value={
+                detailPayment.type === 'donation'
+                  ? (detailPayment.payerName || 'حمایت عمومی')
+                  : detailPayment.tenantName
+              }
+            />
+
+            <DetailRow
+              label="ساب‌دامین"
+              value={detailPayment.tenantSubdomain || '—'}
+              mono
+            />
+
+            <DetailRow
+              label="موبایل ثبت‌شده"
+              value={
+                detailPayment.type === 'donation'
+                  ? (detailPayment.payerMobile || 'ثبت نشده')
+                  : (detailPayment.tenantMobile || '—')
+              }
+              mono
+            />
+
+            <DetailRow
+              label="ایمیل ثبت‌شده"
+              value={
+                detailPayment.type === 'donation'
+                  ? (detailPayment.payerEmail || 'ثبت نشده')
+                  : '—'
+              }
+              mono
+            />
+
+            <DetailRow
+              label="کارت واریزکننده از زرین‌پال"
+              value={detailPayment.cardPan || 'در دسترس نیست'}
+              mono
+            />
+
+            <DetailRow
+              label="نوع کارمزد"
+              value={detailPayment.feeType || '—'}
+            />
+          </div>
+
+          {detailPayment.cardHash && (
+            <div className="mt-3 bg-white border border-gray-200 rounded-lg p-2.5">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <p className="text-[10px] font-bold text-gray-600 flex items-center gap-1">
+                  <Hash className="w-3 h-3" />
+                  Card Hash
+                </p>
+                <button
+                  onClick={() => copyText(detailPayment.cardHash, 'Card Hash')}
+                  className="text-[10px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                >
+                  <Copy className="w-3 h-3" />
+                  کپی
+                </button>
+              </div>
+              <p className="text-[10px] font-mono text-gray-700 break-all" dir="ltr">
+                {detailPayment.cardHash}
+              </p>
+            </div>
+          )}
+
+          <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">
+            نکته: زرین‌پال شماره حساب یا شبا واریزکننده را نمی‌دهد. برای شناسایی کامل حمایت‌ها،
+            باید فرم نام/موبایل/ایمیل اهداکننده قبل از پرداخت گرفته شود.
+          </p>
+        </div>
+
+        {/* ═══ اطلاعات verify زرین‌پال ═══ */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-blue-900 mb-2">اطلاعات تأیید / Verify</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <DetailRow label="کد پاسخ Verify" value={String(detailPayment.verifyCode ?? '—')} mono />
+            <DetailRow label="پیام Verify" value={detailPayment.verifyMessage || '—'} />
+            <DetailRow label="RefID / کد رهگیری" value={detailPayment.paymentRef || '—'} mono />
+            <DetailRow label="Authority" value={detailPayment.authority || detailPayment.paymentRef || '—'} mono />
+            <DetailRow
+              label="Auto Verify"
+              value={
+                detailPayment.autoVerify === true
+                  ? 'خودکار'
+                  : detailPayment.autoVerify === false
+                    ? 'غیرخودکار'
+                    : 'تنظیم پنل / نامشخص'
+              }
+            />
+            <DetailRow label="درگاه" value={getGatewayInfo(detailPayment).label} />
+          </div>
+        </div>
+
+        {/* ═══ استعلام وضعیت ═══ */}
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-purple-900 mb-2">استعلام وضعیت / Inquiry</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <DetailRow
+              label="وضعیت در زرین‌پال"
+              value={getInquiryStatusLabel(detailPayment.inquiryStatus)}
+            />
+            <DetailRow label="کد استعلام" value={String(detailPayment.inquiryCode ?? '—')} mono />
+            <DetailRow label="پیام استعلام" value={detailPayment.inquiryMessage || '—'} />
+            <DetailRow
+              label="زمان استعلام"
+              value={
+                detailPayment.inquiryAt
+                  ? `${formatPersianDateTime(detailPayment.inquiryAt).date} ${formatPersianDateTime(detailPayment.inquiryAt).time}`
+                  : '—'
+              }
+            />
+          </div>
+        </div>
+
+        {/* ═══ ریورس / برگشت ═══ */}
+        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-orange-900 mb-2">ریورس / برگشت تراکنش</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <DetailRow
+              label="وضعیت ریورس"
+              value={detailPayment.status === 'reversed' ? 'برگشت خورده' : 'انجام نشده'}
+            />
+            <DetailRow label="کد ریورس" value={String(detailPayment.reverseCode ?? '—')} mono />
+            <DetailRow label="پیام ریورس" value={detailPayment.reverseMessage || '—'} />
+            <DetailRow
+              label="زمان ریورس"
+              value={
+                detailPayment.reversedAt
+                  ? `${formatPersianDateTime(detailPayment.reversedAt).date} ${formatPersianDateTime(detailPayment.reversedAt).time}`
+                  : '—'
+              }
+            />
+          </div>
+
+          <p className="text-[10px] text-orange-800 mt-2 leading-relaxed">
+            ریورس فقط تا ۳۰ دقیقه بعد از پرداخت موفق ممکن است و نیازمند ثبت IP سرور در پنل زرین‌پال است.
+          </p>
+        </div>
+
+        {/* ═══ تسویه حساب ═══ */}
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-slate-900 mb-2">وضعیت تسویه</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <DetailRow label="وضعیت تسویه" value={detailPayment.settlementStatus || 'pending'} />
+            <DetailRow
+              label="تاریخ تسویه"
+              value={formatPersianDateTime(detailPayment.settlementDate).date}
+            />
+            <DetailRow
+              label="کد تسویه"
+              value={detailPayment.settlementReferenceId || '—'}
+              mono
+            />
+          </div>
+        </div>
+
+        {/* ═══ زمانی ═══ */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p className="text-[11px] font-black text-gray-900 mb-2">رویدادهای زمانی</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <DetailRow
+              label="ایجاد درخواست"
+              value={
+                detailPayment.createdAt
+                  ? `${formatPersianDateTime(detailPayment.createdAt).date} ${formatPersianDateTime(detailPayment.createdAt).time}`
+                  : '—'
+              }
+            />
+            <DetailRow
+              label="پرداخت / paidAt"
+              value={
+                detailPayment.paidAt
+                  ? `${formatPersianDateTime(detailPayment.paidAt).date} ${formatPersianDateTime(detailPayment.paidAt).time}`
+                  : '—'
+              }
+            />
+            <DetailRow
+              label="تأیید / verifiedAt"
+              value={
+                detailPayment.verifiedAt
+                  ? `${formatPersianDateTime(detailPayment.verifiedAt).date} ${formatPersianDateTime(detailPayment.verifiedAt).time}`
+                  : '—'
+              }
+            />
+            <DetailRow
+              label="آخرین به‌روزرسانی"
+              value={
+                detailPayment.updatedAt
+                  ? `${formatPersianDateTime(detailPayment.updatedAt).date} ${formatPersianDateTime(detailPayment.updatedAt).time}`
+                  : '—'
+              }
+            />
+          </div>
+        </div>
+
+        {/* ═══ توضیحات ═══ */}
+        {detailPayment.description && (
+          <div className="bg-gray-900 text-gray-100 rounded-lg p-3">
+            <p className="text-[10px] font-bold text-gray-400 mb-1">توضیحات / متادیتا</p>
+            <pre className="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono">
+              {detailPayment.description}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+)}
 
       {/* ═══════════════════════ مودال تأیید / رد پرداخت ═══════════════════════ */}
       {reviewPayment && (

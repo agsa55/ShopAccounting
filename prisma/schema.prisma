@@ -1090,6 +1090,36 @@ model OnlinePayment {
   settlementDate        DateTime?
   settlementReferenceId String?   @db.VarChar(100)
 
+    // =========================
+  // ★ پاسخ verify زرین‌پال
+  // =========================
+  verifyCode    Int?
+  verifyMessage String?
+  autoVerify    Boolean?
+
+  // =========================
+  // ★ استعلام وضعیت inquiry
+  // =========================
+  inquiryStatus  String? @db.VarChar(30)
+  inquiryCode    Int?
+  inquiryMessage String?
+  inquiryAt      DateTime?
+
+  // =========================
+  // ★ ریورس / برگشت تراکنش
+  // =========================
+  reverseCode    Int?
+  reverseMessage String?
+  reversedAt     DateTime?
+
+  // =========================
+  // ★ شناسایی اختیاری واریزکننده برای حمایت
+  // =========================
+  payerName   String? @db.VarChar(255)
+  payerMobile String? @db.VarChar(20)
+  payerEmail  String? @db.VarChar(255)
+  payerNote   String?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
