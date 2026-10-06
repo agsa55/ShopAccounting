@@ -239,6 +239,7 @@ export default function AdminTransactionsPage() {
   const [detailPayment, setDetailPayment] = useState<any | null>(null);
  const [inquiryBusyId, setInquiryBusyId] = useState<string | null>(null);
 const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
+const [inquiryResult, setInquiryResult] = useState<any | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
     return () => clearInterval(timer);
@@ -495,6 +496,76 @@ const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
     );
   }
 
+const getInquiryTone = (
+  status: string | null | undefined
+): {
+  label: string;
+  icon: any;
+  color: string;
+  bg: string;
+  border: string;
+} => {
+  const s = String(status || '').toUpperCase();
+
+  if (s === 'VERIFIED') {
+    return {
+      label: 'تأیید شده',
+      icon: CheckCircle2,
+      color: 'text-emerald-700',
+      bg: 'bg-emerald-50',
+      border: 'border-emerald-200',
+    };
+  }
+
+  if (s === 'PAID') {
+    return {
+      label: 'پرداخت شده / تأیید نشده',
+      icon: Clock3,
+      color: 'text-amber-700',
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+    };
+  }
+
+  if (s === 'IN_BANK') {
+    return {
+      label: 'در بانک / در حال پردازش',
+      icon: CreditCard,
+      color: 'text-blue-700',
+      bg: 'bg-blue-50',
+      border: 'border-blue-200',
+    };
+  }
+
+  if (s === 'FAILED') {
+    return {
+      label: 'ناموفق',
+      icon: XCircle,
+      color: 'text-red-700',
+      bg: 'bg-red-50',
+      border: 'border-red-200',
+    };
+  }
+
+  if (s === 'REVERSED') {
+    return {
+      label: 'برگشت خورده',
+      icon: Undo2,
+      color: 'text-orange-700',
+      bg: 'bg-orange-50',
+      border: 'border-orange-200',
+    };
+  }
+
+  return {
+    label: 'نامشخص',
+    icon: Info,
+    color: 'text-gray-700',
+    bg: 'bg-gray-50',
+    border: 'border-gray-200',
+  };
+};
+
   const getInquiryStatusLabel = (status: string | null | undefined): string => {
   const s = String(status || '').toUpperCase();
 
@@ -528,6 +599,7 @@ const handleInquiry = async (payment: any) => {
   if (!payment?.id) return;
 
   setInquiryBusyId(payment.id);
+
   try {
     const res = await fetch(`/api/admin/payments/${payment.id}/inquiry`, {
       method: 'POST',
@@ -537,24 +609,32 @@ const handleInquiry = async (payment: any) => {
     const data = await res.json();
 
     if (data.success) {
-      alert(
-        `استعلام انجام شد\n\n` +
-        `وضعیت زرین‌پال: ${data.data?.inquiryStatusLabel || data.data?.inquiryStatus || '—'}\n` +
-        `کد: ${data.data?.inquiryCode ?? '—'}\n` +
-        `پیام: ${data.data?.inquiryMessage || '—'}`
-      );
+      setInquiryResult({
+        success: true,
+        payment,
+        result: data.data || {},
+      });
+
+      // جدول را به‌روز کن تا وضعیت استعلام در لیست هم دیده شود
       loadData(pagination.page);
     } else {
-      alert(data.error || 'خطا در استعلام وضعیت.');
+      setInquiryResult({
+        success: false,
+        payment,
+        error: data.error || 'خطا در استعلام وضعیت.',
+      });
     }
   } catch (err) {
     console.error('[Inquiry] Error:', err);
-    alert('خطای شبکه در استعلام وضعیت.');
+    setInquiryResult({
+      success: false,
+      payment,
+      error: 'خطای شبکه در استعلام وضعیت.',
+    });
   } finally {
     setInquiryBusyId(null);
   }
 };
-
 const handleReverse = async (payment: any) => {
   if (!payment?.id) return;
 
@@ -1411,6 +1491,169 @@ const copyText = async (text: string, label: string) => {
     </div>
   </div>
 )}
+
+{/* ═══════════════════════ مودال نتیجه استعلام وضعیت ═══════════════════════ */}
+{inquiryResult && (() => {
+  const tone = getInquiryTone(inquiryResult.result?.inquiryStatus);
+  const ToneIcon = tone.icon;
+  const payment = inquiryResult.payment || {};
+  const result = inquiryResult.result || {};
+
+  const inquiryTime = result.inquiryAt
+    ? formatPersianDateTime(result.inquiryAt)
+    : { date: '—', time: '—' };
+
+  const gross = Number(payment.grossAmount || payment.amount || 0);
+  const fee = Number(payment.fee || 0);
+  const net = Number(payment.netAmount || payment.amount || 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={() => setInquiryResult(null)}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className={`px-4 py-3 text-white ${
+            inquiryResult.success
+              ? 'bg-gradient-to-l from-blue-600 to-indigo-700'
+              : 'bg-gradient-to-l from-red-600 to-rose-700'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ScanSearch className="w-5 h-5" />
+              <h3 className="text-sm font-black">
+                {inquiryResult.success ? 'نتیجه استعلام وضعیت' : 'خطای استعلام وضعیت'}
+              </h3>
+            </div>
+            <button
+              onClick={() => setInquiryResult(null)}
+              className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {inquiryResult.success ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-gray-600">
+                  وضعیت در زرین‌پال
+                </span>
+
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold border ${tone.bg} ${tone.color} ${tone.border}`}
+                >
+                  <ToneIcon className="w-3.5 h-3.5" />
+                  {result.inquiryStatusLabel || tone.label}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <MiniField
+                  label="کد پاسخ"
+                  value={String(result.inquiryCode ?? '—')}
+                  mono
+                />
+
+                <MiniField
+                  label="وضعیت داخلی"
+                  value={getStatusInfo(payment).label}
+                />
+
+                <MiniField
+                  label="زمان استعلام"
+                  value={`${inquiryTime.date} ${inquiryTime.time}`}
+                />
+
+                <MiniField
+                  label="درگاه"
+                  value={getGatewayInfo(payment).label}
+                />
+
+                <MiniField
+                  label="Authority"
+                  value={result.authority || payment.authority || '—'}
+                  mono
+                  span
+                />
+
+                <MiniField
+                  label="RefID"
+                  value={result.refId || payment.refId || payment.paymentRef || '—'}
+                  mono
+                  span
+                />
+              </div>
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <p className="text-[11px] font-black text-emerald-900 mb-2">
+                  خلاصه مالی
+                </p>
+
+                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                  <div>
+                    <p className="text-gray-600">ناخالص</p>
+                    <p className="font-black text-gray-900" dir="ltr">
+                      {formatNumberFa(gross)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-gray-600">کارمزد</p>
+                    <p className="font-black text-rose-700" dir="ltr">
+                      {formatNumberFa(fee)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-gray-600">خالص</p>
+                    <p className="font-black text-emerald-700" dir="ltr">
+                      {formatNumberFa(net)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {result.inquiryMessage && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-blue-800 mb-1">
+                    پیام سرویس
+                  </p>
+                  <p className="text-[11px] text-blue-900 leading-relaxed break-words">
+                    {result.inquiryMessage}
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-[11px] font-black text-red-900 mb-1">
+                خطا
+              </p>
+              <p className="text-[11px] text-red-800 leading-relaxed break-words">
+                {inquiryResult.error}
+              </p>
+            </div>
+          )}
+
+          <button
+            onClick={() => setInquiryResult(null)}
+            className="w-full px-3 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-xs font-bold"
+          >
+            بستن
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+})()}
       {/* ═══════════════════════ مودال تأیید / رد پرداخت ═══════════════════════ */}
       {reviewPayment && (
         <div
@@ -1549,6 +1792,36 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
     <div className="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
       <p className="text-[10px] font-bold text-gray-500 mb-0.5">{label}</p>
       <p className={`text-[11px] font-bold text-gray-900 break-words ${mono ? 'font-mono' : ''}`} dir={mono ? 'ltr' : 'rtl'}>
+        {value || '—'}
+      </p>
+    </div>
+  );
+}
+
+function MiniField({
+  label,
+  value,
+  mono = false,
+  span = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  span?: boolean;
+}) {
+  return (
+    <div
+      className={`bg-gray-50 border border-gray-100 rounded-lg p-2 ${
+        span ? 'col-span-2' : ''
+      }`}
+    >
+      <p className="text-[10px] font-bold text-gray-500 mb-0.5">{label}</p>
+      <p
+        className={`text-[11px] font-bold text-gray-900 break-all ${
+          mono ? 'font-mono' : ''
+        }`}
+        dir={mono ? 'ltr' : 'rtl'}
+      >
         {value || '—'}
       </p>
     </div>

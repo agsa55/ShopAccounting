@@ -990,7 +990,7 @@ const pricingCardRefs = [
             <div className="inline-flex animate-fade-in-up">
               <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-bold backdrop-blur-sm relative overflow-hidden animate-shine">
                 <Sparkles className="w-3.5 h-3.5" />
-                سیستم حسابداری فروشگاهی هوشمند رهگشا
+          سیستم تحت وب حسابداری فروشگاهی رهگشا
               </span>
             </div>
 
@@ -999,7 +999,7 @@ const pricingCardRefs = [
               style={{ fontSize: 'clamp(1.2rem, 5vw, 2.8rem)', animationDelay: '0.1s' }}
             >
               حسابداری فروشگاهی رهگشا 
-              <br />
+                            <br />
               <HeroTypewriter />
             </h1>
 
@@ -1266,7 +1266,7 @@ const pricingCardRefs = [
               <span className="bg-gradient-to-l from-violet-600 to-purple-500 bg-clip-text text-transparent"> کسب‌وکار شما</span>
             </h2>
             <p className="text-gray-500 text-base sm:text-lg">
-            پلن مناسب خود را انتخاب کنید،  ۳ ماه استفاده رایگان، بدون پرداخت هزینه
+            پلن مناسب خود را انتخاب کنید،استفاده رایگان، بدون پرداخت هزینه
             </p>
           </div>
 
@@ -1389,7 +1389,7 @@ const pricingCardRefs = [
           </div>
 
           <div className="text-center mt-10 sm:mt-14 space-y-2">
-            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
+            <p className="text-sm text-gray-400"> استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
               پشتیبانی کامل در دوره رایگان
@@ -1469,8 +1469,7 @@ const pricingCardRefs = [
           </h2>
 
           <p className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-            همین الان ثبت‌نام کنید و ۳ ماه رایگان از تمام امکانات استفاده کنید.
-            بدون نیاز به پرداخت هزینه.
+    همین الان ثبت نام کنید، استفاده رایگان از تمام امکانات بدون پرداخت هزینه
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
