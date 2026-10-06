@@ -593,21 +593,75 @@ const getInquiryTone = (
   return '—';
 };
 
-const canReversePayment = (t: any): boolean => {
-  if (String(t?.gatewayType || '').toLowerCase() !== 'zarinpal') return false;
-  if (!t?.authority) return false;
-  if (!(t.isPaid || t.status === 'paid')) return false;
-  if (t.status === 'reversed') return false;
+const getReverseEligibility = (t: any): {
+  show: boolean;
+  eligible: boolean;
+  minutesElapsed: number | null;
+  remainingMinutes: number | null;
+  title: string;
+} => {
+  const isZarinpal = String(t?.gatewayType || '').toLowerCase() === 'zarinpal';
+  const hasAuthority = Boolean(t?.authority);
+  const isPaid = Boolean(t?.isPaid || t?.status === 'paid');
+  const isReversed = t?.status === 'reversed';
+
+  const show = isZarinpal && hasAuthority && isPaid && !isReversed;
+
+  if (!show) {
+    return {
+      show: false,
+      eligible: false,
+      minutesElapsed: null,
+      remainingMinutes: null,
+      title: 'این تراکنش قابل ریورس نیست.',
+    };
+  }
 
   const candidates = [t.paidAt, t.verifiedAt, t.createdAt].filter(Boolean);
-  if (candidates.length === 0) return false;
+
+  if (candidates.length === 0) {
+    return {
+      show: true,
+      eligible: false,
+      minutesElapsed: null,
+      remainingMinutes: null,
+      title: 'زمان پرداخت مشخص نیست؛ امکان ریورس وجود ندارد.',
+    };
+  }
 
   const latest = candidates
     .map((d) => new Date(d as string))
     .sort((a, b) => b.getTime() - a.getTime())[0];
 
-  const diffMinutes = Math.floor((Date.now() - latest.getTime()) / 60000);
-  return diffMinutes <= 30;
+  const diffMs = Date.now() - latest.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
+  const eligible = diffMinutes <= 30;
+  const remainingMinutes = Math.max(0, 30 - diffMinutes);
+
+  if (eligible) {
+    return {
+      show: true,
+      eligible: true,
+      minutesElapsed: diffMinutes,
+      remainingMinutes,
+      title:
+        remainingMinutes === 0
+          ? 'ریورس مجاز است — دقایق پایانی'
+          : `ریورس مجاز است — ${toFaNum(remainingMinutes)} دقیقه فرصت باقی است`,
+    };
+  }
+
+  return {
+    show: true,
+    eligible: false,
+    minutesElapsed: diffMinutes,
+    remainingMinutes: 0,
+    title: `امکان ریورس وجود ندارد — ${toFaNum(diffMinutes)} دقیقه از پرداخت گذشته است. حداکثر مهلت ریورس ۳۰ دقیقه است.`,
+  };
+};
+
+const canReversePayment = (t: any): boolean => {
+  return getReverseEligibility(t).eligible;
 };
 
 const handleInquiry = async (payment: any) => {
@@ -970,6 +1024,7 @@ const copyText = async (text: string, label: string) => {
                     t.source === 'online' &&
                     String(t.gatewayType || '').toLowerCase() === 'manual_card' &&
                     t.status === 'waiting_review';
+                    const reverseEligibility = getReverseEligibility(t);
 
                   return (
                     <tr key={`${t.source}-${t.id}`} className="hover:bg-gray-50/70 transition-colors group">
@@ -1112,21 +1167,28 @@ const copyText = async (text: string, label: string) => {
       </button>
     )}
 
-{canReversePayment(t) && (
+{reverseEligibility.show && (
   <button
-    onClick={() => openReverseModal(t)}
-    disabled={reverseBusyId === t.id}
-        className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-orange-700 hover:text-white bg-orange-50 hover:bg-orange-600 hover:shadow-md disabled:opacity-50"
-        title="ریورس / برگشت تراکنش (تا ۳۰ دقیقه)"
-      >
-        {reverseBusyId === t.id ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <Undo2 className="w-4 h-4" />
-        )}
-      </button>
+    onClick={() => {
+      if (reverseEligibility.eligible) {
+        openReverseModal(t);
+      }
+    }}
+    disabled={!reverseEligibility.eligible || reverseBusyId === t.id}
+    className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all disabled:cursor-not-allowed ${
+      reverseEligibility.eligible
+        ? 'text-orange-700 hover:text-white bg-orange-50 hover:bg-orange-600 hover:shadow-md disabled:opacity-50'
+        : 'text-gray-400 bg-gray-100 border border-gray-200 opacity-70'
+    }`}
+    title={reverseEligibility.title}
+  >
+    {reverseBusyId === t.id ? (
+      <Loader2 className="w-4 h-4 animate-spin" />
+    ) : (
+      <Undo2 className="w-4 h-4" />
     )}
-
+  </button>
+)}
     {canReview && (
       <>
         <button
@@ -1452,7 +1514,18 @@ const copyText = async (text: string, label: string) => {
             <DetailRow
               label="وضعیت ریورس"
               value={detailPayment.status === 'reversed' ? 'برگشت خورده' : 'انجام نشده'}
+              
             />
+            <DetailRow
+  label="مهلت ریورس"
+  value={
+    detailPayment.status === 'reversed'
+      ? 'برگشت خورده'
+      : getReverseEligibility(detailPayment).eligible
+        ? `مجاز — ${toFaNum(getReverseEligibility(detailPayment).remainingMinutes ?? 0)} دقیقه باقی‌مانده`
+        : 'منقضی شده — حداکثر ۳۰ دقیقه'
+  }
+/>
             <DetailRow label="کد ریورس" value={String(detailPayment.reverseCode ?? '—')} mono />
             <DetailRow label="پیام ریورس" value={detailPayment.reverseMessage || '—'} />
             <DetailRow
@@ -1716,7 +1789,11 @@ const copyText = async (text: string, label: string) => {
   const isError = phase === 'error';
   const isConfirm = phase === 'confirm';
 
-  const canSubmit = reverseModal.confirmText.trim() === 'REVERSE' && !isProcessing;
+const normalizedConfirmText = reverseModal.confirmText.trim().toLowerCase();
+
+const canSubmit =
+  ['بازگشت', 'reverse'].includes(normalizedConfirmText) &&
+  !isProcessing;
 
   const gross = Number(payment.grossAmount || payment.amount || 0);
   const fee = Number(payment.fee || 0);
@@ -1772,10 +1849,10 @@ const copyText = async (text: string, label: string) => {
                 className={`w-5 h-5 ${isProcessing ? 'animate-spin' : ''}`}
               />
               <h3 className="text-sm font-black">
-                {isConfirm && 'ریورس تراکنش'}
-                {isProcessing && 'در حال ریورس...'}
-                {isSuccess && 'ریورس موفق'}
-                {isError && 'خطای ریورس'}
+            {isConfirm && 'بازگشت تراکنش'}
+       {isProcessing && 'در حال بازگشت تراکنش...'}
+        {isSuccess && 'بازگشت موفق'}
+             {isError && 'خطای بازگشت تراکنش'}
               </h3>
             </div>
 
@@ -1880,35 +1957,36 @@ const copyText = async (text: string, label: string) => {
                 />
               </div>
 
-              <div>
-                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
-                  برای تأیید نهایی، عبارت زیر را دقیقاً تایپ کنید:
-                </label>
+            <div>
+  <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+    برای تأیید نهایی، عبارت زیر را دقیقاً تایپ کنید:
+    <span className="mr-1 font-black text-orange-700">بازگشت</span>
+  </label>
 
-                <input
-                  type="text"
-                  value={reverseModal.confirmText}
-                  onChange={(e) =>
-                    setReverseModal((prev) => ({
-                      ...prev,
-                      confirmText: e.target.value,
-                    }))
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && canSubmit) {
-                      submitReverse();
-                    }
-                  }}
-                  disabled={isProcessing}
-                  placeholder="REVERSE"
-                  dir="ltr"
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition text-sm font-mono bg-gray-50/50 focus:bg-white disabled:opacity-60"
-                />
+  <input
+    type="text"
+    value={reverseModal.confirmText}
+    onChange={(e) =>
+      setReverseModal((prev) => ({
+        ...prev,
+        confirmText: e.target.value,
+      }))
+    }
+    onKeyDown={(e) => {
+      if (e.key === 'Enter' && canSubmit) {
+        submitReverse();
+      }
+    }}
+    disabled={isProcessing}
+    placeholder="بازگشت"
+    dir="rtl"
+    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition text-sm bg-gray-50/50 focus:bg-white disabled:opacity-60"
+  />
 
-                <p className="text-[10px] text-gray-500 mt-1.5">
-                  این عملیات غیرقابل بازگشت است و مبلغ به حساب خریدار برگشت می‌خورد.
-                </p>
-              </div>
+  <p className="text-[10px] text-gray-500 mt-1.5">
+    این عملیات غیرقابل بازگشت است و مبلغ به حساب خریدار بازگردانده می‌شود.
+  </p>
+</div>
             </>
           )}
 
@@ -2041,7 +2119,7 @@ const copyText = async (text: string, label: string) => {
                   className="flex-1 px-3 py-2.5 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 bg-gradient-to-l from-orange-500 to-amber-600"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>ریورس تراکنش</span>
+    <span>بازگشت تراکنش</span>
                 </button>
               </>
             )}
