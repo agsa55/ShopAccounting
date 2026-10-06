@@ -237,9 +237,24 @@ export default function AdminTransactionsPage() {
 
   // ★ details modal state
   const [detailPayment, setDetailPayment] = useState<any | null>(null);
- const [inquiryBusyId, setInquiryBusyId] = useState<string | null>(null);
+const [inquiryBusyId, setInquiryBusyId] = useState<string | null>(null);
 const [reverseBusyId, setReverseBusyId] = useState<string | null>(null);
 const [inquiryResult, setInquiryResult] = useState<any | null>(null);
+
+const [reverseModal, setReverseModal] = useState<{
+  open: boolean;
+  payment: any | null;
+  phase: 'confirm' | 'processing' | 'success' | 'error';
+  confirmText: string;
+  result?: any;
+  error?: string;
+  hint?: string;
+}>({
+  open: false,
+  payment: null,
+  phase: 'confirm',
+  confirmText: '',
+});
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(getPersianTime()), 60000);
     return () => clearInterval(timer);
@@ -635,26 +650,47 @@ const handleInquiry = async (payment: any) => {
     setInquiryBusyId(null);
   }
 };
-const handleReverse = async (payment: any) => {
+const openReverseModal = (payment: any) => {
+  if (!canReversePayment(payment)) return;
+
+  setReverseModal({
+    open: true,
+    payment,
+    phase: 'confirm',
+    confirmText: '',
+    result: undefined,
+    error: undefined,
+    hint: undefined,
+  });
+};
+
+const closeReverseModal = () => {
+  setReverseModal({
+    open: false,
+    payment: null,
+    phase: 'confirm',
+    confirmText: '',
+    result: undefined,
+    error: undefined,
+    hint: undefined,
+  });
+};
+
+const submitReverse = async () => {
+  const payment = reverseModal.payment;
+
   if (!payment?.id) return;
+  if (reverseModal.confirmText.trim() !== 'REVERSE') return;
 
-  const ok = confirm(
-    `⚠️ ریورس تراکنش\n\n` +
-    `این عمل فقط تا ۳۰ دقیقه بعد از پرداخت موفق ممکن است.\n` +
-    `مبلغ به حساب خریدار برگشت می‌خورد.\n\n` +
-    `آیا مطمئن هستید؟`
-  );
-
-  if (!ok) return;
-
-  const confirmText = prompt('برای تأیید نهایی، عبارت REVERSE را تایپ کنید:');
-
-  if (!confirmText || confirmText.trim() !== 'REVERSE') {
-    alert('عملیات لغو شد.');
-    return;
-  }
+  setReverseModal((prev) => ({
+    ...prev,
+    phase: 'processing',
+    error: undefined,
+    hint: undefined,
+  }));
 
   setReverseBusyId(payment.id);
+
   try {
     const res = await fetch(`/api/admin/payments/${payment.id}/reverse`, {
       method: 'POST',
@@ -665,19 +701,33 @@ const handleReverse = async (payment: any) => {
     const data = await res.json();
 
     if (data.success) {
-      alert(data.message || 'تراکنش با موفقیت برگشت خورد.');
+      setReverseModal((prev) => ({
+        ...prev,
+        phase: 'success',
+        result: data.data || {},
+      }));
+
       loadData(pagination.page);
     } else {
-      alert(data.error || 'خطا در ریورس تراکنش.');
+      setReverseModal((prev) => ({
+        ...prev,
+        phase: 'error',
+        error: data.error || 'خطا در ریورس تراکنش.',
+        hint: data.data?.hint,
+      }));
     }
   } catch (err) {
     console.error('[Reverse] Error:', err);
-    alert('خطای شبکه در ریورس تراکنش.');
+
+    setReverseModal((prev) => ({
+      ...prev,
+      phase: 'error',
+      error: 'خطای شبکه در ریورس تراکنش.',
+    }));
   } finally {
     setReverseBusyId(null);
   }
 };
-
 const copyText = async (text: string, label: string) => {
   try {
     await navigator.clipboard.writeText(text);
@@ -1062,10 +1112,10 @@ const copyText = async (text: string, label: string) => {
       </button>
     )}
 
-    {canReversePayment(t) && (
-      <button
-        onClick={() => handleReverse(t)}
-        disabled={reverseBusyId === t.id}
+{canReversePayment(t) && (
+  <button
+    onClick={() => openReverseModal(t)}
+    disabled={reverseBusyId === t.id}
         className="inline-flex items-center justify-center w-8 h-8 rounded-lg transition-all text-orange-700 hover:text-white bg-orange-50 hover:bg-orange-600 hover:shadow-md disabled:opacity-50"
         title="ریورس / برگشت تراکنش (تا ۳۰ دقیقه)"
       >
@@ -1654,6 +1704,398 @@ const copyText = async (text: string, label: string) => {
     </div>
   );
 })()}
+
+{/* ═══════════════════════ مودال ریورس تراکنش ═══════════════════════ */}
+{reverseModal.open && reverseModal.payment && (() => {
+  const payment = reverseModal.payment as any;
+  const result = reverseModal.result || {};
+  const phase = reverseModal.phase;
+
+  const isProcessing = phase === 'processing';
+  const isSuccess = phase === 'success';
+  const isError = phase === 'error';
+  const isConfirm = phase === 'confirm';
+
+  const canSubmit = reverseModal.confirmText.trim() === 'REVERSE' && !isProcessing;
+
+  const gross = Number(payment.grossAmount || payment.amount || 0);
+  const fee = Number(payment.fee || 0);
+  const net = Number(payment.netAmount || payment.amount || 0);
+
+  const paidTime = formatPersianDateTime(
+    payment.paidAt || payment.verifiedAt || payment.createdAt
+  );
+
+  const reversedTime = result.reversedAt
+    ? formatPersianDateTime(result.reversedAt)
+    : { date: '—', time: '—' };
+
+  const headerGradient = isError
+    ? 'from-red-600 to-rose-700'
+    : isSuccess
+      ? 'from-emerald-600 to-teal-700'
+      : isProcessing
+        ? 'from-blue-600 to-indigo-700'
+        : 'from-orange-500 to-amber-600';
+
+  const HeaderIcon = isError
+    ? XCircle
+    : isSuccess
+      ? CheckCircle2
+      : isProcessing
+        ? Loader2
+        : Undo2;
+
+  const showIpHint =
+    isError &&
+    (
+      reverseModal.hint ||
+      reverseModal.error ||
+      ''
+    ).toString().toLowerCase().includes('ip');
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4"
+      onClick={isProcessing ? undefined : closeReverseModal}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className={`px-4 py-3 text-white bg-gradient-to-l ${headerGradient}`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <HeaderIcon
+                className={`w-5 h-5 ${isProcessing ? 'animate-spin' : ''}`}
+              />
+              <h3 className="text-sm font-black">
+                {isConfirm && 'ریورس تراکنش'}
+                {isProcessing && 'در حال ریورس...'}
+                {isSuccess && 'ریورس موفق'}
+                {isError && 'خطای ریورس'}
+              </h3>
+            </div>
+
+            <button
+              onClick={closeReverseModal}
+              disabled={isProcessing}
+              className="w-7 h-7 rounded-lg hover:bg-white/20 flex items-center justify-center transition-colors disabled:opacity-50"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {/* ═══ حالت تأیید ═══ */}
+          {isConfirm && (
+            <>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
+                  <div className="text-[11px] text-orange-900 leading-relaxed">
+                    <p className="font-black mb-1">توجه مهم</p>
+                    <ul className="list-disc pr-4 space-y-1">
+                      <li>
+                        ریورس فقط برای تراکنش‌های موفق زرین‌پال و حداکثر تا ۳۰ دقیقه
+                        بعد از پرداخت ممکن است.
+                      </li>
+                      <li>
+                        مبلغ بدون کارمزد به حساب خریدار بازگردانده می‌شود.
+                      </li>
+                      <li>
+                        برای استفاده از ریورس، IP سرور باید در پنل زرین‌پال ثبت شده
+                        باشد. در غیر این صورت خطای <span dir="ltr">-62</span> دریافت
+                        می‌کنید.
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-gray-600">
+                    فروشگاه / حامی
+                  </span>
+                  <span className="text-xs font-black text-gray-900">
+                    {payment.type === 'donation'
+                      ? (payment.payerName || 'حمایت عمومی')
+                      : (payment.tenantName || 'نامشخص')}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-gray-600">
+                    مبلغ خالص تراکنش
+                  </span>
+                  <span className="text-sm font-black text-gray-900" dir="ltr">
+                    {formatNumberFa(net)} تومان
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-[10px]">
+                  <div className="bg-white border border-gray-200 rounded-lg p-2">
+                    <p className="text-gray-500 font-bold mb-0.5">ناخالص</p>
+                    <p className="font-black text-gray-900" dir="ltr">
+                      {formatNumberFa(gross)}
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-gray-200 rounded-lg p-2">
+                    <p className="text-gray-500 font-bold mb-0.5">کارمزد</p>
+                    <p className="font-black text-rose-700" dir="ltr">
+                      {formatNumberFa(fee)}
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-gray-200 rounded-lg p-2">
+                    <p className="text-gray-500 font-bold mb-0.5">خالص</p>
+                    <p className="font-black text-emerald-700" dir="ltr">
+                      {formatNumberFa(net)}
+                    </p>
+                  </div>
+                </div>
+
+                <MiniField
+                  label="Authority"
+                  value={payment.authority || '—'}
+                  mono
+                  span
+                />
+
+                <MiniField
+                  label="RefID"
+                  value={payment.refId || payment.paymentRef || '—'}
+                  mono
+                  span
+                />
+
+                <MiniField
+                  label="زمان پرداخت"
+                  value={`${paidTime.date} ${paidTime.time}`}
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 mb-1.5 block">
+                  برای تأیید نهایی، عبارت زیر را دقیقاً تایپ کنید:
+                </label>
+
+                <input
+                  type="text"
+                  value={reverseModal.confirmText}
+                  onChange={(e) =>
+                    setReverseModal((prev) => ({
+                      ...prev,
+                      confirmText: e.target.value,
+                    }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canSubmit) {
+                      submitReverse();
+                    }
+                  }}
+                  disabled={isProcessing}
+                  placeholder="REVERSE"
+                  dir="ltr"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition text-sm font-mono bg-gray-50/50 focus:bg-white disabled:opacity-60"
+                />
+
+                <p className="text-[10px] text-gray-500 mt-1.5">
+                  این عملیات غیرقابل بازگشت است و مبلغ به حساب خریدار برگشت می‌خورد.
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* ═══ حالت در حال پردازش ═══ */}
+          {isProcessing && (
+            <div className="py-10 text-center space-y-3">
+              <div className="relative w-16 h-16 mx-auto">
+                <div className="absolute inset-0 rounded-full border-4 border-blue-100"></div>
+                <div className="absolute inset-0 rounded-full border-4 border-t-blue-600 animate-spin"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Undo2 className="w-7 h-7 text-blue-600" />
+                </div>
+              </div>
+
+              <p className="text-sm font-black text-gray-800">
+                در حال ارسال درخواست ریورس به زرین‌پال...
+              </p>
+
+              <p className="text-[11px] text-gray-500">
+                لطفاً صفحه را نبندید و مرورگر را رفرش نکنید.
+              </p>
+            </div>
+          )}
+
+          {/* ═══ حالت موفق ═══ */}
+          {isSuccess && (
+            <>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center">
+                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                </div>
+
+                <p className="text-sm font-black text-emerald-900 mb-1">
+                  {result.message || 'تراکنش با موفقیت برگشت خورد.'}
+                </p>
+
+                <p className="text-[11px] text-emerald-700">
+                  مبلغ به حساب خریدار بازگردانده شد.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <MiniField
+                  label="کد پاسخ"
+                  value={String(result.code ?? '—')}
+                  mono
+                />
+
+                <MiniField
+                  label="زمان ریورس"
+                  value={`${reversedTime.date} ${reversedTime.time}`}
+                />
+
+                <MiniField
+                  label="Authority"
+                  value={payment.authority || '—'}
+                  mono
+                  span
+                />
+
+                <MiniField
+                  label="مبلغ برگشتی"
+                  value={`${formatNumberFa(net)} تومان`}
+                  span
+                />
+              </div>
+            </>
+          )}
+
+          {/* ═══ حالت خطا ═══ */}
+          {isError && (
+            <>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+                  <XCircle className="w-8 h-8 text-red-600" />
+                </div>
+
+                <p className="text-sm font-black text-red-900 mb-1">
+                  ریورس تراکنش انجام نشد
+                </p>
+
+                <p className="text-[11px] text-red-700 break-words">
+                  {reverseModal.error || 'خطای ناشناخته.'}
+                </p>
+              </div>
+
+              {showIpHint && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                  <p className="text-[11px] font-black text-orange-900 mb-1">
+                    احتمال خطای IP
+                  </p>
+                  <p className="text-[11px] text-orange-800 leading-relaxed">
+                    طبق مستندات زرین‌پال، برای ریورس باید IP سرور شما در پنل زرین‌پال
+                    ثبت شده باشد. به مسیر زیر بروید:
+                  </p>
+                  <p className="text-[11px] font-bold text-orange-900 mt-1" dir="rtl">
+                    پنل زرین‌پال ← تنظیمات درگاه ← IP سرور
+                  </p>
+                </div>
+              )}
+
+              {reverseModal.hint && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-[10px] font-bold text-blue-800 mb-1">
+                    راهنما
+                  </p>
+                  <p className="text-[11px] text-blue-900 leading-relaxed break-words">
+                    {reverseModal.hint}
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ═══ دکمه‌ها ═══ */}
+          <div className="pt-1 flex items-center gap-2">
+            {isConfirm && (
+              <>
+                <button
+                  onClick={closeReverseModal}
+                  disabled={isProcessing}
+                  className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold disabled:opacity-50"
+                >
+                  انصراف
+                </button>
+
+                <button
+                  onClick={submitReverse}
+                  disabled={!canSubmit}
+                  className="flex-1 px-3 py-2.5 text-white rounded-lg hover:shadow-lg transition-all text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 bg-gradient-to-l from-orange-500 to-amber-600"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>ریورس تراکنش</span>
+                </button>
+              </>
+            )}
+
+            {isProcessing && (
+              <button
+                disabled
+                className="w-full px-3 py-2.5 bg-gray-200 text-gray-500 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>در حال پردازش...</span>
+              </button>
+            )}
+
+            {isSuccess && (
+              <button
+                onClick={closeReverseModal}
+                className="w-full px-3 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-xs font-bold"
+              >
+                بستن
+              </button>
+            )}
+
+            {isError && (
+              <>
+                <button
+                  onClick={() =>
+                    setReverseModal((prev) => ({
+                      ...prev,
+                      phase: 'confirm',
+                      error: undefined,
+                      hint: undefined,
+                    }))
+                  }
+                  className="flex-1 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-all text-xs font-bold"
+                >
+                  تلاش مجدد
+                </button>
+
+                <button
+                  onClick={closeReverseModal}
+                  className="flex-1 px-3 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all text-xs font-bold"
+                >
+                  بستن
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+})()}
+
       {/* ═══════════════════════ مودال تأیید / رد پرداخت ═══════════════════════ */}
       {reviewPayment && (
         <div
