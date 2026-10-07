@@ -14,6 +14,7 @@ import {
   Star, TrendingUp, ShieldCheck, Clock, ArrowLeft, Sparkles,
   Menu, X, LogIn, Percent, Infinity,
   HeartHandshake, Copy, Check, Gift, Banknote, Loader2,
+  Monitor, Smartphone, Lock,
 } from 'lucide-react'
 import { useSiteContent } from '@/lib/site-content'
 
@@ -1115,68 +1116,115 @@ const pricingCardRefs = [
             </div>
           </div>
 
-          {/* ★ Hero Visual */}
-          <div className="relative order-1 lg:order-2 flex justify-center lg:justify-end">
-            <div className="relative w-full max-w-[420px]">
-              <div className="animate-float relative z-10">
-                <div className="rounded-3xl overflow-hidden shadow-2xl shadow-violet-900/50 border border-white/10">
-                  <div className="bg-gradient-to-l from-violet-600 to-purple-700 px-5 py-4">
-                    <div className="flex items-center justify-between text-white">
-                      <div>
-                        <p className="text-xs text-violet-200">فروش امروز</p>
-                        <p className="text-2xl font-black">{formatPrice(4_850_000)} تومان</p>
-                      </div>
-                      <div className="flex items-center gap-1.5 bg-white/20 rounded-xl px-3 py-1.5">
-                        <TrendingUp className="w-4 h-4" />
-                        <span className="text-sm font-bold">۲۳٪+</span>
+                     {/* ★ Hero Visual — Desktop + Mobile Dashboard Screenshots */}
+             <div className="relative order-1 lg:order-2 flex justify-center lg:justify-end pt-2 sm:pt-5 lg:pt-0 lg:-translate-y-[150px]">
+            <div className="relative w-full max-w-[520px] lg:max-w-[560px]">
+              {/* Ambient glow */}
+              <div className="pointer-events-none absolute -inset-8 rounded-[3.5rem] bg-gradient-to-tr from-violet-600/25 via-fuchsia-500/15 to-amber-400/15 blur-3xl" />
+              {/* Desktop screenshot */}
+              <div className="animate-fade-in-up relative z-10">
+                <div className="group relative flex w-full flex-col overflow-hidden rounded-[1.85rem] border border-white/15 bg-white shadow-2xl shadow-violet-950/60">
+                  {/* Browser chrome */}
+                  <div className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-gradient-to-l from-violet-700/95 to-purple-800/95 px-4 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-400/90 shadow-[0_0_10px_rgba(248,113,113,0.55)]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-amber-400/90 shadow-[0_0_10px_rgba(251,191,36,0.55)]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/90 shadow-[0_0_10px_rgba(52,211,153,0.55)]" />
+                    </div>
+
+                    <div className="flex-1">
+                      <div
+                        dir="ltr"
+                        className="flex h-6 items-center rounded-lg bg-black/25 px-3 text-[10px] font-mono text-violet-100/80 ring-1 ring-white/10"
+                      >
+                        <Lock className="ml-1.5 h-2.5 w-2.5 shrink-0 text-emerald-300" />
+                        <span className="truncate">app.rahgosha.com/dashboard</span>
                       </div>
                     </div>
                   </div>
-                  <div className="bg-white p-5">
-                    <div className="flex items-end gap-1.5 h-28 mb-5">
-                      {[38, 62, 48, 80, 55, 92, 70, 85, 60, 95].map((h, i) => (
-                        <div
-                          key={i}
-                          className="flex-1 rounded-t-lg bg-gradient-to-t from-violet-500 to-purple-400 opacity-80 hover:opacity-100 transition-opacity"
-                          style={{ height: `${h}%` }}
-                        />
-                      ))}
+
+                  {/* Desktop image area */}
+                  <div className="relative bg-white">
+                    <img
+                      src="/picsite.jpg"
+                      alt="داشبورد سیستم حسابداری فروشگاهی رهگشا در نسخه دسکتاپ"
+                      className="block h-auto w-full"
+                      loading="eager"
+                      decoding="async"
+                    />
+
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-700 group-hover:opacity-100" />
+                  </div>
+
+                  {/* Desktop badge */}
+                  <div className="absolute left-4 top-14 z-20 inline-flex items-center gap-1.5 rounded-full border border-violet-300/30 bg-violet-950/75 px-3 py-1 text-[10px] font-black text-violet-100 shadow-lg backdrop-blur-md">
+                    <Monitor className="h-3 w-3" />
+                    نسخه دسکتاپ
+                  </div>
+                </div>
+              </div>
+                        {/* Mobile screenshot */}
+              <div
+         className="animate-float-slow absolute -bottom-20 -right-2 z-20 sm:-bottom-28 sm:-right-4 lg:-bottom-32 lg:-right-6"
+                style={{ animationDelay: '1.2s' }}
+              >
+                <div className="relative w-20 sm:w-24 lg:w-32">
+                  <div className="pointer-events-none absolute -inset-2 rounded-[1.75rem] bg-gradient-to-br from-amber-400/30 via-violet-500/25 to-fuchsia-500/30 blur-xl" />
+
+                  <div className="relative overflow-hidden rounded-[1.65rem] border-[4px] border-gray-900 bg-gray-900 shadow-2xl shadow-black/55 ring-1 ring-white/10">
+                    <div className="absolute left-1/2 top-1 z-30 h-1.5 w-8 -translate-x-1/2 rounded-full bg-black/80" />
+
+                    <div className="relative aspect-[9/19.5] bg-white">
+                      <img
+                        src="/picmobsit.png"
+                        alt="نمای موبایلی داشبورد سیستم حسابداری فروشگاهی رهگشا"
+                        className="h-full w-full object-cover object-top"
+                        loading="lazy"
+                        decoding="async"
+                      />
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: 'فاکتور', val: '۱٬۴۸', color: 'bg-violet-50 text-violet-700' },
-                        { label: 'مشتری', val: '۸۶۲', color: 'bg-blue-50 text-blue-700' },
-                        { label: 'اقساط', val: '۳۴۰', color: 'bg-amber-50 text-amber-700' },
-                      ].map((s) => (
-                        <div key={s.label} className={`${s.color} rounded-xl p-3 text-center`}>
-                          <p className="text-xs opacity-60 mb-0.5">{s.label}</p>
-                          <p className="font-black text-base">{s.val}</p>
-                        </div>
-                      ))}
+                  </div>
+
+                  <div className="absolute -top-2 right-1 z-30 inline-flex items-center gap-1 rounded-full border border-amber-300/40 bg-amber-400/95 px-2 py-0.5 text-[8px] font-black text-gray-950 shadow-lg backdrop-blur-sm">
+                    <Smartphone className="h-2.5 w-2.5" />
+                    موبایل
+                  </div>
+                </div>
+              </div>
+
+              {/* Floating security chip */}
+              <div
+                className="animate-float absolute -top-5 -left-3 z-20 hidden sm:block"
+                style={{ animationDelay: '0.6s' }}
+              >
+                <div className="rounded-2xl bg-white/95 p-3 shadow-xl shadow-black/10 ring-1 ring-gray-100 backdrop-blur">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100">
+                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400">امنیت داده</p>
+                      <p className="text-xs font-black text-gray-900">۱۰٪ رمزنگاری</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="absolute -bottom-6 -left-6 sm:-left-10 z-20 animate-float-slow w-44 sm:w-52">
-                <div className="rounded-2xl bg-white shadow-xl shadow-black/10 border border-gray-100 p-3.5 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                    <CreditCard className="w-5 h-5 text-amber-600" />
+              {/* Floating growth chip */}
+              <div
+                className="animate-float absolute -bottom-4 -left-4 z-20 hidden md:block"
+                style={{ animationDelay: '2s' }}
+              >
+                <div className="rounded-2xl bg-white/95 p-3 shadow-xl shadow-black/10 ring-1 ring-gray-100 backdrop-blur">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100">
+                      <TrendingUp className="h-4 w-4 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400">رشد فروش</p>
+                      <p className="text-xs font-black text-gray-900">۲۳٪+</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-gray-400">اقساط فعال</p>
-                    <p className="text-sm font-black text-gray-900">۳۴۰ میلیون</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="absolute -top-4 -right-4 sm:-right-8 z-20 animate-float w-36 sm:w-44" style={{ animationDelay: '1.2s' }}>
-                <div className="rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 shadow-xl shadow-violet-400/30 p-3.5 text-white">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                    <span className="text-[10px] font-medium opacity-80">رضایت مشتری</span>
-                  </div>
-                  <p className="text-2xl font-black">۹۹٪</p>
                 </div>
               </div>
             </div>
