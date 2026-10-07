@@ -502,6 +502,39 @@ html { scroll-behavior: smooth; }
   .hero-sub   { font-size: 1rem !important; }
   .stat-value { font-size: 1.5rem !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ Skeleton Screen for Landing Images
+═══════════════════════════════════════════════════════════════ */
+.skeleton-screen {
+  background-color: #e2e8f0;
+  background-image: linear-gradient(
+    90deg,
+    rgba(100, 116, 139, 0.08) 0%,
+    rgba(100, 116, 139, 0.28) 20%,
+    rgba(100, 116, 139, 0.08) 40%,
+    rgba(100, 116, 139, 0.08) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-wave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-screen {
+    animation: none;
+  }
+}
+
 `
 
 const features = [
@@ -1143,14 +1176,16 @@ const pricingCardRefs = [
                     </div>
                   </div>
 
-                  {/* Desktop image area */}
+                                 {/* Desktop image area */}
                   <div className="relative bg-white">
-                    <img
+                               <ImageWithSkeleton
                       src="/picsite.jpg"
                       alt="داشبورد سیستم حسابداری فروشگاهی رهگشا در نسخه دسکتاپ"
-                      className="block h-auto w-full"
-                      loading="eager"
-                      decoding="async"
+                      width={1920}
+                      height={1080}
+                      priority
+                      className="bg-white"
+                      fallbackLabel="تصویر دسکتاپ در دسترس نیست. لطفاً فایل picsite.jpeg را در پوشه public قرار دهید."
                     />
 
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-700 group-hover:opacity-100" />
@@ -1174,13 +1209,16 @@ const pricingCardRefs = [
                   <div className="relative overflow-hidden rounded-[1.65rem] border-[4px] border-gray-900 bg-gray-900 shadow-2xl shadow-black/55 ring-1 ring-white/10">
                     <div className="absolute left-1/2 top-1 z-30 h-1.5 w-8 -translate-x-1/2 rounded-full bg-black/80" />
 
-                    <div className="relative aspect-[9/19.5] bg-white">
-                      <img
+                        <div className="relative aspect-[9/19.5] bg-white">
+                      <ImageWithSkeleton
                         src="/picmobsit.png"
                         alt="نمای موبایلی داشبورد سیستم حسابداری فروشگاهی رهگشا"
-                        className="h-full w-full object-cover object-top"
-                        loading="lazy"
-                        decoding="async"
+                        width={390}
+                        height={844}
+                        priority
+                        fill
+                        imgClassName="object-contain object-center"
+                        fallbackLabel="تصویر موبایل در دسترس نیست. لطفاً فایل picmobsit.png را در پوشه public قرار دهید."
                       />
                     </div>
                   </div>
@@ -1854,6 +1892,111 @@ function StatItem({
         </div>
         <p className="text-xs sm:text-sm text-gray-500 mt-1.5 font-medium">{stat.label}</p>
       </div>
+    </div>
+  )
+}
+
+function ImageWithSkeleton({
+  src,
+  alt,
+  width,
+  height,
+  priority = false,
+  fill = false,
+  className = '',
+  imgClassName = '',
+  fallbackLabel = 'تصویر در حال بارگذاری است...',
+}: {
+  src: string
+  alt: string
+  width: number
+  height: number
+  priority?: boolean
+  fill?: boolean
+  className?: string
+  imgClassName?: string
+  fallbackLabel?: string
+}) {
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+
+  useEffect(() => {
+    const img = imgRef.current
+    if (img?.complete && img.naturalWidth > 0) {
+      setLoaded(true)
+    }
+  }, [])
+
+  const skeleton = (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none absolute inset-0 skeleton-screen transition-opacity duration-700 ${
+        loaded && !error ? 'opacity-0' : 'opacity-100'
+      }`}
+    >
+      {!error && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-violet-500" />
+        </div>
+      )}
+    </div>
+  )
+
+  const errorFallback = error ? (
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-200">
+        <Smartphone className="h-6 w-6 text-slate-500" />
+      </div>
+      <p className="px-4 text-[11px] font-bold text-slate-500">
+        {fallbackLabel}
+      </p>
+    </div>
+  ) : null
+
+  if (fill) {
+    return (
+      <div className={`absolute inset-0 overflow-hidden ${className}`}>
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          width={width}
+          height={height}
+          loading={priority ? 'eager' : 'lazy'}
+          decoding={priority ? 'sync' : 'async'}
+          fetchPriority={priority ? 'high' : 'auto'}
+          onLoad={() => setLoaded(true)}
+          onError={() => setError(true)}
+          className={`absolute inset-0 h-full w-full transition-opacity duration-700 ${
+            loaded && !error ? 'opacity-100' : 'opacity-0'
+          } ${imgClassName}`}
+        />
+        {skeleton}
+        {errorFallback}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`relative overflow-hidden ${className}`}>
+      <img
+        ref={imgRef}
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading={priority ? 'eager' : 'lazy'}
+        decoding={priority ? 'sync' : 'async'}
+        fetchPriority={priority ? 'high' : 'auto'}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+        className={`relative block h-auto w-full transition-opacity duration-700 ${
+          loaded && !error ? 'opacity-100' : 'opacity-0'
+        } ${imgClassName}`}
+      />
+      {skeleton}
+      {errorFallback}
     </div>
   )
 }
