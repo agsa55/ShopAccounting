@@ -1242,7 +1242,7 @@ const pricingCardRefs = [
                     </div>
                     <div>
                       <p className="text-[9px] font-bold text-gray-400">امنیت داده</p>
-                      <p className="text-xs font-black text-gray-900">۱۰٪ رمزنگاری</p>
+                      <p className="text-xs font-black text-gray-900">۱۰۰٪ رمزنگاری</p>
                     </div>
                   </div>
                 </div>
