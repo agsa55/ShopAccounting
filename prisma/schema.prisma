@@ -561,6 +561,8 @@ model Invoice {
   moidianError       String?   @db.VarChar(500)
   moidianRetryCount  Int       @default(0)
 
+    customerPortalToken String? @db.VarChar(450)
+
   // ★★★ v6.1: انبار
   warehouseId String? @db.VarChar(450)
 
@@ -580,6 +582,7 @@ model Invoice {
   // ★ v11.6.3: تراکنش‌های صندوق مرتبط با فاکتور
   cashMovements CashMovement[] @relation("CashMovementInvoice")
 
+  @@index([customerPortalToken])
   @@unique([number, tenantId])
   @@index([tenantId])
   @@index([tenantId, status])

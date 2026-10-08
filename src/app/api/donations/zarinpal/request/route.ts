@@ -1,10 +1,11 @@
 // ============================================================================
 // src/app/api/donations/zarinpal/request/route.ts
-// ★ ایجاد پرداخت حمایتی با زرین‌پال
+// ★ v12.1: ایجاد پرداخت حمایتی با زرین‌پال — مطابق مستندات رسمی
 // ★ پشتیبانی از Sandbox و Production
-// ★ بدون IDPay
 // ★ بدون ارسال metadata/details خالی
 // ★ رفع خطای: The metadata.mobile must be a string
+// ★ ارسال amountRial در callback برای جلوگیری از mismatch مبلغ
+// ★ اضافه شدن timeout برای fetch به زرین‌پال
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -119,6 +120,27 @@ function getZarinpalErrorMessage(payload: any): string | undefined {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  ★ fetch با timeout
+// ═══════════════════════════════════════════════════════════════
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 15000
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ★ POST: ایجاد پرداخت حمایتی
 // ═══════════════════════════════════════════════════════════════
 export async function POST(req: NextRequest) {
@@ -147,11 +169,15 @@ export async function POST(req: NextRequest) {
         .trim()
         .slice(0, 120) || 'حمایت از توسعه رهگشا'
 
-    if (!Number.isFinite(amountToman) || amountToman <= 0) {
+    if (
+      !Number.isFinite(amountToman) ||
+      !Number.isInteger(amountToman) ||
+      amountToman <= 0
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: 'مبلغ پرداخت نامعتبر است.',
+          error: 'مبلغ پرداخت نامعتبر است. مبلغ باید عدد صحیح مثبت باشد.',
         },
         { status: 400 }
       )
@@ -178,20 +204,31 @@ export async function POST(req: NextRequest) {
     }
 
     // زرین‌پال مبلغ را به ریال می‌گیرد
-    const amountRial = Math.round(amountToman * 10)
+    const amountRial = amountToman * 10
+
+    if (!Number.isSafeInteger(amountRial) || amountRial <= 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'مبلغ ریالی محاسبه‌شده نامعتبر است.',
+        },
+        { status: 400 }
+      )
+    }
 
     const baseUrl = getPublicBaseUrl(req)
     const orderId = generateOrderId()
 
+    // ★ مهم: amountRial هم در callback ارسال می‌شود تا مبلغ دقیق verify شود
     const callbackUrl =
       `${baseUrl}/api/donations/zarinpal/callback` +
-      `?amountToman=${amountToman}` +
-      `&orderId=${encodeURIComponent(orderId)}`
+      `?orderId=${encodeURIComponent(orderId)}` +
+      `&amountToman=${amountToman}` +
+      `&amountRial=${amountRial}`
 
     // ═══════════════════════════════════════════════════════════
-    // ★ مهم‌ترین تغییر برای رفع خطا:
+    // ★ طبق مستندات و برای جلوگیری از خطای metadata.mobile:
     // metadata و details ارسال نمی‌شوند.
-    // بنابراین خطای metadata.mobile must be a string رفع می‌شود.
     // ═══════════════════════════════════════════════════════════
     const payload = {
       merchant_id: merchantId,
@@ -209,15 +246,39 @@ export async function POST(req: NextRequest) {
       orderId,
     })
 
-    const zarinpalRes = await fetch(urls.request, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(payload),
-      cache: 'no-store',
-    })
+    let zarinpalRes: Response
+    try {
+      zarinpalRes = await fetchWithTimeout(
+        urls.request,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(payload),
+          cache: 'no-store',
+        },
+        15000
+      )
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError'
+
+      console.error('[ZarinPal Donation Request] Fetch error:', {
+        isTimeout,
+        message: err?.message,
+      })
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: isTimeout
+            ? 'اتصال به زرین‌پال به timeout خورد. لطفاً دوباره تلاش کنید.'
+            : 'خطا در ارتباط با سرویس زرین‌پال. لطفاً دوباره تلاش کنید.',
+        },
+        { status: 502 }
+      )
+    }
 
     const zarinpalJson = await zarinpalRes.json().catch(() => null)
     const zarinpalErrorMessage = getZarinpalErrorMessage(zarinpalJson)
@@ -255,8 +316,9 @@ export async function POST(req: NextRequest) {
     const code = zarinpalJson.data?.code
     const authority = zarinpalJson.data?.authority
 
+    // در request:
     // 100 = موفق
-    // 101 = تکراری / قبلاً ایجاد شده
+    // 101 = در برخی حالت‌ها تکراری/ایجادشده، اگر authority داشت قابل استفاده است
     if ((code === 100 || code === 101) && authority) {
       const paymentUrl = `${urls.startPay}${authority}`
 

@@ -48,6 +48,13 @@ import {
   addToSyncQueue,
 } from '@/lib/offline-db'
 
+// ============================================================================
+// ★ FEATURE FLAG — موقتاًَ پورتال مشتری در مودال جزئیات فاکتور غیرفعال است
+// ============================================================================
+// با تغییر این مقدار به true، دکمه پورتال دوباره نمایش داده می‌شود.
+const ENABLE_CUSTOMER_PORTAL_IN_INVOICE_MODAL: boolean = false
+// ============================================================================
+
 // ═══════════════════════════════════════════════════════════════
 // KPI Card (استاندارد)
 // ═══════════════════════════════════════════════════════════════
@@ -1936,39 +1943,50 @@ const renderDetailDialog = () => {
           </div>
         </div>
 
-            <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
-          {inv.customerId && planFeatures.canOnlinePayment && (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
-            <PortalLinkButton customerId={inv.customerId} customerName={inv.customerName} portalToken={inv.customerPortalToken} variant="outline" size="sm" label="پورتال" />
-          )}
-          <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
+    <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+  {ENABLE_CUSTOMER_PORTAL_IN_INVOICE_MODAL &&
+    inv.customerId &&
+    planFeatures.canOnlinePayment &&
+    (inv.paymentType === 'credit' || inv.paymentType === 'installment') && (
+      <PortalLinkButton
+        customerId={inv.customerId}
+        customerName={inv.customerName}
+        portalToken={inv.customerPortalToken}
+        variant="outline"
+        size="sm"
+        label="پورتال"
+      />
+    )}
 
-          {/* ★ دریافت وجه فقط برای فاکتورهای غیرچکی نمایش داده شود */}
-          {!isCheck && remaining > 0 && !isCancelled && !isReturn && planFeatures.canAccessCredit && (
-            <Button
-              size="sm"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs gap-1.5"
-              onClick={() => {
-                setDetailOpen(false)
-                handleReceivePaymentClick(inv)
-              }}
-            >
-              <Wallet className="w-3.5 h-3.5" />
-              دریافت وجه
-            </Button>
-          )}
+  <InvoicePDFButton invoiceId={inv.id} invoiceNumber={inv.invoiceNumber || inv.number} />
 
-          {/* ★ راهنمای فاکتور چکی */}
-          {isCheck && remaining > 0 && !isCancelled && (
-            <Badge className="bg-cyan-100 text-cyan-700 hover:bg-cyan-100 text-[10px] gap-1">
-              <ClipboardList className="w-3 h-3" />
-              وصول چک از ماژول چک انجام شود
-            </Badge>
-          )}
+  {/* ★ دریافت وجه فقط برای فاکتورهای غیرچکی نمایش داده شود */}
+  {!isCheck && remaining > 0 && !isCancelled && !isReturn && planFeatures.canAccessCredit && (
+    <Button
+      size="sm"
+      className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs gap-1.5"
+      onClick={() => {
+        setDetailOpen(false)
+        handleReceivePaymentClick(inv)
+      }}
+    >
+      <Wallet className="w-3.5 h-3.5" />
+      دریافت وجه
+    </Button>
+  )}
 
-          <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
-            بستن
-          </Button>
-        </div>
+  {/* ★ راهنمای فاکتور چکی */}
+  {isCheck && remaining > 0 && !isCancelled && (
+    <Badge className="bg-cyan-100 text-cyan-700 hover:bg-cyan-100 text-[10px] gap-1">
+      <ClipboardList className="w-3 h-3" />
+      وصول چک از ماژول چک انجام شود
+    </Badge>
+  )}
+
+  <Button variant="ghost" size="sm" onClick={() => setDetailOpen(false)} className="mr-auto h-8 px-3 text-xs">
+    بستن
+  </Button>
+</div>
       </DialogContent>
     </Dialog>
   )

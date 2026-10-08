@@ -1,9 +1,14 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/settings-page.tsx (v10.2 ★★★ — Cleaned Up)
+// src/components/settings/settings-page.tsx (v10.4 ★★★ — Payment Gateway Temporarily Disabled)
 // ShopAccounting — صفحه تنظیمات با ساختار ماژولار (بدون کارت ویزارد)
 // ============================================================================
+// ★★★ v10.4 تغییرات:
+//   ✓ غیرفعال‌سازی موقت تب "درگاه پرداخت الکترونیکی" برای همه پلن‌ها
+//   ✓ کد تب و کامپوننت PaymentGatewayTab حذف نشده و فقط با Feature Flag مخفی شده است
+//   ✓ بعداً با تغییر ENABLE_PAYMENT_GATEWAY_TAB به true دوباره فعال می‌شود
+//
 // ★★★ v10.2 تغییرات:
 //   ✓ حذف کارت ویزارد راه‌اندازی از بالای صفحه (مدیریت در تب راه‌اندازی انجام می‌شود)
 //   ✓ حذف کامپوننت‌ها و ایمپورت‌های بدون استفاده (SetupStatusBadges, SetupWizard, Card, Button, etc.)
@@ -44,6 +49,17 @@ import { MoidianTab } from './moidian-tab'
 import { PosDevicesTab } from './pos-devices-tab'
 import { PaymentGatewayTab } from './payment-gateway-tab'
 import { BasicYearEndPage } from './basic-year-end-page'  // ★ v12.0: بستن حساب پلن پایه
+
+// ============================================================================
+// ★ FEATURE FLAGS — غیرفعال‌سازی موقت بدون حذف کد
+// ============================================================================
+// با تغییر این مقدار به true، تب درگاه پرداخت دوباره برای پلن‌های مجاز نمایش داده می‌شود.
+const ENABLE_PAYMENT_GATEWAY_TAB: boolean = false
+
+// با تغییر این مقدار به true، تب پشتیبان‌گیری دوباره نمایش داده می‌شود.
+const ENABLE_BACKUP_TAB: boolean = false
+// ============================================================================
+
 // ============================================================================
 // DemoDisabledSection — پیام غیرفعال در حالت دمو
 // ============================================================================
@@ -103,17 +119,20 @@ export default function SettingsPage() {
 
   // ★ اگر activeTab فعلی دیگر در دسترس نیست، به تب پیش‌فرض برگردان
   useEffect(() => {
-    const visibleTabs = ['store', 'invoice', 'backup', 'subscription', 'employees', 'initial-balance']
+const visibleTabs = ['store', 'invoice', 'subscription', 'employees', 'initial-balance']
+
+// ★ پشتیبان‌گیری موقتاً با Feature Flag غیرفعال است.
+// بعداً با ENABLE_BACKUP_TAB = true دوباره نمایش داده می‌شود.
+if (ENABLE_BACKUP_TAB) visibleTabs.push('backup')
     // ★★★ v10.3: تغییر شرط تب SMS از canAccessInstallments به canAccessSmsNotifications
     //   - پلن پایه: canAccessSmsNotifications = false → تب SMS مخفی
     //   - پلن پیشرفته: canAccessSmsNotifications = false → تب SMS مخفی
     //   - پلن حرفه‌ای: canAccessSmsNotifications = true → تب SMS نمایش داده می‌شود
     if (features.canAccessSmsNotifications) visibleTabs.push('sms')
-    // ★★★ تب درگاه پرداخت فقط برای پلن‌های دارای canOnlinePayment
-    //   - پلن پایه: canOnlinePayment = false → مخفی
-    //   - پلن پیشرفته: canOnlinePayment = false → مخفی (تغییر v9.1)
-    //   - پلن حرفه‌ای: canOnlinePayment = true → نمایش
-    if (features.canOnlinePayment) visibleTabs.push('gateway')
+    // ★★★ v10.4: تب درگاه پرداخت موقتاً با Feature Flag غیرفعال شده است.
+    //   - ENABLE_PAYMENT_GATEWAY_TAB = false → برای همه پلن‌ها مخفی
+    //   - بعداً با true کردن، فقط برای پلن‌های دارای canOnlinePayment نمایش داده می‌شود.
+    if (ENABLE_PAYMENT_GATEWAY_TAB && features.canOnlinePayment) visibleTabs.push('gateway')
     // ★★★ تب کارتخوان برای پلن‌های دارای canMultiCashRegister
     //   - پلن پایه: canMultiCashRegister = false → مخفی
     //   - پلن پیشرفته: canMultiCashRegister = true → نمایش (تغییر v9.1)
@@ -162,8 +181,8 @@ export default function SettingsPage() {
               <span className="hidden sm:inline">فروشگاه</span>
             </TabsTrigger>
 
-            {/* ★★★ v10.3: تب درگاه پرداخت — فقط برای پلن حرفه‌ای (canOnlinePayment) */}
-            {features.canOnlinePayment && (
+            {/* ★★★ v10.4: تب درگاه پرداخت — موقتاً غیرفعال است */}
+            {ENABLE_PAYMENT_GATEWAY_TAB && features.canOnlinePayment && (
               <TabsTrigger value="gateway" className={tabClassEmerald}>
                 <CreditCard className="w-4 h-4" />
                 <span className="hidden sm:inline">درگاه پرداخت</span>
@@ -183,16 +202,18 @@ export default function SettingsPage() {
               <span className="hidden sm:inline">قالب فاکتور</span>
             </TabsTrigger>
 
-            <TabsTrigger
-              value="backup"
-              disabled={isDemo}
-              title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
-              className={`${tabClassEmerald} ${isDemo ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">پشتیبان‌گیری</span>
-              {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
-            </TabsTrigger>
+    {ENABLE_BACKUP_TAB && (
+  <TabsTrigger
+    value="backup"
+    disabled={isDemo}
+    title={isDemo ? 'این بخش در حالت تست دمو غیرفعال است' : ''}
+    className={`${tabClassEmerald} ${isDemo ? 'opacity-50 cursor-not-allowed' : ''}`}
+  >
+    <Database className="w-4 h-4" />
+    <span className="hidden sm:inline">پشتیبان‌گیری</span>
+    {isDemo && <span className="text-[8px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-bold">دمو</span>}
+  </TabsTrigger>
+)}
 
            
             {/* ═══ ردیف ۲: تنظیمات پیشرفته ═══ */}
@@ -259,8 +280,8 @@ export default function SettingsPage() {
         {/* ═══ محتوای تب‌ها ═══ */}
         <TabsContent value="store"><StoreSettingsTab /></TabsContent>
 
-        {/* ★★★ v10.3: محتوای تب درگاه پرداخت — فقط برای پلن حرفه‌ای */}
-        {features.canOnlinePayment && (
+        {/* ★★★ v10.4: محتوای تب درگاه پرداخت — موقتاً غیرفعال است */}
+        {ENABLE_PAYMENT_GATEWAY_TAB && features.canOnlinePayment && (
           <TabsContent value="gateway"><PaymentGatewayTab /></TabsContent>
         )}
 
@@ -271,10 +292,15 @@ export default function SettingsPage() {
 
         <TabsContent value="invoice"><InvoiceTemplateTab /></TabsContent>
 
-        <TabsContent value="backup">
-          {isDemo ? <DemoDisabledSection message="بخش پشتیبان‌گیری در حالت تست دمو غیرفعال است. برای استفاده از این بخش، لطفاً یکی از پلن‌ها را خریداری کنید." /> : <BackupTab />}
-        </TabsContent>
-
+ {ENABLE_BACKUP_TAB && (
+  <TabsContent value="backup">
+    {isDemo ? (
+      <DemoDisabledSection message="بخش پشتیبان‌گیری در حالت تست دمو غیرفعال است. برای استفاده از این بخش، لطفاً یکی از پلن‌ها را خریداری کنید." />
+    ) : (
+      <BackupTab />
+    )}
+  </TabsContent>
+)}
         <TabsContent value="subscription">
           {isDemo ? <DemoDisabledSection message="بخش مدیریت اشتراک در حالت تست دمو غیرفعال است. برای خرید پلن، لطفاً پس از پایان مدت دمو اقدام کنید." /> : <SubscriptionTab />}
         </TabsContent>

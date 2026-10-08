@@ -14,6 +14,7 @@ import {
   Star, TrendingUp, ShieldCheck, Clock, ArrowLeft, Sparkles,
   Menu, X, LogIn, Percent, Infinity,
   HeartHandshake, Copy, Check, Gift, Banknote, Loader2,
+  Monitor, Smartphone, Lock,
 } from 'lucide-react'
 import { useSiteContent } from '@/lib/site-content'
 
@@ -23,7 +24,8 @@ import { useSiteContent } from '@/lib/site-content'
 // ═══════════════════════════════════════════════════════════════
 const DONATION_CARD_NUMBER = '6063-7312-9723-0196'
 const DONATION_CARD_OWNER = 'سید عقیل سادات پور'
-const MIN_DONATION_TOMAN = 10000
+const MIN_DONATION_TOMAN = 10_000
+const MAX_DONATION_TOMAN = 100_000_000
 
 // Merchant ID زرین‌پال فقط در .env / env سرور قرار می‌گیرد.
 // هرگز آن را داخل این فایل فرانت‌اند نگذارید.
@@ -34,6 +36,38 @@ function formatPrice(price: number): string {
 
 function formatFaNumber(n: number): string {
   return new Intl.NumberFormat('fa-IR').format(n)
+}
+
+const FA_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
+
+function toFaDigits(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  return String(value).replace(/\d/g, (d) => FA_DIGITS[Number(d)])
+}
+
+function convertPersianDigitsToEnglish(value: string): string {
+  return value
+    .replace(/[\u06F0-\u06F9]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x06f0 + 0x0030))
+    .replace(/[\u0660-\u0669]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 0x0030))
+}
+
+function parseNumericValue(value: string | null | undefined): number {
+  if (!value) return 0
+
+  const english = convertPersianDigitsToEnglish(String(value))
+  const cleaned = english.replace(/[^\d]/g, '')
+
+  if (!cleaned) return 0
+
+  const parsed = parseInt(cleaned, 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function formatDonationAmount(value: string | number | null | undefined): string {
+  const num = parseNumericValue(String(value ?? ''))
+  if (!num) return ''
+
+  return toFaDigits(num.toLocaleString('en-US'))
 }
 
 function useScrollReveal<T extends HTMLElement = HTMLDivElement>(threshold = 0.15) {
@@ -468,6 +502,39 @@ html { scroll-behavior: smooth; }
   .hero-sub   { font-size: 1rem !important; }
   .stat-value { font-size: 1.5rem !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ Skeleton Screen for Landing Images
+═══════════════════════════════════════════════════════════════ */
+.skeleton-screen {
+  background-color: #e2e8f0;
+  background-image: linear-gradient(
+    90deg,
+    rgba(100, 116, 139, 0.08) 0%,
+    rgba(100, 116, 139, 0.28) 20%,
+    rgba(100, 116, 139, 0.08) 40%,
+    rgba(100, 116, 139, 0.08) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-wave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-screen {
+    animation: none;
+  }
+}
+
 `
 
 const features = [
@@ -579,7 +646,7 @@ export default function LandingPage() {
 
   // ★ Donation states
  const [donateOpen, setDonateOpen] = useState(false)
-const [donateAmount, setDonateAmount] = useState('100000')
+const [donateAmount, setDonateAmount] = useState(() => formatDonationAmount('100000'))
 const [copied, setCopied] = useState(false)
 const [donationNotice, setDonationNotice] = useState('')
 const [donationLoading, setDonationLoading] = useState(false)
@@ -665,18 +732,48 @@ useEffect(() => {
 
   if (!donation) return
 
-  const amountToman = Number(params.get('amountToman'))
+  const refId = params.get('refId') || params.get('ref_id')
+  const errorCode = params.get('errorCode')
+  const errorMessage = params.get('errorMessage')
+
+  const amountTomanParam = params.get('amountToman')
+  const amountRialParam = params.get('amountRial')
+
+  const parsedAmountRial = parseNumericValue(amountRialParam)
+  const parsedAmountToman = parseNumericValue(amountTomanParam)
+
+  const amountToman =
+    parsedAmountToman > 0
+      ? parsedAmountToman
+      : parsedAmountRial > 0
+      ? Math.round(parsedAmountRial / 10)
+      : 0
 
   if (donation === 'success') {
+    const amountText =
+      amountToman > 0 ? ` (${formatFaNumber(amountToman)} تومان)` : ''
+
+    const refText = refId
+      ? ` — کد تراکنش: ${toFaDigits(refId)}`
+      : ''
+
     setDonationNotice(
-      amountToman > 0
-        ? `سپاس از حمایت گرم شما (${formatFaNumber(amountToman)} تومان). این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.`
-        : 'سپاس از حمایت گرم شما. این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.'
+      `سپاس از حمایت گرم شما${amountText}.${refText} این انرژی ما را برای توسعه رهگشا بیشتر می‌کند.`
     )
   } else if (donation === 'cancelled') {
-    setDonationNotice('پرداخت لغو شد. در صورت تمایل می‌توانید دوباره تلاش کنید.')
+    setDonationNotice(
+      errorMessage
+        ? `پرداخت لغو شد: ${errorMessage}`
+        : 'پرداخت لغو شد. در صورت تمایل می‌توانید دوباره تلاش کنید.'
+    )
   } else {
-    setDonationNotice('پرداخت ناموفق بود. لطفاً دوباره تلاش کنید یا از شماره کارت استفاده کنید.')
+    const codeText = errorCode ? ` (کد خطا: ${toFaDigits(errorCode)})` : ''
+
+    setDonationNotice(
+      errorMessage
+        ? `پرداخت ناموفق بود: ${errorMessage}${codeText}`
+        : `پرداخت ناموفق بود${codeText}. لطفاً دوباره تلاش کنید یا از شماره کارت استفاده کنید.`
+    )
   }
 
   setDonateOpen(true)
@@ -715,12 +812,21 @@ useEffect(() => {
     }
   }
 
- const handleOnlineDonation = async () => {
-  const amount = Number(donateAmount)
+const handleOnlineDonation = async () => {
+  if (donationLoading) return
+
+  const amount = parseNumericValue(donateAmount)
 
   if (!amount || amount < MIN_DONATION_TOMAN) {
     setDonationNotice(
-      `حداقل مبلغ حمایت ${MIN_DONATION_TOMAN.toLocaleString('fa-IR')} تومان است.`
+      `حداقل مبلغ حمایت ${formatFaNumber(MIN_DONATION_TOMAN)} تومان است.`
+    )
+    return
+  }
+
+  if (amount > MAX_DONATION_TOMAN) {
+    setDonationNotice(
+      `حداکثر مبلغ حمایت مجاز ${formatFaNumber(MAX_DONATION_TOMAN)} تومان است.`
     )
     return
   }
@@ -918,7 +1024,7 @@ const pricingCardRefs = [
             <div className="inline-flex animate-fade-in-up">
               <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-bold backdrop-blur-sm relative overflow-hidden animate-shine">
                 <Sparkles className="w-3.5 h-3.5" />
-                سیستم حسابداری فروشگاهی هوشمند رهگشا
+          سیستم تحت وب حسابداری فروشگاهی رهگشا
               </span>
             </div>
 
@@ -927,7 +1033,7 @@ const pricingCardRefs = [
               style={{ fontSize: 'clamp(1.2rem, 5vw, 2.8rem)', animationDelay: '0.1s' }}
             >
               حسابداری فروشگاهی رهگشا 
-              <br />
+                            <br />
               <HeroTypewriter />
             </h1>
 
@@ -999,7 +1105,7 @@ const pricingCardRefs = [
                     </p>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
+                                          <button
                         onClick={() => {
                           setDonationNotice('')
                           setDonateOpen(true)
@@ -1007,7 +1113,7 @@ const pricingCardRefs = [
                         className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-l from-amber-400 to-orange-500 px-3.5 py-2 text-xs font-black text-white shadow-lg shadow-amber-500/25 transition-all hover:scale-[1.02] hover:shadow-amber-400/40"
                       >
                         <Gift className="h-3.5 w-3.5" />
-                        پرداخت الکترونیکی و حمایت
+                        پرداخت امن با زرین‌پال
                       </button>
 
                       <button
@@ -1043,68 +1149,120 @@ const pricingCardRefs = [
             </div>
           </div>
 
-          {/* ★ Hero Visual */}
-          <div className="relative order-1 lg:order-2 flex justify-center lg:justify-end">
-            <div className="relative w-full max-w-[420px]">
-              <div className="animate-float relative z-10">
-                <div className="rounded-3xl overflow-hidden shadow-2xl shadow-violet-900/50 border border-white/10">
-                  <div className="bg-gradient-to-l from-violet-600 to-purple-700 px-5 py-4">
-                    <div className="flex items-center justify-between text-white">
-                      <div>
-                        <p className="text-xs text-violet-200">فروش امروز</p>
-                        <p className="text-2xl font-black">{formatPrice(4_850_000)} تومان</p>
-                      </div>
-                      <div className="flex items-center gap-1.5 bg-white/20 rounded-xl px-3 py-1.5">
-                        <TrendingUp className="w-4 h-4" />
-                        <span className="text-sm font-bold">۲۳٪+</span>
+                     {/* ★ Hero Visual — Desktop + Mobile Dashboard Screenshots */}
+             <div className="relative order-1 lg:order-2 flex justify-center lg:justify-end pt-2 sm:pt-5 lg:pt-0 lg:-translate-y-[150px]">
+            <div className="relative w-full max-w-[520px] lg:max-w-[560px]">
+              {/* Ambient glow */}
+              <div className="pointer-events-none absolute -inset-8 rounded-[3.5rem] bg-gradient-to-tr from-violet-600/25 via-fuchsia-500/15 to-amber-400/15 blur-3xl" />
+              {/* Desktop screenshot */}
+              <div className="animate-fade-in-up relative z-10">
+                <div className="group relative flex w-full flex-col overflow-hidden rounded-[1.85rem] border border-white/15 bg-white shadow-2xl shadow-violet-950/60">
+                  {/* Browser chrome */}
+                  <div className="flex shrink-0 items-center gap-3 border-b border-white/10 bg-gradient-to-l from-violet-700/95 to-purple-800/95 px-4 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-400/90 shadow-[0_0_10px_rgba(248,113,113,0.55)]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-amber-400/90 shadow-[0_0_10px_rgba(251,191,36,0.55)]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/90 shadow-[0_0_10px_rgba(52,211,153,0.55)]" />
+                    </div>
+
+                    <div className="flex-1">
+                      <div
+                        dir="ltr"
+                        className="flex h-6 items-center rounded-lg bg-black/25 px-3 text-[10px] font-mono text-violet-100/80 ring-1 ring-white/10"
+                      >
+                        <Lock className="ml-1.5 h-2.5 w-2.5 shrink-0 text-emerald-300" />
+                        <span className="truncate">app.rahgosha.com/dashboard</span>
                       </div>
                     </div>
                   </div>
-                  <div className="bg-white p-5">
-                    <div className="flex items-end gap-1.5 h-28 mb-5">
-                      {[38, 62, 48, 80, 55, 92, 70, 85, 60, 95].map((h, i) => (
-                        <div
-                          key={i}
-                          className="flex-1 rounded-t-lg bg-gradient-to-t from-violet-500 to-purple-400 opacity-80 hover:opacity-100 transition-opacity"
-                          style={{ height: `${h}%` }}
-                        />
-                      ))}
+
+                                 {/* Desktop image area */}
+                  <div className="relative bg-white">
+                               <ImageWithSkeleton
+                      src="/picsite.jpg"
+                      alt="داشبورد سیستم حسابداری فروشگاهی رهگشا در نسخه دسکتاپ"
+                      width={1920}
+                      height={1080}
+                      priority
+                      className="bg-white"
+                      fallbackLabel="تصویر دسکتاپ در دسترس نیست. لطفاً فایل picsite.jpeg را در پوشه public قرار دهید."
+                    />
+
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-700 group-hover:opacity-100" />
+                  </div>
+
+                  {/* Desktop badge */}
+                  <div className="absolute left-4 top-14 z-20 inline-flex items-center gap-1.5 rounded-full border border-violet-300/30 bg-violet-950/75 px-3 py-1 text-[10px] font-black text-violet-100 shadow-lg backdrop-blur-md">
+                    <Monitor className="h-3 w-3" />
+                    نسخه دسکتاپ
+                  </div>
+                </div>
+              </div>
+                        {/* Mobile screenshot */}
+              <div
+         className="animate-float-slow absolute -bottom-20 -right-2 z-20 sm:-bottom-28 sm:-right-4 lg:-bottom-32 lg:-right-6"
+                style={{ animationDelay: '1.2s' }}
+              >
+                <div className="relative w-20 sm:w-24 lg:w-32">
+                  <div className="pointer-events-none absolute -inset-2 rounded-[1.75rem] bg-gradient-to-br from-amber-400/30 via-violet-500/25 to-fuchsia-500/30 blur-xl" />
+
+                  <div className="relative overflow-hidden rounded-[1.65rem] border-[4px] border-gray-900 bg-gray-900 shadow-2xl shadow-black/55 ring-1 ring-white/10">
+                    <div className="absolute left-1/2 top-1 z-30 h-1.5 w-8 -translate-x-1/2 rounded-full bg-black/80" />
+
+                        <div className="relative aspect-[9/19.5] bg-white">
+                      <ImageWithSkeleton
+                        src="/picmobsit.png"
+                        alt="نمای موبایلی داشبورد سیستم حسابداری فروشگاهی رهگشا"
+                        width={390}
+                        height={844}
+                        priority
+                        fill
+                        imgClassName="object-contain object-center"
+                        fallbackLabel="تصویر موبایل در دسترس نیست. لطفاً فایل picmobsit.png را در پوشه public قرار دهید."
+                      />
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: 'فاکتور', val: '۱٬۴۸', color: 'bg-violet-50 text-violet-700' },
-                        { label: 'مشتری', val: '۸۶۲', color: 'bg-blue-50 text-blue-700' },
-                        { label: 'اقساط', val: '۳۴۰', color: 'bg-amber-50 text-amber-700' },
-                      ].map((s) => (
-                        <div key={s.label} className={`${s.color} rounded-xl p-3 text-center`}>
-                          <p className="text-xs opacity-60 mb-0.5">{s.label}</p>
-                          <p className="font-black text-base">{s.val}</p>
-                        </div>
-                      ))}
+                  </div>
+
+                  <div className="absolute -top-2 right-1 z-30 inline-flex items-center gap-1 rounded-full border border-amber-300/40 bg-amber-400/95 px-2 py-0.5 text-[8px] font-black text-gray-950 shadow-lg backdrop-blur-sm">
+                    <Smartphone className="h-2.5 w-2.5" />
+                    موبایل
+                  </div>
+                </div>
+              </div>
+
+              {/* Floating security chip */}
+              <div
+                className="animate-float absolute -top-5 -left-3 z-20 hidden sm:block"
+                style={{ animationDelay: '0.6s' }}
+              >
+                <div className="rounded-2xl bg-white/95 p-3 shadow-xl shadow-black/10 ring-1 ring-gray-100 backdrop-blur">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100">
+                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400">امنیت داده</p>
+                      <p className="text-xs font-black text-gray-900">۱۰۰٪ رمزنگاری</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="absolute -bottom-6 -left-6 sm:-left-10 z-20 animate-float-slow w-44 sm:w-52">
-                <div className="rounded-2xl bg-white shadow-xl shadow-black/10 border border-gray-100 p-3.5 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                    <CreditCard className="w-5 h-5 text-amber-600" />
+              {/* Floating growth chip */}
+              <div
+                className="animate-float absolute -bottom-4 -left-4 z-20 hidden md:block"
+                style={{ animationDelay: '2s' }}
+              >
+                <div className="rounded-2xl bg-white/95 p-3 shadow-xl shadow-black/10 ring-1 ring-gray-100 backdrop-blur">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100">
+                      <TrendingUp className="h-4 w-4 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-400">رشد فروش</p>
+                      <p className="text-xs font-black text-gray-900">۲۳٪+</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-gray-400">اقساط فعال</p>
-                    <p className="text-sm font-black text-gray-900">۳۴۰ میلیون</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="absolute -top-4 -right-4 sm:-right-8 z-20 animate-float w-36 sm:w-44" style={{ animationDelay: '1.2s' }}>
-                <div className="rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 shadow-xl shadow-violet-400/30 p-3.5 text-white">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                    <span className="text-[10px] font-medium opacity-80">رضایت مشتری</span>
-                  </div>
-                  <p className="text-2xl font-black">۹۹٪</p>
                 </div>
               </div>
             </div>
@@ -1194,7 +1352,7 @@ const pricingCardRefs = [
               <span className="bg-gradient-to-l from-violet-600 to-purple-500 bg-clip-text text-transparent"> کسب‌وکار شما</span>
             </h2>
             <p className="text-gray-500 text-base sm:text-lg">
-            پلن مناسب خود را انتخاب کنید،  ۳ ماه استفاده رایگان، بدون پرداخت هزینه
+            پلن مناسب خود را انتخاب کنید،استفاده رایگان، بدون پرداخت هزینه
             </p>
           </div>
 
@@ -1317,7 +1475,7 @@ const pricingCardRefs = [
           </div>
 
           <div className="text-center mt-10 sm:mt-14 space-y-2">
-            <p className="text-sm text-gray-400">۳ ماه استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
+            <p className="text-sm text-gray-400"> استفاده رایگان — بدون نیاز به پرداخت هزینه </p>
             <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
               <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
               پشتیبانی کامل در دوره رایگان
@@ -1397,8 +1555,7 @@ const pricingCardRefs = [
           </h2>
 
           <p className="text-gray-400 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-            همین الان ثبت‌نام کنید و ۳ ماه رایگان از تمام امکانات استفاده کنید.
-            بدون نیاز به پرداخت هزینه.
+    همین الان ثبت نام کنید، استفاده رایگان از تمام امکانات بدون پرداخت هزینه
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-2">
@@ -1526,22 +1683,23 @@ const pricingCardRefs = [
 
 {/* ═══════════════════════════════════════════════════════════
     ★ ستون ۵: نماد اعتماد الکترونیکی (اینماد)
+    عنوان و لوگو هر دو وسط‌چین
 ═══════════════════════════════════════════════════════════ */}
-<div className="col-span-2 sm:col-span-1 flex flex-col items-center sm:items-start">
-  <h4 className="text-white font-black text-sm mb-4 text-center sm:text-right w-full">
+<div className="col-span-2 sm:col-span-1 flex flex-col items-center">
+  <h4 className="text-white font-black text-sm mb-4 text-center w-full">
     نماد اعتماد
   </h4>
 
- <div className="flex flex-col items-center gap-2 w-full">
-  <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center">
-    <div
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={{
-        __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
-      }}
-      suppressHydrationWarning
-    />
-  </div>
+  <div className="flex flex-col items-center gap-2 w-full">
+    <div className="bg-white rounded-xl p-3 border border-gray-200 min-h-[120px] min-w-[110px] flex items-center justify-center mx-auto">
+      <div
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: `<a referrerpolicy='origin' target='_blank' href='https://trustseal.enamad.ir/?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'><img referrerpolicy='origin' src='https://trustseal.enamad.ir/logo.aspx?id=8004737&Code=0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47' alt='' style='cursor:pointer' code='0O3nMlqTyMyL9I9jUc6iSQtqKUd7eB47'></a>`
+        }}
+        suppressHydrationWarning
+      />
+    </div>
 
     <p className="text-[10px] text-gray-500 text-center mt-1 leading-relaxed">
       نماد اعتماد الکترونیکی
@@ -1606,22 +1764,34 @@ const pricingCardRefs = [
                 </div>
               )}
 
-              <div className="space-y-2">
+                        <div className="space-y-2">
                 <label className="text-xs font-black text-gray-700">مبلغ حمایت (تومان)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
                   value={donateAmount}
-                  onChange={(e) => setDonateAmount(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-                  dir="ltr"
-                  placeholder="مثلاً: 100000"
+                  onChange={(e) => setDonateAmount(formatDonationAmount(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleOnlineDonation()
+                    }
+                  }}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-right"
+                  dir="rtl"
+                  placeholder="مثلاً: ۱۰۰,۰۰۰"
                 />
+
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  حداقل: {formatFaNumber(MIN_DONATION_TOMAN)} تومان — حداکثر: {formatFaNumber(MAX_DONATION_TOMAN)} تومان
+                </p>
 
                 <div className="grid grid-cols-4 gap-1.5">
                   {[50000, 100000, 200000, 500000].map((amount) => (
                     <button
                       key={amount}
-                      onClick={() => setDonateAmount(String(amount))}
+                      onClick={() => setDonateAmount(formatDonationAmount(String(amount)))}
                       className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-[10px] font-bold text-gray-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700"
                     >
                       {formatFaNumber(amount)}
@@ -1629,7 +1799,6 @@ const pricingCardRefs = [
                   ))}
                 </div>
               </div>
-
               <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-black text-gray-700">شماره کارت</span>
@@ -1723,6 +1892,111 @@ function StatItem({
         </div>
         <p className="text-xs sm:text-sm text-gray-500 mt-1.5 font-medium">{stat.label}</p>
       </div>
+    </div>
+  )
+}
+
+function ImageWithSkeleton({
+  src,
+  alt,
+  width,
+  height,
+  priority = false,
+  fill = false,
+  className = '',
+  imgClassName = '',
+  fallbackLabel = 'تصویر در حال بارگذاری است...',
+}: {
+  src: string
+  alt: string
+  width: number
+  height: number
+  priority?: boolean
+  fill?: boolean
+  className?: string
+  imgClassName?: string
+  fallbackLabel?: string
+}) {
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+
+  useEffect(() => {
+    const img = imgRef.current
+    if (img?.complete && img.naturalWidth > 0) {
+      setLoaded(true)
+    }
+  }, [])
+
+  const skeleton = (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none absolute inset-0 skeleton-screen transition-opacity duration-700 ${
+        loaded && !error ? 'opacity-0' : 'opacity-100'
+      }`}
+    >
+      {!error && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-violet-500" />
+        </div>
+      )}
+    </div>
+  )
+
+  const errorFallback = error ? (
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-200">
+        <Smartphone className="h-6 w-6 text-slate-500" />
+      </div>
+      <p className="px-4 text-[11px] font-bold text-slate-500">
+        {fallbackLabel}
+      </p>
+    </div>
+  ) : null
+
+  if (fill) {
+    return (
+      <div className={`absolute inset-0 overflow-hidden ${className}`}>
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          width={width}
+          height={height}
+          loading={priority ? 'eager' : 'lazy'}
+          decoding={priority ? 'sync' : 'async'}
+          fetchPriority={priority ? 'high' : 'auto'}
+          onLoad={() => setLoaded(true)}
+          onError={() => setError(true)}
+          className={`absolute inset-0 h-full w-full transition-opacity duration-700 ${
+            loaded && !error ? 'opacity-100' : 'opacity-0'
+          } ${imgClassName}`}
+        />
+        {skeleton}
+        {errorFallback}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`relative overflow-hidden ${className}`}>
+      <img
+        ref={imgRef}
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading={priority ? 'eager' : 'lazy'}
+        decoding={priority ? 'sync' : 'async'}
+        fetchPriority={priority ? 'high' : 'auto'}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+        className={`relative block h-auto w-full transition-opacity duration-700 ${
+          loaded && !error ? 'opacity-100' : 'opacity-0'
+        } ${imgClassName}`}
+      />
+      {skeleton}
+      {errorFallback}
     </div>
   )
 }

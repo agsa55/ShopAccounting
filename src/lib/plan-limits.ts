@@ -734,35 +734,44 @@ export async function upgradePlan(
   newBillingCycle: BillingCycle
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { db } = await import('@/lib/db');
+    const { db } = await import('@/lib/db')
 
-    let planTierId: number | null = null;
-    let durationDays = 365;
+    let planTierId: number | null = null
+    let durationDays = 365
 
     try {
       const planTier = await db.client.planTier.findFirst({
         where: { name: newTierName, isActive: true },
-      });
+      })
+
       if (planTier) {
-        planTierId = planTier.id;
+        planTierId = planTier.id
 
         try {
-          const price = await db.client.planPrice.findUnique({
+          const price = await db.client.planPrice.findFirst({
             where: {
-              planTierId_billingCycle: {
-                planTierId: planTier.id,
-                billingCycle: newBillingCycle,
-              },
+              planTierId: planTier.id,
+              billingCycle: String(newBillingCycle),
             },
-          });
-          if (price) durationDays = price.durationDays;
-        } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
+            orderBy: { id: 'desc' },
+          })
 
-    const now = new Date();
-    const isLifetime = isLifetimeCycle(newBillingCycle) || durationDays === 0;
-    const expiresAt = isLifetime ? null : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+          if (price && typeof price.durationDays === 'number') {
+            durationDays = price.durationDays
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const now = new Date()
+    const isLifetime = isLifetimeCycle(newBillingCycle) || durationDays === 0
+    const expiresAt = isLifetime
+      ? null
+      : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000)
 
     console.log('[PlanLimits] upgradePlan:', {
       tenantId,
@@ -771,31 +780,30 @@ export async function upgradePlan(
       durationDays,
       isLifetime,
       expiresAt: expiresAt ? expiresAt.toISOString() : 'null (lifetime)',
-    });
+    })
 
     const updateData: any = {
       planName: `${newTierName}_${newBillingCycle}`,
       soldAt: now,
       expiresAt,
-    };
+    }
 
     if (planTierId) {
-      updateData.planTierId = planTierId;
-      updateData.billingCycle = newBillingCycle;
+      updateData.planTierId = planTierId
+      updateData.billingCycle = newBillingCycle
     }
 
     await db.client.tenant.update({
       where: { id: tenantId },
       data: updateData,
-    });
+    })
 
-    return { success: true };
+    return { success: true }
   } catch (error: any) {
-    console.error('[PlanLimits] upgradePlan error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[PlanLimits] upgradePlan error:', error.message)
+    return { success: false, error: error.message }
   }
 }
-
 // ═══════════════════════════════════════════════════════════════════════
 //  تمدید اشتراک (Renew Subscription)
 // ═══════════════════════════════════════════════════════════════════════
@@ -839,59 +847,67 @@ export async function setInitialPlan(
   billingCycle: BillingCycle = 'annual'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { db } = await import('@/lib/db');
+    const { db } = await import('@/lib/db')
 
-    let planTierId: number | null = null;
-    let durationDays = 365;
+    let planTierId: number | null = null
+    let durationDays = 365
 
     try {
       const planTier = await db.client.planTier.findFirst({
         where: { name: tierName, isActive: true },
-      });
+      })
+
       if (planTier) {
-        planTierId = planTier.id;
+        planTierId = planTier.id
 
         try {
-          const price = await db.client.planPrice.findUnique({
+          const price = await db.client.planPrice.findFirst({
             where: {
-              planTierId_billingCycle: {
-                planTierId: planTier.id,
-                billingCycle,
-              },
+              planTierId: planTier.id,
+              billingCycle: String(billingCycle),
             },
-          });
-          if (price) durationDays = price.durationDays;
-        } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
+            orderBy: { id: 'desc' },
+          })
 
-    const now = new Date();
-    const isLifetime = isLifetimeCycle(billingCycle) || durationDays === 0;
-    const expiresAt = isLifetime ? null : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+          if (price && typeof price.durationDays === 'number') {
+            durationDays = price.durationDays
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const now = new Date()
+    const isLifetime = isLifetimeCycle(billingCycle) || durationDays === 0
+    const expiresAt = isLifetime
+      ? null
+      : new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000)
 
     const updateData: any = {
       planName: `${tierName}_${billingCycle}`,
       soldAt: now,
       expiresAt,
-    };
+    }
 
     if (planTierId) {
-      updateData.planTierId = planTierId;
-      updateData.billingCycle = billingCycle;
+      updateData.planTierId = planTierId
+      updateData.billingCycle = billingCycle
     }
 
     await db.client.tenant.update({
       where: { id: tenantId },
       data: updateData,
-    });
+    })
 
-    return { success: true };
+    return { success: true }
   } catch (error: any) {
-    console.error('[PlanLimits] setInitialPlan error:', error.message);
-    return { success: false, error: error.message };
+    console.error('[PlanLimits] setInitialPlan error:', error.message)
+    return { success: false, error: error.message }
   }
 }
-
 // ═══════════════════════════════════════════════════════════════════════
 //  دریافت پلن‌ها با قیمت‌ها (Get All Plans With Prices)
 // ═══════════════════════════════════════════════════════════════════════

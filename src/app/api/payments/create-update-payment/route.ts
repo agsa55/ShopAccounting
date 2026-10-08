@@ -1,140 +1,340 @@
 // ============================================================================
-// src/app/api/payments/create-update-payment/route.ts (v2.0 ★★★)
+// src/app/api/payments/create-update-payment/route.ts (v3.0 ★★★)
 // ShopAccounting — Subscription Payment Creation (ZarinPal v4)
 // ----------------------------------------------------------------------------
-// ★ v2.0: بازنویسی کامل برای سازگاری با /api/subscription/verify
-// ★ v2.0: استفاده از subscription-utils برای ایجاد رکورد صحیح
-// ★ v2.0: اصلاح Currency (IRT = تومان) و URL های v4 جدید
-// ★ v2.0: Callback URL صحیح: /api/subscription/verify
+// ★ v3.0: ارسال مبلغ به زرین‌پال به ریال با currency IRR
+// ★ v3.0: محاسبه امن مبلغ در سمت سرور
+// ★ v3.0: ثبت همزمان رکورد در OnlinePayments برای صفحه تراکنش‌ها
+// ★ v3.0: callback با context=subscription_update برای جلوگیری از cleanup خطرناک
+// ★ v3.0: timeout برای fetch به زرین‌پال
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantIsolation } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
+import { createPendingSubscription } from '@/lib/subscription-utils'
 import {
-  createPendingSubscription,
-  buildPaymentMethodMetadata,
+  checkSubscriptionStatus,
+  getPlanPrice,
+  isLifetimeCycle,
   type BillingCycle,
-} from '@/lib/subscription-utils'
-import { isLifetimeCycle } from '@/lib/plan-limits'
+} from '@/lib/plan-limits'
+import {
+  getServerPlanBasePrice,
+  getServerPlanDiscountPercent,
+} from '@/lib/site-content-server'
 
+import {
+  getZarinpalMerchantId,
+  isZarinpalSandbox,
+  getPublicBaseUrl,
+} from '@/lib/zarinpal/donation-config'
+import { getZarinpalUrls } from '@/lib/zarinpal/tashim'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const ALLOWED_PLANS = ['simple', 'professional', 'enterprise']
+
+// ═══════════════════════════════════════════════════════════════
+//  fetch با timeout
+// ═══════════════════════════════════════════════════════════════
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 15000
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ساخت Order ID یکتا
+// ═══════════════════════════════════════════════════════════════
+function generateOrderId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID()
+    }
+  } catch {}
+
+  return `sub_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  محدود کردن عدد
+// ═══════════════════════════════════════════════════════════════
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  استخراج پیام خطا از پاسخ زرین‌پال
+// ═══════════════════════════════════════════════════════════════
+function getZarinpalErrorMessage(payload: any): string | undefined {
+  if (!payload) return undefined
+
+  if (Array.isArray(payload.errors)) {
+    return payload.errors[0]?.message
+  }
+
+  if (payload.errors?.message) {
+    return payload.errors.message
+  }
+
+  if (payload.data?.message) {
+    return payload.data.message
+  }
+
+  return undefined
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  محاسبه امن قیمت در سمت سرور — با اولویت Site Content
+// ═══════════════════════════════════════════════════════════════
+async function computeServerPricing(
+  tenantId: string,
+  planName: string,
+  billingCycle: BillingCycle,
+  requestedDiscountPercent: number
+) {
+  // ★ اول از Site Content خوانده می‌شود
+  const effectiveCycle = billingCycle === 'lifetime' ? 'lifetime' : 'annual'
+
+  let basePrice = getServerPlanBasePrice(planName, effectiveCycle)
+
+  // ★ اگر Site Content قیمت نداشت، fallback به plan-limits
+  if (!Number.isFinite(basePrice) || basePrice <= 0) {
+    basePrice = getPlanPrice(planName, billingCycle)
+  }
+
+  if (!Number.isFinite(basePrice) || basePrice <= 0) {
+    return {
+      ok: false as const,
+      error: 'قیمت این پلن در Site Content یا plan-limits تنظیم نشده است.',
+    }
+  }
+
+  // ★ تخفیف از Site Content
+  const siteDiscount = getServerPlanDiscountPercent(planName)
+
+  // ★ تخفیف زودهنگام بر اساس وضعیت اشتراک
+  let earlyDiscount = 0
+
+  try {
+    const status = await checkSubscriptionStatus(tenantId)
+
+    if (
+      !status.isLifetime &&
+      status.daysRemaining > 0 &&
+      status.daysRemaining <= 7
+    ) {
+      earlyDiscount = 30
+    }
+  } catch (err: any) {
+    console.warn('[CreatePayment v3.0] Could not compute subscription discount:', err?.message)
+    earlyDiscount = 0
+  }
+
+  // ★ سقف تخفیف مجاز سمت سرور
+  //   برای جلوگیری از مبلغ صفر یا سوءاستفاده، حداکثر ۹۰٪ مجاز است.
+  const allowedDiscount = Math.min(90, Math.max(siteDiscount, earlyDiscount))
+
+  // ★ تخفیف درخواستی کاربر فقط تا سقف مجاز پذیرفته می‌شود
+  const discountPercent = Math.round(
+    clampNumber(Number(requestedDiscountPercent) || 0, 0, allowedDiscount)
+  )
+
+  const amountToman = Math.round(basePrice * (1 - discountPercent / 100))
+
+  if (!Number.isSafeInteger(amountToman) || amountToman <= 0) {
+    return {
+      ok: false as const,
+      error: 'مبلغ محاسبه‌شده نامعتبر است.',
+    }
+  }
+
+  const cycleLabel = isLifetimeCycle(billingCycle) ? 'مادام‌العمر' : 'سالانه'
+
+  return {
+    ok: true as const,
+    basePrice,
+    discountPercent,
+    amountToman,
+    cycleLabel,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  پاک‌سازی رکوردهای pending در صورت خطا
+// ═══════════════════════════════════════════════════════════════
+async function cleanupPendingRecords(
+  subscriptionId: string,
+  paymentId: string,
+  authority?: string
+): Promise<void> {
+  try {
+    if (authority) {
+      await db.client.onlinePayment.deleteMany({
+        where: { authority },
+      })
+    }
+
+    await db.client.onlinePayment.deleteMany({
+      where: { gatewayId: paymentId },
+    })
+
+    await db.client.subscriptionPayments.delete({
+      where: { id: paymentId },
+    })
+
+    await db.client.subscriptions.delete({
+      where: { id: subscriptionId },
+    })
+
+    console.log('[CreatePayment v3.0] 🧹 Pending records cleaned up')
+  } catch (err: any) {
+    console.warn('[CreatePayment v3.0] ⚠️ Cleanup failed:', err?.message)
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  POST: ایجاد پرداخت به‌روزرسانی اشتراک
+// ═══════════════════════════════════════════════════════════════
 export const POST = withTenantIsolation(
   async (req: NextRequest, ctx: any, tenant: any) => {
     try {
       const tenantId = tenant.tenantId
-      const body = await req.json()
-      const { planName, amount, discountPercent, isLifetime, billingCycle } = body
+      const body = await req.json().catch(() => ({}))
 
-      console.log('[CreatePayment v2.0] 📥 Request:', {
+      const planName = String(body.planName || '').trim()
+      const requestedDiscountPercent = Number(body.discountPercent) || 0
+      const requestedBillingCycle = body.billingCycle
+      const requestedIsLifetime = body.isLifetime
+
+      console.log('[CreatePayment v3.0] 📥 Request:', {
         tenantId,
         planName,
-        amount,
-        discountPercent,
-        isLifetime,
-        billingCycle,
+        requestedDiscountPercent,
+        requestedBillingCycle,
+        requestedIsLifetime,
       })
 
-      // ── ۱. اعتبارسنجی ورودی‌ها ─────────────────────────────
-      if (!planName || !amount) {
+      if (!ALLOWED_PLANS.includes(planName)) {
         return NextResponse.json(
-          { success: false, error: 'اطلاعات ناقص است (planName یا amount)' },
+          { success: false, error: 'پلن انتخابی نامعتبر است.' },
           { status: 400 }
         )
       }
 
-      const amountNumber = Number(amount)
-      if (isNaN(amountNumber) || amountNumber <= 0) {
-        return NextResponse.json(
-          { success: false, error: 'مبلغ نامعتبر است' },
-          { status: 400 }
-        )
-      }
-
-      // ── ۲. تعیین billingCycle (پیش‌فرض: lifetime) ──────────
-      // ★ v2.0: چون همه پلن‌ها مادام‌العمر هستند، پیش‌فرض lifetime است
+      // ★ پیش‌فرض فعلی پروژه: مادام‌العمر
       const effectiveBillingCycle: BillingCycle =
-        billingCycle === 'annual' ? 'annual' :
-        isLifetime === false ? 'annual' :
-        'lifetime'
+        requestedBillingCycle === 'annual'
+          ? 'annual'
+          : requestedIsLifetime === false
+          ? 'annual'
+          : 'lifetime'
 
-      console.log('[CreatePayment v2.0] 📋 Effective billing cycle:', effectiveBillingCycle)
+      const pricing = await computeServerPricing(
+        tenantId,
+        planName,
+        effectiveBillingCycle,
+        requestedDiscountPercent
+      )
 
-      // ── ۳. دریافت مرچنت کد از ENV (Platform Gateway) ─────
-      const merchantId = process.env.ZARINPAL_MERCHANT_ID || ''
-      const sandboxMode = process.env.ZARINPAL_SANDBOX === 'true'
+      if (!pricing.ok) {
+        return NextResponse.json(
+          { success: false, error: pricing.error },
+          { status: 400 }
+        )
+      }
+
+      const amountToman = pricing.amountToman
+
+      if (!Number.isSafeInteger(amountToman) || amountToman <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'مبلغ محاسبه‌شده نامعتبر است.' },
+          { status: 400 }
+        )
+      }
+
+      // ★ زرین‌پال مبلغ را به ریال می‌گیرد
+      const amountRial = amountToman * 10
+
+      if (!Number.isSafeInteger(amountRial) || amountRial <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'مبلغ ریالی محاسبه‌شده نامعتبر است.' },
+          { status: 400 }
+        )
+      }
+
+      const merchantId = getZarinpalMerchantId()
+      const sandbox = isZarinpalSandbox()
+      const urls = getZarinpalUrls(sandbox)
 
       if (!merchantId) {
-        console.error('[CreatePayment v2.0] ❌ ZARINPAL_MERCHANT_ID not set in .env')
+        console.error('[CreatePayment v3.0] ❌ Merchant ID is missing')
         return NextResponse.json(
-          { success: false, error: 'درگاه پرداخت پلتفرم پیکربندی نشده است. با پشتیبانی تماس بگیرید.' },
+          {
+            success: false,
+            error: sandbox
+              ? 'مرچنت سندباکس یا اصلی زرین‌پال تنظیم نشده است.'
+              : 'مرچنت واقعی زرین‌پال تنظیم نشده است.',
+          },
           { status: 500 }
         )
       }
 
-      console.log('[CreatePayment v2.0] 🔑 Using platform merchant:', {
-        merchantId: merchantId.substring(0, 8) + '...',
-        sandbox: sandboxMode,
-      })
+      const orderId = generateOrderId()
+      const baseUrl = getPublicBaseUrl(req)
 
-      // ── ۴. ایجاد رکورد در SubscriptionPayments ──────────
-      // ★ v2.0: از subscription-utils استفاده می‌کنیم
-      //   این تابع:
-      //     - PlanTier را پیدا/ایجاد می‌کند
-      //     - Plans را پیدا/ایجاد می‌کند
-      //     - Subscriptions (status=pending) می‌سازد
-      //     - SubscriptionPayments (status=pending) با paymentMethod metadata می‌سازد
+      const callbackUrl =
+        `${baseUrl}/api/subscription/verify` +
+        `?tenantId=${encodeURIComponent(tenantId)}` +
+        `&context=subscription_update` +
+        `&orderId=${encodeURIComponent(orderId)}`
+
+      const description = `[SUBSCRIPTION_UPDATE] به‌روزرسانی پلن ${planName} (${pricing.cycleLabel})`
+
+      // ── . ایجاد رکورد pending در Subscriptions و SubscriptionPayments ──
       const pending = await createPendingSubscription(
         tenantId,
         planName,
         effectiveBillingCycle,
-        amountNumber,
-        'temp_authority' // ★ موقت — بعد از دریافت از زرین‌پال آپدیت می‌شود
+        amountToman,
+        `temp_${orderId}`
       )
 
       if (!pending) {
-        console.error('[CreatePayment v2.0] ❌ Failed to create pending subscription')
+        console.error('[CreatePayment v3.0] ❌ Failed to create pending subscription')
         return NextResponse.json(
           { success: false, error: 'خطا در ایجاد تراکنش اولیه' },
           { status: 500 }
         )
       }
 
-      console.log('[CreatePayment v2.0] ✅ Pending subscription created:', pending)
+      console.log('[CreatePayment v3.0] ✅ Pending subscription created:', pending)
 
-      // ── ۵. دریافت authority از زرین‌پال (v4) ─────────────
-      const apiRequestUrl = sandboxMode
-        ? 'https://sandbox.zarinpal.com/pg/v4/payment/request.json'
-        : 'https://api.zarinpal.com/pg/v4/payment/request.json'
-
-      // ★ v2.0: Callback URL صحیح — با tenantId در query
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
-      const callbackUrl = `${appUrl}/api/subscription/verify?tenantId=${encodeURIComponent(tenantId)}`
-
-      // ★ v2.0: IRT = تومان (چون مبالغ UI به تومان هستند)
-      const currency = 'IRT'
-
-        const cycleLabel = isLifetimeCycle(effectiveBillingCycle) ? 'مادام‌العمر' : 'سالانه'
-      const description = `به‌روزرسانی سیستم ShopAccounting — پلن ${planName} (${cycleLabel})${discountPercent > 0 ? ` - ${discountPercent}% تخفیف` : ''}`
-
-      console.log('[CreatePayment v2.1] 🔄 Calling ZarinPal v4:', {
-        url: apiRequestUrl,
-        merchantId: merchantId.substring(0, 8) + '...',
-        amount: amountNumber,
-        currency,
-        callbackUrl,
-      })
-
-      // ★ v2.1: ساخت body بدون metadata (زرین‌پال فیلدهای خالی/undefined را رد می‌کند)
-      // ★ tierName و billingCycle از قبل در paymentMethod ذخیره شده‌اند
+      // ── . ساخت body درخواست زرین‌پال ──
       const requestBody: any = {
         merchant_id: merchantId,
-        amount: amountNumber,
-        currency,
+        amount: amountRial,
+        currency: 'IRR',
         description,
         callback_url: callbackUrl,
       }
 
-      // ★ v2.1: فقط در صورت وجود اطلاعات معتبر، metadata را اضافه کن
+      // ── . metadata فقط در صورت وجود مقادیر معتبر ──
       try {
         const tenantDetails = await db.client.tenant.findUnique({
           where: { id: tenantId },
@@ -142,150 +342,209 @@ export const POST = withTenantIsolation(
         })
 
         const metadata: any = {}
-        if (tenantDetails?.ownerMobile && typeof tenantDetails.ownerMobile === 'string' && tenantDetails.ownerMobile.trim()) {
+
+        if (
+          tenantDetails?.ownerMobile &&
+          typeof tenantDetails.ownerMobile === 'string' &&
+          tenantDetails.ownerMobile.trim()
+        ) {
           metadata.mobile = tenantDetails.ownerMobile.trim()
         }
-        if (tenantDetails?.ownerEmail && typeof tenantDetails.ownerEmail === 'string' && tenantDetails.ownerEmail.trim()) {
+
+        if (
+          tenantDetails?.ownerEmail &&
+          typeof tenantDetails.ownerEmail === 'string' &&
+          tenantDetails.ownerEmail.trim()
+        ) {
           metadata.email = tenantDetails.ownerEmail.trim()
         }
 
         if (Object.keys(metadata).length > 0) {
           requestBody.metadata = metadata
-          console.log('[CreatePayment v2.1] 📱 Adding metadata:', metadata)
+          console.log('[CreatePayment v3.0] 📱 Adding metadata:', metadata)
         } else {
-          console.log('[CreatePayment v2.1] ℹ️ No metadata (mobile/email not available)')
+          console.log('[CreatePayment v3.0] ℹ️ No metadata sent')
         }
       } catch (metaErr: any) {
-        console.warn('[CreatePayment v2.1] ⚠️ Could not fetch tenant details for metadata:', metaErr?.message)
-        // ادامه بده بدون metadata
+        console.warn('[CreatePayment v3.0] ⚠️ Could not fetch tenant details for metadata:', metaErr?.message)
       }
 
-      const zarinpalRes = await fetch(apiRequestUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
+      console.log('[CreatePayment v3.0] 🔄 Calling ZarinPal v4:', {
+        url: urls.request,
+        sandbox,
+        amountToman,
+        amountRial,
+        currency: 'IRR',
+        callbackUrl,
+        orderId,
       })
+
+      // ── ۴. ارسال درخواست به زرین‌پال ──
+      let zarinpalRes: Response
+      try {
+        zarinpalRes = await fetchWithTimeout(
+          urls.request,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+            cache: 'no-store',
+          },
+          15000
+        )
+      } catch (err: any) {
+        const isTimeout = err?.name === 'AbortError'
+
+        console.error('[CreatePayment v3.0] ❌ Fetch error:', {
+          isTimeout,
+          message: err?.message,
+        })
+
+        await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: isTimeout
+              ? 'اتصال به زرین‌پال به timeout خورد. لطفاً دوباره تلاش کنید.'
+              : 'خطا در ارتباط با سرویس زرین‌پال. لطفاً دوباره تلاش کنید.',
+          },
+          { status: 502 }
+        )
+      }
+
+      const zarinpalJson = await zarinpalRes.json().catch(() => null)
+      const zarinpalErrorMessage = getZarinpalErrorMessage(zarinpalJson)
 
       if (!zarinpalRes.ok) {
-        const errorText = await zarinpalRes.text()
-        console.error('[CreatePayment v2.0] ❌ ZarinPal HTTP error:', zarinpalRes.status, errorText)
+        console.error('[CreatePayment v3.0] ❌ ZarinPal HTTP error:', {
+          status: zarinpalRes.status,
+          json: zarinpalJson,
+        })
 
-        // پاک کردن رکورد pending در صورت خطا
         await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
 
         return NextResponse.json(
-          { success: false, error: `خطا در ارتباط با درگاه پرداخت (کد ${zarinpalRes.status})` },
-          { status: 500 }
+          {
+            success: false,
+            error: zarinpalErrorMessage || `خطا در ارتباط با درگاه پرداخت (کد ${zarinpalRes.status})`,
+            zarinpalStatus: zarinpalRes.status,
+            zarinpalResponse: zarinpalJson,
+          },
+          { status: 400 }
         )
       }
 
-      let zarinpalData: any
-      try {
-        zarinpalData = await zarinpalRes.json()
-      } catch (parseErr) {
-        console.error('[CreatePayment v2.0] ❌ JSON parse error:', parseErr)
+      if (!zarinpalJson) {
+        console.error('[CreatePayment v3.0] ❌ Empty response from ZarinPal')
+
         await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
+
         return NextResponse.json(
           { success: false, error: 'پاسخ نامعتبر از درگاه پرداخت' },
-          { status: 500 }
+          { status: 502 }
         )
       }
 
-      console.log('[CreatePayment v2.0] 📦 ZarinPal v4 response:', JSON.stringify(zarinpalData, null, 2))
+      console.log('[CreatePayment v3.0] 📦 ZarinPal v4 response:', JSON.stringify(zarinpalJson, null, 2))
 
-      // ── ۶. بررسی خطاها در پاسخ زرین‌پال ───────────────────
-      if (zarinpalData?.errors && Array.isArray(zarinpalData.errors) && zarinpalData.errors.length > 0) {
-        console.error('[CreatePayment v2.0] ❌ ZarinPal errors:', zarinpalData.errors)
-        const firstError = zarinpalData.errors[0]
-        await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
-        return NextResponse.json(
-          { success: false, error: firstError?.message || 'خطای ناشناخته از زرین‌پال' },
-          { status: 500 }
-        )
-      }
+      const code = zarinpalJson.data?.code
+      const authority = zarinpalJson.data?.authority
 
-      // v4 موفق: code === 100
-      if (zarinpalData?.data?.code !== 100) {
-        console.error('[CreatePayment v2.0] ❌ ZarinPal error code:', zarinpalData?.data?.code)
-        await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
-        return NextResponse.json(
-          { success: false, error: zarinpalData?.data?.message || 'خطا در ایجاد تراکنش' },
-          { status: 500 }
-        )
-      }
+      if ((code === 100 || code === 101) && authority) {
+        // ── ۵. آپدیت رکورد pending با authority واقعی ──
+        try {
+          await db.client.subscriptionPayments.update({
+            where: { id: pending.paymentId },
+            data: {
+              paymentRef: authority,
+            },
+          })
+          console.log('[CreatePayment v3.0] ✅ Payment record updated with authority:', authority)
+        } catch (updateErr: any) {
+          console.error('[CreatePayment v3.0] ⚠️ Failed to update paymentRef:', updateErr?.message)
+        }
 
-      const authority = zarinpalData.data.authority
+        // ── ۶. ثبت در OnlinePayments برای صفحه تراکنش‌ها ──
+        try {
+      await db.client.onlinePayment.create({
+  data: {
+    tenantId,
+    type: 'subscription_update',
+    isSandbox: sandbox,
 
-      if (!authority) {
-        console.error('[CreatePayment v2.0] ❌ No authority in response')
-        await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
-        return NextResponse.json(
-          { success: false, error: 'authority از زرین‌پال دریافت نشد' },
-          { status: 500 }
-        )
-      }
+    amount: amountToman,
+    grossAmount: amountToman,
+    netAmount: amountToman,
+    fee: 0,
 
-      // ── ۷. آپدیت رکورد با authority واقعی ────────────────
-      try {
-        await db.client.subscriptionPayments.update({
-          where: { id: pending.paymentId },
-          data: { paymentRef: authority },
+    authority,
+    status: 'pending',
+    gatewayType: 'zarinpal',
+    gatewayId: pending.paymentId,
+    description: `${description} | orderId=${orderId} | discount=${pricing.discountPercent}%`,
+    paidAt: null,
+    verifiedAt: null,
+    settlementStatus: 'pending',
+  },
+})
+          console.log('[CreatePayment v3.0] ✅ OnlinePayment record created')
+        } catch (onlineErr: any) {
+          console.warn('[CreatePayment v3.0] ⚠️ Failed to create OnlinePayment record:', onlineErr?.message)
+        }
+
+        const startPayDomain = sandbox
+          ? 'https://sandbox.zarinpal.com'
+          : 'https://www.zarinpal.com'
+
+        const paymentUrl = `${startPayDomain}/pg/StartPay/${authority}`
+
+        console.log('[CreatePayment v3.0] 🎉 Payment URL ready:', paymentUrl)
+
+        return NextResponse.json({
+          success: true,
+          data: {
+            paymentId: pending.paymentId,
+            subscriptionId: pending.subscriptionId,
+            authority,
+            paymentUrl,
+            amountToman,
+            amountRial,
+            currency: 'IRR',
+            tierName: planName,
+            billingCycle: effectiveBillingCycle,
+            discountPercent: pricing.discountPercent,
+            orderId,
+            sandbox,
+          },
         })
-        console.log('[CreatePayment v2.0] ✅ Payment record updated with authority:', authority)
-      } catch (updateErr: any) {
-        console.error('[CreatePayment v2.0] ⚠️ Failed to update paymentRef:', updateErr?.message)
       }
 
-      // ── ۸. ساخت URL پرداخت (v4 جدید) ─────────────────────
-      // ★ v2.0: طبق مستندات v4، URL صحیح این است
-      const startPayDomain = sandboxMode
-        ? 'https://sandbox.zarinpal.com'
-        : 'https://www.zarinpal.com'
+      console.warn('[CreatePayment v3.0] ❌ ZarinPal request failed:', zarinpalJson)
 
-      const paymentUrl = `${startPayDomain}/pg/StartPay/${authority}`
+      await cleanupPendingRecords(pending.subscriptionId, pending.paymentId)
 
-      console.log('[CreatePayment v2.0] 🎉 Payment URL ready:', paymentUrl)
-
-      // ── ۹. پاسخ موفق به کلاینت ────────────────────────────
-      return NextResponse.json({
-        success: true,
-        data: {
-          paymentId: pending.paymentId,
-          subscriptionId: pending.subscriptionId,
-          authority,
-          paymentUrl,
-          amount: amountNumber,
-          currency,
-          tierName: planName,
-          billingCycle: effectiveBillingCycle,
-        },
-      })
-    } catch (error: any) {
-      console.error('[CreatePayment v2.0] 💥 Unexpected error:', error)
       return NextResponse.json(
-        { success: false, error: error?.message || 'خطای سرور' },
+        {
+          success: false,
+          error: zarinpalErrorMessage || 'ایجاد تراکنش در زرین‌پال ناموفق بود.',
+          code,
+        },
+        { status: 400 }
+      )
+    } catch (error: any) {
+      console.error('[CreatePayment v3.0] 💥 Unexpected error:', error)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: error?.message || 'خطای سرور',
+        },
         { status: 500 }
       )
     }
   }
 )
-
-// ═══════════════════════════════════════════════════════════════
-//  تابع کمکی: پاک کردن رکوردهای pending در صورت خطا
-// ═══════════════════════════════════════════════════════════════
-
-async function cleanupPendingRecords(
-  subscriptionId: string,
-  paymentId: string
-): Promise<void> {
-  try {
-    await db.client.subscriptionPayments.delete({ where: { id: paymentId } })
-    await db.client.subscriptions.delete({ where: { id: subscriptionId } })
-    console.log('[CreatePayment v2.0] 🧹 Pending records cleaned up')
-  } catch (err: any) {
-    console.warn('[CreatePayment v2.0] ⚠️ Cleanup failed:', err?.message)
-  }
-}

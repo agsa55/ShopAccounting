@@ -1,42 +1,77 @@
+// ============================================================================
+// next.config.ts — ShopAccounting (v13.2 ★★★ Next.js 16 Compatible)
+// ----------------------------------------------------------------------------
+// ★ v13.2: حذف eslint از NextConfig برای سازگاری با Next.js 16
+// ★ رفع خطای:
+//   Object literal may only specify known properties,
+//   and 'eslint' does not exist in type 'NextConfig'.
+// ============================================================================
+
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
+  // ★ خروجی standalone برای Docker/Runflare
   output: "standalone",
-  
+
+  // ★ Strict Mode در production
+  reactStrictMode: false,
+
+  // ★ حذف هدر Next.js
+  poweredByHeader: false,
+
+  // ★ فشرده‌سازی فقط در production
+  compress: !isDev,
+
+  // ★ source map مرورگر در production تولید نشود
+  productionBrowserSourceMaps: false,
+
+  // ★ خطاهای TypeScript را در build نادیده بگیر
   typescript: {
     ignoreBuildErrors: true,
   },
-  
-  reactStrictMode: false,
-  
-  // ★ بهینه‌سازی تصاویر
+
+  // ★ تصاویر بدون بهینه‌سازی سمت سرور
   images: {
     unoptimized: true,
     remotePatterns: [],
   },
-  
-  // ★ بسته‌های external
-serverExternalPackages: ["bcryptjs", "bcrypt"],
-  
-  // ★ Prisma Client
-outputFileTracingIncludes: {
-  "/api/**": [
-    "./node_modules/.prisma/client/**/*",
-    "./node_modules/@prisma/client/**/*"
+
+  // ★ پکیج‌هایی که نباید توسط bundler پردازش شوند
+  serverExternalPackages: [
+    "bcryptjs",
+    "bcrypt",
+    "@prisma/client",
   ],
-},
-  
-  // ★ فشرده‌سازی (فقط production)
-  compress: !isDev,
-  
-  // ★ Headers
+
+  // ★ برای standalone، فایل‌های Prisma Client include شوند
+  outputFileTracingIncludes: {
+    "/api/**": [
+      "./node_modules/.prisma/client/**/*",
+      "./node_modules/@prisma/client/**/*",
+    ],
+  },
+
+  // ★ تنظیمات کاهش مصرف RAM در build
+  experimental: {
+    // محدود کردن workerهای build به ۱ CPU
+    cpus: 1,
+
+    // بهینه‌سازی import کتابخانه‌های سنگین
+    optimizePackageImports: [
+      "lucide-react",
+      "recharts",
+      "date-fns",
+      "zustand",
+    ],
+  },
+
+  // ★ هدرهای امنیتی و استاتیک
   async headers() {
-    // ★ v11.4: Cache-Control متفاوت برای dev و prod
     const staticCacheControl = isDev
-      ? "no-cache, no-store, must-revalidate"  // ← در dev: هر بار چک کن
-      : "public, max-age=31536000, immutable"; // ← در prod: کش طولانی
+      ? "no-cache, no-store, must-revalidate"
+      : "public, max-age=31536000, immutable";
 
     return [
       // ── هدرهای امنیتی عمومی ──
@@ -52,12 +87,24 @@ outputFileTracingIncludes: {
             value: "DENY",
           },
           {
+            key: "X-XSS-Protection",
+            value: "1; mode=block",
+          },
+          {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
           },
+          ...(isDev
+            ? []
+            : [
+                {
+                  key: "Strict-Transport-Security",
+                  value: "max-age=31536000; includeSubDomains",
+                },
+              ]),
         ],
       },
-      
+
       // ── Service Worker ──
       {
         source: "/sw.js",
@@ -68,8 +115,8 @@ outputFileTracingIncludes: {
           },
           {
             key: "Cache-Control",
-            value: isDev 
-              ? "no-cache, no-store, must-revalidate" 
+            value: isDev
+              ? "no-cache, no-store, must-revalidate"
               : "public, max-age=0, must-revalidate",
           },
           {
@@ -78,7 +125,7 @@ outputFileTracingIncludes: {
           },
         ],
       },
-      
+
       // ── Manifest ──
       {
         source: "/manifest.json",
@@ -89,13 +136,13 @@ outputFileTracingIncludes: {
           },
           {
             key: "Cache-Control",
-            value: isDev 
-              ? "no-cache, no-store, must-revalidate" 
+            value: isDev
+              ? "no-cache, no-store, must-revalidate"
               : "public, max-age=604800",
           },
         ],
       },
-      
+
       // ── Icons ──
       {
         source: "/icons/:path*",
@@ -106,17 +153,9 @@ outputFileTracingIncludes: {
           },
         ],
       },
-      
-      // ── فایل‌های استاتیک Next.js (★ اصلاح شده v11.4) ──
-      {
-        source: "/_next/static/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: staticCacheControl,  // ★ در dev: no-cache, در prod: immutable
-          },
-        ],
-      },
+
+      // ★ هدر سفارشی برای /_next/static حذف شد.
+      // Next.js خودش Cache-Control مناسب برای فایل‌های hashed استاتیک می‌دهد.
     ];
   },
 };
