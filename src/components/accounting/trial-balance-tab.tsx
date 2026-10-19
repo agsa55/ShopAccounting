@@ -1,16 +1,16 @@
 'use client'
 
 // ============================================================================
-// src/components/accounting/trial-balance-tab.tsx — v10.3 Persian DatePicker Fixed
+// src/components/accounting/trial-balance-tab.tsx — v10.6 Default Fiscal Year Fixed
 // ShopAccounting — Enhanced Trial Balance Tab Component
 // ----------------------------------------------------------------------------
-// ★★★ v10.3:
-//   - بازگشت کامل PersianDatePicker
-//   - رفع قفل شدن تاریخ روی ابتدای سال مالی
-//   - جلوگیری از double counting در سال مالی جدید
-//   - ریست تاریخ فقط هنگام تغییر سال مالی
-//   - ارسال dateFrom/dateTo معتبر برای سال مالی انتخابی
-//   - حفظ گروه‌بندی، خروجی Excel، چاپ و نمای موبایل
+// ★★★ v10.6:
+//   - پیش‌فرض کامل روی سال مالی انتخابی/فعال
+//   - حذف نیاز به کلیک روی دکمه «سال مالی انتخابی»
+//   - تلاش خودکار برای پیدا کردن سال مالی فعال از /api/fiscal-years
+//   - ارسال includeOpening و includeLegacyNullFiscalYearEntries به API
+//   - fallback امن بر اساس بازه زمانی سال مالی اگر API هنوز fiscalYearId را کامل اعمال نکند
+//   - حفظ حالت آفلاین، گروه‌بندی، خروجی Excel، چاپ و نمای موبایل
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
@@ -60,6 +60,9 @@ const API_FISCAL_NOT_APPLIED_WARNING =
 const OFFLINE_TRIAL_WARNING =
   'تراز آزمایشی آفلاین بر اساس آخرین اسناد کش‌شده محاسبه شده است. این محاسبه ممکن است مانده افتتاحیه رسمی سال مالی را به‌دقت محاسبه نکند و فقط برای مشاهده است.'
 
+const FALLBACK_DATE_RANGE_WARNING =
+  'برای اطمینان از نمایش سند افتتاحیه، گزارش با بازه زمانی سال مالی انتخابی محاسبه شد. برای ایزولاسیون کامل بر اساس fiscalYearId، API تراز آزمایشی باید اصلاح شود.'
+
 // ═══════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════
@@ -81,8 +84,8 @@ function formatRial(num: number): string {
 
 function toLatinDigits(value: string): string {
   return value
-    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String('۰۱۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٣٤٥٦٧٨٩'.indexOf(d)))
 }
 
 /**
@@ -188,6 +191,31 @@ function inferAccountType(
   }
 
   return 'unknown'
+}
+
+function isOpeningEntry(entry: any): boolean {
+  const sourceType = String(entry?.sourceType || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '_')
+
+  const description = String(
+    entry?.description || entry?.memo || entry?.narration || ''
+  )
+    .trim()
+    .toLowerCase()
+
+  return (
+    sourceType === 'opening' ||
+    sourceType === 'opening_balance' ||
+    sourceType === 'initial_balance' ||
+    sourceType === 'start_balance' ||
+    description.includes('opening') ||
+    description.includes('افتتاحیه') ||
+    description.includes('اعتتاحیه') ||
+    description.includes('گشایش') ||
+    description.includes('موجودی اولیه')
+  )
 }
 
 interface FiscalYearInfo {
@@ -354,25 +382,27 @@ export function TrialBalanceTabV8() {
     (s: any) => s.selectedFiscalYearId
   ) as string | null | undefined
 
-  const selectedFiscalYearId =
+  const storeFiscalYearBounds = useAppStore((s: any) => s.fiscalYearBounds) as any
+
+  // ★ v10.6: پیش‌فرض همیشه «سال مالی انتخابی» است، نه همه سنوات.
+  const [allYears, setAllYears] = useState(false)
+
+  const [resolvedFiscalYearId, setResolvedFiscalYearId] = useState<string | null>(
     storeSelectedFiscalYearId && storeSelectedFiscalYearId !== 'all'
-      ? storeSelectedFiscalYearId
+      ? String(storeSelectedFiscalYearId)
       : null
-
-  const fiscalYearBounds = useAppStore((s: any) => s.fiscalYearBounds) as any
-
-  const [allYears, setAllYears] = useState(
-    storeSelectedFiscalYearId === 'all'
   )
 
-  // همگام‌سازی با فیلتر هدر
-  useEffect(() => {
-    if (storeSelectedFiscalYearId === 'all') {
-      setAllYears(true)
-    } else if (storeSelectedFiscalYearId) {
-      setAllYears(false)
-    }
-  }, [storeSelectedFiscalYearId])
+  const [resolvedBounds, setResolvedBounds] = useState<{
+    from: string
+    to: string
+  } | null>(() => {
+    const from = normalizeDateOnly(storeFiscalYearBounds?.from)
+    const to = normalizeDateOnly(storeFiscalYearBounds?.to)
+    return from && to ? { from, to } : null
+  })
+
+  const fiscalYearsFetchedRef = useRef(false)
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
@@ -392,6 +422,109 @@ export function TrialBalanceTabV8() {
   // ★ فقط یک‌بار برای هر سال مالی بازه پیش‌فرض ست شود
   const initializedForRef = useRef<string | null | undefined>(undefined)
 
+  // ─── Sync with global store ─────────────────────────────────
+  useEffect(() => {
+    if (storeSelectedFiscalYearId === 'all') {
+      setAllYears(true)
+      setResolvedFiscalYearId(null)
+    } else if (storeSelectedFiscalYearId) {
+      setAllYears(false)
+      setResolvedFiscalYearId(String(storeSelectedFiscalYearId))
+    }
+  }, [storeSelectedFiscalYearId])
+
+  useEffect(() => {
+    const from = normalizeDateOnly(storeFiscalYearBounds?.from)
+    const to = normalizeDateOnly(storeFiscalYearBounds?.to)
+
+    if (from && to) {
+      setResolvedBounds({ from, to })
+    }
+  }, [storeFiscalYearBounds?.from, storeFiscalYearBounds?.to])
+
+  // ─── Auto-resolve active fiscal year if missing ─────────────
+  useEffect(() => {
+    if (allYears) return
+    if (resolvedFiscalYearId) return
+    if (fiscalYearsFetchedRef.current) return
+
+    fiscalYearsFetchedRef.current = true
+
+    ;(async () => {
+      try {
+        const res = await fetch('/api/fiscal-years', {
+          headers: getAuthHeaders(),
+        })
+
+        const json = await res.json()
+
+        const years =
+          json?.data?.years ||
+          json?.years ||
+          []
+
+        if (!Array.isArray(years) || years.length === 0) {
+          // اگر سال مالی‌ای نبود، مجبوریم همه سنوات را نشان دهیم تا صفحه گیر نکند.
+          setAllYears(true)
+          setWarning(NO_FISCAL_YEAR_WARNING)
+          return
+        }
+
+        const active =
+          years.find((y: any) => y.isActive && !y.isClosed) ||
+          years[0]
+
+        const id = active?.id ? String(active.id) : null
+        const from = normalizeDateOnly(active?.startDate)
+        const to = normalizeDateOnly(active?.endDate)
+
+        if (id) {
+          setResolvedFiscalYearId(id)
+          setAllYears(false)
+
+          if (from && to) {
+            setResolvedBounds({ from, to })
+          }
+
+          setFiscalYearInfo({
+            id,
+            name: active?.name || null,
+            startDate: from,
+            endDate: to,
+            isActive: Boolean(active?.isActive),
+            isClosed: Boolean(active?.isClosed),
+          })
+
+          // همگام‌سازی با store مرکزی، اگر تابعش موجود باشد.
+          const state: any = useAppStore.getState()
+
+          if (typeof state.setSelectedFiscalYearId === 'function') {
+            state.setSelectedFiscalYearId(id)
+          }
+
+          if (
+            from &&
+            to &&
+            typeof state.setFiscalYearBounds === 'function'
+          ) {
+            state.setFiscalYearBounds({ from, to })
+          }
+        } else {
+          setAllYears(true)
+          setWarning(NO_FISCAL_YEAR_WARNING)
+        }
+      } catch (err: any) {
+        console.error('[TrialBalance] Failed to resolve active fiscal year:', err)
+        setError(
+          err?.message ||
+            'خطا در دریافت سال مالی فعال. لطفاً صفحه را رفرش کنید یا سال مالی را از هدر انتخاب کنید.'
+        )
+        setLoading(false)
+      }
+    })()
+  }, [allYears, resolvedFiscalYearId])
+
+  // ─── Date handlers ──────────────────────────────────────────
   const handleFromDateChange = (value: string | null) => {
     const next = normalizeDateOnly(value)
 
@@ -436,7 +569,7 @@ export function TrialBalanceTabV8() {
     }
   }
 
-  // ★ ریست تاریخ فقط هنگام تغییر سال مالی یا رسیدن bounds معتبر برای اولین بار
+  // ─── Initialize date range once per fiscal year ─────────────
   useEffect(() => {
     if (allYears) {
       if (initializedForRef.current !== 'all') {
@@ -447,9 +580,10 @@ export function TrialBalanceTabV8() {
       return
     }
 
-    const fyKey = selectedFiscalYearId || null
-    const from = normalizeDateOnly(fiscalYearBounds?.from)
-    const to = normalizeDateOnly(fiscalYearBounds?.to)
+    const fyKey = resolvedFiscalYearId || null
+    const from = resolvedBounds?.from || null
+    const to = resolvedBounds?.to || null
+
     const hasValidRange = !!from && !!to && isIsoDate(from) && isIsoDate(to)
 
     // اگر برای همین سال مالی قبلاً initialize شده، تاریخ کاربر را خراب نکن
@@ -462,26 +596,47 @@ export function TrialBalanceTabV8() {
     setDateTo(to)
     initializedForRef.current = fyKey
   }, [
-    selectedFiscalYearId,
+    resolvedFiscalYearId,
     allYears,
-    fiscalYearBounds?.from,
-    fiscalYearBounds?.to,
+    resolvedBounds?.from,
+    resolvedBounds?.to,
   ])
 
-    const fetchReport = useCallback(async () => {
+  const isReadyForReport = useMemo(() => {
+    if (allYears) return true
+
+    return (
+      !!resolvedFiscalYearId &&
+      !!resolvedBounds?.from &&
+      !!resolvedBounds?.to &&
+      isIsoDate(resolvedBounds.from) &&
+      isIsoDate(resolvedBounds.to)
+    )
+  }, [
+    allYears,
+    resolvedFiscalYearId,
+    resolvedBounds?.from,
+    resolvedBounds?.to,
+  ])
+
+  // ─── Fetch report ───────────────────────────────────────────
+  const fetchReport = useCallback(async () => {
+    const boundsFrom = normalizeDateOnly(resolvedBounds?.from)
+    const boundsTo = normalizeDateOnly(resolvedBounds?.to)
+
+    // تا سال مالی/بازه آماده نشده، درخواست نفرست و loading را هم خاموش نکن.
+    if (!allYears && (!resolvedFiscalYearId || !boundsFrom || !boundsTo)) {
+      return
+    }
+
     setLoading(true)
     setError(null)
-
-    const boundsFrom = normalizeDateOnly(fiscalYearBounds?.from)
-    const boundsTo = normalizeDateOnly(fiscalYearBounds?.to)
 
     let effectiveDateFrom = isIsoDate(dateFrom) ? dateFrom : null
     let effectiveDateTo = isIsoDate(dateTo) ? dateTo : null
 
-    // ★ v10.5 production-safe:
-    // دیتاپیکرها در UI آزاد می‌مانند؛ فقط درخواست API برای سال مالی انتخابی
-    // داخل بازه همان سال مالی ارسال می‌شود.
-    if (!allYears && selectedFiscalYearId) {
+    // ★ برای سال مالی انتخابی، همیشه داخل بازه همان سال مالی clamp شو.
+    if (!allYears && resolvedFiscalYearId) {
       if (!effectiveDateFrom) effectiveDateFrom = boundsFrom
       if (!effectiveDateTo) effectiveDateTo = boundsTo
 
@@ -506,7 +661,7 @@ export function TrialBalanceTabV8() {
       if (!effectiveDateFrom || !effectiveDateTo) {
         setLoading(false)
         setError(
-          'بازه تاریخ سال مالی هنوز آماده نشده است. لطفاً روی «بازه کامل سال مالی» کلیک کنید یا صفحه را رفرش کنید.'
+          'بازه تاریخ سال مالی هنوز آماده نشده است. لطفاً صفحه را رفرش کنید.'
         )
         return
       }
@@ -522,13 +677,32 @@ export function TrialBalanceTabV8() {
       try {
         const cachedEntries = await getCachedJournalEntries()
 
-        const scopedCachedEntries =
-          !allYears && selectedFiscalYearId
-            ? cachedEntries.filter((entry: any) => {
-                if (!entry?.fiscalYearId) return true
-                return entry.fiscalYearId === selectedFiscalYearId
-              })
-            : cachedEntries
+        const scopedCachedEntries = allYears
+          ? cachedEntries
+          : cachedEntries.filter((entry: any) => {
+              const entryDate = normalizeDateOnly(entry?.date)
+
+              const inFiscalRange =
+                !boundsFrom || !boundsTo
+                  ? true
+                  : entryDate &&
+                    isIsoDate(entryDate) &&
+                    entryDate >= boundsFrom &&
+                    entryDate <= boundsTo
+
+              const fyMatch =
+                entry?.fiscalYearId &&
+                String(entry.fiscalYearId) === String(resolvedFiscalYearId)
+
+              // اسناد legacy بدون fiscalYearId اگر داخل بازه سال مالی باشند شامل می‌شوند.
+              const legacyInRange = !entry?.fiscalYearId && inFiscalRange
+
+              // اسناد افتتاحیه حتی اگر fiscalYearId نداشته باشند ولی تاریخشان داخل سال مالی باشد، شامل می‌شوند.
+              const openingInRange =
+                isOpeningEntry(entry) && inFiscalRange
+
+              return Boolean(fyMatch || legacyInRange || openingInRange)
+            })
 
         if (scopedCachedEntries.length === 0) {
           setData({
@@ -543,7 +717,7 @@ export function TrialBalanceTabV8() {
               from: effectiveDateFrom,
               to: effectiveDateTo,
             },
-            fiscalYearId: selectedFiscalYearId,
+            fiscalYearId: allYears ? null : resolvedFiscalYearId,
             fiscalYearName: fiscalYearInfo?.name || null,
             warning: OFFLINE_TRIAL_WARNING,
           })
@@ -558,7 +732,7 @@ export function TrialBalanceTabV8() {
 
           setData({
             ...offlineData,
-            fiscalYearId: selectedFiscalYearId,
+            fiscalYearId: allYears ? null : resolvedFiscalYearId,
             fiscalYearName: fiscalYearInfo?.name || null,
             warning: OFFLINE_TRIAL_WARNING,
           })
@@ -574,6 +748,23 @@ export function TrialBalanceTabV8() {
 
     // ─── حالت آنلاین ─────────────────────────────────────────
     try {
+      const fetchJson = async (params: URLSearchParams) => {
+        const res = await fetch(
+          `/api/reports/trial-balance?${params.toString()}`,
+          {
+            headers: getAuthHeaders(),
+          }
+        )
+
+        const json = await res.json()
+
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || 'خطا در بارگذاری تراز آزمایشی')
+        }
+
+        return json
+      }
+
       const params = new URLSearchParams()
 
       if (effectiveDateFrom) params.set('dateFrom', effectiveDateFrom)
@@ -583,35 +774,79 @@ export function TrialBalanceTabV8() {
 
       if (allYears) {
         params.set('allYears', 'true')
-      } else if (selectedFiscalYearId) {
-        params.set('fiscalYearId', selectedFiscalYearId)
+      } else if (resolvedFiscalYearId) {
+        params.set('fiscalYearId', resolvedFiscalYearId)
+
+        // ★ این دو پارامتر را API جدید باید پشتیبانی کند.
+        params.set('includeOpening', 'true')
+        params.set('includeLegacyNullFiscalYearEntries', 'true')
       }
 
-      const res = await fetch(
-        `/api/reports/trial-balance?${params.toString()}`,
-        {
-          headers: getAuthHeaders(),
-        }
+      let json = await fetchJson(params)
+      let responseData = json.data || json
+      let usedFallbackDateRange = false
+
+      const firstCount = Number(
+        responseData?.accountCount ??
+          responseData?.flatRows?.length ??
+          0
       )
 
-      const json = await res.json()
+      // ★ Fallback امن:
+      // اگر API هنوز fiscalYearId را کامل اعمال نکند و نتیجه خالی شد،
+      // با allYears=true ولی محدود به بازه زمانی همان سال مالی دوباره درخواست بده.
+      if (
+        !allYears &&
+        resolvedFiscalYearId &&
+        firstCount === 0 &&
+        effectiveDateFrom &&
+        effectiveDateTo
+      ) {
+        try {
+          const fallbackParams = new URLSearchParams()
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'خطا در بارگذاری تراز آزمایشی')
+          fallbackParams.set('allYears', 'true')
+          fallbackParams.set('dateFrom', effectiveDateFrom)
+          fallbackParams.set('dateTo', effectiveDateTo)
+          fallbackParams.set('includeOpening', 'true')
+          fallbackParams.set('includeLegacyNullFiscalYearEntries', 'true')
+
+          if (includeZero) fallbackParams.set('includeZero', 'true')
+          if (!groupByType) fallbackParams.set('groupByType', 'false')
+
+          const fallbackJson = await fetchJson(fallbackParams)
+          const fallbackData = fallbackJson.data || fallbackJson
+
+          const fallbackCount = Number(
+            fallbackData?.accountCount ??
+              fallbackData?.flatRows?.length ??
+              0
+          )
+
+          if (fallbackCount > 0) {
+            json = fallbackJson
+            responseData = fallbackData
+            usedFallbackDateRange = true
+          }
+        } catch (fallbackErr) {
+          console.warn(
+            '[TrialBalance] date-range fallback failed:',
+            fallbackErr
+          )
+        }
       }
-
-      const responseData = json.data || json
 
       const fy =
         json.fiscalYear ||
         responseData.fiscalYear ||
         null
 
-      const responseFiscalYearId =
-        json.fiscalYearId ||
-        fy?.id ||
-        (allYears ? null : selectedFiscalYearId) ||
-        null
+      const responseFiscalYearId = allYears
+        ? null
+        : json.fiscalYearId ||
+          fy?.id ||
+          resolvedFiscalYearId ||
+          null
 
       const responseFiscalYearName =
         json.fiscalYearName ||
@@ -623,35 +858,41 @@ export function TrialBalanceTabV8() {
         responseData.warning ||
         null
 
-      if (allYears) {
+      if (usedFallbackDateRange) {
+        responseWarning = FALLBACK_DATE_RANGE_WARNING
+      } else if (allYears) {
         responseWarning = responseWarning || ALL_YEARS_WARNING
       } else if (!responseFiscalYearId) {
         responseWarning = responseWarning || NO_FISCAL_YEAR_WARNING
-      } else if (!fy && selectedFiscalYearId) {
+      } else if (!fy && resolvedFiscalYearId) {
         responseWarning = responseWarning || API_FISCAL_NOT_APPLIED_WARNING
       }
 
-      if (fy) {
-        setFiscalYearInfo({
-          id: fy.id || responseFiscalYearId || null,
-          name: fy.name || responseFiscalYearName || null,
-          startDate: fy.startDate || null,
-          endDate: fy.endDate || null,
-          isActive: Boolean(fy.isActive),
-          isClosed: Boolean(fy.isClosed),
-        })
-      } else if (responseFiscalYearId) {
-        setFiscalYearInfo({
-          id: responseFiscalYearId,
-          name: responseFiscalYearName,
-          startDate: null,
-          endDate: null,
-          isActive: false,
-          isClosed: false,
-        })
-      } else {
-        setFiscalYearInfo(null)
-      }
+      setFiscalYearInfo((prev) => {
+        if (fy) {
+          return {
+            id: fy.id || responseFiscalYearId || null,
+            name: fy.name || responseFiscalYearName || prev?.name || null,
+            startDate: fy.startDate || prev?.startDate || boundsFrom,
+            endDate: fy.endDate || prev?.endDate || boundsTo,
+            isActive: Boolean(fy.isActive),
+            isClosed: Boolean(fy.isClosed),
+          }
+        }
+
+        if (responseFiscalYearId) {
+          return {
+            id: responseFiscalYearId,
+            name: responseFiscalYearName || prev?.name || null,
+            startDate: prev?.startDate || boundsFrom,
+            endDate: prev?.endDate || boundsTo,
+            isActive: prev?.isActive ?? false,
+            isClosed: prev?.isClosed ?? false,
+          }
+        }
+
+        return null
+      })
 
       setWarning(responseWarning)
 
@@ -660,13 +901,12 @@ export function TrialBalanceTabV8() {
         fiscalYearId: responseFiscalYearId,
         fiscalYearName: responseFiscalYearName,
         warning: responseWarning,
+        usedFallbackDateRange,
         dateRange: responseData.dateRange || {
           from: effectiveDateFrom,
           to: effectiveDateTo,
         },
       })
-
-
     } catch (err: any) {
       setError(err?.message || 'خطا در ارتباط با سرور')
     } finally {
@@ -674,20 +914,20 @@ export function TrialBalanceTabV8() {
     }
   }, [
     isOnline,
-    selectedFiscalYearId,
     allYears,
+    resolvedFiscalYearId,
+    resolvedBounds?.from,
+    resolvedBounds?.to,
     dateFrom,
     dateTo,
     includeZero,
     groupByType,
-    fiscalYearBounds?.from,
-    fiscalYearBounds?.to,
-    fiscalYearInfo?.name,
   ])
 
   useEffect(() => {
+    if (!isReadyForReport) return
     fetchReport()
-  }, [fetchReport])
+  }, [fetchReport, isReadyForReport])
 
   const handleExport = () => {
     if (!data) return
@@ -708,7 +948,7 @@ export function TrialBalanceTabV8() {
       ? 'همه سنوات'
       : fiscalYearInfo?.name ||
         data.fiscalYearName ||
-        selectedFiscalYearId ||
+        resolvedFiscalYearId ||
         'بدون سال مالی'
 
     rows.push(['تراز آزمایشی', fiscalTitle, '', '', '', '', ''])
@@ -816,10 +1056,10 @@ export function TrialBalanceTabV8() {
   const displayWarning = warning || data.warning || null
 
   const fiscalFrom = normalizeDateOnly(
-    fiscalYearBounds?.from || fiscalYearInfo?.startDate
+    resolvedBounds?.from || fiscalYearInfo?.startDate
   )
   const fiscalTo = normalizeDateOnly(
-    fiscalYearBounds?.to || fiscalYearInfo?.endDate
+    resolvedBounds?.to || fiscalYearInfo?.endDate
   )
 
   return (
@@ -867,9 +1107,9 @@ export function TrialBalanceTabV8() {
                 تراز آزمایشی
               </h3>
 
-              {!allYears && fiscalYearInfo?.name && (
+              {!allYears && (fiscalYearInfo?.name || resolvedFiscalYearId) && (
                 <Badge className="text-[10px] border-emerald-200 bg-emerald-50 text-emerald-700">
-                  {fiscalYearInfo.name}
+                  {fiscalYearInfo?.name || 'سال مالی انتخابی'}
                 </Badge>
               )}
 
@@ -891,7 +1131,9 @@ export function TrialBalanceTabV8() {
               onClick={() => setAllYears((v) => !v)}
             >
               <Calendar className="w-3.5 h-3.5 ml-1" />
-              {allYears ? 'همه سنوات' : 'سال مالی انتخابی'}
+              {allYears
+                ? 'بازگشت به سال مالی انتخابی'
+                : 'همه سنوات (مدیریتی)'}
             </Button>
           </div>
 
@@ -911,7 +1153,7 @@ export function TrialBalanceTabV8() {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                                 <div>
+            <div>
               <PersianDatePicker
                 value={dateFrom}
                 onChange={handleFromDateChange}
@@ -920,7 +1162,7 @@ export function TrialBalanceTabV8() {
               />
             </div>
 
-                      <div>
+            <div>
               <PersianDatePicker
                 value={dateTo}
                 onChange={handleToDateChange}
@@ -987,10 +1229,15 @@ export function TrialBalanceTabV8() {
                 variant="outline"
                 className="text-[11px] h-7 bg-emerald-50 border-emerald-200 text-emerald-700"
                 onClick={() => {
-                  if (fiscalFrom && fiscalTo && isIsoDate(fiscalFrom) && isIsoDate(fiscalTo)) {
+                  if (
+                    fiscalFrom &&
+                    fiscalTo &&
+                    isIsoDate(fiscalFrom) &&
+                    isIsoDate(fiscalTo)
+                  ) {
                     setDateFrom(fiscalFrom)
                     setDateTo(fiscalTo)
-                    initializedForRef.current = selectedFiscalYearId || null
+                    initializedForRef.current = resolvedFiscalYearId || null
                   }
                 }}
               >
@@ -1044,9 +1291,9 @@ export function TrialBalanceTabV8() {
           </div>
 
           <p className="text-[10px] text-gray-500 mt-2 leading-5">
-            نکته: برای سال مالی انتخابی، «از تاریخ» نباید خالی باشد؛ اگر خالی
-            باشد گزارش تجمعی محاسبه شده و مانده سنوات قبل را هم شامل می‌شود.
-            برای تراز رسمی سال مالی، از دکمه «بازه کامل سال مالی» استفاده کنید.
+            نکته: این نسخه به‌صورت پیش‌فرض روی سال مالی انتخابی/فعال کار می‌کند
+            و برای نمایش سند افتتاحیه نیازی به کلیک روی دکمه نیست. دکمه «همه
+            سنوات» فقط برای بررسی مدیریتی است.
           </p>
         </CardContent>
       </Card>

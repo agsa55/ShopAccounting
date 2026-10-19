@@ -1,19 +1,20 @@
 // ============================================================================
-// src/app/api/reports/trial-balance/route.ts — GET (v10.1 Standard Trial Balance)
+// src/app/api/reports/trial-balance/route.ts — GET (v10.2 Opening-Aware Trial Balance)
 // ShopAccounting — Trial Balance Report API
 // ----------------------------------------------------------------------------
-// ★★★ v10.1:
-//   - رفع double counting در سال‌های مالی دارای سند افتتاحیه
-//   - اگر fiscal_year_open وجود داشته باشد، مانده سنوات قبل جداگانه اضافه نشود
-//   - فقط حرکات همان سال مالی برای opening balance قبل از تاریخ انتخابی محاسبه شود
-//   - حفظ رفتار قبلی برای سنواتی که سند افتتاحیه ندارند
-//   - پشتیبانی از fiscalYearId / allYears
-//   - پشتیبانی از mode=balance پیش‌فرض و mode=movement
-//   - بازگشت fiscalYear کامل برای frontend
-//   - fallback امن اگر فیلد fiscalYearId در JournalEntry وجود نداشت
-//   - احتساب حساب‌های غیرفعال که مانده یا حرکت دارند
-//   - clamp تاریخ داخل سال مالی
-//   - warning مناسب برای همه سنوات / نبود سال مالی فعال
+// ★★★ v10.2:
+//   - حل اساسی نمایش سند افتتاحیه در سال مالی انتخابی به‌صورت پیش‌فرض
+//   - تشخیص گسترده‌تر اسناد افتتاحیه:
+//       fiscal_year_open / opening / opening_balance / initial_balance / start_balance
+//       + توضیحات含 «افتتاحیه»، «اعتتاحیه»، «گشایش»، «موجودی اولیه»، «مانده اولیه»
+//   - پشتیبانی از اسناد legacy با fiscalYearId = null اگر تاریخشان داخل سال مالی باشد
+//   - جلوگیری از double counting وقتی سال مالی سند افتتاحیه دارد
+//   - اگر سند افتتاحیه نداشت، رفتار قبلی حفظ شود: مانده سنوات قبل اضافه شود
+//   - includeOpening پیش‌فرض true
+//   - includeLegacyNullFiscalYearEntries پیش‌فرض true
+//   - fallback امن برای نبود فیلد isCancelled یا fiscalYearId
+//   - fallback امن برای include lines
+//   - diagnostics کامل‌تر برای عیب‌یابی frontend/backend
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -46,6 +47,16 @@ const POSTED_STATUS_VALUES = [
   'confirmed',
   'Confirmed',
 ]
+
+const OPENING_SOURCE_TYPES = new Set([
+  'fiscal_year_open',
+  'fy_open',
+  'opening',
+  'opening_balance',
+  'opening_entry',
+  'initial_balance',
+  'start_balance',
+])
 
 const ACCOUNT_TYPE_GROUPS: Record<
   string,
@@ -87,6 +98,13 @@ function roundMoney(value: number): number {
   return Math.round(value)
 }
 
+function normalizeToken(value: any): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+}
+
 function parseDateOnly(value: string | null | undefined): Date | null {
   if (!value) return null
 
@@ -120,6 +138,25 @@ function truncateUtcDay(value: any): Date | null {
 
   return new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  )
+}
+
+function isOpeningEntry(je: any): boolean {
+  const sourceType = normalizeToken(je?.sourceType)
+
+  if (OPENING_SOURCE_TYPES.has(sourceType)) return true
+
+  const description = normalizeToken(
+    je?.description || je?.memo || je?.narration || ''
+  )
+
+  return (
+    description.includes('opening') ||
+    description.includes('افتتاحیه') ||
+    description.includes('اعتتاحیه') ||
+    description.includes('گشایش') ||
+    description.includes('موجودی اولیه') ||
+    description.includes('مانده اولیه')
   )
 }
 
@@ -172,12 +209,65 @@ function shouldIncludeEntry(entry: any): boolean {
   return status === 'posted' || status === 'confirmed'
 }
 
-async function queryJournalEntries(
+function isInSelectedFiscalScope(
+  je: any,
+  selectedFiscalYearId: string,
+  fyStart: Date | null,
+  fyEnd: Date | null,
+  includeOpening: boolean,
+  includeLegacyNullFiscalYearEntries: boolean
+): boolean {
+  // اگر صراحتاً اسناد افتتاحیه حذف خواسته شده باشند، حتی با fiscalYearId هم شامل نشوند.
+  if (!includeOpening && isOpeningEntry(je)) return false
+
+  const jeFiscalYearId = je?.fiscalYearId ? String(je.fiscalYearId) : null
+  const jeDate = truncateUtcDay(je?.date)
+
+  const dateInFiscalYear =
+    fyStart && fyEnd && jeDate
+      ? jeDate >= fyStart && jeDate <= fyEnd
+      : true
+
+  // ۱. تگ دقیق سال مالی انتخابی
+  if (jeFiscalYearId === String(selectedFiscalYearId)) return true
+
+  // ۲. اسناد legacy بدون fiscalYearId ولی داخل بازهٔ همان سال مالی
+  if (
+    includeLegacyNullFiscalYearEntries &&
+    !jeFiscalYearId &&
+    dateInFiscalYear
+  ) {
+    return true
+  }
+
+  // ۳. اسناد افتتاحیه که ممکن است fiscalYearId نداشته باشند یا نادرست tagging شده باشند،
+  //    ولی تاریخشان داخل همان سال مالی است.
+  if (includeOpening && isOpeningEntry(je) && dateInFiscalYear) {
+    return true
+  }
+
+  return false
+}
+
+async function fetchPostedEntriesUpTo(
   tenantDb: any,
-  where: any,
-  fiscalYearId: string | null
+  tenantId: string,
+  toDateExclusive: Date | null
 ): Promise<any[]> {
-  const include = {
+  const baseWhere: any = {
+    tenantId,
+    status: {
+      in: POSTED_STATUS_VALUES,
+    },
+  }
+
+  if (toDateExclusive) {
+    baseWhere.date = {
+      lt: toDateExclusive,
+    }
+  }
+
+  const includeLines = {
     lines: {
       select: {
         accountId: true,
@@ -189,37 +279,118 @@ async function queryJournalEntries(
 
   const orderBy = { date: 'asc' as const }
 
-  if (!fiscalYearId) {
-    return await tenantDb.journalEntry.findMany({
-      where,
-      include,
-      orderBy,
-    })
-  }
-
+  // ۱. تلاش با isCancelled
   try {
     return await tenantDb.journalEntry.findMany({
       where: {
-        ...where,
-        fiscalYearId,
+        ...baseWhere,
+        isCancelled: {
+          not: true,
+        },
       },
-      include,
+      include: includeLines,
       orderBy,
     })
   } catch (err: any) {
-    const message = String(err?.message || '')
-
-    // fallback امن اگر schema هنوز fiscalYearId را روی JournalEntry نداشت
-    if (message.includes('fiscalYearId')) {
-      return await tenantDb.journalEntry.findMany({
-        where,
-        include,
-        orderBy,
-      })
-    }
-
-    throw err
+    console.warn(
+      '[TrialBalance v10.2] isCancelled filter failed, retrying without it:',
+      err?.message
+    )
   }
+
+  // ۲. تلاش بدون isCancelled ولی با include lines
+  try {
+    return await tenantDb.journalEntry.findMany({
+      where: baseWhere,
+      include: includeLines,
+      orderBy,
+    })
+  } catch (err: any) {
+    console.warn(
+      '[TrialBalance v10.2] include lines failed, retrying plain entries:',
+      err?.message
+    )
+  }
+
+  // ۳. Fallback: entries بدون include، سپس خطوط جداگانه
+  const entries = await tenantDb.journalEntry.findMany({
+    where: baseWhere,
+    orderBy,
+  })
+
+  const ids = entries
+    .map((e: any) => e?.id)
+    .filter(Boolean)
+    .map(String)
+
+  const linesByEntry = new Map<string, any[]>()
+
+  if (ids.length > 0) {
+    // تلاش اول: journalLine.journalEntryId
+    try {
+      const lines = await tenantDb.journalLine.findMany({
+        where: {
+          journalEntryId: {
+            in: ids,
+          },
+        },
+        select: {
+          journalEntryId: true,
+          accountId: true,
+          debit: true,
+          credit: true,
+        },
+      })
+
+      for (const line of lines) {
+        const key = String(line.journalEntryId || '')
+        if (!key) continue
+
+        if (!linesByEntry.has(key)) linesByEntry.set(key, [])
+        linesByEntry.get(key)!.push(line)
+      }
+    } catch (err: any) {
+      console.warn(
+        '[TrialBalance v10.2] journalLine.journalEntryId fallback failed, trying entryId:',
+        err?.message
+      )
+
+      // تلاش دوم: journalLine.entryId
+      try {
+        const lines = await tenantDb.journalLine.findMany({
+          where: {
+            entryId: {
+              in: ids,
+            },
+          },
+          select: {
+            entryId: true,
+            accountId: true,
+            debit: true,
+            credit: true,
+          },
+        })
+
+        for (const line of lines) {
+          const key = String(line.entryId || '')
+          if (!key) continue
+
+          if (!linesByEntry.has(key)) linesByEntry.set(key, [])
+          linesByEntry.get(key)!.push(line)
+        }
+      } catch (err2: any) {
+        console.warn(
+          '[TrialBalance v10.2] Could not load journal lines manually:',
+          err2?.message
+        )
+      }
+    }
+  }
+
+  return entries.map((e: any) => ({
+    ...e,
+    lines: linesByEntry.get(String(e.id)) || [],
+  }))
 }
 
 function buildFiscalYearPayload(fy: any) {
@@ -245,6 +416,8 @@ function makeEmptyResponse({
   fromDate,
   toDate,
   fiscalYearRange,
+  includeOpening,
+  includeLegacyNullFiscalYearEntries,
 }: {
   mode: 'balance' | 'movement'
   fiscalYearId: string | null
@@ -255,6 +428,8 @@ function makeEmptyResponse({
   fromDate: Date | null
   toDate: Date | null
   fiscalYearRange: { from: string; to: string } | null
+  includeOpening: boolean
+  includeLegacyNullFiscalYearEntries: boolean
 }) {
   return NextResponse.json({
     success: true,
@@ -264,6 +439,8 @@ function makeEmptyResponse({
     fiscalYear,
     allYears,
     warning,
+    includeOpening,
+    includeLegacyNullFiscalYearEntries,
     data: {
       mode,
       isBalanced: true,
@@ -288,6 +465,10 @@ function makeEmptyResponse({
 
 export const GET = withTenantAndPermission('accounting')(
   async (req: NextRequest, ctx: any, tenant: any) => {
+    console.log(
+      '[TrialBalance v10.2] ★★★ VERSION LOADED — OPENING-AWARE TRIAL BALANCE'
+    )
+
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
@@ -305,6 +486,11 @@ export const GET = withTenantAndPermission('accounting')(
 
       const fiscalYearIdParam = (searchParams.get('fiscalYearId') || '').trim()
       let allYears = searchParams.get('allYears') === 'true'
+
+      // ★ v10.2: پیش‌فرض نمایش اسناد افتتاحیه فعال است.
+      const includeOpening = searchParams.get('includeOpening') !== 'false'
+      const includeLegacyNullFiscalYearEntries =
+        searchParams.get('includeLegacyNullFiscalYearEntries') !== 'false'
 
       let fy: any = null
       let effectiveFiscalYearId: string | null = null
@@ -380,10 +566,12 @@ export const GET = withTenantAndPermission('accounting')(
       }
 
       let fiscalYearRange: { from: string; to: string } | null = null
+      let fyStart: Date | null = null
+      let fyEnd: Date | null = null
 
       if (fy) {
-        const fyStart = truncateUtcDay(fy.startDate)
-        const fyEnd = truncateUtcDay(fy.endDate)
+        fyStart = truncateUtcDay(fy.startDate)
+        fyEnd = truncateUtcDay(fy.endDate)
 
         if (fyStart && fyEnd) {
           fiscalYearRange = {
@@ -410,6 +598,8 @@ export const GET = withTenantAndPermission('accounting')(
           fromDate,
           toDate,
           fiscalYearRange,
+          includeOpening,
+          includeLegacyNullFiscalYearEntries,
         })
       }
 
@@ -417,7 +607,7 @@ export const GET = withTenantAndPermission('accounting')(
         ? new Date(toDate.getTime() + 86400000)
         : null
 
-      console.log('[TrialBalance v10.1] Query context', {
+      console.log('[TrialBalance v10.2] Query context', {
         tenantId,
         mode,
         fiscalYearId: effectiveFiscalYearId,
@@ -427,43 +617,8 @@ export const GET = withTenantAndPermission('accounting')(
         toDate: toDate?.toISOString() || null,
         includeZero,
         groupByType,
-      })
-
-      // ═════════════════════════════════════════════════════════
-      //  ★ v10.1: تشخیص سند افتتاحیه برای سال مالی انتخابی
-      // ═════════════════════════════════════════════════════════
-      let hasFiscalYearOpeningEntry = false
-
-      if (effectiveFiscalYearId) {
-        try {
-          const openingEntryProbe = await tenantDb.journalEntry.findFirst({
-            where: {
-              tenantId,
-              fiscalYearId: effectiveFiscalYearId,
-              sourceType: 'fiscal_year_open',
-              status: {
-                in: POSTED_STATUS_VALUES,
-              },
-              isCancelled: false,
-            },
-            select: {
-              id: true,
-            },
-          })
-
-          hasFiscalYearOpeningEntry = Boolean(openingEntryProbe)
-        } catch (err: any) {
-          console.warn(
-            '[TrialBalance v10.1] Opening entry probe failed:',
-            err?.message || err
-          )
-          hasFiscalYearOpeningEntry = false
-        }
-      }
-
-      console.log('[TrialBalance v10.1] Opening entry detection', {
-        effectiveFiscalYearId,
-        hasFiscalYearOpeningEntry,
+        includeOpening,
+        includeLegacyNullFiscalYearEntries,
       })
 
       // ═════════════════════════════════════════════════════════
@@ -488,39 +643,52 @@ export const GET = withTenantAndPermission('accounting')(
       )
 
       // ═════════════════════════════════════════════════════════
-      //  ۴. کوئری اسناد
+      //  ۴. دریافت همه اسناد posted/confirmed تا toDate
+      //     ★ سپس در JS scope سال مالی اعمال می‌شود تا اسناد افتتاحیه legacy هم دیده شوند.
       // ═════════════════════════════════════════════════════════
-      const baseWhere: any = {
+      const allEntries = await fetchPostedEntriesUpTo(
+        tenantDb,
         tenantId,
-        status: {
-          in: POSTED_STATUS_VALUES,
-        },
-        isCancelled: false,
-      }
+        toDateExclusive
+      )
+
+      const fiscalScopedEntries = effectiveFiscalYearId
+        ? allEntries.filter((je: any) =>
+            isInSelectedFiscalScope(
+              je,
+              effectiveFiscalYearId!,
+              fyStart,
+              fyEnd,
+              includeOpening,
+              includeLegacyNullFiscalYearEntries
+            )
+          )
+        : allEntries
+
+      const hasFiscalYearOpeningEntry =
+        includeOpening &&
+        Boolean(effectiveFiscalYearId) &&
+        fiscalScopedEntries.some((je: any) => isOpeningEntry(je))
+
+      console.log('[TrialBalance v10.2] Scope detection', {
+        effectiveFiscalYearId,
+        allEntries: allEntries.length,
+        fiscalScopedEntries: fiscalScopedEntries.length,
+        hasFiscalYearOpeningEntry,
+        includeOpening,
+        includeLegacyNullFiscalYearEntries,
+      })
 
       // ─── حرکات داخل بازه ─────────────────────────────────────
-      const movementWhere: any = { ...baseWhere }
+      const movementSourceEntries = fiscalScopedEntries.filter((je: any) => {
+        const d = truncateUtcDay(je?.date)
+        if (!d) return false
 
-      if (fromDate && toDateExclusive) {
-        movementWhere.date = {
-          gte: fromDate,
-          lt: toDateExclusive,
-        }
-      } else if (fromDate) {
-        movementWhere.date = {
-          gte: fromDate,
-        }
-      } else if (toDateExclusive) {
-        movementWhere.date = {
-          lt: toDateExclusive,
-        }
-      }
+        if (fromDate && d < fromDate) return false
+        if (toDateExclusive && d >= toDateExclusive) return false
 
-      const movementEntries = await queryJournalEntries(
-        tenantDb,
-        movementWhere,
-        effectiveFiscalYearId
-      )
+        return true
+      })
 
       // ─── مانده افتتاحیه قبل از fromDate ──────────────────────
       // ★ فقط در حالت balance نیاز است
@@ -531,47 +699,39 @@ export const GET = withTenantAndPermission('accounting')(
       let openingScope:
         | 'none'
         | 'same_fiscal_year_only'
-        | 'all_prior_periods' = 'none'
+        | 'all_prior_periods'
+        | 'all_periods' = 'none'
 
       if (needOpening && fromDate) {
-        // ★ v10.1:
-        // اگر سال مالی انتخابی سند افتتاحیه دارد، مانده سنوات قبل را اضافه نکن.
-        // فقط حرکات همان سال مالی قبل از fromDate لحاظ می‌شود.
-        //
-        // دلیل:
-        // سند افتتاحیه خودش مانده سنوات قبل را منتقل کرده است.
-        // اگر دوباره مانده سنوات قبل را اضافه کنیم، double counting رخ می‌دهد.
-        openingScope = hasFiscalYearOpeningEntry
-          ? 'same_fiscal_year_only'
-          : 'all_prior_periods'
+        if (hasFiscalYearOpeningEntry) {
+          // اگر سال مالی سند افتتاحیه دارد، فقط همان سال مالی لحاظ شود.
+          // در غیر این صورت double counting رخ می‌دهد.
+          openingScope = 'same_fiscal_year_only'
 
-        const openingWhere: any = {
-          ...baseWhere,
-          date: {
-            lt: fromDate,
-          },
+          openingEntries = fiscalScopedEntries.filter((je: any) => {
+            const d = truncateUtcDay(je?.date)
+            return Boolean(d) && d! < fromDate!
+          })
+        } else {
+          // اگر سند افتتاحیه‌ای وجود ندارد، برای حفظ سازگاری با داده‌های قدیمی،
+          // مانده سنوات قبل از allEntries محاسبه می‌شود.
+          openingScope = effectiveFiscalYearId
+            ? 'all_prior_periods'
+            : 'all_periods'
+
+          openingEntries = allEntries.filter((je: any) => {
+            const d = truncateUtcDay(je?.date)
+            return Boolean(d) && d! < fromDate!
+          })
         }
-
-        const openingFiscalYearId = hasFiscalYearOpeningEntry
-          ? effectiveFiscalYearId
-          : null
-
-        openingEntries = await queryJournalEntries(
-          tenantDb,
-          openingWhere,
-          openingFiscalYearId
-        )
       }
 
-      console.log('[TrialBalance v10.1] Opening scope', {
+      console.log('[TrialBalance v10.2] Opening scope', {
         openingScope,
         needOpening,
         fromDate: fromDate?.toISOString() || null,
-      })
-
-      console.log('[TrialBalance v10.1] Entries fetched', {
-        movementEntries: movementEntries.length,
         openingEntries: openingEntries.length,
+        movementEntries: movementSourceEntries.length,
       })
 
       // ═════════════════════════════════════════════════════════
@@ -609,7 +769,7 @@ export const GET = withTenantAndPermission('accounting')(
         { debit: number; credit: number }
       >()
 
-      for (const je of movementEntries) {
+      for (const je of movementSourceEntries) {
         if (!shouldIncludeEntry(je)) continue
 
         const lines = je?.lines || []
@@ -854,7 +1014,7 @@ export const GET = withTenantAndPermission('accounting')(
         warning = warning || ALL_YEARS_WARNING
       }
 
-      console.log('[TrialBalance v10.1] Computed', {
+      console.log('[TrialBalance v10.2] Computed', {
         mode,
         fiscalYearId: effectiveFiscalYearId,
         hasFiscalYearOpeningEntry,
@@ -874,8 +1034,18 @@ export const GET = withTenantAndPermission('accounting')(
         fiscalYear: fiscalYearPayload,
         allYears,
         warning,
+        includeOpening,
+        includeLegacyNullFiscalYearEntries,
         hasFiscalYearOpeningEntry,
         openingScope,
+        diagnostics: {
+          allEntries: allEntries.length,
+          fiscalScopedEntries: fiscalScopedEntries.length,
+          movementEntries: movementSourceEntries.length,
+          openingEntries: openingEntries.length,
+          openingNetAccounts: openingNetMap.size,
+          movementAccounts: movementMap.size,
+        },
         data: {
           mode,
           isBalanced,
@@ -893,7 +1063,7 @@ export const GET = withTenantAndPermission('accounting')(
         },
       })
     } catch (error: any) {
-      console.error('[TrialBalance v10.1] Error:', error?.message || error)
+      console.error('[TrialBalance v10.2] Error:', error?.message || error)
 
       return NextResponse.json(
         {
