@@ -63,6 +63,25 @@ export type SortDirection = 'asc' | 'desc'
 
 /** نوع تجسم خروجی */
 export type VisualizationType = 'table' | 'bar' | 'line' | 'pie' | 'pivot'
+export type FiscalYearStrategy =
+  | 'direct'
+  | 'relation'
+  | 'date'
+  | 'none'
+
+export interface FiscalYearConfig {
+  strategy: FiscalYearStrategy
+  field?: string
+  relationPath?: string
+  dateField?: string
+  allowAllYears?: boolean
+  note?: string
+}
+
+export interface ReportFiscalYearPolicy {
+  mode: 'active' | 'selected' | 'all' | 'none'
+  fiscalYearId?: string | null
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  تعریف Dataset (منبع داده)
@@ -80,7 +99,7 @@ export interface DatasetField {
   description?: string
   isFormula?: boolean
   formula?: string
-  
+  nullable?: boolean
   // ★ جدید: اگر این فیلد یک رابطه است، مشخص می‌کنیم که برای گروه‌بندی از کدام فیلد اسکالر استفاده شود
   groupByKey?: string 
 }
@@ -121,6 +140,8 @@ export interface Dataset {
   /** حداکثر تعداد ردیف در preview (اگر محدودیت خاص دارد) */
   previewLimit?: number
     tenantFilterPath?: string
+
+    fiscalYear?: FiscalYearConfig
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -197,6 +218,7 @@ export interface ReportDefinition {
     type: VisualizationType
     config?: Record<string, any>
   }
+  fiscalYearPolicy?: ReportFiscalYearPolicy
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -265,6 +287,7 @@ export interface DatasetSummary {
   fieldsCount: number
   aggregatableFieldsCount: number
   allowGroupBy: boolean
+  fiscalYearStrategy?: FiscalYearStrategy
 }
 
 /** خلاصه یک گزارش ذخیره‌شده */

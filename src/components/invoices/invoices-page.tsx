@@ -813,6 +813,7 @@ export default function InvoicesPage() {
   const isOnline = useAppStore((s) => s.isOnline)
   const setCurrentView = useAppStore((s) => s.setCurrentView)
   const planName = useAppStore((s) => s.planName)
+    const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId) 
   const planFeatures = useMemo(() => getFeaturesByPlanName(planName), [planName])
 // ★ v9.4.0: آمار کلی (مستقل از صفحه‌بندی)
 interface GlobalStats {
@@ -859,16 +860,30 @@ const [loadingStats, setLoadingStats] = useState(false)
       return
     }
 
-    try {
+      try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const params = new URLSearchParams()
+      
       params.set('page', String(page))
       params.set('limit', '10')
       params.set('tenantId', tenantId)
-      if (statusFilter !== 'ALL') params.set('status', statusFilter)
+      
+      if (statusFilter !== 'ALL') {
+        params.set('status', statusFilter)
+      }
+
+      // ★★ اضافه کردن فیلتر سال مالی به درخواست ★★
+      if (selectedFiscalYearId) {
+        params.set('fiscalYearId', selectedFiscalYearId)
+      }
+
+      console.log('[Invoices Page] Fetching with FY:', selectedFiscalYearId) // لاگ دیباگ اختیاری
 
       const res = await fetch(`/api/invoices?${params.toString()}`, {
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { 
+          'Content-Type': 'application/json', 
+          ...(token ? { Authorization: `Bearer ${token}` } : {}) 
+        },
       })
       const result = await res.json()
 
@@ -905,7 +920,7 @@ const [loadingStats, setLoadingStats] = useState(false)
       }
       setLoading(false)
     }
-  }, [page, statusFilter, tenantId, isOnline, invoices.length])
+  }, [page, statusFilter, tenantId, isOnline, invoices.length, selectedFiscalYearId]) // ★ selectedFiscalYearId اضافه شد
 
 // ═══════════════════════════════════════════════════════════════
 // ★ v9.4.0: بارگذاری آمار کلی از سرور (مستقل از صفحه‌بندی)

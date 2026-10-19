@@ -1,10 +1,14 @@
 // ============================================================================
-// src/app/api/invoices/route.ts — v8.6 (Installment Rounding + COGS/Status Fixes)
+// src/app/api/invoices/route.ts — v9.0 (Fiscal Year Isolation)
 // ★ استفاده از db.client مستقیم برای جلوگیری از مشکل tenant isolation در Railway
+// ★ v9.0: ایزولاسیون کامل سال مالی
+//          - fiscalYearId در Invoice, StockMovement, Check, JournalEntry
+//          - فیلتر GET بر اساس سال مالی فعال یا انتخابی
+//          - اعتبارسنجی تاریخ فاکتور در بازه سال مالی
 // ★ v8.6: اصلاح rounding اقساط، COGS fallback، وضعیت فاکتور قسطی، پاسخ اقساط
 // ★ v8.5: ایجاد Check خارج از transaction (حل مشکل Railway Foreign Key)
 // ★ v8.4: اضافه کردن createdCheck به response
-// ★ v7.9: استفاده از حساب ۱۳۵۰ (چک‌های دریافتنی) برای جلوگیری از سند تکراری
+// ★ v7.9: استفاده از حساب ۱۳۵ (چک‌های دریافتنی) برای جلوگیری از سند تکراری
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -13,6 +17,70 @@ import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
 import type { PlanTier } from '@/lib/plan-features'
 import { generateJournalNumber } from '@/lib/journal-number-generator'
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v9.0: تابع کمکی — گرفتن سال مالی فعال
+// ═══════════════════════════════════════════════════════════════
+
+async function getActiveFiscalYear(tenantId: string) {
+  const activeYear = await db.client.fiscalYear.findFirst({
+    where: {
+      tenantId,
+      isActive: true,
+      isClosed: false,
+    },
+    orderBy: { startDate: 'desc' },
+  })
+
+  if (!activeYear) {
+    throw new Error('سال مالی فعالی برای این فروشگاه تعریف نشده است. لطفاً ابتدا سال مالی را ایجاد کنید.')
+  }
+
+  return activeYear
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v9.0: تابع کمکی — گرفتن سال مالی بر اساس ID یا فعال
+// ═══════════════════════════════════════════════════════════════
+
+async function resolveFiscalYear(tenantId: string, fiscalYearId?: string | null) {
+  if (fiscalYearId) {
+    const fy = await db.client.fiscalYear.findFirst({
+      where: { id: fiscalYearId, tenantId },
+    })
+    if (!fy) {
+      throw new Error('سال مالی انتخابی یافت نشد.')
+    }
+    return fy
+  }
+
+  return getActiveFiscalYear(tenantId)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ★ v9.0: تابع کمکی — اعتبارسنجی تاریخ در بازه سال مالی
+// ═══════════════════════════════════════════════════════════════
+
+function validateDateInFiscalYear(
+  date: Date,
+  fiscalYear: { startDate: Date; endDate: Date; name: string }
+) {
+  const d = new Date(date)
+  const start = new Date(fiscalYear.startDate)
+  const end = new Date(fiscalYear.endDate)
+
+  // مقایسه بدون ساعت
+  d.setHours(0, 0, 0, 0)
+  start.setHours(0, 0, 0, 0)
+  end.setHours(23, 59, 59, 999)
+
+  if (d < start || d > end) {
+    throw new Error(
+      `تاریخ انتخابی (${d.toLocaleDateString('fa-IR')}) خارج از بازه سال مالی «${fiscalYear.name}» است. ` +
+      `بازه مجاز: ${start.toLocaleDateString('fa-IR')} تا ${end.toLocaleDateString('fa-IR')}`
+    )
+  }
+}
 
 // ─── ایجاد سند حسابداری خودکار ────────────────────────────
 async function createAutoJournalEntry(
@@ -23,7 +91,8 @@ async function createAutoJournalEntry(
   paymentType: string,
   planTier: PlanTier,
   totalCogs: number,
-  paidAmount: number = 0
+  paidAmount: number = 0,
+  fiscalYearId?: string | null // ★ v9.0
 ) {
   try {
     console.log('[Invoices] 🚀 createAutoJournalEntry started for invoice:', invoice.number, 'paymentType:', paymentType)
@@ -77,7 +146,6 @@ async function createAutoJournalEntry(
     const taxAmount = Number(invoice.taxAmount || 0)
 
     // ★ v8.6: درآمد خالص فروش باید کل فاکتور منهای مالیات باشد
-    // این کار discounts آیتمی و تخفیف کلی را درست لحاظ می‌کند.
     const netSales = Math.max(0, totalAmount - taxAmount)
 
     const remainingAmount = totalAmount - paidAmount
@@ -145,6 +213,7 @@ async function createAutoJournalEntry(
         balanced: Math.abs(totalDebit - totalCredit) < 0.01,
         paymentType,
         lineCount: lines.length,
+        fiscalYearId: fiscalYearId || 'null',
       })
 
       await tx.journalEntry.create({
@@ -159,6 +228,7 @@ async function createAutoJournalEntry(
           totalCredit,
           createdBy: invoice.cashierId,
           tenantId,
+          fiscalYearId: fiscalYearId || null, // ★ v9.0
           lines: { create: lines },
         },
       })
@@ -194,7 +264,6 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
     const down = Math.max(0, Math.round(Number(downPayment) || 0))
     const invoiceTotal = Math.max(0, Math.round(Number(invoice.totalAmount) || 0))
 
-    // ★ v8.6: مبلغ قابل تقسیم باید دقیقاً باقیمانده فاکتور باشد
     let totalToInstall = Math.max(0, Math.round(Number(remainingAmount) || 0))
 
     if (totalToInstall <= 0) {
@@ -243,8 +312,6 @@ async function createInstallmentPlan(tx: any, tenantId: string, invoice: any, in
 
     for (let i = 1; i <= count; i++) {
       const dueDate = new Date(baseDate.getTime() + i * daysPerPeriod * 24 * 60 * 60 * 1000)
-
-      // ★ v8.6: توزیع دقیق ریال باقیمانده بین اقساط
       const amount = baseAmount + (i <= remainder ? 1 : 0)
 
       await tx.installmentSchedule.create({
@@ -342,38 +409,28 @@ function normalizeInstallmentPlan(plan: any) {
 
   return {
     ...plan,
-
-    // ★ مهم‌ترین بخش: فرانت‌اند دنبال schedule است
     schedule,
-
-    // برای سازگاری با نام‌های دیگر
     schedules: schedule,
     installments: schedule,
-
     numberOfInstallments:
       schedule.length > 0
         ? schedule.length
         : Number(plan.numberOfInstallments || 0),
-
     paidInstallments:
       schedule.length > 0
         ? paidCount
         : Number(plan.paidInstallments || 0),
-
     scheduleTotal,
     schedulePaidAmount: schedulePaid,
     scheduleRemainingAmount: scheduleRemaining,
-
     totalPaidAmount:
       plan.totalPaidAmount !== undefined && plan.totalPaidAmount !== null
         ? Number(plan.totalPaidAmount)
         : schedulePaid,
-
     nextDueDate:
       toIsoOrNull(plan.nextDueDate) ||
       nextDueSchedule?.dueDate ||
       null,
-
     status:
       plan.status ||
       (schedule.length > 0 && paidCount === schedule.length
@@ -448,190 +505,222 @@ function normalizeInvoiceForApi(inv: any) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/invoices (v8.5)
+//  GET /api/invoices (v9.0 — Fiscal Year Filter)
 // ═══════════════════════════════════════════════════════════════
-export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
-  try {
-    const { searchParams } = new URL(req.url)
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/invoices (v9.1 — Fiscal Year Filter + allYears Support)
+// ═══════════════════════════════════════════════════════════════
+export const GET = withTenantAndPermission('pos')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const { searchParams } = new URL(req.url)
 
-    const tenantId = searchParams.get('tenantId') || tenant.tenantId
-    const idParam = searchParams.get('id')
+      // ★ v9.1: پشتیبانی از allYears برای نمایش نسیه‌های باز از همه سال‌ها
+      const allYears = searchParams.get('allYears') === 'true'
 
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '50')
-    const status = searchParams.get('status')
-    const paymentType = searchParams.get('paymentType')
+         const tenantId = tenant.tenantId
+      const idParam = searchParams.get('id')
+      const fiscalYearIdParam = (searchParams.get('fiscalYearId') || '').trim()
 
-    const baseInclude = {
-      customer: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          mobile: true,
-          portalToken: true,
+      const page = parseInt(searchParams.get('page') || '1')
+      const limit = parseInt(searchParams.get('limit') || '50')
+      const status = searchParams.get('status')
+      const paymentType = searchParams.get('paymentType')
+
+      // ★ v9.1: تعیین سال مالی برای فیلتر
+      let effectiveFiscalYearId: string | null = null
+
+      if (!allYears) {
+        if (fiscalYearIdParam) {
+          effectiveFiscalYearId = fiscalYearIdParam
+        } else {
+          // پیش‌فرض: سال مالی فعال
+          try {
+            const activeFY = await getActiveFiscalYear(tenantId)
+            effectiveFiscalYearId = activeFY.id
+          } catch {
+            // اگر سال مالی فعال نداشت، بدون فیلتر سال برگردان
+            effectiveFiscalYearId = null
+          }
+        }
+      }
+
+      // ★ اگر allYears=true باشد، fiscalFilter خالی است و فیلتر سال مالی اعمال نمی‌شود
+      const fiscalFilter =
+        !allYears && effectiveFiscalYearId
+          ? { fiscalYearId: effectiveFiscalYearId }
+          : {}
+
+      const baseInclude = {
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            mobile: true,
+            portalToken: true,
+          },
         },
-      },
-      cashier: {
-        select: {
-          id: true,
-          username: true,
+        cashier: {
+          select: {
+            id: true,
+            username: true,
+          },
         },
-      },
-      items: true,
-      payments: true,
-    }
+        items: true,
+        payments: true,
+      }
 
-    const installmentInclude = {
-      installmentPlan: {
-        include: {
-          schedules: {
-            orderBy: {
-              installmentNumber: 'asc' as const,
+      const installmentInclude = {
+        installmentPlan: {
+          include: {
+            schedules: {
+              orderBy: {
+                installmentNumber: 'asc' as const,
+              },
             },
           },
         },
-      },
-    }
+      }
 
-    const checkInclude = {
-      checks: {
-        select: {
-          id: true,
-          status: true,
-          checkNumber: true,
-          bankName: true,
-          dueDate: true,
-        },
-        orderBy: {
-          createdAt: 'desc' as const,
-        },
-        take: 1,
-      },
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // ★ حالت تک‌فاکتور از طریق query: /api/invoices?id=xxx
-    // ═══════════════════════════════════════════════════════════════
-    if (idParam) {
-      let invoice: any = null
-
-      try {
-        invoice = await db.client.invoice.findFirst({
-          where: {
-            id: idParam,
-            tenantId,
+      const checkInclude = {
+        checks: {
+          select: {
+            id: true,
+            status: true,
+            checkNumber: true,
+            bankName: true,
+            dueDate: true,
           },
-          include: {
-            ...baseInclude,
-            ...installmentInclude,
-            ...checkInclude,
+          orderBy: {
+            createdAt: 'desc' as const,
           },
-        })
-      } catch (err: any) {
-        console.warn('[Invoices GET by id] Full include failed:', err?.message)
+          take: 1,
+        },
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // ★ حالت تک‌فاکتور از طریق query: /api/invoices?id=xxx
+      // ═══════════════════════════════════════════════════════════════
+      if (idParam) {
+        let invoice: any = null
 
         try {
           invoice = await db.client.invoice.findFirst({
             where: {
               id: idParam,
               tenantId,
+              ...fiscalFilter,
             },
             include: {
               ...baseInclude,
               ...installmentInclude,
+              ...checkInclude,
             },
           })
-        } catch (err2: any) {
-          console.warn('[Invoices GET by id] Installment include failed:', err2?.message)
+        } catch (err: any) {
+          console.warn('[Invoices GET by id] Full include failed:', err?.message)
 
-          invoice = await db.client.invoice.findFirst({
-            where: {
-              id: idParam,
-              tenantId,
-            },
-            include: baseInclude,
-          }).catch(() => null)
+          try {
+            invoice = await db.client.invoice.findFirst({
+              where: {
+                id: idParam,
+                tenantId,
+                ...fiscalFilter,
+              },
+              include: {
+                ...baseInclude,
+                ...installmentInclude,
+              },
+            })
+          } catch (err2: any) {
+            console.warn('[Invoices GET by id] Installment include failed:', err2?.message)
+
+            invoice = await db.client.invoice
+              .findFirst({
+                where: {
+                  id: idParam,
+                  tenantId,
+                  ...fiscalFilter,
+                },
+                include: baseInclude,
+              })
+              .catch(() => null)
+          }
         }
+
+        if (!invoice) {
+          return NextResponse.json(
+            { success: false, error: 'فاکتور یافت نشد' },
+            { status: 404 }
+          )
+        }
+
+        const normalized = normalizeInvoiceForApi(invoice)
+
+        console.log('[Invoices GET by id] ✅ Invoice loaded:', {
+          invoiceId: normalized.id,
+          invoiceNumber: normalized.invoiceNumber,
+          paymentType: normalized.paymentType,
+          fiscalYearId: normalized.fiscalYearId,
+          allYears,
+          hasInstallmentPlan: !!normalized.installmentPlan,
+          scheduleCount: normalized.installmentPlan?.schedule?.length || 0,
+          paidInstallments: normalized.installmentPlan?.paidInstallments || 0,
+          hasCheck: !!normalized.checkInfo,
+        })
+
+        return NextResponse.json({
+          success: true,
+          data: normalized,
+          allYears,
+          fiscalYearId: effectiveFiscalYearId,
+        })
       }
 
-      if (!invoice) {
-        return NextResponse.json(
-          { success: false, error: 'فاکتور یافت نشد' },
-          { status: 404 }
-        )
+      // ═══════════════════════════════════════════════════════════════
+      // ★ حالت لیست فاکتورها
+      // ═══════════════════════════════════════════════════════════════
+      const where: any = {
+        tenantId,
+        ...fiscalFilter,
       }
 
-      const normalized = normalizeInvoiceForApi(invoice)
-
-      console.log('[Invoices GET by id] ✅ Invoice loaded:', {
-        invoiceId: normalized.id,
-        invoiceNumber: normalized.invoiceNumber,
-        paymentType: normalized.paymentType,
-        hasInstallmentPlan: !!normalized.installmentPlan,
-        scheduleCount: normalized.installmentPlan?.schedule?.length || 0,
-        paidInstallments: normalized.installmentPlan?.paidInstallments || 0,
-        hasCheck: !!normalized.checkInfo,
-      })
-
-      return NextResponse.json({
-        success: true,
-        data: normalized,
-      })
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // ★ حالت لیست فاکتورها
-    // ═══════════════════════════════════════════════════════════════
-    const where: any = { tenantId }
-
-    if (status) {
-      const statusUpper = status.toUpperCase()
-      where.OR = [
-        { status: statusUpper },
-        { status: statusUpper.toLowerCase() },
-        ...(statusUpper === 'PENDING'
-          ? [{ paymentType: 'credit', status: { in: ['confirmed', 'Confirmed'] } }]
-          : []),
-        ...(statusUpper === 'PAID'
-          ? [{ paymentType: { in: ['cash', 'Cash', 'card', 'Card', 'check', 'Check'] }, paidAmount: { gt: 0 } }]
-          : []),
-        ...(statusUpper === 'PARTIAL'
-          ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }]
-          : []),
-      ]
-    }
-
-    if (paymentType) {
-      const ptLower = paymentType.toLowerCase()
-      const ptUpper = paymentType.toUpperCase()
-      const ptCapitalized = ptLower.charAt(0).toUpperCase() + ptLower.slice(1)
-
-      where.paymentType = {
-        in: [ptLower, ptUpper, ptCapitalized],
+      if (status) {
+        const statusUpper = status.toUpperCase()
+        where.OR = [
+          { status: statusUpper },
+          { status: statusUpper.toLowerCase() },
+          ...(statusUpper === 'PENDING'
+            ? [{ paymentType: 'credit', status: { in: ['confirmed', 'Confirmed'] } }]
+            : []),
+          ...(statusUpper === 'PAID'
+            ? [
+                {
+                  paymentType: { in: ['cash', 'Cash', 'card', 'Card', 'check', 'Check'] },
+                  paidAmount: { gt: 0 },
+                },
+              ]
+            : []),
+          ...(statusUpper === 'PARTIAL'
+            ? [{ remainingAmount: { gt: 0 }, paidAmount: { gt: 0 } }]
+            : []),
+        ]
       }
 
-      console.log('[Invoices GET] Filtering by paymentType:', where.paymentType)
-    }
+      if (paymentType) {
+        const ptLower = paymentType.toLowerCase()
+        const ptUpper = paymentType.toUpperCase()
+        const ptCapitalized = ptLower.charAt(0).toUpperCase() + ptLower.slice(1)
 
-    let invoices: any[] = []
+        where.paymentType = {
+          in: [ptLower, ptUpper, ptCapitalized],
+        }
 
-    try {
-      invoices = await db.client.invoice.findMany({
-        where,
-        include: {
-          ...baseInclude,
-          ...installmentInclude,
-          ...checkInclude,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-        skip: (page - 1) * limit,
-        take: limit,
-      })
-    } catch (err: any) {
-      console.warn('[Invoices GET] Full include failed, trying installment-only include:', err?.message)
+        console.log('[Invoices GET] Filtering by paymentType:', where.paymentType)
+      }
+
+      let invoices: any[] = []
 
       try {
         invoices = await db.client.invoice.findMany({
@@ -639,6 +728,7 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           include: {
             ...baseInclude,
             ...installmentInclude,
+            ...checkInclude,
           },
           orderBy: {
             createdAt: 'desc',
@@ -646,49 +736,79 @@ export const GET = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
           skip: (page - 1) * limit,
           take: limit,
         })
-      } catch (err2: any) {
-        console.warn('[Invoices GET] Installment include failed, using basic include:', err2?.message)
+      } catch (err: any) {
+        console.warn(
+          '[Invoices GET] Full include failed, trying installment-only include:',
+          err?.message
+        )
 
-        invoices = await db.client.invoice.findMany({
-          where,
-          include: baseInclude,
-          orderBy: {
-            createdAt: 'desc',
-          },
-          skip: (page - 1) * limit,
-          take: limit,
-        }).catch(() => [])
+        try {
+          invoices = await db.client.invoice.findMany({
+            where,
+            include: {
+              ...baseInclude,
+              ...installmentInclude,
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+            skip: (page - 1) * limit,
+            take: limit,
+          })
+        } catch (err2: any) {
+          console.warn(
+            '[Invoices GET] Installment include failed, using basic include:',
+            err2?.message
+          )
+
+          invoices = await db.client.invoice
+            .findMany({
+              where,
+              include: baseInclude,
+              orderBy: {
+                createdAt: 'desc',
+              },
+              skip: (page - 1) * limit,
+              take: limit,
+            })
+            .catch(() => [])
+        }
       }
-    }
 
-    const result = invoices.map(normalizeInvoiceForApi)
+      const result = invoices.map(normalizeInvoiceForApi)
 
-    const total = await db.client.invoice.count({ where })
+      const total = await db.client.invoice.count({ where })
 
-    console.log('[Invoices GET] Found invoices:', result.length, 'with paymentType filter:', paymentType)
-
-    return NextResponse.json({
-      success: true,
-      data: result,
-      pagination: {
-        page,
-        limit,
+      console.log('[Invoices GET] Found invoices:', {
+        count: result.length,
         total,
-        totalPages: Math.ceil(total / limit),
-      },
-    })
-  } catch (error: any) {
-    console.error('[Invoices] GET error:', error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در بارگذاری فاکتورها' },
-      { status: 500 }
-    )
-  }
-})
+        allYears,
+        fiscalYearId: effectiveFiscalYearId,
+      })
 
+      return NextResponse.json({
+        success: true,
+        data: result,
+        allYears,
+        fiscalYearId: effectiveFiscalYearId,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      })
+    } catch (error: any) {
+      console.error('[Invoices] GET error:', error)
+      return NextResponse.json(
+        { success: false, error: 'خطا در بارگذاری فاکتورها' },
+        { status: 500 }
+      )
+    }
+  }
+)
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/invoices (v8.5)
-//  ★ v8.5: Check creation OUTSIDE transaction (Railway fix)
+//  POST /api/invoices (v9.0 — Fiscal Year Isolation)
 // ═══════════════════════════════════════════════════════════════
 
 export const POST = withTenantAndPermission('pos')(async (
@@ -699,10 +819,10 @@ export const POST = withTenantAndPermission('pos')(async (
   try {
     const invoiceData = await req.json()
 
-    const tenantId = invoiceData.tenantId || tenant.tenantId
+    const tenantId = tenant.tenantId
     const items = invoiceData.items || []
 
-    console.log('\n=== 🚨 [Invoices POST v8.6] DEBUG RECEIVED DATA 🚨 ===')
+    console.log('\n=== 🚨 [Invoices POST v9.0] DEBUG RECEIVED DATA 🚨 ===')
     console.log('tenantId:', tenantId)
     console.log('paymentType:', invoiceData.paymentType)
     console.log('paidAmount:', invoiceData.paidAmount)
@@ -718,6 +838,10 @@ export const POST = withTenantAndPermission('pos')(async (
         { status: 400 }
       )
     }
+
+    // ★ v9.0: گرفتن سال مالی فعال
+    const activeFY = await getActiveFiscalYear(tenantId)
+    console.log('[Invoices POST] 📅 Active Fiscal Year:', activeFY.name, activeFY.id)
 
     const pt = (invoiceData.paymentType || 'cash').toLowerCase()
     const isCreditOrInstallment = pt === 'credit' || pt === 'installment' || pt === 'check'
@@ -744,7 +868,6 @@ export const POST = withTenantAndPermission('pos')(async (
     const paidAmount = Number(invoiceData.paidAmount) || 0
     const remainingAmount = totalAmount - paidAmount
 
-    // ★ v8.6: وضعیت فاکتور دقیق‌تر
     const invoiceStatus = isCreditOrInstallment
       ? (paidAmount > 0 && paidAmount < totalAmount ? 'partial' : 'unpaid')
       : (paidAmount >= totalAmount ? 'paid' : 'partial')
@@ -762,6 +885,17 @@ export const POST = withTenantAndPermission('pos')(async (
           if (firstWh) warehouseId = firstWh.id
         }
       } catch { /* ignore */ }
+    }
+
+    // ★ v9.0: اعتبارسنجی تاریخ فاکتور در بازه سال مالی
+    const invoiceDate = invoiceData.invoiceDate ? new Date(invoiceData.invoiceDate) : new Date()
+    try {
+      validateDateInFiscalYear(invoiceDate, activeFY)
+    } catch (dateErr: any) {
+      return NextResponse.json(
+        { success: false, error: dateErr.message, code: 'DATE_OUT_OF_FISCAL_YEAR' },
+        { status: 400 }
+      )
     }
 
     // بررسی موجودی
@@ -808,14 +942,14 @@ export const POST = withTenantAndPermission('pos')(async (
     let totalCogs = 0
 
     // ═══════════════════════════════════════════════════════════════
-    // TRANSACTION: فقط Invoice, Items, Payments, InstallmentPlan
+    // TRANSACTION
     // ═══════════════════════════════════════════════════════════════
     const result = await db.client.$transaction(async (tx: any) => {
       const inv = await tx.invoice.create({
         data: {
           number: invoiceNumber,
           customerId: invoiceData.customerId || null,
-          invoiceDate: new Date(),
+          invoiceDate,
           dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : null,
           status: invoiceStatus,
           paymentType: invoiceData.paymentType || 'cash',
@@ -828,6 +962,7 @@ export const POST = withTenantAndPermission('pos')(async (
           cashierId: tenant.user?.id || null,
           description: invoiceData.description || null,
           tenantId,
+          fiscalYearId: activeFY.id, // ★ v9.0
           ...(warehouseId ? { warehouseId } : {}),
         },
       })
@@ -836,6 +971,7 @@ export const POST = withTenantAndPermission('pos')(async (
         id: inv.id,
         number: inv.number,
         tenantId: inv.tenantId,
+        fiscalYearId: inv.fiscalYearId,
         paymentType: pt,
         status: invoiceStatus,
       })
@@ -868,7 +1004,6 @@ export const POST = withTenantAndPermission('pos')(async (
             })
           : null
 
-        // ★ v8.6: حتی آیتم‌های بدون productId هم ثبت می‌شوند
         await tx.invoiceItem.create({
           data: {
             invoiceId: inv.id,
@@ -884,8 +1019,6 @@ export const POST = withTenantAndPermission('pos')(async (
 
         if (!item.productId) continue
 
-        // ★ v8.6: محاسبه COGS با اولویت:
-        // StockLevel.averageCost → Product.purchasePrice → Product.salePrice → item.unitPrice
         let unitCost = Number(product?.purchasePrice || 0)
         let cogsSource = unitCost > 0 ? 'Product.purchasePrice' : 'unknown'
 
@@ -914,7 +1047,6 @@ export const POST = withTenantAndPermission('pos')(async (
               data: { quantity: { decrement: itemQty } },
             }).catch((err: any) => console.warn(`[Invoices POST] Failed to decrement StockLevel:`, err?.message))
           } else {
-            // ★ v8.6: اگر StockLevel وجود نداشت، از موجودی محصول برای ساخت رک انبار استفاده کن
             const remainingStock = Math.max(0, Number(product?.currentStock || 0) - itemQty)
 
             await tx.stockLevel.create({
@@ -928,6 +1060,7 @@ export const POST = withTenantAndPermission('pos')(async (
             }).catch((err: any) => console.warn(`[Invoices POST] Failed to create StockLevel:`, err?.message))
           }
 
+          // ★ v9.0: اضافه کردن fiscalYearId به StockMovement
           await tx.stockMovement.create({
             data: {
               tenantId,
@@ -939,6 +1072,7 @@ export const POST = withTenantAndPermission('pos')(async (
               referenceType: 'invoice',
               referenceId: inv.id,
               description: `فروش فاکتور ${invoiceNumber}`,
+              fiscalYearId: activeFY.id, // ★ v9.0
             },
           }).catch((err: any) => console.warn(`[Invoices POST] Failed to create StockMovement:`, err?.message))
         } else {
@@ -969,7 +1103,6 @@ export const POST = withTenantAndPermission('pos')(async (
 
       console.log('[Invoices POST] Total COGS calculated:', totalCogs)
 
-            // ★ v12.4: ذخیره cogsAmount در خود فاکتور برای گزارش‌ها
       if (totalCogs > 0) {
         await tx.invoice.update({
           where: { id: inv.id },
@@ -977,6 +1110,7 @@ export const POST = withTenantAndPermission('pos')(async (
         })
         console.log('[Invoices POST] ✅ cogsAmount saved to invoice:', totalCogs)
       }
+
       // ثبت پرداخت‌ها
       const payments = invoiceData.payments || []
 
@@ -1034,7 +1168,6 @@ export const POST = withTenantAndPermission('pos')(async (
         }).catch((err: any) => console.warn(`[Invoices POST] Failed to update customer balance:`, err?.message))
       }
 
-            // ★ v12.6: به‌روزرسانی تاریخ آخرین خرید مشتری
       if (invoiceData.customerId) {
         await tx.customer.update({
           where: { id: invoiceData.customerId },
@@ -1048,8 +1181,8 @@ export const POST = withTenantAndPermission('pos')(async (
     console.log('[Invoices POST] ✅ Transaction committed successfully')
 
     // ═══════════════════════════════════════════════════════════════
-    // ★ v8.5: ایجاد Check خارج از transaction (بعد از commit)
-    // ★ این کار مشکل Railway Foreign Key constraint را حل می‌کند
+    // ★ v8.5: ایجاد Check خارج از transaction
+    // ★ v9.0: اضافه کردن fiscalYearId
     // ═══════════════════════════════════════════════════════════════
     let createdCheck: any = null
     if (pt === 'check' && remainingAmount > 0) {
@@ -1075,9 +1208,9 @@ export const POST = withTenantAndPermission('pos')(async (
           bankName,
           amount: remainingAmount,
           dueDate: checkDueDate,
+          fiscalYearId: activeFY.id,
         })
 
-        // ★ v8.5: استفاده از db.client (نه tx) چون خارج از transaction هستیم
         createdCheck = await db.client.check.create({
           data: {
             tenantId,
@@ -1093,6 +1226,7 @@ export const POST = withTenantAndPermission('pos')(async (
             description: `چک دریافتی بابت فاکتور ${result.number}`,
             status: 'pending',
             invoiceId: result.id,
+            fiscalYearId: activeFY.id, // ★ v9.0
           },
         })
 
@@ -1101,6 +1235,7 @@ export const POST = withTenantAndPermission('pos')(async (
           checkNumber: createdCheck.checkNumber,
           invoiceId: createdCheck.invoiceId,
           amount: createdCheck.amount,
+          fiscalYearId: createdCheck.fiscalYearId,
         })
       } catch (err: any) {
         console.error('[Invoices POST] ❌ Check creation failed:', err?.message)
@@ -1110,7 +1245,17 @@ export const POST = withTenantAndPermission('pos')(async (
 
     // ایجاد سند حسابداری (بعد از transaction)
     const planTier = tenant.planTier || 'basic'
-    await createAutoJournalEntry(db.client, tenantId, result, items, pt, planTier, totalCogs, paidAmount)
+    await createAutoJournalEntry(
+      db.client,
+      tenantId,
+      result,
+      items,
+      pt,
+      planTier,
+      totalCogs,
+      paidAmount,
+      activeFY.id // ★ v9.0
+    )
 
     // ═══════════════════════════════════════════════════════════════
     // ★ v11.6.4: ثبت خودکار تراکنش صندوق
@@ -1123,19 +1268,51 @@ export const POST = withTenantAndPermission('pos')(async (
                              pt === 'installment' ? 'installment' :
                              'sale'
 
-        await (db.client as any).cashMovement.create({
-          data: {
-            shiftId: null,
-            tenantId,
-            cashierId,
-            transactionType: movementType,
-            paymentMethod: invoiceData.downPaymentMethod || pt,
-            amount: paidAmount,
-            type: 'in',
-            invoiceId: result.id,
-            description: `فروش فاکتور ${invoiceNumber}`,
-          },
-        })
+         const cashMovementBaseData: any = {
+          shiftId: null,
+          tenantId,
+          cashierId,
+          transactionType: movementType,
+          paymentMethod: invoiceData.downPaymentMethod || pt,
+          amount: paidAmount,
+          type: 'in',
+          invoiceId: result.id,
+          description: `فروش فاکتور ${invoiceNumber}`,
+        }
+
+        try {
+          await (db.client as any).cashMovement.create({
+            data: {
+              ...cashMovementBaseData,
+              fiscalYearId: activeFY.id,
+            },
+          })
+        } catch (err: any) {
+          const msg = String(err?.message || '')
+
+          if (
+            msg.includes('fiscalYearId') &&
+            (
+              msg.includes('Unknown field') ||
+              msg.includes('does not exist') ||
+              msg.includes('Invalid')
+            )
+          ) {
+            await (db.client as any).cashMovement
+              .create({ data: cashMovementBaseData })
+              .catch((innerErr: any) => {
+                console.warn(
+                  '[Invoices POST] CashMovement fallback failed:',
+                  innerErr?.message
+                )
+              })
+          } else {
+            console.warn(
+              '[Invoices POST] CashMovement creation failed:',
+              msg
+            )
+          }
+        }
 
         console.log('[Invoices POST] ✅ CashMovement created:', {
           type: movementType,
@@ -1176,7 +1353,6 @@ export const POST = withTenantAndPermission('pos')(async (
       console.warn('[Invoices] Moidian auto-submit hook failed:', err?.message)
     }
 
-    // ★ v8.6: بازگشت response با createdCheck و installmentPlan
     return NextResponse.json({
       success: true,
       data: {
@@ -1206,7 +1382,7 @@ export const POST = withTenantAndPermission('pos')(async (
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT /api/invoices (v8.5)
+//  PUT /api/invoices (v9.0)
 // ═══════════════════════════════════════════════════════════════
 
 export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
@@ -1217,7 +1393,7 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
       return NextResponse.json({ success: false, error: 'شناسه فاکتور الزامی است' }, { status: 400 })
     }
 
-    const tenantId = body.tenantId || tenant.tenantId
+    const tenantId = tenant.tenantId
     const where: any = { id: body.id, tenantId }
     const existing = await db.client.invoice.findFirst({ where })
     if (!existing) {
@@ -1272,6 +1448,7 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
                 referenceType: 'invoice',
                 referenceId: existing.id,
                 description: `برگشت از لغو فاکتور ${existing.number}`,
+                fiscalYearId: existing.fiscalYearId || null, // ★ v9.0
               },
             }).catch((err: any) => console.warn(`[Invoices PUT] Failed to create StockMovement:`, err?.message))
           }
@@ -1309,23 +1486,18 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
 })
 
 // ═══════════════════════════════════════════════════════════════
-//  DELETE /api/invoices (v8.5)
+//  DELETE /api/invoices (v9.0)
 // ═══════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════
-//  DELETE /api/invoices (v11.6.8 - حذف هوشمند)
-//  ★ فاکتور پرداخت‌نشده: حذف کامل
-//  ★ فاکتور پرداخت‌شده: فقط لغو با سند اصلاحی
-// ═══════════════════════════════════════════════════════════════
 export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
     const tenantDb = tenant?.tenantDb || db.client
-    const tenantIdFromTenant = tenant?.tenantId
+    const tenantId = tenant?.tenantId
 
     const { searchParams } = new URL(req.url)
+    const allYears = searchParams.get('allYears') === 'true'
     const invoiceId = searchParams.get('id')
-    const tenantId = searchParams.get('tenantId') || tenantIdFromTenant
-    const forceDelete = searchParams.get('force') === 'true' // برای حذف اجباری توسط ادمین
+    const forceDelete = searchParams.get('force') === 'true'
 
     if (!invoiceId) {
       return NextResponse.json(
@@ -1351,9 +1523,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
     const isPaid = paidAmount > 0
     const isCancelled = (invoice.status || '').toLowerCase() === 'cancelled'
 
-    // ═══════════════════════════════════════════════════════════════
-    // بررسی: آیا فاکتور قبلاً لغو شده؟
-    // ═══════════════════════════════════════════════════════════════
     if (isCancelled && !forceDelete) {
       return NextResponse.json(
         { success: false, error: 'این فاکتور قبلاً لغو شده است' },
@@ -1361,31 +1530,22 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
       )
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // منطق هوشمند: حذف کامل یا لغو؟
-    // ═══════════════════════════════════════════════════════════════
     const canHardDelete = !isPaid || forceDelete
 
     console.log(`[DELETE] 🎯 Invoice ${invoice.number}: paidAmount=${paidAmount}, isPaid=${isPaid}, isReturn=${isReturn}, force=${forceDelete}, canHardDelete=${canHardDelete}`)
 
     if (isPaid && !forceDelete) {
-      // فاکتور پرداخت‌شده: فقط لغو می‌شود (نه حذف فیزیکی)
       console.log(`[DELETE] 🔄 Invoice ${invoice.number} is paid - will CANCEL only`)
-
       return await cancelPaidInvoice(tenantDb, tenantId, invoice, isReturn)
     }
 
-    // فاکتور پرداخت‌نشده: حذف فیزیکی کامل
     console.log(`[DELETE] 🗑️ Invoice ${invoice.number} will be HARD DELETED`)
 
     await tenantDb.$transaction(async (tx: any) => {
-      // ═══ ۱. حذف تراکنش‌های صندوق ═══
       await tx.cashMovement.deleteMany({
         where: { invoiceId }
       }).catch(() => {})
 
-      // ═══ ۲. حذف فیزیکی سندهای حسابداری ═══
-      // ابتدا خطوط سند را حذف می‌کنیم (چون foreign key دارند)
       const journalEntries = await tx.journalEntry.findMany({
         where: { tenantId, sourceId: invoiceId },
         select: { id: true },
@@ -1400,12 +1560,10 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }).catch(() => {})
       }
 
-      // ═══ ۳. حذف پرداخت‌ها ═══
       await tx.invoicePayment.deleteMany({
         where: { invoiceId }
       }).catch(() => {})
 
-      // ═══ ۴. حذف پلن اقساطی (اگر وجود دارد) ═══
       if (String(invoice.paymentType || '').toLowerCase() === 'installment') {
         try {
           const plan = await tx.installmentPlan.findUnique({
@@ -1425,12 +1583,10 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      // ═══ ۵. حذف پرداخت‌های آنلاین ═══
       await tx.onlinePayment.deleteMany({
         where: { invoiceId }
       }).catch(() => {})
 
-      // ═══ . حذف/باطل کردن چک‌های مرتبط ═══
       if (String(invoice.paymentType || '').toLowerCase() === 'check') {
         try {
           await tx.check.deleteMany({
@@ -1441,7 +1597,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      // ═══ ۷. بازگرداندن موجودی ═══
       const warehouseId = invoice.warehouseId
       if (warehouseId && invoice.items?.length > 0) {
         for (const item of invoice.items) {
@@ -1450,7 +1605,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
           if (qty <= 0) continue
 
           if (isReturn) {
-            // فاکتور برگشتی: موجودی کاهش می‌یابد
             await tx.stockLevel.update({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
               data: { quantity: { decrement: qty } },
@@ -1460,7 +1614,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
               data: { currentStock: { decrement: qty } },
             }).catch(() => {})
           } else {
-            // فاکتور فروش: موجودی افزایش می‌یابد (برگشت)
             await tx.stockLevel.update({
               where: { warehouseId_productId: { warehouseId, productId: item.productId } },
               data: { quantity: { increment: qty } },
@@ -1473,7 +1626,6 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      // ═══ ۸. به‌روزرسانی مانده مشتری ═══
       if (!isReturn && (invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
         const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
         if (remainingAmount > 0) {
@@ -1484,17 +1636,14 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
         }
       }
 
-      // ═══ ۹. حذف حرکات کالا ═══
       await tx.stockMovement.deleteMany({
         where: { tenantId, referenceId: invoiceId }
       }).catch(() => {})
 
-      // ═══ ۱۰. حذف آیتم‌های فاکتور ═══
       await tx.invoiceItem.deleteMany({
         where: { invoiceId }
       })
 
-      // ═══ ۱۱. حذف فاکتور ═══
       await tx.invoice.delete({
         where: { id: invoiceId }
       })
@@ -1518,7 +1667,7 @@ export const DELETE = withTenantAndPermission('pos')(async (req: NextRequest, ct
 })
 
 // ═══════════════════════════════════════════════════════════════
-// تابع کمکی: لغو فاکتور پرداخت‌شده (با صدور سند اصلاحی)
+// تابع کمکی: لغو فاکتور پرداخت‌شده
 // ═══════════════════════════════════════════════════════════════
 async function cancelPaidInvoice(
   tx: any,
@@ -1530,7 +1679,6 @@ async function cancelPaidInvoice(
     const warehouseId = invoice.warehouseId
 
     await tx.$transaction(async (txInner: any) => {
-      // ═══ ۱. تغییر وضعیت فاکتور به cancelled ═══
       await txInner.invoice.update({
         where: { id: invoice.id },
         data: {
@@ -1539,7 +1687,6 @@ async function cancelPaidInvoice(
         },
       })
 
-      // ═══ ۲. بازگرداندن موجودی ═══
       if (warehouseId && invoice.items?.length > 0) {
         for (const item of invoice.items) {
           if (!item.productId) continue
@@ -1568,7 +1715,6 @@ async function cancelPaidInvoice(
         }
       }
 
-      // ═══ ۳. به‌روزرسانی مانده مشتری ═══
       if ((invoice.paymentType === 'credit' || invoice.paymentType === 'installment' || invoice.paymentType === 'check') && invoice.customerId) {
         const remainingAmount = Number(invoice.totalAmount) - Number(invoice.paidAmount)
         if (remainingAmount > 0) {
@@ -1579,7 +1725,6 @@ async function cancelPaidInvoice(
         }
       }
 
-      // ═══ ۴. لغو چک‌های مرتبط ═══
       if (String(invoice.paymentType || '').toLowerCase() === 'check') {
         try {
           await txInner.check.updateMany({
@@ -1597,7 +1742,6 @@ async function cancelPaidInvoice(
         }
       }
 
-      // ═══ ۵. لغو سندهای حسابداری (نه حذف فیزیکی) ═══
       const journalEntries = await txInner.journalEntry.findMany({
         where: { tenantId, sourceId: invoice.id },
         select: { id: true },
@@ -1614,9 +1758,6 @@ async function cancelPaidInvoice(
         }).catch(() => {})
       }
 
-      // ═══ ۶. صدور سند اصلاحی (برای حفظ ترازنامه) ═══
-      // این سند باعث می‌شود که اعداد در گزارش‌ها درست باقی بمانند
-      // و ترازنامه به هم نریزد
       console.log(`[Cancel] 📝 Correction journal for ${invoice.number}`)
     })
 

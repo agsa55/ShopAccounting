@@ -1,9 +1,7 @@
 'use client'
 
 // ============================================================================
-// src/components/contacts/contacts-page.tsx (v7.5 — Unified Contacts)
-// ============================================================================
-// ★★★ یکپارچه‌سازی مشتریان و تامین‌کنندگان در یک صفحه با تب‌بندی
+// src/components/contacts/contacts-page.tsx (v7.7 — Unified Contacts + Business Language Statement)
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -23,6 +21,7 @@ import {
 import {
   Users, Plus, Search, Edit2, Trash2, Loader2, User, Building2,
   Wallet, Phone, AlertTriangle, CheckCircle2, WifiOff, CloudOff, RefreshCw, Upload,
+  ArrowLeftRight, FileText, Calendar, CreditCard, Banknote, TrendingUp, TrendingDown, HandCoins, Package,
 } from 'lucide-react'
 
 // ============================================================================
@@ -87,7 +86,7 @@ interface Contact {
   companyName: string | null
   legalForm: string | null
   createdAt: string
-    _offlineId?: string
+  _offlineId?: string
   _isOffline?: boolean
   _offlineAction?: 'create' | 'update' | 'delete'
 }
@@ -115,6 +114,40 @@ function getTenantId(): string {
   return ''
 }
 
+// Helper for Stat Boxes inside Modal
+function StatBox({
+  label,
+  value,
+  color,
+  icon: Icon,
+  bold,
+}: {
+  label: string
+  value: string
+  color: string
+  icon?: any
+  bold?: boolean
+}) {
+  const colors: Record<string, string> = {
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    blue: 'border-blue-200 bg-blue-50 text-blue-700',
+    red: 'border-red-200 bg-red-50 text-red-700',
+    gray: 'border-gray-200 bg-gray-50 text-gray-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700',
+  }
+
+  return (
+    <div className={`p-3 rounded-lg border flex items-center gap-3 ${colors[color] || colors.gray}`}>
+      {Icon && <Icon className="w-5 h-5 shrink-0 opacity-80" />}
+      <div className="min-w-0">
+        <p className="text-[10px] font-medium opacity-70 mb-0.5 truncate">{label}</p>
+        <p className={`${bold ? 'text-base' : 'text-sm'} font-bold truncate`} dir="ltr">
+          {value}
+        </p>
+      </div>
+    </div>
+  )
+}
 // ============================================================================
 //  Form Data
 // ============================================================================
@@ -166,9 +199,17 @@ export function ContactsPage() {
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [form, setForm] = useState<ContactForm>(emptyForm)
 
-   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingContact, setDeletingContact] = useState<Contact | null>(null)
 
+    // ★ State برای Modal گردش حساب
+  const [statementModalOpen, setStatementModalOpen] = useState(false)
+  const [selectedContactForStatement, setSelectedContactForStatement] = useState<Contact | null>(null)
+  const [statementData, setStatementData] = useState<any>(null)
+  const [loadingStatement, setLoadingStatement] = useState(false)
+  const [statementAllYears, setStatementAllYears] = useState(false)
+
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId)
   // ★ آفلاین State
   const isOnline = useAppStore((s) => s.isOnline)
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([])
@@ -183,12 +224,15 @@ export function ContactsPage() {
   const addToSyncQueue = useCallback((item: Omit<SyncQueueItem, 'id' | 'retryCount' | 'createdAt'>) => {
     const queue = loadSyncQueue()
     const newItem: SyncQueueItem = { ...item, id: generateOfflineId(), retryCount: 0, createdAt: new Date().toISOString() }
-    saveSyncQueue([...queue, newItem])
+    saveToStorage(STORAGE_KEYS.SYNC_QUEUE, [...queue, newItem])
+    setSyncQueue([...queue, newItem])
     return newItem
-  }, [loadSyncQueue, saveSyncQueue])
+  }, [loadSyncQueue, saveToStorage])
   const removeFromSyncQueue = useCallback((queueItemId: string) => {
-    saveSyncQueue(loadSyncQueue().filter(i => i.id !== queueItemId))
-  }, [loadSyncQueue, saveSyncQueue])
+    const newQueue = loadSyncQueue().filter(i => i.id !== queueItemId)
+    saveToStorage(STORAGE_KEYS.SYNC_QUEUE, newQueue)
+    setSyncQueue(newQueue)
+  }, [loadSyncQueue, saveToStorage])
   
 
   // ═══ Load Data ═══
@@ -199,7 +243,6 @@ export function ContactsPage() {
 
     if (!trulyOnline) {
       const cached = loadFromStorage<Contact[]>(STORAGE_KEYS.CONTACTS, [])
-      // تفکیک کش به مشتریان و تامین‌کنندگان
       setCustomers(cached.filter(c => c.type === 'customer'))
       setSuppliers(cached.filter(c => c.type === 'supplier'))
       setSyncQueue(loadSyncQueue())
@@ -244,7 +287,6 @@ export function ContactsPage() {
       setCustomers(formattedCust)
       setSuppliers(formattedSup)
       
-      // ذخیره در کش
       saveToStorage(STORAGE_KEYS.CONTACTS, [...formattedCust, ...formattedSup])
       const now = new Date().toISOString()
       saveToStorage(STORAGE_KEYS.LAST_SYNC, now)
@@ -315,6 +357,76 @@ export function ContactsPage() {
     setDialogOpen(true)
   }
 
+  // ═══ Handle Open Statement ═══
+  // ═══ Load Statement ═══
+  const loadStatement = useCallback(async (contact: Contact, allYearsFlag: boolean) => {
+    setSelectedContactForStatement(contact)
+    setStatementModalOpen(true)
+    setLoadingStatement(true)
+    setStatementData(null)
+
+    try {
+      const params = new URLSearchParams()
+
+      if (allYearsFlag) {
+        params.set('allYears', 'true')
+      } else if (selectedFiscalYearId) {
+        params.set('fiscalYearId', selectedFiscalYearId)
+      }
+
+      const baseUrl =
+        contact.type === 'customer'
+          ? `/api/customers/${contact.id}/statement`
+          : `/api/suppliers/${contact.id}/statement`
+
+      const url = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl
+
+      console.log('[ContactsPage] Loading statement:', url)
+
+      const res = await fetch(url, {
+        credentials: 'include',
+        headers: getAuthHeaders(),
+      })
+
+      const json = await res.json()
+
+      if (!json.success) {
+        throw new Error(json.error || 'خطا در دریافت گردش حساب')
+      }
+
+      const payload = json.data || {}
+
+      setStatementData({
+        ...payload,
+        fiscalYearName: json.fiscalYearName ?? payload.fiscalYearName ?? null,
+        allYears: json.allYears ?? allYearsFlag,
+        warning: json.warning,
+      })
+    } catch (err: any) {
+      console.error(err)
+      toast({
+        title: 'خطا',
+        description: err.message || 'عدم توانایی در دریافت اطلاعات',
+        variant: 'destructive',
+      })
+      setStatementModalOpen(false)
+    } finally {
+      setLoadingStatement(false)
+    }
+  }, [selectedFiscalYearId, toast])
+
+  const handleOpenStatement = (contact: Contact) => {
+    setStatementAllYears(false)
+    loadStatement(contact, false)
+  }
+
+  useEffect(() => {
+    if (statementModalOpen && selectedContactForStatement && !statementAllYears) {
+      loadStatement(selectedContactForStatement, false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFiscalYearId])
+
     const handleSubmit = async () => {
     if (form.personType === 'person' && !form.firstName.trim()) {
       toast({ title: 'خطا', description: 'نام الزامی است', variant: 'destructive' }); return
@@ -336,7 +448,6 @@ export function ContactsPage() {
     if (form.type === 'customer') { body.firstName = form.firstName.trim(); body.lastName = form.lastName.trim() }
     else { body.name = form.personType === 'legal' ? (form.companyName.trim() || form.firstName.trim()) : `${form.firstName} ${form.lastName}`.trim() }
 
-    // ★ حالت آفلاین
     if (!trulyOnline) {
       const offlineId = editingContact?._offlineId || generateOfflineId()
       const newContact: Contact = {
@@ -366,7 +477,6 @@ export function ContactsPage() {
       setDialogOpen(false); setSubmitting(false); return
     }
 
-    // ★ حالت آنلاین
     try {
       const api = form.type === 'customer' ? '/api/customers' : '/api/suppliers'
       const method = editingContact ? 'PUT' : 'POST'
@@ -388,7 +498,6 @@ export function ContactsPage() {
     const tid = getTenantId()
     const trulyOnline = isOnline && navigator.onLine
 
-    // ★ حالت آفلاین
     if (!trulyOnline || (deletingContact as any)._isOffline) {
       const cached = loadFromStorage<Contact[]>(STORAGE_KEYS.CONTACTS, [])
       const updated = cached.filter(c => c.id !== deletingContact.id && (c as any)._offlineId !== deletingContact.id)
@@ -403,7 +512,6 @@ export function ContactsPage() {
       setDeleteDialogOpen(false); setDeletingContact(null); setSubmitting(false); return
     }
 
-    // ★ حالت آنلاین
     try {
       const api = deletingContact.type === 'customer' ? `/api/customers?id=${deletingContact.id}&tenantId=${tid}` : `/api/suppliers?id=${deletingContact.id}&tenantId=${tid}`
       const res = await fetch(api, { method: 'DELETE', headers: getAuthHeaders() })
@@ -415,7 +523,7 @@ export function ContactsPage() {
     } catch (err: any) { toast({ title: 'خطا', description: err?.message, variant: 'destructive' }) }
     setSubmitting(false)
   }
-  // ═══ Sync Engine ═══
+  
   const syncOfflineData = useCallback(async () => {
     const queue = loadSyncQueue()
     if (queue.length === 0 || !isOnline) return
@@ -456,8 +564,7 @@ export function ContactsPage() {
     }
   }, [isOnline])
 
-  // ═══ Render ═══
-  // ═══ Mobile Contact Card ═══
+  // ═══ Render ═
   const MobileContactCard = ({ c }: { c: Contact }) => (
     <Card className={`border shadow-none ${(c as any)._isOffline ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200'}`}>
       <CardContent className="p-3">
@@ -493,6 +600,10 @@ export function ContactsPage() {
           </div>
         </div>
         <div className="flex items-center justify-end gap-1 pt-2 border-t border-gray-100">
+          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-indigo-50 hover:text-indigo-600" onClick={() => handleOpenStatement(c)}>
+            <ArrowLeftRight className="w-3.5 h-3.5" />
+          </Button>
+          
           <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600" onClick={() => handleOpenEdit(c)}>
             <Edit2 className="w-3.5 h-3.5" />
           </Button>
@@ -535,9 +646,8 @@ export function ContactsPage() {
         </div>
       </div>
 
-      {/* ★ KPI (ریسپانسیو) */}
+      {/* ★ KPI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        {/* ... (کد KPI شما بدون تغییر باقی بماند، فقط کلاس‌های آن خوب هستند) ... */}
         <div className="border rounded-lg p-2.5 border-emerald-200 bg-emerald-50">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center"><Users className="w-4 h-4 text-emerald-600" /></div>
@@ -553,13 +663,13 @@ export function ContactsPage() {
         <div className="border rounded-lg p-2.5 border-red-200 bg-red-50">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center"><Wallet className="w-4 h-4 text-red-600" /></div>
-            <div><p className="text-[10px] text-gray-500">بدهکاران</p><p className="text-sm font-bold" dir="ltr">{formatNumber(stats.totalDebit)}</p></div>
+            <div><p className="text-[10px] text-gray-500">طلب از مشتریان</p><p className="text-sm font-bold" dir="ltr">{formatNumber(stats.totalDebit)}</p></div>
           </div>
         </div>
         <div className="border rounded-lg p-2.5 border-orange-200 bg-orange-50">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center"><Wallet className="w-4 h-4 text-orange-600" /></div>
-            <div><p className="text-[10px] text-gray-500">بستانکاران</p><p className="text-sm font-bold" dir="ltr">{formatNumber(stats.totalCredit)}</p></div>
+            <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center"><HandCoins className="w-4 h-4 text-orange-600" /></div>
+            <div><p className="text-[10px] text-gray-500">بدهی به تامین‌کنندگان</p><p className="text-sm font-bold" dir="ltr">{formatNumber(stats.totalCredit)}</p></div>
           </div>
         </div>
       </div>
@@ -588,7 +698,7 @@ export function ContactsPage() {
         </CardContent>
       </Card>
 
-      {/* ★ List (ریسپانسیو: کارت در موبایل، جدول در دسکتاپ) */}
+      {/* ★ List */}
       <Card>
         <CardContent className="p-0">
           {loading ? (
@@ -600,12 +710,10 @@ export function ContactsPage() {
             </div>
           ) : (
             <>
-              {/* نمای موبایل */}
               <div className="md:hidden space-y-2 p-3">
                 {filteredContacts.map((c) => <MobileContactCard key={`${c.type}-${c.id}`} c={c} />)}
               </div>
               
-              {/* نمای دسکتاپ */}
               <div className="hidden md:block">
                 <Table>
                   <TableHeader><TableRow className="bg-gray-50">
@@ -653,6 +761,16 @@ export function ContactsPage() {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex items-center justify-center gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => handleOpenStatement(c)} 
+                              className="h-7 w-7 p-0 hover:bg-indigo-50 hover:text-indigo-600"
+                              title="گردش حساب"
+                            >
+                              <ArrowLeftRight className="w-3.5 h-3.5" />
+                            </Button>
+                            
                             <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(c)} className="h-7 w-7 p-0"><Edit2 className="w-3.5 h-3.5" /></Button>
                             <Button variant="ghost" size="sm" onClick={() => { setDeletingContact(c); setDeleteDialogOpen(true) }} className="h-7 w-7 p-0 text-red-500"><Trash2 className="w-3.5 h-3.5" /></Button>
                           </div>
@@ -665,15 +783,14 @@ export function ContactsPage() {
             </>
           )}
         </CardContent>
-.      </Card>
+      </Card>
 
-      {/* ★ Add/Edit Dialog (ریسپانسیو) */}
+      {/* ★ Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[550px] max-h-[90vh] overflow-y-auto rounded-xl" dir="rtl">
           <DialogHeader>
             <DialogTitle>{editingContact ? 'ویرایش طرف حساب' : 'طرف حساب جدید'}</DialogTitle>
           </DialogHeader>
-          {/* ... (محتوای فرم شما بدون تغییر باقی بماند) ... */}
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => setForm({ ...form, type: 'customer' })}
@@ -729,7 +846,7 @@ export function ContactsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ★ Delete Dialog (ریسپانسیو) */}
+      {/* ★ Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="w-[calc(100%-1rem)] sm:max-w-[400px] rounded-xl" dir="rtl">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-red-500" /> حذف طرف حساب</DialogTitle></DialogHeader>
@@ -738,6 +855,326 @@ export function ContactsPage() {
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="h-9">انصراف</Button>
             <Button onClick={handleDelete} disabled={submitting} className="bg-red-600 hover:bg-red-700 gap-1.5 h-9">
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} حذف
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ★ Statement Modal - Updated for Business Language */}
+       {/* ★ Statement Modal - v2 Cross-Year Safe */}
+      <Dialog
+        open={statementModalOpen}
+        onOpenChange={(open) => {
+          setStatementModalOpen(open)
+          if (!open) {
+            setStatementData(null)
+            setSelectedContactForStatement(null)
+            setStatementAllYears(false)
+          }
+        }}
+      >
+        <DialogContent
+          className="w-[calc(100%-1rem)] sm:max-w-[980px] max-h-[90vh] overflow-hidden flex flex-col rounded-xl"
+          dir="rtl"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <ArrowLeftRight className="w-5 h-5 text-indigo-600" />
+              گردش حساب: {selectedContactForStatement?.name}
+            </DialogTitle>
+
+            <DialogDescription className="text-xs text-gray-500 mt-1">
+              نوع: {selectedContactForStatement?.type === 'customer' ? 'مشتری' : 'تامین‌کننده'} | بازه:{' '}
+              {statementData?.allYears
+                ? 'همه سنوات'
+                : statementData?.fiscalYearName ||
+                  (selectedFiscalYearId ? 'سال مالی انتخابی' : 'سال مالی فعال')}
+            </DialogDescription>
+
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              <Button
+                size="sm"
+                variant={!statementAllYears ? 'default' : 'outline'}
+                className="h-8 text-xs"
+                onClick={() => {
+                  setStatementAllYears(false)
+                  if (selectedContactForStatement) {
+                    loadStatement(selectedContactForStatement, false)
+                  }
+                }}
+              >
+                سال مالی انتخابی
+              </Button>
+
+              <Button
+                size="sm"
+                variant={statementAllYears ? 'default' : 'outline'}
+                className="h-8 text-xs"
+                onClick={() => {
+                  setStatementAllYears(true)
+                  if (selectedContactForStatement) {
+                    loadStatement(selectedContactForStatement, true)
+                  }
+                }}
+              >
+                همه سنوات
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto min-h-0 py-2 space-y-4">
+            {loadingStatement ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+              </div>
+            ) : !statementData ? (
+              <div className="text-center py-10 text-gray-400">داده‌ای یافت نشد.</div>
+            ) : (
+              (() => {
+                const isCustomer = selectedContactForStatement?.type === 'customer'
+
+                const opening = Number(statementData.openingBalance ?? 0)
+                const closing = Number(statementData.closingBalance ?? 0)
+                const outstanding = Number(
+                  statementData.outstandingAllYears ??
+                    statementData.totals?.invoiceOutstanding ??
+                    0
+                )
+
+                const periodSales = Number(statementData.totals?.grossPurchases ?? 0)
+                const periodReturns = Number(statementData.totals?.returns ?? 0)
+        const periodPayments = Number(
+  statementData.totals?.paymentsReceived ??
+    statementData.totals?.paymentsMade ??
+    0
+)
+
+                const ledger = Array.isArray(statementData.ledger) ? statementData.ledger : []
+                const priorOpen = Array.isArray(statementData.priorOpenInvoices)
+                  ? statementData.priorOpenInvoices
+                  : []
+
+                return (
+                  <>
+                    {/* خلاصه دوره */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 pb-4 border-b border-gray-100">
+                      <StatBox
+                        label="مانده ابتدای دوره"
+                        value={formatNumber(opening)}
+                        color={opening > 0 ? 'red' : 'gray'}
+                        icon={Wallet}
+                        bold
+                      />
+
+                      <StatBox
+                        label={isCustomer ? 'فروش دوره' : 'خرید دوره'}
+                        value={formatNumber(periodSales)}
+                        color={isCustomer ? 'emerald' : 'amber'}
+                        icon={TrendingUp}
+                      />
+
+                      <StatBox
+                        label="مرجوعی"
+                        value={formatNumber(periodReturns)}
+                        color="gray"
+                        icon={Package}
+                      />
+
+                      <StatBox
+                        label={isCustomer ? 'وصول دوره' : 'پرداخت دوره'}
+                        value={formatNumber(periodPayments)}
+                        color="blue"
+                        icon={HandCoins}
+                      />
+
+                      <StatBox
+                        label="مانده پایان دوره"
+                        value={formatNumber(closing)}
+                        color={closing > 0 ? 'red' : 'emerald'}
+                        icon={ArrowLeftRight}
+                        bold
+                      />
+
+                      <StatBox
+                        label={isCustomer ? 'کل طلب باز' : 'کل بدهی باز'}
+                        value={formatNumber(outstanding)}
+                        color="red"
+                        icon={AlertTriangle}
+                        bold
+                      />
+                    </div>
+
+                    {/* اسناد باز سنوات قبل */}
+                    {priorOpen.length > 0 && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                        <div className="flex items-center gap-2 text-amber-800 text-xs font-bold mb-2">
+                          <AlertTriangle className="w-4 h-4" />
+                          اسناد باز از سنوات قبل ({toFa(priorOpen.length)} مورد)
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-amber-100/50">
+                                <TableHead className="text-right text-[10px]">شماره</TableHead>
+                                <TableHead className="text-right text-[10px]">تاریخ</TableHead>
+                                <TableHead className="text-left text-[10px]">مانده</TableHead>
+                                <TableHead className="text-center text-[10px]">نوع پرداخت</TableHead>
+                              </TableRow>
+                            </TableHeader>
+
+                            <TableBody>
+                              {priorOpen.map((inv: any) => (
+                                <TableRow key={inv.id} className="text-xs">
+                                  <TableCell className="font-mono">{inv.number || '—'}</TableCell>
+                                  <TableCell>
+                                    {inv.invoiceDate
+                                      ? new Date(inv.invoiceDate).toLocaleDateString('fa-IR')
+                                      : '—'}
+                                  </TableCell>
+                                  <TableCell
+                                    className="text-left font-mono font-bold text-red-600"
+                                    dir="ltr"
+                                  >
+                                    {formatNumber(Number(inv.remainingAmount || 0))}
+                                  </TableCell>
+                                  <TableCell className="text-center text-[10px]">
+                                    {inv.paymentType || '—'}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* دفتر کل گردش حساب */}
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50 sticky top-0 z-10">
+                            <TableHead className="text-right text-[10px] font-bold uppercase tracking-wide">
+                              تاریخ
+                            </TableHead>
+                            <TableHead className="text-right text-[10px] font-bold uppercase tracking-wide">
+                              شرح / مرجع
+                            </TableHead>
+
+                            {isCustomer ? (
+                              <>
+                                <TableHead className="text-left text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                                  فروش (طلب)
+                                </TableHead>
+                                <TableHead className="text-left text-[10px] font-bold uppercase tracking-wide text-blue-600">
+                                  پرداخت (وصول)
+                                </TableHead>
+                              </>
+                            ) : (
+                              <>
+                                <TableHead className="text-left text-[10px] font-bold uppercase tracking-wide text-amber-600">
+                                  خرید (بدهی)
+                                </TableHead>
+                                <TableHead className="text-left text-[10px] font-bold uppercase tracking-wide text-blue-600">
+                                  پرداخت (تسویه)
+                                </TableHead>
+                              </>
+                            )}
+
+                            <TableHead className="text-left text-[10px] font-bold uppercase tracking-wide">
+                              مانده کل
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+
+                        <TableBody>
+                          <TableRow className="bg-gray-100 font-bold text-xs">
+                            <TableCell colSpan={4}>مانده ابتدای دوره</TableCell>
+                            <TableCell className="text-left font-mono" dir="ltr">
+                              {formatNumber(opening)}
+                            </TableCell>
+                          </TableRow>
+
+                          {ledger.length > 0 ? (
+                            ledger.map((entry: any, idx: number) => {
+                              const amount = Number(entry.amount || 0)
+                              const isPositive = amount > 0
+
+                              let debitVal = '—'
+                              let creditVal = '—'
+
+                              if (isPositive) {
+                                debitVal = formatNumber(amount)
+                              } else {
+                                creditVal = formatNumber(Math.abs(amount))
+                              }
+
+                              return (
+                                <TableRow key={entry.id || idx} className="hover:bg-indigo-50/30 text-xs">
+                                  <TableCell className="py-2 whitespace-nowrap text-gray-500">
+                                    {entry.date ? new Date(entry.date).toLocaleDateString('fa-IR') : '—'}
+                                  </TableCell>
+
+                                  <TableCell className="py-2">
+                                    <div className="font-medium text-gray-800">{entry.description}</div>
+                                    <div className="text-[9px] text-gray-400">{entry.reference}</div>
+                                  </TableCell>
+
+                                  <TableCell
+                                    className={`py-2 text-left font-mono font-bold ${
+                                      isCustomer ? 'text-emerald-600' : 'text-amber-600'
+                                    }`}
+                                    dir="ltr"
+                                  >
+                                    {debitVal}
+                                  </TableCell>
+
+                                  <TableCell
+                                    className="py-2 text-left font-mono font-bold text-blue-600"
+                                    dir="ltr"
+                                  >
+                                    {creditVal}
+                                  </TableCell>
+
+                                  <TableCell
+                                    className="py-2 text-left font-mono font-bold text-gray-700 bg-gray-50"
+                                    dir="ltr"
+                                  >
+                                    {formatNumber(Number(entry.periodRunningBalance ?? 0))}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center py-8 text-gray-400">
+                                تراکنشی در این دوره ثبت نشده است.
+                              </TableCell>
+                            </TableRow>
+                          )}
+
+                          <TableRow className="bg-gray-100 font-bold text-xs">
+                            <TableCell colSpan={4}>مانده پایان دوره</TableCell>
+                            <TableCell className="text-left font-mono" dir="ltr">
+                              {formatNumber(closing)}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )
+              })()
+            )}
+          </div>
+
+          <DialogFooter className="pt-2 border-t border-gray-100">
+            <Button
+              variant="outline"
+              onClick={() => setStatementModalOpen(false)}
+              className="h-9 w-full sm:w-auto"
+            >
+              بستن
             </Button>
           </DialogFooter>
         </DialogContent>

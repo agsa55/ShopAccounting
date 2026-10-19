@@ -1,33 +1,94 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/initial-balance-tab.tsx
-// ShopAccounting — تب راه‌اندازی اولیه (سند افتتاحیه)
-// ★ v11.9.2: لایه ۱ — هشدار قبل از ثبت نهایی (جلوگیری از خطای کاربر)
-// ★ v11.9.1: لاگ‌های سیستمی اضافه شد
+// src/components/settings/initial-balance-tab.tsx — v12.0 Fiscal Year Safe
+// ShopAccounting — Initial Balance Tab (Opening Journal Entry)
+// ============================================================================
+// ★ v12.0 تغییرات:
+//   - نمایش اطلاعات سال مالی فعال
+//   - غیرفعال کردن ثبت نهایی اگر سال مالی فعال نباشد
+//   - هشدار اگر سال مالی فعال بسته شده باشد
+//   - استفاده از jalali-utils برای تاریخ شمسی
+//   - رفع باگ تراز سند
 // ============================================================================
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
 import { useStore } from '@/lib/store'
-import { getTenantIdFromStore } from '@/lib/tenant-utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
-  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog'
 import {
-  Wallet, Plus, Pencil, Trash2, Loader2, CheckCircle2, AlertCircle,
-  AlertTriangle, Save, TrendingUp, TrendingDown, Package,
+  Wallet,
+  Plus,
+  Pencil,
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Save,
+  TrendingUp,
+  TrendingDown,
+  Package,
+  Calendar,
+  Info,
+  Lock,
 } from 'lucide-react'
+import {
+  formatDateJalali,
+  formatDateLongJalali,
+  toPersianDigits,
+} from '@/lib/jalali-utils'
+
+// ─── Helpers ─────────────────────────────────────────────────
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('token')
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+function safeNum(value: any): number {
+  if (value === null || value === undefined || value === '') return 0
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const n = parseFloat(value.replace(/,/g, ''))
+    return Number.isFinite(n) ? n : 0
+  }
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function formatCurrency(value: any): string {
+  return `${Math.round(safeNum(value)).toLocaleString('fa-IR')} ریال`
+}
+
+// ─── Component ───────────────────────────────────────────────
 
 export function InitialBalanceTab() {
   const { toast } = useToast()
@@ -38,10 +99,12 @@ export function InitialBalanceTab() {
   const [submitting, setSubmitting] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
+  const [activeFiscalYear, setActiveFiscalYear] = useState<any>(null)
+  const [hasOpenFiscalYear, setHasOpenFiscalYear] = useState(false)
+
   const [pendingItems, setPendingItems] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
 
-  // ★ v11.9.2: State برای هشدار قبل از ثبت نهایی
   const [showWarningModal, setShowWarningModal] = useState(false)
   const [warningReasons, setWarningReasons] = useState<string[]>([])
   const [pendingPostAction, setPendingPostAction] = useState<(() => Promise<void>) | null>(null)
@@ -55,72 +118,40 @@ export function InitialBalanceTab() {
     description: '',
   })
 
+  const canPost = hasOpenFiscalYear
+
+  // ─── Load Data ────────────────────────────────────────────
+
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const tid = getTenantIdFromStore()
-      if (!tid) return
+      const headers = getAuthHeaders()
 
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('token')
-        : null
-      const headers = token
-        ? { Authorization: `Bearer ${token}` }
-        : undefined
-
-      const [balRes, prodRes, journalRes] = await Promise.all([
-        fetch('/api/initial-balance', { ...(headers && { headers }) }),
-        fetch('/api/products?limit=100', { ...(headers && { headers }) }),
-        fetch('/api/journal-entries?sourceType=initial_balance&limit=10', { ...(headers && { headers }) }),
+      const [balRes, prodRes] = await Promise.all([
+        fetch('/api/initial-balance', { headers }),
+        fetch('/api/products?limit=100', { headers }),
       ])
-      
-      const balData = await balRes.json()
-      const prodData = await prodRes.json()
-      const journalData = await journalRes.json()
+
+      const balData = await balRes.json().catch(() => ({}))
+      const prodData = await prodRes.json().catch(() => ({}))
 
       if (balData.success) {
-        let apiItems = Array.isArray(balData.data) ? balData.data : []
-        
-        if (apiItems.length === 0 && journalData.success && journalData.data?.entries?.length > 0) {
-          console.log('[InitialBalanceTab] ⚠️ InitialBalances empty but JournalEntries found — recovering...')
-          
-          const openingJE = journalData.data.entries.find((e: any) => 
-            e.sourceType === 'initial_balance'
-          )
-          
-          if (openingJE && openingJE.lines && openingJE.lines.length > 0) {
-            apiItems = openingJE.lines.map((line: any, idx: number) => ({
-              id: `recovered-${idx}`,
-              type: line.debit > 0 ? 'cash' : 'liability',
-              title: line.description || line.accountName || `آیتم ${idx + 1}`,
-              amount: Math.abs(line.debit || line.credit || 0),
-              debitAmount: line.debit || 0,
-              creditAmount: line.credit || 0,
-              description: line.description,
-              journalEntryId: openingJE.id,
-              isPosted: true,
-              accountCode: line.accountCode,
-              accountName: line.accountName,
-              _recovered: true,
-            }))
-            
-            console.log('[InitialBalanceTab] ✅ Recovered', apiItems.length, 'items from JournalEntry')
-          }
-        }
-        
+        const apiItems = Array.isArray(balData.data) ? balData.data : []
         setSavedItems(apiItems)
+        setActiveFiscalYear(balData.activeFiscalYear || null)
+        setHasOpenFiscalYear(Boolean(balData.hasOpenFiscalYear))
 
-        if (balData.summary && apiItems.length > 0 && !balData.summary?.isPosted) {
-          setSummary(balData.summary)
-        } else if (apiItems.length > 0) {
+        if (apiItems.length > 0) {
           const assets = apiItems
             .filter((b: any) =>
               ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type)
             )
-            .reduce((s: number, b: any) => s + (b.amount || 0), 0)
+            .reduce((s: number, b: any) => s + safeNum(b.amount), 0)
+
           const liabs = apiItems
             .filter((b: any) => b.type === 'liability')
-            .reduce((s: number, b: any) => s + (b.amount || 0), 0)
+            .reduce((s: number, b: any) => s + safeNum(b.amount), 0)
+
           setSummary({
             isPosted: apiItems.some((b: any) => b.isPosted),
             journalEntryId: apiItems.find((b: any) => b.journalEntryId)
@@ -129,9 +160,30 @@ export function InitialBalanceTab() {
             totalLiabilities: liabs,
             equity: assets - liabs,
             count: apiItems.length,
+            productCount: balData.summary?.productCount || 0,
+            warehouseCount: balData.summary?.warehouseCount || 0,
+            totalInventoryValue:
+              balData.summary?.totalInventoryValue || 0,
+            postedFiscalYearName:
+              balData.summary?.postedFiscalYearName || null,
+            postedFiscalYearIsClosed:
+              balData.summary?.postedFiscalYearIsClosed || false,
           })
         } else {
-          setSummary(null)
+          setSummary({
+            isPosted: false,
+            journalEntryId: null,
+            totalAssets: 0,
+            totalLiabilities: 0,
+            equity: 0,
+            count: 0,
+            productCount: balData.summary?.productCount || 0,
+            warehouseCount: balData.summary?.warehouseCount || 0,
+            totalInventoryValue:
+              balData.summary?.totalInventoryValue || 0,
+            postedFiscalYearName: null,
+            postedFiscalYearIsClosed: false,
+          })
         }
 
         setPendingItems([])
@@ -154,6 +206,8 @@ export function InitialBalanceTab() {
     loadData()
   }, [loadData])
 
+  // ─── Add Item ──────────────────────────────────────────────
+
   const handleAddItem = () => {
     if (!form.title.trim()) {
       toast({
@@ -163,7 +217,8 @@ export function InitialBalanceTab() {
       })
       return
     }
-    const amt = Number(form.amount)
+
+    const amt = safeNum(form.amount)
     if (!form.amount || amt <= 0) {
       toast({
         title: 'خطا',
@@ -172,6 +227,7 @@ export function InitialBalanceTab() {
       })
       return
     }
+
     if (form.type === 'inventory' && !form.productId) {
       toast({
         title: 'خطا',
@@ -208,6 +264,8 @@ export function InitialBalanceTab() {
     })
   }
 
+  // ─── Save ──────────────────────────────────────────────────
+
   const handleSave = async (postToJournal: boolean = false) => {
     if (pendingItems.length === 0) {
       toast({
@@ -218,19 +276,25 @@ export function InitialBalanceTab() {
       return
     }
 
+    if (postToJournal && !canPost) {
+      toast({
+        title: 'خطا',
+        description:
+          'سال مالی فعال و بازی وجود ندارد. ابتدا یک سال مالی فعال تعریف کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     setSubmitting(true)
     try {
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('token')
-        : null
-
       const allItems = [
         ...savedItems
           .filter((b) => !summary?.isPosted)
           .map((b) => ({
             type: b.type,
             title: b.title,
-            amount: b.amount,
+            amount: safeNum(b.amount),
             accountId: b.accountId || undefined,
             productId: b.productId || undefined,
             quantity: b.quantity || undefined,
@@ -239,7 +303,7 @@ export function InitialBalanceTab() {
         ...pendingItems.map((b) => ({
           type: b.type,
           title: b.title,
-          amount: b.amount,
+          amount: safeNum(b.amount),
           accountId: b.accountId || undefined,
           productId: b.productId || undefined,
           quantity: b.quantity || undefined,
@@ -249,41 +313,32 @@ export function InitialBalanceTab() {
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           items: allItems,
           postToJournal,
         }),
       })
+
       const data = await res.json()
 
       if (data.success) {
-        // ★ v11.9.1: لاگ ذخیره سند افتتاحیه
         const assets = allItems
-          .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
-          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+          .filter((b) =>
+            ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type)
+          )
+          .reduce((s, b) => s + safeNum(b.amount), 0)
         const liabs = allItems
           .filter((b) => b.type === 'liability')
-          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
+          .reduce((s, b) => s + safeNum(b.amount), 0)
 
         logger.info('سند افتتاحیه ذخیره شد', {
-          postToJournal: postToJournal,
+          postToJournal,
           itemsCount: allItems.length,
           totalAssets: assets,
           totalLiabilities: liabs,
           equity: assets - liabs,
-          itemsBreakdown: {
-            cash: allItems.filter(b => b.type === 'cash').length,
-            bank: allItems.filter(b => b.type === 'bank').length,
-            inventory: allItems.filter(b => b.type === 'inventory').length,
-            fixedAsset: allItems.filter(b => b.type === 'fixed_asset').length,
-            liability: allItems.filter(b => b.type === 'liability').length,
-          },
-          journalEntryId: data.data?.journalEntryId || null,
-          isUpdate: savedItems.length > 0,
+          fiscalYearName: data.data?.journalEntry?.fiscalYearName || null,
         })
 
         toast({
@@ -292,11 +347,9 @@ export function InitialBalanceTab() {
         })
         await loadData()
       } else {
-        // ★ v11.9.1: لاگ خطای ذخیره سند افتتاحیه
         logger.error('خطا در ذخیره سند افتتاحیه', undefined, {
-          postToJournal: postToJournal,
-          itemsCount: allItems.length,
           error: data.error,
+          code: data.code,
         })
 
         toast({
@@ -317,50 +370,32 @@ export function InitialBalanceTab() {
     }
   }
 
+  // ─── Delete ────────────────────────────────────────────────
+
   const handleDelete = async () => {
     setSubmitting(true)
     try {
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('token')
-        : null
-
       const forceParam = summary?.isPosted ? '?force=true' : ''
-
-      // ذخیره اطلاعات قبلی برای لاگ
-      const deletedInfo = {
-        itemsCount: savedItems.length,
-        isPosted: summary?.isPosted || false,
-        journalEntryId: summary?.journalEntryId || null,
-        totalAssets: summary?.totalAssets || 0,
-        totalLiabilities: summary?.totalLiabilities || 0,
-        equity: summary?.equity || 0,
-        forceUsed: !!forceParam,
-      }
 
       const res = await fetch(`/api/initial-balance${forceParam}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
       })
+
       const data = await res.json()
+
       if (data.success) {
-        // ★ v11.9.1: لاگ حذف سند افتتاحیه
         logger.info('سند افتتاحیه حذف شد', {
-          itemsCount: deletedInfo.itemsCount,
-          wasPosted: deletedInfo.isPosted,
-          journalEntryId: deletedInfo.journalEntryId,
-          totalAssets: deletedInfo.totalAssets,
-          totalLiabilities: deletedInfo.totalLiabilities,
-          equity: deletedInfo.equity,
-          forceUsed: deletedInfo.forceUsed,
+          itemsCount: savedItems.length,
+          wasPosted: summary?.isPosted || false,
+          forceUsed: !!forceParam,
         })
 
         toast({
           title: 'حذف شد ✓',
           description: data.message,
         })
+
         setSavedItems([])
         setSummary(null)
         setPendingItems([])
@@ -368,25 +403,14 @@ export function InitialBalanceTab() {
         await loadData()
       } else {
         if (data.needsForce) {
-          console.log('[InitialBalanceTab] Retrying with force=true')
           const retryRes = await fetch('/api/initial-balance?force=true', {
             method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
+            headers: getAuthHeaders(),
           })
-          const retryData = await retryRes.json()
-          if (retryData.success) {
-            // ★ v11.9.1: لاگ حذف سند افتتاحیه با force (retry)
-            logger.info('سند افتتاحیه با force حذف شد', {
-              itemsCount: savedItems.length,
-              wasPosted: summary?.isPosted || false,
-              journalEntryId: summary?.journalEntryId || null,
-              forceUsed: true,
-              wasRetry: true,
-            })
 
+          const retryData = await retryRes.json()
+
+          if (retryData.success) {
             toast({
               title: 'حذف شد ✓',
               description: retryData.message,
@@ -399,10 +423,6 @@ export function InitialBalanceTab() {
             return
           }
         }
-        
-        logger.error('خطا در حذف سند افتتاحیه', undefined, {
-          error: data.error,
-        })
 
         toast({
           title: 'خطا',
@@ -411,7 +431,6 @@ export function InitialBalanceTab() {
         })
       }
     } catch (err) {
-      logger.error('خطای شبکه در حذف سند افتتاحیه', err as Error)
       toast({
         title: 'خطا',
         description: 'ارتباط با سرور برقرار نشد',
@@ -421,6 +440,8 @@ export function InitialBalanceTab() {
       setSubmitting(false)
     }
   }
+
+  // ─── Finalize Draft ───────────────────────────────────────
 
   const handleFinalizeDraft = async () => {
     if (savedItems.length === 0) {
@@ -432,16 +453,22 @@ export function InitialBalanceTab() {
       return
     }
 
+    if (!canPost) {
+      toast({
+        title: 'خطا',
+        description:
+          'سال مالی فعال و بازی وجود ندارد. ابتدا یک سال مالی فعال تعریف کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     setSubmitting(true)
     try {
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('token')
-        : null
-
       const draftItems = savedItems.map((b: any) => ({
         type: b.type,
         title: b.title,
-        amount: b.amount,
+        amount: safeNum(b.amount),
         accountId: b.accountId || undefined,
         productId: b.productId || undefined,
         quantity: b.quantity || undefined,
@@ -450,47 +477,28 @@ export function InitialBalanceTab() {
 
       const res = await fetch('/api/initial-balance', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           items: draftItems,
           postToJournal: true,
         }),
       })
+
       const data = await res.json()
 
       if (data.success) {
-        // ★ v11.9.1: لاگ ثبت نهایی سند افتتاحیه
-        const assets = draftItems
-          .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
-          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
-        const liabs = draftItems
-          .filter((b) => b.type === 'liability')
-          .reduce((s, b) => s + (Number(b.amount) || 0), 0)
-
         logger.info('سند افتتاحیه پیش‌نویس به سند قطعی تبدیل شد', {
           itemsCount: draftItems.length,
-          totalAssets: assets,
-          totalLiabilities: liabs,
-          equity: assets - liabs,
-          journalEntryId: data.data?.journalEntryId || null,
-          wasDraft: true,
+          fiscalYearName: data.data?.journalEntry?.fiscalYearName || null,
         })
 
         toast({
           title: 'سند افتتاحیه صادر شد ✓',
-          description: data.message || 'سند قطعی افتتاحیه با موفقیت ثبت شد',
+          description:
+            data.message || 'سند قطعی افتتاحیه با موفقیت ثبت شد',
         })
         await loadData()
       } else {
-        // ★ v11.9.1: لاگ خطای ثبت نهایی
-        logger.error('خطا در ثبت نهایی سند افتتاحیه', undefined, {
-          itemsCount: draftItems.length,
-          error: data.error,
-        })
-
         toast({
           title: 'خطا',
           description: data.error || 'ثبت نهایی ناموفق بود',
@@ -498,7 +506,6 @@ export function InitialBalanceTab() {
         })
       }
     } catch (err) {
-      logger.error('خطای شبکه در ثبت نهایی سند افتتاحیه', err as Error)
       toast({
         title: 'خطا',
         description: 'ارتباط با سرور برقرار نشد',
@@ -509,21 +516,15 @@ export function InitialBalanceTab() {
     }
   }
 
+  // ─── Edit Draft ────────────────────────────────────────────
+
   const handleEditDraft = () => {
     if (savedItems.length === 0) return
-
-    // ★ v11.9.1: لاگ ورود به حالت ویرایش پیش‌نویس
-    logger.info('ورود به حالت ویرایش سند افتتاحیه', {
-      itemsCount: savedItems.length,
-      previousTotalAssets: summary?.totalAssets || 0,
-      previousTotalLiabilities: summary?.totalLiabilities || 0,
-      wasPosted: summary?.isPosted || false,
-    })
 
     const editable = savedItems.map((b: any) => ({
       type: b.type,
       title: b.title,
-      amount: Number(b.amount) || 0,
+      amount: safeNum(b.amount),
       productId: b.productId || null,
       quantity: b.quantity != null ? Number(b.quantity) : null,
       description: b.description || null,
@@ -536,31 +537,30 @@ export function InitialBalanceTab() {
 
     toast({
       title: 'حالت ویرایش',
-      description: 'آیتم‌های سند برای ویرایش بارگذاری شدند. تغییرات را اعمال و سپس ثبت کنید.',
+      description:
+        'آیتم‌های سند برای ویرایش بارگذاری شدند. تغییرات را اعمال و سپس ثبت کنید.',
     })
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★ v11.9.2: بررسی قبل از ثبت نهایی (لایه ۱ — هشدار)
-  // ═══════════════════════════════════════════════════════════════
+  // ─── Pre-post checks ──────────────────────────────────────
+
   const checkBeforePost = (): string[] => {
     const warnings: string[] = []
-
     const productCount = products.length
 
-    // بررسی ۱: آیا کالایی ثبت شده است؟
     if (productCount === 0) {
       warnings.push('هیچ کالایی در سیستم ثبت نشده است')
     } else {
-      // بررسی ۲: آیا موجودی کالا در سند هست؟
       const allItems = [...savedItems, ...pendingItems]
       const hasInventoryInBalance = allItems.some(
-        (b) => b.type === 'inventory' && (Number(b.amount) || 0) > 0
+        (b) => b.type === 'inventory' && safeNum(b.amount) > 0
       )
 
       if (!hasInventoryInBalance) {
         warnings.push(
-          `شما ${productCount} کالا در سیستم دارید اما ارزش موجودی کالا در سند افتتاحیه وارد نشده است`
+          `شما ${toPersianDigits(
+            productCount
+          )} کالا در سیستم دارید اما ارزش موجودی کالا در سند افتتاحیه وارد نشده است`
         )
       }
     }
@@ -568,11 +568,19 @@ export function InitialBalanceTab() {
     return warnings
   }
 
-  // ★ v11.9.2: Wrapper برای ثبت نهایی پیش‌نویس
   const handleFinalizeDraftWithCheck = async () => {
+    if (!canPost) {
+      toast({
+        title: 'خطا',
+        description:
+          'سال مالی فعال و بازی وجود ندارد. ابتدا سال مالی فعال تعریف کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     const warnings = checkBeforePost()
     if (warnings.length > 0) {
-      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
       setWarningReasons(warnings)
       setPendingPostAction(() => handleFinalizeDraft)
       setShowWarningModal(true)
@@ -581,11 +589,19 @@ export function InitialBalanceTab() {
     await handleFinalizeDraft()
   }
 
-  // ★ v11.9.2: Wrapper برای ثبت + صدور سند
   const handleSaveWithCheck = async () => {
+    if (!canPost) {
+      toast({
+        title: 'خطا',
+        description:
+          'سال مالی فعال و بازی وجود ندارد. ابتدا سال مالی فعال تعریف کنید.',
+        variant: 'destructive',
+      })
+      return
+    }
+
     const warnings = checkBeforePost()
     if (warnings.length > 0) {
-      logger.info('⚠️ هشدار قبل از ثبت نهایی', { warnings })
       setWarningReasons(warnings)
       setPendingPostAction(() => () => handleSave(true))
       setShowWarningModal(true)
@@ -594,7 +610,6 @@ export function InitialBalanceTab() {
     await handleSave(true)
   }
 
-  // ★ v11.9.2: تایید عملیات از مودال هشدار
   const confirmPendingAction = async () => {
     if (!pendingPostAction) return
     setShowWarningModal(false)
@@ -603,53 +618,94 @@ export function InitialBalanceTab() {
     await action()
   }
 
-  // ★ v11.9.2: هدایت کاربر به بخش کالاها
   const goToProducts = () => {
     setShowWarningModal(false)
     setPendingPostAction(null)
     useStore.getState().setCurrentView('products' as any)
     toast({
       title: '📦 بخش کالاها',
-      description: 'ابتدا کالاهای فروشگاه را ثبت کنید، سپس به این صفحه برگردید.',
+      description:
+        'ابتدا کالاهای فروشگاه را ثبت کنید، سپس به این صفحه برگردید.',
     })
   }
 
-  const formatNumber = (n: number) => (n || 0).toLocaleString('fa-IR')
+  // ─── Computed ─────────────────────────────────────────────
 
-  const TYPE_LABELS: Record<string, string> = {
-    cash: '💵 نقدی (صندوق)',
-    bank: '🏦 بانک',
-    inventory: '📦 موجودی کالا',
-    fixed_asset: '🏭 دارایی ثابت',
-    liability: '📋 بدهی (وام)',
-  }
+  const TYPE_LABELS: Record<string, string> = useMemo(
+    () => ({
+      cash: '💵 نقدی (صندوق)',
+      bank: '🏦 بانک',
+      inventory: '📦 موجودی کالا',
+      fixed_asset: '🏭 دارایی ثابت',
+      liability: '📋 بدهی (وام)',
+    }),
+    []
+  )
 
-  const TYPE_COLORS: Record<string, string> = {
-    cash: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    bank: 'bg-blue-100 text-blue-700 border-blue-200',
-    inventory: 'bg-amber-100 text-amber-700 border-amber-200',
-    fixed_asset: 'bg-purple-100 text-purple-700 border-purple-200',
-    liability: 'bg-red-100 text-red-700 border-red-200',
-  }
+  const TYPE_COLORS: Record<string, string> = useMemo(
+    () => ({
+      cash: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      bank: 'bg-blue-100 text-blue-700 border-blue-200',
+      inventory: 'bg-amber-100 text-amber-700 border-amber-200',
+      fixed_asset: 'bg-purple-100 text-purple-700 border-purple-200',
+      liability: 'bg-red-100 text-red-700 border-red-200',
+    }),
+    []
+  )
 
   const pendingAssets = pendingItems
-    .filter((b) => ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type))
-    .reduce((s, b) => s + b.amount, 0)
+    .filter((b) =>
+      ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type)
+    )
+    .reduce((s, b) => s + safeNum(b.amount), 0)
+
   const pendingLiabs = pendingItems
     .filter((b) => b.type === 'liability')
-    .reduce((s, b) => s + b.amount, 0)
+    .reduce((s, b) => s + safeNum(b.amount), 0)
+
+  // ─── Render ────────────────────────────────────────────────
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-6 h-6 animate-spin text-violet-500" />
-        <span className="mr-2 text-sm text-gray-600">در حال بارگذاری...</span>
+        <span className="mr-2 text-sm text-gray-600">
+          در حال بارگذاری...
+        </span>
       </div>
     )
   }
 
   return (
     <div className="space-y-3" dir="rtl">
+      {/* ─── سال مالی فعال ─────────────────────────────────── */}
+      {activeFiscalYear ? (
+        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className="text-xs text-emerald-900 flex-1">
+            <strong>سال مالی فعال:</strong> {activeFiscalYear.name}
+            <span className="text-emerald-700 mr-2">
+              (از {formatDateLongJalali(activeFiscalYear.startDate)} تا{' '}
+              {formatDateLongJalali(activeFiscalYear.endDate)})
+            </span>
+          </div>
+          <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">
+            فعال و باز
+          </Badge>
+        </div>
+      ) : (
+        <Alert className="border-red-200 bg-red-50">
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+          <AlertDescription className="text-red-800 text-xs">
+            <strong>سال مالی فعال و بازی وجود ندارد.</strong> برای صدور
+            سند افتتاحیه، ابتدا در بخش سال‌های مالی، یک سال مالی فعال
+            تعریف و باز کنید. بدون سال مالی فعال، فقط امکان ذخیره
+            پیش‌نویس وجود دارد.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ─── راهنما ────────────────────────────────────────── */}
       <Card className="border-violet-200 bg-violet-50/30">
         <CardContent className="p-3">
           <div className="flex items-start gap-2">
@@ -659,23 +715,38 @@ export function InitialBalanceTab() {
                 راه‌اندازی اولیه فروشگاه
               </p>
               <p className="text-xs text-violet-700 mt-1 leading-relaxed">
-                موجودی‌های اولیه (نقد، بانک، کالا، تجهیزات، بدهی) را ثبت کنید.
-                سیستم سند افتتاحیه را خودکار صادر می‌کند.
+                موجودی‌های اولیه (نقد، بانک، کالا، تجهیزات، بدهی) را ثبت
+                کنید. سیستم سند افتتاحیه را خودکار در سال مالی فعال صادر
+                می‌کند.
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* ─── هشدار سند در سال مالی بسته ───────────────────── */}
+      {summary?.isPosted && summary?.postedFiscalYearIsClosed && (
+        <Alert className="border-amber-200 bg-amber-50">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <AlertDescription className="text-amber-800 text-xs">
+            سند افتتاحیه در سال مالی بسته ({summary.postedFiscalYearName})
+            صادر شده است. برای تغییر، ابتدا باید آن سال مالی باز شود.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* ─── سند ذخیره‌شده ────────────────────────────────── */}
       {savedItems.length > 0 && (
-        <Card className={`border-2 ${
-          summary?.isPosted
-            ? 'border-emerald-300 bg-emerald-50/30'
-            : 'border-amber-300 bg-amber-50/30'
-        }`}>
+        <Card
+          className={`border-2 ${
+            summary?.isPosted
+              ? 'border-emerald-300 bg-emerald-50/30'
+              : 'border-amber-300 bg-amber-50/30'
+          }`}
+        >
           <CardHeader className="p-3 pb-2">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-sm flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
                 {summary?.isPosted ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 ) : (
@@ -683,46 +754,58 @@ export function InitialBalanceTab() {
                 )}
                 <span>
                   سند افتتاحیه
-                  {summary?.isPosted
-                    ? ' — صادر شده ✓'
-                    : ' — پیش‌نویس'}
+                  {summary?.isPosted ? ' — صادر شده ✓' : ' — پیش‌نویس'}
                 </span>
-                <Badge className={`text-[10px] ${
-                  summary?.isPosted
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {savedItems.length} آیتم
+                <Badge
+                  className={`text-[10px] ${
+                    summary?.isPosted
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}
+                >
+                  {toPersianDigits(savedItems.length)} آیتم
                 </Badge>
-              </CardTitle>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {!summary?.isPosted && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 gap-1"
-                    onClick={handleEditDraft}
-                    disabled={submitting}
-                  >
-                    <Pencil className="w-3 h-3" />
-                    ویرایش
-                  </Button>
+                {summary?.postedFiscalYearName && (
+                  <Badge className="bg-blue-100 text-blue-700 text-[10px]">
+                    سال مالی: {summary.postedFiscalYearName}
+                  </Badge>
                 )}
-
+              </CardTitle>
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                 {!summary?.isPosted && (
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
-                    onClick={handleFinalizeDraftWithCheck}
-                    disabled={submitting}
-                  >
-                    {submitting ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="w-3 h-3" />
-                    )}
-                    ثبت نهایی
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 gap-1"
+                      onClick={handleEditDraft}
+                      disabled={submitting}
+                    >
+                      <Pencil className="w-3 h-3" />
+                      ویرایش
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleFinalizeDraftWithCheck}
+                      disabled={submitting || !canPost}
+                      title={
+                        canPost
+                          ? 'ثبت نهایی و صدور سند افتتاحیه'
+                          : 'سال مالی فعال وجود ندارد'
+                      }
+                    >
+                      {submitting ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : !canPost ? (
+                        <Lock className="w-3 h-3" />
+                      ) : (
+                        <CheckCircle2 className="w-3 h-3" />
+                      )}
+                      ثبت نهایی
+                    </Button>
+                  </>
                 )}
 
                 <Button
@@ -752,9 +835,12 @@ export function InitialBalanceTab() {
                   className="flex items-center justify-between gap-2 px-3 py-2"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
-                      TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-700'
-                    }`}>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
+                        TYPE_COLORS[item.type] ||
+                        'bg-gray-100 text-gray-700'
+                      }`}
+                    >
                       {TYPE_LABELS[item.type]?.split(' ')[0] || item.type}
                     </span>
                     <div className="min-w-0">
@@ -769,7 +855,7 @@ export function InitialBalanceTab() {
                     </div>
                   </div>
                   <div className="shrink-0 text-xs font-bold font-mono text-gray-700">
-                    {formatNumber(item.amount)} ﷼
+                    {formatCurrency(item.amount)}
                   </div>
                 </div>
               ))}
@@ -783,7 +869,7 @@ export function InitialBalanceTab() {
                     جمع دارایی‌ها:
                   </span>
                   <span className="font-bold text-emerald-700 font-mono">
-                    {formatNumber(summary.totalAssets)} ﷼
+                    {formatCurrency(summary.totalAssets)}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">
@@ -792,23 +878,27 @@ export function InitialBalanceTab() {
                     جمع بدهی‌ها:
                   </span>
                   <span className="font-bold text-red-600 font-mono">
-                    {formatNumber(summary.totalLiabilities)} ﷼
+                    {formatCurrency(summary.totalLiabilities)}
                   </span>
                 </div>
                 <div className="flex justify-between text-xs pt-1.5 border-t border-gray-200">
-                  <span className="font-bold text-gray-900">سرمایه مالک:</span>
-                  <span className={`font-bold text-base font-mono ${
-                    summary.equity >= 0
-                      ? 'text-violet-700'
-                      : 'text-red-600'
-                  }`}>
-                    {formatNumber(summary.equity)} ﷼
+                  <span className="font-bold text-gray-900">
+                    سرمایه مالک:
+                  </span>
+                  <span
+                    className={`font-bold text-base font-mono ${
+                      summary.equity >= 0
+                        ? 'text-violet-700'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    {formatCurrency(summary.equity)}
                   </span>
                 </div>
                 <p className="text-[9px] text-center text-gray-400 pt-1 border-t border-gray-100">
-                  دارایی‌ها ({formatNumber(summary.totalAssets)}) ={' '}
-                  بدهی‌ها ({formatNumber(summary.totalLiabilities)}) +{' '}
-                  سرمایه ({formatNumber(summary.equity)})
+                  دارایی‌ها ({formatCurrency(summary.totalAssets)}) =
+                  بدهی‌ها ({formatCurrency(summary.totalLiabilities)}) +
+                  سرمایه ({formatCurrency(summary.equity)})
                 </p>
               </div>
             )}
@@ -816,6 +906,7 @@ export function InitialBalanceTab() {
         </Card>
       )}
 
+      {/* ─── فرم افزودن آیتم ──────────────────────────────── */}
       <Card className="border-gray-200">
         <CardHeader className="p-3 pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -826,7 +917,8 @@ export function InitialBalanceTab() {
           </CardTitle>
           {savedItems.length > 0 && (
             <p className="text-[10px] text-amber-600 mt-0.5">
-              ⚠ با ثبت آیتم جدید، سند قبلی حذف و سند جدید با همه آیتم‌ها صادر می‌شود
+              ⚠ با ثبت آیتم جدید، سند قبلی حذف و سند جدید با همه
+              آیتم‌ها صادر می‌شود
             </p>
           )}
         </CardHeader>
@@ -834,11 +926,17 @@ export function InitialBalanceTab() {
         <CardContent className="space-y-3 p-3 pt-0">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <Label className="text-[11px] text-gray-600">نوع موجودی</Label>
+              <Label className="text-[11px] text-gray-600">
+                نوع موجودی
+              </Label>
               <select
                 value={form.type}
                 onChange={(e) =>
-                  setForm({ ...form, type: e.target.value, productId: '' })
+                  setForm({
+                    ...form,
+                    type: e.target.value,
+                    productId: '',
+                  })
                 }
                 className="w-full mt-0.5 text-xs border border-gray-200 rounded-md h-9 px-2 bg-white"
               >
@@ -854,15 +952,17 @@ export function InitialBalanceTab() {
               <Label className="text-[11px] text-gray-600">عنوان</Label>
               <Input
                 value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, title: e.target.value })
+                }
                 placeholder={
                   form.type === 'cash'
                     ? 'صندوق فروشگاه'
                     : form.type === 'bank'
-                      ? 'بانک ملت'
-                      : form.type === 'liability'
-                        ? 'وام بانک'
-                        : 'عنوان'
+                    ? 'بانک ملت'
+                    : form.type === 'liability'
+                    ? 'وام بانک'
+                    : 'عنوان'
                 }
                 className="mt-0.5 text-xs h-9"
                 onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
@@ -873,7 +973,9 @@ export function InitialBalanceTab() {
           {form.type === 'inventory' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
               <div>
-                <Label className="text-[11px] text-gray-600">محصول</Label>
+                <Label className="text-[11px] text-gray-600">
+                  محصول
+                </Label>
                 <select
                   value={form.productId}
                   onChange={(e) =>
@@ -890,14 +992,16 @@ export function InitialBalanceTab() {
                 </select>
               </div>
               <div>
-                <Label className="text-[11px] text-gray-600">مقدار</Label>
+                <Label className="text-[11px] text-gray-600">
+                  مقدار
+                </Label>
                 <Input
                   type="number"
                   value={form.quantity}
                   onChange={(e) =>
                     setForm({ ...form, quantity: e.target.value })
                   }
-                  placeholder="۱۰۰"
+                  placeholder={toPersianDigits(100)}
                   className="mt-0.5 text-xs h-9"
                 />
               </div>
@@ -906,11 +1010,15 @@ export function InitialBalanceTab() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <Label className="text-[11px] text-gray-600">مبلغ (ریال)</Label>
+              <Label className="text-[11px] text-gray-600">
+                مبلغ (ریال)
+              </Label>
               <Input
                 type="number"
                 value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, amount: e.target.value })
+                }
                 placeholder="۵۰٬۰۰۰٬۰۰۰"
                 className="mt-0.5 text-xs h-9"
                 dir="ltr"
@@ -943,6 +1051,7 @@ export function InitialBalanceTab() {
         </CardContent>
       </Card>
 
+      {/* ─── آیتم‌های در انتظار ─────────────────────────────── */}
       {pendingItems.length > 0 && (
         <Card className="border-violet-200 bg-violet-50/20">
           <CardHeader className="p-3 pb-2">
@@ -950,7 +1059,7 @@ export function InitialBalanceTab() {
               <AlertCircle className="w-3.5 h-3.5" />
               آیتم‌های در انتظار ثبت
               <Badge className="bg-violet-100 text-violet-700 text-[10px]">
-                {pendingItems.length} آیتم
+                {toPersianDigits(pendingItems.length)} آیتم
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -962,9 +1071,12 @@ export function InitialBalanceTab() {
                   className="flex items-center justify-between gap-2 px-3 py-2"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
-                      TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-700'
-                    }`}>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded border shrink-0 ${
+                        TYPE_COLORS[item.type] ||
+                        'bg-gray-100 text-gray-700'
+                      }`}
+                    >
                       {TYPE_LABELS[item.type]?.split(' ')[0] || item.type}
                     </span>
                     <p className="text-xs font-medium text-gray-800 truncate">
@@ -973,7 +1085,7 @@ export function InitialBalanceTab() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-xs font-bold font-mono text-gray-700">
-                      {formatNumber(item.amount)} ﷼
+                      {formatCurrency(item.amount)}
                     </span>
                     <Button
                       variant="ghost"
@@ -996,13 +1108,13 @@ export function InitialBalanceTab() {
               <div className="flex justify-between text-xs">
                 <span className="text-gray-600">دارایی‌های جدید:</span>
                 <span className="font-bold text-emerald-700 font-mono">
-                  {formatNumber(pendingAssets)} ﷼
+                  {formatCurrency(pendingAssets)}
                 </span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-gray-600">بدهی‌های جدید:</span>
                 <span className="font-bold text-red-600 font-mono">
-                  {formatNumber(pendingLiabs)} ﷼
+                  {formatCurrency(pendingLiabs)}
                 </span>
               </div>
             </div>
@@ -1024,11 +1136,18 @@ export function InitialBalanceTab() {
             </Button>
             <Button
               onClick={handleSaveWithCheck}
-              disabled={submitting}
-              className="bg-violet-600 hover:bg-violet-700 text-white text-xs h-9 gap-1"
+              disabled={submitting || !canPost}
+              className="bg-violet-600 hover:bg-violet-700 text-white text-xs h-9 gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                canPost
+                  ? 'ثبت و صدور سند افتتاحیه در سال مالی فعال'
+                  : 'سال مالی فعال وجود ندارد'
+              }
             >
               {submitting ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : !canPost ? (
+                <Lock className="w-3.5 h-3.5" />
               ) : (
                 <CheckCircle2 className="w-3.5 h-3.5" />
               )}
@@ -1038,6 +1157,7 @@ export function InitialBalanceTab() {
         </Card>
       )}
 
+      {/* ─── Empty State ───────────────────────────────────── */}
       {savedItems.length === 0 && pendingItems.length === 0 && (
         <Card className="border-dashed border-violet-200">
           <CardContent className="py-10 text-center">
@@ -1054,6 +1174,7 @@ export function InitialBalanceTab() {
         </Card>
       )}
 
+      {/* ─── Delete Dialog ─────────────────────────────────── */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
@@ -1066,7 +1187,9 @@ export function InitialBalanceTab() {
                 <p className="text-gray-500">این عملیات:</p>
                 <ul className="mt-2 space-y-1 list-disc list-inside text-gray-600">
                   <li>
-                    تمام {savedItems.length} آیتم موجودی اولیه را حذف می‌کند
+                    تمام{' '}
+                    {toPersianDigits(savedItems.length)} آیتم موجودی اولیه
+                    را حذف می‌کند
                   </li>
                   {summary?.isPosted && (
                     <li className="text-red-600 font-bold">
@@ -1107,18 +1230,21 @@ export function InitialBalanceTab() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ══════════════════════════════════════════════════════════ */}
-      {/* ★ v11.9.2: مودال هشدار قبل از ثبت نهایی                  */}
-      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ─── Warning Modal ─────────────────────────────────── */}
       <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
-        <DialogContent className="sm:max-w-md w-[calc(100%-2rem)]" dir="rtl">
+        <DialogContent
+          className="sm:max-w-md w-[calc(100%-2rem)]"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-5 h-5 text-amber-600" />
               </div>
               <div>
-                <span className="text-gray-900">⚠️ هشدار قبل از ثبت نهایی</span>
+                <span className="text-gray-900">
+                  ⚠️ هشدار قبل از ثبت نهایی
+                </span>
                 <DialogDescription className="text-[11px] text-gray-500 font-normal mt-0.5">
                   لطفاً موارد زیر را بررسی کنید
                 </DialogDescription>
@@ -1127,7 +1253,6 @@ export function InitialBalanceTab() {
           </DialogHeader>
 
           <div className="space-y-3 py-2">
-            {/* لیست هشدارها */}
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
               <p className="text-xs font-bold text-amber-800 mb-2">
                 مواردی که باید بررسی شوند:
@@ -1137,24 +1262,24 @@ export function InitialBalanceTab() {
                   key={idx}
                   className="flex items-start gap-2 text-xs text-amber-700"
                 >
-                  <span className="text-amber-500 mt-0.5 shrink-0">❌</span>
+                  <span className="text-amber-500 mt-0.5 shrink-0">
+                    ❌
+                  </span>
                   <span>{reason}</span>
                 </div>
               ))}
             </div>
 
-            {/* توصیه */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-xs text-blue-800 leading-relaxed">
-                <span className="font-bold">💡 توصیه:</span>
-                {' '}برای داشتن گزارش‌های دقیق مالی، بهتر است ابتدا کالاهای موجود
-                در فروشگاه خود را در بخش <strong>"کالاها"</strong> ثبت کنید، سپس
-                موجودی اولیه کالاها را در این سند اضافه کنید و در نهایت سند را
-                ثبت نهایی نمایید.
+                <span className="font-bold">💡 توصیه:</span> برای داشتن
+                گزارش‌های دقیق مالی، بهتر است ابتدا کالاهای موجود در
+                فروشگاه خود را در بخش <strong>«کالاها»</strong> ثبت
+                کنید، سپس موجودی اولیه کالاها را در این سند اضافه کنید و
+                در نهایت سند را ثبت نهایی نمایید.
               </p>
             </div>
 
-            {/* دکمه‌های عملیات */}
             <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
               <Button
                 onClick={goToProducts}
@@ -1190,10 +1315,9 @@ export function InitialBalanceTab() {
               </Button>
             </div>
 
-            {/* یادآوری */}
             <p className="text-[10px] text-gray-400 text-center pt-1">
-              ⚠️ توجه: اگر سند را بدون ثبت کالاها ثبت نهایی کنید، موجودی
-              کالاها در سند افتتاحیه لحاظ نمی‌شود.
+              ⚠️ توجه: اگر سند را بدون ثبت کالاها ثبت نهایی کنید،
+              موجودی کالاها در سند افتتاحیه لحاظ نمی‌شود.
             </p>
           </div>
         </DialogContent>
@@ -1201,3 +1325,5 @@ export function InitialBalanceTab() {
     </div>
   )
 }
+
+export default InitialBalanceTab

@@ -1,14 +1,16 @@
 'use client'
 
 // ============================================================================
-// src/components/accounting/recurring-journals-manager.tsx (v5.4 ★★★ Final)
+// src/components/accounting/recurring-journals-manager.tsx (v6.1 Jalali Utils)
 // ShopAccounting — Recurring Journals Manager
 // ----------------------------------------------------------------------------
-// این کامپوننت مدیریت اسناد تکرارشونده را انجام می‌دهد:
-//   - لیست الگوهای موجود با توضیح راهنما
-//   - ایجاد الگوی جدید با اعتبارسنجی تراز
-//   - فعال/غیرفعال کردن و حذف الگو
-//   - اجرای دستی (force) برای جبران عقب‌افتادگی
+// ★ v6.1:
+//   - استفاده از src/lib/jalali-utils.ts موجود پروژه
+//   - محاسبه/نمایش تاریخ‌ها بر اساس تقویم شمسی
+//   - اتصال به اطلاعات سال مالی از API
+//   - اعتبارسنجی قوی‌تر ردیف‌های سند
+//   - جلوگیری از ایجاد الگو وقتی سال مالی فعال/باز وجود ندارد
+//   - نمایش هشدار برای الگوهایی که تاریخ اجرای بعدی‌شان در سال مالی بسته/غیرفعال است
 // ============================================================================
 
 import { useState, useEffect, useCallback } from 'react'
@@ -19,19 +21,52 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 import {
-  Plus, RefreshCw, Trash2, Play, Repeat, Calendar, Loader2, AlertCircle,
-  CheckCircle2, Power, Edit, Clock, Info,
+  Plus,
+  Trash2,
+  Play,
+  Repeat,
+  Calendar,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  Power,
+  Edit,
+  Clock,
+  Info,
 } from 'lucide-react'
+import {
+  JALALI_MONTHS,
+  formatDateJalali,
+  formatDateLongJalali,
+  toPersianDigits,
+} from '@/lib/jalali-utils'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -44,6 +79,15 @@ interface RecurringLine {
   description?: string
 }
 
+interface FiscalYearPayload {
+  id: string | null
+  name: string | null
+  startDate: string | null
+  endDate: string | null
+  isActive: boolean
+  isClosed: boolean
+}
+
 interface RecurringJournal {
   id: string
   title: string
@@ -52,15 +96,18 @@ interface RecurringJournal {
   dayOfMonth: number | null
   dayOfWeek: number | null
   monthOfYear: number | null
-  startDate: string
+  startDate: string | null
   endDate: string | null
-  nextExecutionDate: string
+  nextExecutionDate: string | null
   lastExecutedAt: string | null
   isActive: boolean
   autoPost: boolean
   lines: RecurringLine[]
   generatedCount: number
   createdAt: string
+  nextExecutionFiscalYear?: FiscalYearPayload | null
+  canGenerateNext?: boolean
+  generationWarning?: string | null
 }
 
 interface Account {
@@ -74,7 +121,7 @@ interface RecurringJournalsManagerProps {
   accounts?: Account[]
 }
 
-// ─── Helpers ──────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────
 
 const FREQUENCY_LABELS: Record<string, string> = {
   weekly: 'هفتگی',
@@ -83,32 +130,40 @@ const FREQUENCY_LABELS: Record<string, string> = {
   yearly: 'سالانه',
 }
 
-const DAY_OF_WEEK_LABELS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه']
-const MONTH_LABELS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند']
+const DAY_OF_WEEK_LABELS = [
+  'یکشنبه',
+  'دوشنبه',
+  'سه‌شنبه',
+  'چهارشنبه',
+  'پنجشنبه',
+  'جمعه',
+  'شنبه',
+]
 
 function formatAmount(n: number): string {
   return (n || 0).toLocaleString('fa-IR')
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '---'
-  try {
-    return new Date(dateStr).toLocaleDateString('fa-IR')
-  } catch {
-    return dateStr
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('token')
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
 }
 
 function getScheduleDescription(rj: RecurringJournal): string {
   switch (rj.frequency) {
     case 'weekly':
-      return `هر ${DAY_OF_WEEK_LABELS[rj.dayOfWeek || 1]}`
+      return `هر ${DAY_OF_WEEK_LABELS[rj.dayOfWeek ?? 1]}`
     case 'monthly':
-      return `روز ${(rj.dayOfMonth || 1).toLocaleString('fa-IR')} هر ماه`
+      return `روز ${toPersianDigits(rj.dayOfMonth || 1)} هر ماه شمسی`
     case 'quarterly':
-      return `روز ${(rj.dayOfMonth || 1).toLocaleString('fa-IR')} هر ۳ ماه`
+      return `روز ${toPersianDigits(rj.dayOfMonth || 1)} هر ۳ ماه شمسی`
     case 'yearly':
-      return `${MONTH_LABELS[(rj.monthOfYear || 1) - 1]} روز ${(rj.dayOfMonth || 1).toLocaleString('fa-IR')}`
+      return `${
+        JALALI_MONTHS[(rj.monthOfYear || 1) - 1]
+      } روز ${toPersianDigits(rj.dayOfMonth || 1)}`
     default:
       return rj.frequency
   }
@@ -116,13 +171,22 @@ function getScheduleDescription(rj: RecurringJournal): string {
 
 // ─── Component ────────────────────────────────────────────────
 
-export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJournalsManagerProps = {}) {
+export function RecurringJournalsManager({
+  accounts: propAccounts,
+}: RecurringJournalsManagerProps = {}) {
   const [templates, setTemplates] = useState<RecurringJournal[]>([])
   const [fetchedAccounts, setFetchedAccounts] = useState<Account[]>([])
-  const accounts = propAccounts || fetchedAccounts
+  const accounts =
+    propAccounts && propAccounts.length > 0 ? propAccounts : fetchedAccounts
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  const [activeFiscalYear, setActiveFiscalYear] =
+    useState<FiscalYearPayload | null>(null)
+  const [hasOpenFiscalYear, setHasOpenFiscalYear] = useState(true)
+  const [metaWarning, setMetaWarning] = useState('')
 
   // ★ state مودال ایجاد
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -146,41 +210,74 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
 
+  const propAccountsLength = propAccounts?.length ?? 0
+
+  const canCreateTemplate = hasOpenFiscalYear
+
   // ─── Load data ──────────────────────────────────────────────
   const loadData = useCallback(async () => {
     setLoading(true)
     setError('')
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const headers: Record<string, string> = {}
-      if (token) headers.Authorization = `Bearer ${token}`
 
-      const templatesRes = await fetch('/api/recurring-journals?includeInactive=true', { headers })
+    try {
+      const headers = getAuthHeaders()
+
+      const templatesRes = await fetch(
+        '/api/recurring-journals?includeInactive=true',
+        { headers }
+      )
       const templatesData = await templatesRes.json()
 
       if (templatesData.success) {
-        setTemplates(templatesData.data || [])
+        const payload = templatesData.data
+        const list = Array.isArray(payload)
+          ? payload
+          : payload?.templates || payload?.items || []
+
+        setTemplates(list)
+        setActiveFiscalYear(
+          templatesData.activeFiscalYear || payload?.activeFiscalYear || null
+        )
+        setHasOpenFiscalYear(
+          Boolean(
+            templatesData.hasOpenFiscalYear ??
+              payload?.hasOpenFiscalYear ??
+              true
+          )
+        )
+        setMetaWarning(templatesData.warning || payload?.warning || '')
+      } else {
+        setError(templatesData.error || 'خطا در بارگذاری الگوها')
       }
 
-      if (!propAccounts || propAccounts.length === 0) {
+      if (propAccountsLength === 0) {
         try {
           const accountsRes = await fetch('/api/accounts', { headers })
           const accountsData = await accountsRes.json()
 
           if (accountsData.success) {
-            const accList = accountsData.data?.accounts || accountsData.data || accountsData.accounts || []
+            const accList =
+              accountsData.data?.accounts ||
+              accountsData.data ||
+              accountsData.accounts ||
+              []
+
             const formatted = Array.isArray(accList)
               ? accList.map((a: any) => ({
-                  id: a.id,
-                  code: a.code || '',
-                  name: a.name || '',
-                  type: a.type || 'asset',
+                  id: String(a.id || ''),
+                  code: String(a.code || ''),
+                  name: String(a.name || ''),
+                  type: String(a.type || 'asset'),
                 }))
               : []
+
             setFetchedAccounts(formatted)
           }
         } catch (accErr) {
-          console.warn('[RecurringJournalsManager] Failed to fetch accounts:', accErr)
+          console.warn(
+            '[RecurringJournalsManager] Failed to fetch accounts:',
+            accErr
+          )
         }
       }
     } catch (err: any) {
@@ -188,13 +285,13 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
     } finally {
       setLoading(false)
     }
-  }, [propAccounts])
+  }, [propAccountsLength])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  // ─── Save ───────────────────────────────────────────────────
+  // ─── Save ─────────────────────────────────────────────────
   const handleSave = async () => {
     setError('')
     setSuccess('')
@@ -204,43 +301,90 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
       return
     }
 
-    const validLines = formLines.filter(l => l.accountId)
+    const validLines = formLines.filter((l) => l.accountId)
+
     if (validLines.length < 2) {
       setError('حداقل دو ردیف با حساب مشخص الزامی است')
       return
     }
 
-    const totalDebit = validLines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
-    const totalCredit = validLines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
+    let totalDebit = 0
+    let totalCredit = 0
+    let hasDebit = false
+    let hasCredit = false
+
+    for (const line of validLines) {
+      const debit = Number(line.debit || 0)
+      const credit = Number(line.credit || 0)
+
+      if (!Number.isFinite(debit) || debit < 0) {
+        setError('مبلغ بدهکار نامعتبر است')
+        return
+      }
+
+      if (!Number.isFinite(credit) || credit < 0) {
+        setError('مبلغ بستانکار نامعتبر است')
+        return
+      }
+
+      if (debit > 0 && credit > 0) {
+        setError('یک ردیف نمی‌تواند همزمان بدهکار و بستانکار باشد')
+        return
+      }
+
+      if (debit > 0) hasDebit = true
+      if (credit > 0) hasCredit = true
+
+      totalDebit += debit
+      totalCredit += credit
+    }
+
+    if (!hasDebit || !hasCredit) {
+      setError('سند باید حداقل یک ردیف بدهکار و یک ردیف بستانکار داشته باشد')
+      return
+    }
 
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      setError(`سند تراز نیست. بدهکار: ${formatAmount(totalDebit)}، بستانکار: ${formatAmount(totalCredit)}`)
+      setError(
+        `سند تراز نیست. بدهکار: ${formatAmount(
+          totalDebit
+        )}، بستانکار: ${formatAmount(totalCredit)}`
+      )
       return
     }
 
     setSaving(true)
+
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const headers = {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      }
+
       const body = {
-        title: formTitle,
-        description: formDescription,
+        title: formTitle.trim(),
+        description: formDescription.trim() || null,
         frequency: formFrequency,
         dayOfMonth: formFrequency !== 'weekly' ? formDayOfMonth : null,
         dayOfWeek: formFrequency === 'weekly' ? formDayOfWeek : null,
         monthOfYear: formFrequency === 'yearly' ? formMonthOfYear : null,
-        lines: validLines,
+        lines: validLines.map((l) => ({
+          accountId: l.accountId,
+          debit: Number(l.debit || 0),
+          credit: Number(l.credit || 0),
+          description: l.description || null,
+        })),
         autoPost: formAutoPost,
       }
 
-      const url = editingId ? `/api/recurring-journals/${editingId}` : '/api/recurring-journals'
+      const url = editingId
+        ? `/api/recurring-journals/${editingId}`
+        : '/api/recurring-journals'
       const method = editingId ? 'PUT' : 'POST'
 
       const res = await fetch(url, {
         method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         body: JSON.stringify(body),
       })
 
@@ -273,25 +417,46 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
     setFormDayOfWeek(rj.dayOfWeek || 1)
     setFormMonthOfYear(rj.monthOfYear || 1)
     setFormAutoPost(rj.autoPost)
-    setFormLines(rj.lines.length >= 2 ? rj.lines : [
-      ...rj.lines,
-      { accountId: '', debit: 0, credit: 0, description: '' },
-    ])
+    setFormLines(
+      rj.lines.length >= 2
+        ? rj.lines.map((l) => ({
+            accountId: l.accountId || '',
+            debit: Number(l.debit || 0),
+            credit: Number(l.credit || 0),
+            description: l.description || '',
+          }))
+        : [
+            ...rj.lines.map((l) => ({
+              accountId: l.accountId || '',
+              debit: Number(l.debit || 0),
+              credit: Number(l.credit || 0),
+              description: l.description || '',
+            })),
+            { accountId: '', debit: 0, credit: 0, description: '' },
+          ]
+    )
     setDialogOpen(true)
   }
 
   // ─── Toggle active ──────────────────────────────────────────
   const handleToggleActive = async (rj: RecurringJournal) => {
+    setError('')
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      await fetch(`/api/recurring-journals/${rj.id}`, {
+      const res = await fetch(`/api/recurring-journals/${rj.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ isActive: !rj.isActive }),
       })
+
+      const data = await res.json()
+
+      if (!data.success) {
+        throw new Error(data.error || 'خطا در تغییر وضعیت')
+      }
+
       loadData()
     } catch (err: any) {
       setError(err?.message || 'خطا در تغییر وضعیت')
@@ -301,12 +466,19 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
   // ─── Delete ─────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!deleteId) return
+
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      await fetch(`/api/recurring-journals/${deleteId}`, {
+      const res = await fetch(`/api/recurring-journals/${deleteId}`, {
         method: 'DELETE',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: getAuthHeaders(),
       })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'خطا در حذف')
+      }
+
       setDeleteId(null)
       loadData()
       setSuccess('الگو حذف شد')
@@ -320,15 +492,31 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
   const handleForceRun = async () => {
     setRunning(true)
     setError('')
+
     try {
-      const res = await fetch('/api/cron/recurring-journals?secret=' + process.env.NEXT_PUBLIC_CRON_SECRET + '&force=true')
-      const data = await res.json()
-      if (data.success) {
-        setSuccess(`${data.data.entriesCreated} سند ایجاد شد`)
+      const secret = process.env.NEXT_PUBLIC_CRON_SECRET
+      const url = secret
+        ? `/api/cron/recurring-journals?secret=${encodeURIComponent(
+            secret
+          )}&force=true`
+        : '/api/cron/recurring-journals?force=true'
+
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (res.ok && data.success) {
+        const created = Number(data.data?.entriesCreated || 0)
+        setSuccess(`${toPersianDigits(created)} سند ایجاد شد`)
         setTimeout(() => setSuccess(''), 5000)
         loadData()
       } else {
-        setError(data.error || 'خطا در اجرای کرون جاب')
+        setError(
+          data.error ||
+            'اجرای دستی ناموفق بود. مطمئن شوید endpoint کرون در دسترس است.'
+        )
       }
     } catch {
       setError('برای تست، لینک کرون جاب را مستقیم در مرورگر باز کنید')
@@ -353,7 +541,10 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
   }
 
   const addLine = () => {
-    setFormLines([...formLines, { accountId: '', debit: 0, credit: 0, description: '' }])
+    setFormLines([
+      ...formLines,
+      { accountId: '', debit: 0, credit: 0, description: '' },
+    ])
   }
 
   const removeLine = (index: number) => {
@@ -367,8 +558,14 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
     setFormLines(updated)
   }
 
-  const totalDebit = formLines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
-  const totalCredit = formLines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
+  const totalDebit = formLines.reduce(
+    (sum, l) => sum + (Number(l.debit) || 0),
+    0
+  )
+  const totalCredit = formLines.reduce(
+    (sum, l) => sum + (Number(l.credit) || 0),
+    0
+  )
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01
 
   // ─── Render ─────────────────────────────────────────────────
@@ -390,7 +587,13 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
               <Repeat className="w-5 h-5 text-emerald-600" />
               اسناد تکرارشونده (اتوماتیک)
             </h2>
+            {activeFiscalYear?.name && (
+              <p className="text-xs text-gray-500 mt-1">
+                سال مالی فعال: {activeFiscalYear.name}
+              </p>
+            )}
           </div>
+
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -400,13 +603,34 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
               className="gap-1.5 text-xs"
               title="اجرای فوری تمام الگوهای فعال"
             >
-              {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+              {running ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
               اجرای دستی
             </Button>
+
             <Button
               size="sm"
-              onClick={() => { resetForm(); setEditingId(null); setDialogOpen(true) }}
-              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-xs"
+              onClick={() => {
+                if (!canCreateTemplate) {
+                  setError(
+                    'برای ایجاد الگوی جدید، حداقل یک سال مالی فعال و باز لازم است.'
+                  )
+                  return
+                }
+                resetForm()
+                setEditingId(null)
+                setDialogOpen(true)
+              }}
+              disabled={!canCreateTemplate}
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                canCreateTemplate
+                  ? 'ایجاد الگوی جدید'
+                  : 'سال مالی فعال/بازی وجود ندارد'
+              }
             >
               <Plus className="w-3.5 h-3.5" />
               الگوی جدید
@@ -414,14 +638,29 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
           </div>
         </div>
 
+        {!hasOpenFiscalYear && (
+          <Alert className="border-amber-200 bg-amber-50/70">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <AlertDescription className="text-amber-900 text-xs">
+              {metaWarning ||
+                'سال مالی فعال و بازی وجود ندارد. بنابراین الگوی جدید قابل ایجاد نیست و الگوهای فعال نیز در اجرای خودکار نادیده گرفته می‌شوند.'}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* ★ توضیح راهنما برای کاربر نهایی */}
         <Alert className="border-blue-200 bg-blue-50/60">
           <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
           <AlertDescription className="text-blue-900 text-sm leading-6">
-            <strong className="block text-base mb-1.5 text-blue-800">💡 این ابزار چه کاری انجام می‌دهد؟</strong>
+            <strong className="block text-base mb-1.5 text-blue-800">
+              💡 این ابزار چه کاری انجام می‌دهد؟
+            </strong>
             <span>
-              برای هزینه‌ها یا درآمدهای ثابت و دوره‌ای (مانند <strong>اجاره ماهانه، حقوق و دستمزد، اقساط وام یا حق بیمه</strong>)، به‌جای ثبت دستی سند در هر ماه، یک‌بار الگوی آن را اینجا تعریف کنید. 
-              سیستم به‌صورت خودکار در تاریخ‌های مشخص، سند حسابداری آن را (به‌صورت ثبت‌شده یا پیش‌نویس) صادر می‌کند تا از فراموشی ثبت اسناد جلوگیری شود.
+              برای هزینه‌ها یا درآمدهای ثابت و دوره‌ای (مانند{' '}
+              <strong>اجاره ماهانه، حقوق و دستمزد، اقساط وام یا حق بیمه</strong>)،
+              به‌جای ثبت دستی سند در هر ماه، یک‌بار الگوی آن را اینجا تعریف کنید.
+              سیستم به‌صورت خودکار در تاریخ‌های مشخص، سند حسابداری آن را (به‌صورت
+              ثبت‌شده یا پیش‌نویس) صادر می‌کند تا از فراموشی ثبت اسناد جلوگیری شود.
             </span>
           </AlertDescription>
         </Alert>
@@ -434,6 +673,7 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
           {error}
         </div>
       )}
+
       {success && (
         <div className="p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700 flex items-center gap-1">
           <CheckCircle2 className="w-3.5 h-3.5" />
@@ -446,8 +686,12 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
         <Card className="border-gray-200">
           <CardContent className="py-12 text-center">
             <Repeat className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm text-gray-500 mb-1">هنوز الگوی تکرارشونده‌ای تعریف نشده</p>
-            <p className="text-xs text-gray-400">با کلیک روی «الگوی جدید» اولین الگوی خود را ایجاد کنید</p>
+            <p className="text-sm text-gray-500 mb-1">
+              هنوز الگوی تکرارشونده‌ای تعریف نشده
+            </p>
+            <p className="text-xs text-gray-400">
+              با کلیک روی «الگوی جدید» اولین الگوی خود را ایجاد کنید
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -455,47 +699,114 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
           {templates.map((rj) => (
             <Card
               key={rj.id}
-              className={`border ${rj.isActive ? 'border-emerald-200' : 'border-gray-200 opacity-60'}`}
+              className={`border ${
+                rj.isActive ? 'border-emerald-200' : 'border-gray-200 opacity-70'
+              }`}
             >
               <CardContent className="p-3">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <h3 className="text-sm font-bold text-gray-900 truncate">{rj.title}</h3>
-                      <Badge className={rj.isActive ? 'bg-emerald-100 text-emerald-700 text-[9px]' : 'bg-gray-100 text-gray-500 text-[9px]'}>
+                      <h3 className="text-sm font-bold text-gray-900 truncate">
+                        {rj.title}
+                      </h3>
+
+                      <Badge
+                        className={
+                          rj.isActive
+                            ? 'bg-emerald-100 text-emerald-700 text-[9px]'
+                            : 'bg-gray-100 text-gray-500 text-[9px]'
+                        }
+                      >
                         {rj.isActive ? 'فعال' : 'غیرفعال'}
                       </Badge>
+
                       <Badge className="bg-blue-50 text-blue-600 text-[9px]">
                         {FREQUENCY_LABELS[rj.frequency] || rj.frequency}
                       </Badge>
+
                       {rj.generatedCount > 0 && (
                         <Badge className="bg-purple-50 text-purple-600 text-[9px]">
-                          {rj.generatedCount.toLocaleString('fa-IR')} سند تولیدشده
+                          {toPersianDigits(rj.generatedCount)} سند تولیدشده
+                        </Badge>
+                      )}
+
+                      {rj.canGenerateNext === false && (
+                        <Badge className="bg-amber-100 text-amber-700 text-[9px]">
+                          اجرای بعدی غیرمجاز
                         </Badge>
                       )}
                     </div>
-                    {rj.description && <p className="text-xs text-gray-500 mb-1">{rj.description}</p>}
-                    <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
+
+                    {rj.description && (
+                      <p className="text-xs text-gray-500 mb-1">
+                        {rj.description}
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-3 text-[10px] text-gray-500 flex-wrap">
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {getScheduleDescription(rj)}
                       </span>
+
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        اجرای بعدی: {formatDate(rj.nextExecutionDate)}
+                        اجرای بعدی: {formatDateLongJalali(rj.nextExecutionDate)}
                       </span>
-                      {rj.lastExecutedAt && <span>آخرین اجرا: {formatDate(rj.lastExecutedAt)}</span>}
+
+                      {rj.lastExecutedAt && (
+                        <span>
+                          آخرین اجرا: {formatDateJalali(rj.lastExecutedAt)}
+                        </span>
+                      )}
+
+                      {rj.nextExecutionFiscalYear?.name && (
+                        <span>
+                          سال مالی اجرای بعدی: {rj.nextExecutionFiscalYear.name}
+                        </span>
+                      )}
                     </div>
+
+                    {rj.generationWarning && (
+                      <div className="mt-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5">
+                        {rj.generationWarning}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleToggleActive(rj)} title={rj.isActive ? 'غیرفعال کردن' : 'فعال کردن'}>
-                      <Power className={`w-3.5 h-3.5 ${rj.isActive ? 'text-emerald-600' : 'text-gray-400'}`} />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => handleToggleActive(rj)}
+                      title={rj.isActive ? 'غیرفعال کردن' : 'فعال کردن'}
+                    >
+                      <Power
+                        className={`w-3.5 h-3.5 ${
+                          rj.isActive ? 'text-emerald-600' : 'text-gray-400'
+                        }`}
+                      />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleEdit(rj)} title="ویرایش">
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => handleEdit(rj)}
+                      title="ویرایش"
+                    >
                       <Edit className="w-3.5 h-3.5 text-gray-500" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDeleteId(rj.id)} title="حذف">
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => setDeleteId(rj.id)}
+                      title="حذف"
+                    >
                       <Trash2 className="w-3.5 h-3.5 text-red-500" />
                     </Button>
                   </div>
@@ -505,14 +816,30 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
                 <div className="mt-2 pt-2 border-t border-gray-100">
                   <div className="space-y-1">
                     {rj.lines.map((line, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-[10px] py-0.5">
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between text-[10px] py-0.5"
+                      >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-mono text-gray-400">{line.accountCode || '---'}</span>
-                          <span className="text-gray-600 truncate">{line.accountName || 'حساب نامشخص'}</span>
+                          <span className="font-mono text-gray-400">
+                            {line.accountCode || '—'}
+                          </span>
+                          <span className="text-gray-600 truncate">
+                            {line.accountName || 'حساب نامشخص'}
+                          </span>
                         </div>
+
                         <div className="flex items-center gap-3 shrink-0">
-                          {line.debit > 0 && <span className="text-blue-600 font-mono">بدهکار: {formatAmount(line.debit)}</span>}
-                          {line.credit > 0 && <span className="text-emerald-600 font-mono">بستانکار: {formatAmount(line.credit)}</span>}
+                          {line.debit > 0 && (
+                            <span className="text-blue-600 font-mono">
+                              بدهکار: {formatAmount(line.debit)}
+                            </span>
+                          )}
+                          {line.credit > 0 && (
+                            <span className="text-emerald-600 font-mono">
+                              بستانکار: {formatAmount(line.credit)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -525,34 +852,70 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
       )}
 
       {/* ★ مودال ایجاد/ویرایش */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingId(null); resetForm() } }}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto" dir="rtl">
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open)
+          if (!open) {
+            setEditingId(null)
+            resetForm()
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <Repeat className="w-4 h-4 text-emerald-600" />
-              {editingId ? 'ویرایش الگوی تکرارشونده' : 'الگوی تکرارشونده جدید'}
+              {editingId
+                ? 'ویرایش الگوی تکرارشونده'
+                : 'الگوی تکرارشونده جدید'}
             </DialogTitle>
             <DialogDescription className="text-xs">
               الگویی برای تولید خودکار سند حسابداری در دوره‌های مشخص تعریف کنید
+              {activeFiscalYear?.name && !editingId
+                ? ` — سال مالی فعال: ${activeFiscalYear.name}`
+                : ''}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {!canCreateTemplate && !editingId && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                برای ایجاد الگوی جدید باید حداقل یک سال مالی فعال و باز وجود داشته
+                باشد.
+              </div>
+            )}
+
             <div className="space-y-1">
               <Label className="text-xs font-medium">عنوان *</Label>
-              <Input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="مثلاً: اجاره مغازه" className="h-9" />
+              <Input
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                placeholder="مثلاً: اجاره مغازه"
+                className="h-9"
+              />
             </div>
 
             <div className="space-y-1">
               <Label className="text-xs font-medium">توضیحات سند</Label>
-              <Textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="توضیحاتی که در سند تولیدشده ثبت می‌شود" className="text-xs min-h-[50px]" />
+              <Textarea
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+                placeholder="توضیحاتی که در سند تولیدشده ثبت می‌شود"
+                className="text-xs min-h-[50px]"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs font-medium">دوره تکرار</Label>
                 <Select value={formFrequency} onValueChange={setFormFrequency}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="weekly">هفتگی</SelectItem>
                     <SelectItem value="monthly">ماهانه</SelectItem>
@@ -565,11 +928,18 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
               {formFrequency === 'weekly' && (
                 <div className="space-y-1">
                   <Label className="text-xs font-medium">روز هفته</Label>
-                  <Select value={String(formDayOfWeek)} onValueChange={(v) => setFormDayOfWeek(parseInt(v))}>
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <Select
+                    value={String(formDayOfWeek)}
+                    onValueChange={(v) => setFormDayOfWeek(parseInt(v))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       {DAY_OF_WEEK_LABELS.map((day, idx) => (
-                        <SelectItem key={idx} value={String(idx)}>{day}</SelectItem>
+                        <SelectItem key={idx} value={String(idx)}>
+                          {day}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -578,19 +948,40 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
 
               {formFrequency !== 'weekly' && (
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium">روز ماه (۱-۳۱)</Label>
-                  <Input type="number" min={1} max={31} value={formDayOfMonth} onChange={(e) => setFormDayOfMonth(Math.max(1, Math.min(31, parseInt(e.target.value) || 1)))} className="h-9" />
+                  <Label className="text-xs font-medium">روز ماه شمسی (۱-۳۱)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={formDayOfMonth}
+                    onChange={(e) =>
+                      setFormDayOfMonth(
+                        Math.max(
+                          1,
+                          Math.min(31, parseInt(e.target.value) || 1)
+                        )
+                      )
+                    }
+                    className="h-9"
+                  />
                 </div>
               )}
 
               {formFrequency === 'yearly' && (
                 <div className="space-y-1">
-                  <Label className="text-xs font-medium">ماه سال</Label>
-                  <Select value={String(formMonthOfYear)} onValueChange={(v) => setFormMonthOfYear(parseInt(v))}>
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <Label className="text-xs font-medium">ماه سال شمسی</Label>
+                  <Select
+                    value={String(formMonthOfYear)}
+                    onValueChange={(v) => setFormMonthOfYear(parseInt(v))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      {MONTH_LABELS.map((month, idx) => (
-                        <SelectItem key={idx} value={String(idx + 1)}>{month}</SelectItem>
+                      {JALALI_MONTHS.map((month, idx) => (
+                        <SelectItem key={idx} value={String(idx + 1)}>
+                          {month}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -601,7 +992,9 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
             <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
               <div>
                 <p className="text-xs font-medium">ثبت خودکار (posted)</p>
-                <p className="text-[10px] text-gray-500">اگر خاموش باشد، سند به‌صورت پیش‌نویس ایجاد می‌شود</p>
+                <p className="text-[10px] text-gray-500">
+                  اگر خاموش باشد، سند به‌صورت پیش‌نویس ایجاد می‌شود
+                </p>
               </div>
               <Switch checked={formAutoPost} onCheckedChange={setFormAutoPost} />
             </div>
@@ -609,33 +1002,83 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium">ردیف‌های سند</Label>
-                <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1" onClick={addLine}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[10px] gap-1"
+                  onClick={addLine}
+                >
                   <Plus className="w-3 h-3" /> افزودن ردیف
                 </Button>
               </div>
 
               <div className="space-y-1.5">
                 {formLines.map((line, idx) => (
-                  <div key={idx} className="flex items-start gap-1.5 p-2 bg-gray-50 rounded-lg">
+                  <div
+                    key={idx}
+                    className="flex items-start gap-1.5 p-2 bg-gray-50 rounded-lg"
+                  >
                     <div className="flex-1 min-w-0">
-                      <Select value={line.accountId} onValueChange={(v) => updateLine(idx, 'accountId', v)}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="انتخاب حساب" /></SelectTrigger>
+                      <Select
+                        value={line.accountId || undefined}
+                        onValueChange={(v) => updateLine(idx, 'accountId', v)}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="انتخاب حساب" />
+                        </SelectTrigger>
                         <SelectContent className="max-h-[200px]">
                           {accounts.map((acc) => (
                             <SelectItem key={acc.id} value={acc.id}>
-                              <span className="font-mono text-[10px]">{acc.code}</span> — <span className="text-xs">{acc.name}</span>
+                              <span className="font-mono text-[10px]">
+                                {acc.code}
+                              </span>{' '}
+                              —{' '}
+                              <span className="text-xs">{acc.name}</span>
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
+
                     <div className="w-24">
-                      <Input type="number" placeholder="بدهکار" value={line.debit || ''} onChange={(e) => updateLine(idx, 'debit', Number(e.target.value) || 0)} className="h-8 text-xs" />
+                      <Input
+                        type="number"
+                        placeholder="بدهکار"
+                        value={line.debit === 0 ? '' : line.debit}
+                        onChange={(e) =>
+                          updateLine(
+                            idx,
+                            'debit',
+                            e.target.value === '' ? 0 : Number(e.target.value)
+                          )
+                        }
+                        className="h-8 text-xs"
+                      />
                     </div>
+
                     <div className="w-24">
-                      <Input type="number" placeholder="بستانکار" value={line.credit || ''} onChange={(e) => updateLine(idx, 'credit', Number(e.target.value) || 0)} className="h-8 text-xs" />
+                      <Input
+                        type="number"
+                        placeholder="بستانکار"
+                        value={line.credit === 0 ? '' : line.credit}
+                        onChange={(e) =>
+                          updateLine(
+                            idx,
+                            'credit',
+                            e.target.value === '' ? 0 : Number(e.target.value)
+                          )
+                        }
+                        className="h-8 text-xs"
+                      />
                     </div>
-                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={() => removeLine(idx)} disabled={formLines.length <= 2}>
+
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0 shrink-0"
+                      onClick={() => removeLine(idx)}
+                      disabled={formLines.length <= 2}
+                    >
                       <Trash2 className="w-3 h-3 text-red-500" />
                     </Button>
                   </div>
@@ -645,9 +1088,19 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
               <div className="flex items-center justify-between p-2 bg-gray-100 rounded text-xs">
                 <span className="text-gray-500">جمع کل:</span>
                 <div className="flex items-center gap-3">
-                  <span className="text-blue-600 font-mono">بدهکار: {formatAmount(totalDebit)}</span>
-                  <span className="text-emerald-600 font-mono">بستانکار: {formatAmount(totalCredit)}</span>
-                  <Badge className={isBalanced ? 'bg-emerald-100 text-emerald-700 text-[9px]' : 'bg-red-100 text-red-700 text-[9px]'}>
+                  <span className="text-blue-600 font-mono">
+                    بدهکار: {formatAmount(totalDebit)}
+                  </span>
+                  <span className="text-emerald-600 font-mono">
+                    بستانکار: {formatAmount(totalCredit)}
+                  </span>
+                  <Badge
+                    className={
+                      isBalanced
+                        ? 'bg-emerald-100 text-emerald-700 text-[9px]'
+                        : 'bg-red-100 text-red-700 text-[9px]'
+                    }
+                  >
                     {isBalanced ? '✓ تراز' : '✗ نامتعادل'}
                   </Badge>
                 </div>
@@ -656,9 +1109,31 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
           </div>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setDialogOpen(false); setEditingId(null); resetForm() }}>انصراف</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving || !isBalanced} className="bg-emerald-600 hover:bg-emerald-700 gap-1.5">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setDialogOpen(false)
+                setEditingId(null)
+                resetForm()
+              }}
+            >
+              انصراف
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={
+                saving || !isBalanced || (!editingId && !canCreateTemplate)
+              }
+              className="bg-emerald-600 hover:bg-emerald-700 gap-1.5"
+            >
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              )}
               {editingId ? 'به‌روزرسانی' : 'ایجاد الگو'}
             </Button>
           </DialogFooter>
@@ -666,17 +1141,31 @@ export function RecurringJournalsManager({ accounts: propAccounts }: RecurringJo
       </Dialog>
 
       {/* ★ مودال تأیید حذف */}
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => { if (!open) setDeleteId(null) }}>
+      <AlertDialog
+        open={!!deleteId}
+        onOpenChange={(open) => {
+          if (!open) setDeleteId(null)
+        }}
+      >
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-base">حذف الگوی تکرارشونده</AlertDialogTitle>
+            <AlertDialogTitle className="text-base">
+              حذف الگوی تکرارشونده
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-xs">
-              آیا از حذف این الگو مطمئن هستید؟ اسناد قبلی که از این الگو تولید شده‌اند حذف نخواهند شد.
+              آیا از حذف این الگو مطمئن هستید؟ اسناد قبلی که از این الگو تولید
+              شده‌اند حذف نخواهند شد.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
           <AlertDialogFooter>
             <AlertDialogCancel className="text-xs">انصراف</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="text-xs bg-red-600 hover:bg-red-700">حذف</AlertDialogAction>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="text-xs bg-red-600 hover:bg-red-700"
+            >
+              حذف
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,32 +1,8 @@
 // ============================================================================
-// src/app/api/journal-entries/[id]/audit-log/route.ts — GET (v3.31 ★★★)
+// src/app/api/journal-entries/[id]/audit-log/route.ts — GET (v3.32)
 // ShopAccounting — View Audit Log for a Journal Entry
 // ============================================================================
-// ★★★ v3.31: مشاهده تاریخچه تغییرات یک سند حسابداری
-//
-// Supported methods:
-//
-//   GET /api/journal-entries/[id]/audit-log
-//     - دریافت تمام AuditLogهای مربوط به یک سند
-//     - خروجی:
-//         {
-//           success: true,
-//           data: {
-//             entry: { id, number, ... },
-//             logs: [
-//               {
-//                 id, action, at, userId, username,
-//                 details: { ... }
-//               }
-//             ]
-//           }
-//         }
-//
-// Audit Actions برای اسناد:
-//   - JOURNAL_ENTRY_CREATE: ایجاد سند
-//   - JOURNAL_ENTRY_UPDATE: ویرایش سند
-//   - JOURNAL_ENTRY_CANCEL: ابطال سند
-//   - JOURNAL_ENTRY_POST: ثبت (post) سند
+// ★ v3.32: افزودن fiscalYearId به خروجی
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -35,17 +11,20 @@ import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 // ═══════════════════════════════════════════════════════════════
 //  GET — دریافت AuditLog سند
 // ═══════════════════════════════════════════════════════════════
-
 export const GET = withTenantAndPermission('accounting')(
   async (req: NextRequest, ctx: any, tenant: any) => {
     console.log('[JournalEntry AuditLog] Handler started, tenantId:', tenant?.tenantId)
+
     try {
       const tenantDb = tenant.tenantDb
       const tenantId = tenant.tenantId
+
       // ★★★ Next.js 16: params یک Promise است و باید await شود
-      const params = ctx.params && typeof (ctx.params as any).then === 'function'
-        ? await ctx.params
-        : (ctx.params || {})
+      const params =
+        ctx.params && typeof (ctx.params as any).then === 'function'
+          ? await ctx.params
+          : ctx.params || {}
+
       const id = params?.id
 
       if (!id) {
@@ -67,6 +46,7 @@ export const GET = withTenantAndPermission('accounting')(
           sourceType: true,
           totalDebit: true,
           totalCredit: true,
+          fiscalYearId: true, // ★ v3.32
           isCancelled: true,
           cancelledAt: true,
           cancelledBy: true,
@@ -85,8 +65,8 @@ export const GET = withTenantAndPermission('accounting')(
       }
 
       // ─── ۲. دریافت AuditLogها برای این سند ────────────────────
-      //   جستجو بر اساس entityId = id و entityType = 'JournalEntry'
       let logs: any[] = []
+
       try {
         logs = await tenantDb.auditLogs.findMany({
           where: {
@@ -98,27 +78,30 @@ export const GET = withTenantAndPermission('accounting')(
         })
       } catch (err: any) {
         console.warn('[JournalEntry AuditLog] Cannot query auditLogs:', err?.message)
-        // اگر جدول AuditLogs در دسترس نباشد، فقط اطلاعات سند را برمی‌گردانیم
       }
 
-      // ─── ۳. دریافت اطلاعات کاربران (برای نمایش نام به‌جای id) ──
-      const userIds = [...new Set([
-        ...logs.map((l: any) => l.userId).filter(Boolean),
-        entry.createdBy,
-        entry.cancelledBy,
-      ])] as string[]
+      // ─── ۳. دریافت اطلاعات کاربران ────────────────────────────
+      const userIds = [
+        ...new Set([
+          ...logs.map((l: any) => l.userId).filter(Boolean),
+          entry.createdBy,
+          entry.cancelledBy,
+        ]),
+      ] as string[]
 
       let userMap = new Map<string, { username: string; role: string }>()
+
       if (userIds.length > 0) {
         try {
           const users = await tenantDb.storeUser.findMany({
             where: { id: { in: userIds } },
             select: { id: true, username: true, role: true },
           })
+
           for (const u of users) {
             userMap.set(u.id, { username: u.username, role: u.role })
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
@@ -128,7 +111,7 @@ export const GET = withTenantAndPermission('accounting')(
         JOURNAL_ENTRY_CREATE: { label: 'ایجاد سند', color: 'emerald' },
         JOURNAL_ENTRY_UPDATE: { label: 'ویرایش سند', color: 'blue' },
         JOURNAL_ENTRY_CANCEL: { label: 'ابطال سند', color: 'red' },
-        JOURNAL_ENTRY_POST:   { label: 'ثبت سند', color: 'emerald' },
+        JOURNAL_ENTRY_POST: { label: 'ثبت سند', color: 'emerald' },
       }
 
       const enrichedLogs = logs.map((log: any) => {
@@ -136,6 +119,7 @@ export const GET = withTenantAndPermission('accounting')(
         const actionInfo = actionLabels[log.action] || { label: log.action, color: 'gray' }
 
         let parsedDetails: any = null
+
         try {
           if (log.details) {
             parsedDetails = JSON.parse(log.details)
@@ -163,8 +147,12 @@ export const GET = withTenantAndPermission('accounting')(
         data: {
           entry: {
             ...entry,
-            createdByUsername: entry.createdBy ? userMap.get(entry.createdBy)?.username || null : null,
-            cancelledByUsername: entry.cancelledBy ? userMap.get(entry.cancelledBy)?.username || null : null,
+            createdByUsername: entry.createdBy
+              ? userMap.get(entry.createdBy)?.username || null
+              : null,
+            cancelledByUsername: entry.cancelledBy
+              ? userMap.get(entry.cancelledBy)?.username || null
+              : null,
           },
           logs: enrichedLogs,
           logCount: enrichedLogs.length,
@@ -172,6 +160,7 @@ export const GET = withTenantAndPermission('accounting')(
       })
     } catch (error: any) {
       console.error('[JournalEntry AuditLog] Error:', error)
+
       return NextResponse.json(
         {
           success: false,

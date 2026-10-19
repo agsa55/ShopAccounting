@@ -18,7 +18,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { calculateNextExecutionDate } from '@/app/api/recurring-journals/route'
+import { calculateNextExecutionDate } from '@/lib/jalali-utils'
 
 export async function GET(req: NextRequest) {
   return handleCron(req)

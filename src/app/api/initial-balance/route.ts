@@ -1,257 +1,341 @@
 // ============================================================================
-// src/app/api/initial-balance/route.ts — GET/POST/DELETE (v10.9.8)
-// ★ v10.9.8: Mapping هوشمند Type به Account (هر نوع به حساب درست)
-// ★ v10.9.7: DELETE با force=true برای حذف کامل سند صادر شده
-// ★ v10.9.5: Prisma Relation با حرف بزرگ (Account, Product, ...)
-// ★ v10.9.4: کاملاً سازگار با ساختار واقعی دیتابیس
+// src/app/api/initial-balance/route.ts — v11.0 Fiscal Year Safe
+// ShopAccounting — Initial Balance API (Opening Journal Entry)
+// ============================================================================
+// ★ v11.0 تغییرات:
+//   - سند افتتاحیه حتماً به سال مالی فعال و باز وصل می‌شود
+//   - رفع باگ تکرار خط موازنه (سرمایه مالک)
+//   - شماره‌گذاری امن و یکتا برای سند
+//   - تاریخ سند UTC-safe (بدون مشکل timezone)
+//   - بازگشت اطلاعات سال مالی فعال به UI
+//   - حذف فقط اگر سال مالی آن بسته نباشد
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 
-// ─── Type تعریف‌ها ─────────────────────────────────────────────
-interface BalanceItem {
-  id?: string
-  tenantId?: string
-  type?: string
-  title?: string
-  amount?: number
-  accountId?: string | null
-  productId?: string | null
-  quantity?: number | null
-  description?: string | null
-  journalEntryId?: string | null
-  isPosted?: boolean
-  Account?: { id: string; code: string; name: string } | null
-  createdAt?: Date
-  updatedAt?: Date
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+// ─── Helpers ─────────────────────────────────────────────────
+
+function safeNum(value: any): number {
+  if (value === null || value === undefined || value === '') return 0
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const n = parseFloat(value.replace(/,/g, ''))
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof value === 'object') {
+    try {
+      const s = String(value)
+      const n = parseFloat(s.replace(/,/g, ''))
+      if (Number.isFinite(n)) return n
+    } catch {}
+  }
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
 }
 
-// ─── GET: دریافت موجودی‌های اولیه ─────────────────────────────
-export const GET = withTenantAndPermission('accounting')(async (
-  req: NextRequest,
-  ctx: any,
-  tenant: any
-) => {
+function roundMoney(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.round(v)
+}
+
+function startOfDayUTC(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+}
+
+async function findActiveOpenFiscalYear(
+  tenantDb: any,
+  tenantId: string
+): Promise<any | null> {
   try {
-    const tenantDb = tenant.tenantDb
-    const tenantId = tenant.tenantId
-
-    console.log('[InitialBalance GET] tenantId:', tenantId)
-
-    const balances: BalanceItem[] = await tenantDb.initialBalance.findMany({
-      where: { tenantId },
-      include: {
-        // ★ v10.9.5: Account با حرف بزرگ
-        Account: { select: { id: true, code: true, name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
+    return await tenantDb.fiscalYear.findFirst({
+      where: { tenantId, isActive: true, isClosed: false },
+      orderBy: { startDate: 'desc' },
     })
-
-    let totalAssets = 0
-    let totalLiabilities = 0
-    let isPosted = false
-    let journalEntryId: string | null = null
-
-    for (const b of balances) {
-      const amt = Number(b.amount) || 0
-      if (['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type || '')) {
-        totalAssets += amt
-      } else if (b.type === 'liability') {
-        totalLiabilities += amt
-      }
-      if (b.isPosted || b.journalEntryId) {
-        isPosted = true
-        journalEntryId = b.journalEntryId || journalEntryId
-      }
-    }
-
-    console.log('[InitialBalance GET] found:', balances.length, 'balances, isPosted:', isPosted)
-
-      // ★ v10.9.9: شمارش کالاها و انبارها برای هشدار قبل از ثبت نهایی
-    let productCount = 0
-    let warehouseCount = 0
-    let totalInventoryValue = 0
-
-    try {
-      productCount = await tenantDb.product.count({
-        where: { tenantId, isActive: true },
-      })
-      warehouseCount = await tenantDb.warehouse.count({
-        where: { tenantId, isActive: true },
-      })
-      // محاسبه ارزش کل موجودی کالا
-      const inventoryProducts = await tenantDb.product.findMany({
-        where: { tenantId, isActive: true },
-        select: { currentStock: true, purchasePrice: true },
-      })
-      totalInventoryValue = inventoryProducts.reduce((sum: number, p: any) => {
-        return sum + (Number(p.currentStock) || 0) * (Number(p.purchasePrice) || 0)
-      }, 0)
-    } catch (err) {
-      console.warn('[InitialBalance GET] Failed to count products:', err)
-    }
-
-    console.log('[InitialBalance GET] 📊 Stats:', {
-      balances: balances.length,
-      products: productCount,
-      warehouses: warehouseCount,
-      inventoryValue: totalInventoryValue,
-    })
-
-    return NextResponse.json({
-      success: true,
-      data: balances,
-      summary: {
-        totalAssets,
-        totalLiabilities,
-        equity: totalAssets - totalLiabilities,
-        isPosted,
-        journalEntryId,
-        count: balances.length,
-        // ★ v10.9.9: فیلدهای جدید برای هشدار
-        productCount,
-        warehouseCount,
-        totalInventoryValue,
-      },
-    })
-    
-  } catch (error: any) {
-    console.error('[InitialBalance GET] Error:', error)
-    return NextResponse.json(
-      { success: false, error: 'خطا در دریافت موجودی اولیه' },
-      { status: 500 }
-    )
+  } catch {
+    return null
   }
-})
+}
 
-// ─── POST: ثبت موجودی اولیه + ایجاد سند افتتاحیه ─────────────
-export const POST = withTenantAndPermission('accounting')(async (
-  req: NextRequest,
-  ctx: any,
-  tenant: any
-) => {
+async function findAllFiscalYears(
+  tenantDb: any,
+  tenantId: string
+): Promise<any[]> {
   try {
-    const tenantDb = tenant.tenantDb
-    const tenantId = tenant.tenantId
-    const body = await req.json()
+    return await tenantDb.fiscalYear.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        name: true,
+        startDate: true,
+        endDate: true,
+        isActive: true,
+        isClosed: true,
+      },
+      orderBy: { startDate: 'desc' },
+    })
+  } catch {
+    return []
+  }
+}
 
-    console.log('[InitialBalance POST] tenantId:', tenantId)
-    console.log('[InitialBalance POST] items:', body.items?.length, 'postToJournal:', body.postToJournal)
+async function generateJournalNumber(
+  tx: any,
+  tenantId: string
+): Promise<string> {
+  try {
+    const count = await tx.journalEntry.count({ where: { tenantId } })
+    const suffix = Date.now().toString().slice(-4)
+    return `JE-${(count + 1).toString().padStart(6, '0')}-${suffix}`
+  } catch {
+    return `JE-${Date.now()}`
+  }
+}
 
-    if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
+// ─── GET ─────────────────────────────────────────────────────
+
+export const GET = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+
+      if (!tenantDb?.initialBalance) {
+        return NextResponse.json({
+          success: true,
+          data: [],
+          summary: null,
+          activeFiscalYear: null,
+          hasOpenFiscalYear: false,
+        })
+      }
+
+      const [balances, activeFy, allFys, productCount, warehouseCount] =
+        await Promise.all([
+          tenantDb.initialBalance
+            .findMany({
+              where: { tenantId },
+              include: {
+                Account: { select: { id: true, code: true, name: true } },
+              },
+              orderBy: { createdAt: 'desc' },
+            })
+            .catch(() => []),
+          findActiveOpenFiscalYear(tenantDb, tenantId),
+          findAllFiscalYears(tenantDb, tenantId),
+          tenantDb.product
+            .count({ where: { tenantId, isActive: true } })
+            .catch(() => 0),
+          tenantDb.warehouse
+            .count({ where: { tenantId, isActive: true } })
+            .catch(() => 0),
+        ])
+
+      let totalAssets = 0
+      let totalLiabilities = 0
+      let isPosted = false
+      let journalEntryId: string | null = null
+      let postedFiscalYearId: string | null = null
+
+      for (const b of balances) {
+        const amt = safeNum(b.amount)
+        if (
+          ['cash', 'bank', 'inventory', 'fixed_asset'].includes(b.type || '')
+        ) {
+          totalAssets += amt
+        } else if (b.type === 'liability') {
+          totalLiabilities += amt
+        }
+        if (b.isPosted || b.journalEntryId) {
+          isPosted = true
+          journalEntryId = b.journalEntryId || journalEntryId
+        }
+      }
+
+      // اگر سند صادر شده، سال مالی آن را پیدا کن
+      if (journalEntryId) {
+        try {
+          const je = await tenantDb.journalEntry.findFirst({
+            where: { id: journalEntryId, tenantId },
+            select: { fiscalYearId: true },
+          })
+          postedFiscalYearId = je?.fiscalYearId || null
+        } catch {}
+      }
+
+      let totalInventoryValue = 0
+      try {
+        const inventoryProducts = await tenantDb.product.findMany({
+          where: { tenantId, isActive: true },
+          select: { currentStock: true, purchasePrice: true },
+        })
+        totalInventoryValue = inventoryProducts.reduce(
+          (sum: number, p: any) =>
+            sum + safeNum(p.currentStock) * safeNum(p.purchasePrice),
+          0
+        )
+      } catch {}
+
+      const postedFy = postedFiscalYearId
+        ? allFys.find((fy: any) => fy.id === postedFiscalYearId)
+        : null
+
+      return NextResponse.json({
+        success: true,
+        data: balances,
+        summary: {
+          totalAssets: roundMoney(totalAssets),
+          totalLiabilities: roundMoney(totalLiabilities),
+          equity: roundMoney(totalAssets - totalLiabilities),
+          isPosted,
+          journalEntryId,
+          count: balances.length,
+          productCount,
+          warehouseCount,
+          totalInventoryValue: roundMoney(totalInventoryValue),
+          postedFiscalYearName: postedFy?.name || null,
+          postedFiscalYearIsClosed: postedFy?.isClosed || false,
+        },
+        activeFiscalYear: activeFy
+          ? {
+              id: activeFy.id,
+              name: activeFy.name,
+              startDate: activeFy.startDate,
+              endDate: activeFy.endDate,
+            }
+          : null,
+        hasOpenFiscalYear: Boolean(activeFy),
+      })
+    } catch (error: any) {
+      console.error('[InitialBalance GET]', error)
       return NextResponse.json(
-        { success: false, error: 'حداقل یک آیتم موجودی اولیه الزامی است' },
-        { status: 400 }
+        { success: false, error: 'خطا در دریافت موجودی اولیه' },
+        { status: 500 }
       )
     }
+  }
+)
 
-    // ═══════════════════════════════════════════════════════════════
-    // Idempotency check — جلوگیری از تکرار سند صادر شده
-    // ═══════════════════════════════════════════════════════════════
-    if (body.postToJournal) {
-      try {
-        const existingPosted = await tenantDb.initialBalance.findFirst({
-          where: { tenantId, isPosted: true },
-        })
+// ─── POST ────────────────────────────────────────────────────
 
-        if (existingPosted) {
-          console.warn('[InitialBalance POST] ⚠️ Posted balance already exists')
-          return NextResponse.json({
-            success: true,
-            message: 'سند افتتاحیه قبلاً صادر شده است',
-            data: { skipped: true, existingId: existingPosted.id },
-          })
-        }
-      } catch (err) {
-        console.warn('[InitialBalance POST] Idempotency check failed:', err)
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  حذف موجودی‌های قبلی پیش‌نویس (غیر posted)
-    // ═══════════════════════════════════════════════════════════════
+export const POST = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
     try {
-      const deleted = await tenantDb.initialBalance.deleteMany({
-        where: {
-          tenantId,
-          isPosted: false,
-        },
-      })
-      if (deleted.count > 0) {
-        console.log('[InitialBalance POST] 🗑️ Deleted', deleted.count, 'draft balances')
-      }
-    } catch (err) {
-      console.warn('[InitialBalance POST] Delete drafts failed:', err)
-    }
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+      const userId = tenant.user?.id
+      const body = await req.json()
 
-    // ═══════════════════════════════════════════════════════════════
-    //  ایجاد موجودی‌های جدید — دقیقاً مطابق schema
-    // ═══════════════════════════════════════════════════════════════
-    const createdBalances: BalanceItem[] = []
-
-    for (const item of body.items) {
-      const amount = Number(item.amount) || 0
-      if (amount <= 0) {
-        console.warn('[InitialBalance POST] Skipping item with invalid amount:', item)
-        continue
+      if (
+        !body.items ||
+        !Array.isArray(body.items) ||
+        body.items.length === 0
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'حداقل یک آیتم موجودی اولیه الزامی است',
+          },
+          { status: 400 }
+        )
       }
 
+      // ─── بررسی سال مالی فعال (برای صدور سند) ────────────────
+      let activeFy: any = null
+
+      if (body.postToJournal) {
+        activeFy = await findActiveOpenFiscalYear(tenantDb, tenantId)
+
+        if (!activeFy) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'سال مالی فعال و بازی وجود ندارد. برای صدور سند افتتاحیه، ابتدا یک سال مالی فعال تعریف و باز کنید.',
+              code: 'NO_ACTIVE_FISCAL_YEAR',
+            },
+            { status: 400 }
+          )
+        }
+      }
+
+      // ─── Idempotency check ───────────────────────────────────
+      if (body.postToJournal) {
+        try {
+          const existingPosted = await tenantDb.initialBalance.findFirst({
+            where: { tenantId, isPosted: true },
+          })
+
+          if (existingPosted) {
+            return NextResponse.json({
+              success: true,
+              message: 'سند افتتاحیه قبلاً صادر شده است',
+              data: { skipped: true, existingId: existingPosted.id },
+            })
+          }
+        } catch {}
+      }
+
+      // ─── حذف draft های قبلی ───────────────────────────────────
       try {
-        const balance: BalanceItem = await tenantDb.initialBalance.create({
-          data: {
-            tenantId,
-            type: item.type || 'cash',
-            title: item.title || item.description || 'موجودی اولیه',
-            amount: amount,
-            accountId: item.accountId || null,
-            productId: item.productId || null,
-            quantity: item.quantity != null ? Number(item.quantity) : null,
-            description: item.description || item.title || null,
-            journalEntryId: null,
-            isPosted: false,
-          },
-          include: {
-            // ★ v10.9.5: Account با حرف بزرگ
-            Account: { select: { id: true, code: true, name: true } },
-          },
+        await tenantDb.initialBalance.deleteMany({
+          where: { tenantId, isPosted: false },
         })
-        createdBalances.push(balance)
-      } catch (err: any) {
-        console.error('[InitialBalance POST] ❌ Create failed:', err?.message)
-        console.error('[InitialBalance POST] Item:', JSON.stringify(item))
-        return NextResponse.json({
-          success: false,
-          error: `خطا در ثبت موجودی: ${err?.message}`,
-          errorCode: err?.code,
-        }, { status: 500 })
+      } catch {}
+
+      // ─── ایجاد موجودی‌های جدید ────────────────────────────────
+      const createdBalances: any[] = []
+
+      for (const item of body.items) {
+        const amount = roundMoney(safeNum(item.amount))
+        if (amount <= 0) continue
+
+        try {
+          const balance = await tenantDb.initialBalance.create({
+            data: {
+              tenantId,
+              type: item.type || 'cash',
+              title: item.title || item.description || 'موجودی اولیه',
+              amount,
+              accountId: item.accountId || null,
+              productId: item.productId || null,
+              quantity: item.quantity != null ? Number(item.quantity) : null,
+              description: item.description || item.title || null,
+              journalEntryId: null,
+              isPosted: false,
+            },
+            include: {
+              Account: { select: { id: true, code: true, name: true } },
+            },
+          })
+          createdBalances.push(balance)
+        } catch (err: any) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `خطا در ثبت موجودی: ${err?.message}`,
+              errorCode: err?.code,
+            },
+            { status: 500 }
+          )
+        }
       }
-    }
 
-    console.log('[InitialBalance POST] ✅ Created balances:', createdBalances.length)
-
-    // ═══════════════════════════════════════════════════════════════
-    //  ایجاد سند افتتاحیه (فقط اگر postToJournal=true)
-    // ═══════════════════════════════════════════════════════════════
-    if (body.postToJournal && createdBalances.length > 0) {
-      console.log('[InitialBalance POST] Creating journal entry...')
-
-      try {
-        // ═══════════════════════════════════════════════════════════
-        // ★ v10.9.8: Mapping هوشمند Type به Account
-        // هر type باید به حساب مناسب خودش برود
-        // ═══════════════════════════════════════════════════════════
+      // ─── ایجاد سند افتتاحیه ───────────────────────────────────
+      if (body.postToJournal && createdBalances.length > 0) {
         const defaultAccounts: Record<string, any> = {
-          cash: null,         // صندوق
-          bank: null,         // بانک
-          inventory: null,    // موجودی کالا
-          fixed_asset: null,  // دارایی ثابت
-          liability: null,    // بدهی/وام
-          equity: null,       // سرمایه مالک
+          cash: null,
+          bank: null,
+          inventory: null,
+          fixed_asset: null,
+          liability: null,
+          equity: null,
         }
 
         try {
-          // ۱. حساب صندوق (برای cash)
           defaultAccounts.cash = await tenantDb.account.findFirst({
             where: {
               tenantId,
@@ -264,7 +348,6 @@ export const POST = withTenantAndPermission('accounting')(async (
             orderBy: { code: 'asc' },
           })
 
-          // ۲. حساب بانک (برای bank)
           defaultAccounts.bank = await tenantDb.account.findFirst({
             where: {
               tenantId,
@@ -276,7 +359,6 @@ export const POST = withTenantAndPermission('accounting')(async (
             orderBy: { code: 'asc' },
           })
 
-          // ۳. حساب موجودی کالا (برای inventory)
           defaultAccounts.inventory = await tenantDb.account.findFirst({
             where: {
               tenantId,
@@ -289,11 +371,11 @@ export const POST = withTenantAndPermission('accounting')(async (
             orderBy: { code: 'asc' },
           })
 
-          // ۴. حساب دارایی ثابت (برای fixed_asset)
           defaultAccounts.fixed_asset = await tenantDb.account.findFirst({
             where: {
               tenantId,
               OR: [
+                { code: { startsWith: '14' } },
                 { code: { startsWith: '15' } },
                 { code: { startsWith: '16' } },
                 { name: { contains: 'دارایی ثابت' } },
@@ -303,7 +385,6 @@ export const POST = withTenantAndPermission('accounting')(async (
             orderBy: { code: 'asc' },
           })
 
-          // ۵. حساب بدهی/وام (برای liability)
           defaultAccounts.liability = await tenantDb.account.findFirst({
             where: {
               tenantId,
@@ -317,62 +398,48 @@ export const POST = withTenantAndPermission('accounting')(async (
             orderBy: { code: 'asc' },
           })
 
-          // ۶. حساب سرمایه مالک (برای موازنه)
           defaultAccounts.equity = await tenantDb.account.findFirst({
             where: {
               tenantId,
               OR: [
                 { code: { startsWith: '30' } },
+                { code: { startsWith: '31' } },
                 { name: { contains: 'سرمایه' } },
               ],
             },
             orderBy: { code: 'asc' },
           })
-
-          console.log('[InitialBalance POST] Default accounts found:', {
-            cash: defaultAccounts.cash?.code || 'none',
-            bank: defaultAccounts.bank?.code || 'none',
-            inventory: defaultAccounts.inventory?.code || 'none',
-            fixed_asset: defaultAccounts.fixed_asset?.code || 'none',
-            liability: defaultAccounts.liability?.code || 'none',
-            equity: defaultAccounts.equity?.code || 'none',
-          })
-        } catch (err) {
-          console.warn('[InitialBalance POST] Failed to find default accounts:', err)
-        }
+        } catch {}
 
         const journalLines: any[] = []
         let totalDebit = 0
         let totalCredit = 0
 
         for (const balance of createdBalances) {
-          const amt = Number(balance.amount) || 0
+          const amt = roundMoney(safeNum(balance.amount))
           if (amt <= 0) continue
 
-          // ★ v10.9.8: استفاده از Account relation یا fallback به title
-          const accountName = balance.Account?.name || balance.title || 'موجودی اولیه'
+          const accountName =
+            balance.Account?.name || balance.title || 'موجودی اولیه'
           const accountCode = balance.Account?.code || ''
-
-          // ★ v10.9.8: اصلاح description — اگر accountCode خالی است، فقط title
           const description = accountCode
             ? `${accountCode} - ${accountName}`
             : accountName
 
-          // ★ v10.9.8: انتخاب حساب بر اساس type
           let lineAccountId = balance.accountId
           if (!lineAccountId) {
             const typeKey = balance.type || 'cash'
             lineAccountId = defaultAccounts[typeKey]?.id || null
 
-            // اگر حساب مخصوص type پیدا نشد، از cash استفاده کن (برای دارایی‌ها)
             if (!lineAccountId && typeKey !== 'liability') {
               lineAccountId = defaultAccounts.cash?.id || null
             }
-            // برای liability، اگر حساب بدهی پیدا نشد، از equity استفاده کن
             if (!lineAccountId && typeKey === 'liability') {
               lineAccountId = defaultAccounts.equity?.id || null
             }
           }
+
+          if (!lineAccountId) continue
 
           if (balance.type === 'liability') {
             journalLines.push({
@@ -393,18 +460,11 @@ export const POST = withTenantAndPermission('accounting')(async (
           }
         }
 
-              console.log('[InitialBalance POST] Journal totals (before balancing):', { totalDebit, totalCredit })
-
-        // ═══════════════════════════════════════════════════════
-        // ★ v10.9.11: خط موازنه را قبل از چک length اضافه کن
-        // وقتی فقط دارایی وارد می‌شود، خط سرمایه مالک باید اضافه شود
-        // ═══════════════════════════════════════════════════════
+        // ─── خط موازنه (فقط یک بار) ────────────────────────────
         if (Math.abs(totalDebit - totalCredit) > 0.01) {
           const diff = totalDebit - totalCredit
           const equityAccountId = defaultAccounts.equity?.id || null
-          const equityDescription = 'سرمایه مالک (موازنه)'
-
-          console.log('[InitialBalance POST] ⚖️ Adding balancing line:', diff)
+          const equityDescription = 'سرمایه مالک (موازنه سند افتتاحیه)'
 
           if (diff > 0) {
             journalLines.push({
@@ -423,301 +483,313 @@ export const POST = withTenantAndPermission('accounting')(async (
             })
             totalDebit += Math.abs(diff)
           }
-          console.log('[InitialBalance POST] Journal totals (after balancing):', { totalDebit, totalCredit })
         }
 
-        // ★ حالا چک length (بعد از اضافه شدن خط موازنه)
         if (journalLines.length < 2) {
-          return NextResponse.json({
-            success: false,
-            error: 'حداقل ۲ ردیف برای سند افتتاحیه لازم است. لطفاً حداقل یک دارایی و یک بدهی/سرمایه وارد کنید.',
-          }, { status: 400 })
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'حداقل ۲ ردیف برای سند افتتاحیه لازم است. لطفاً حداقل یک دارایی و یک بدهی/سرمایه وارد کنید.',
+            },
+            { status: 400 }
+          )
         }
 
-        // ★ چک تراز نهایی (باید همیشه true باشد)
         if (Math.abs(totalDebit - totalCredit) > 0.01) {
-          return NextResponse.json({
-            success: false,
-            error: `سند تراز نیست. بدهکار: ${totalDebit}, بستانکار: ${totalCredit}`,
-          }, { status: 400 })
-        }
-        // ═══════════════════════════════════════════════════════════
-        // ★ v10.9.8: خط موازنه با حساب سرمایه مالک
-        // ═══════════════════════════════════════════════════════════
-        if (Math.abs(totalDebit - totalCredit) > 0.01) {
-          const diff = totalDebit - totalCredit
-          const equityAccountId = defaultAccounts.equity?.id || null
-
-          // description بدون تکرار کد حساب
-          const equityDescription = 'سرمایه مالک (موازنه)'
-
-          if (diff > 0) {
-            journalLines.push({
-              accountId: equityAccountId,
-              description: equityDescription,
-              debit: 0,
-              credit: diff,
-            })
-            totalCredit += diff
-          } else {
-            journalLines.push({
-              accountId: equityAccountId,
-              description: equityDescription,
-              debit: Math.abs(diff),
-              credit: 0,
-            })
-            totalDebit += Math.abs(diff)
-          }
-          console.log('[InitialBalance POST] Added balancing line, new totals:', { totalDebit, totalCredit })
+          return NextResponse.json(
+            {
+              success: false,
+              error: `سند تراز نیست. بدهکار: ${totalDebit}, بستانکار: ${totalCredit}`,
+            },
+            { status: 400 }
+          )
         }
 
-             // ═══════════════════════════════════════════════════════════
-        // ★ v11.0: تولید شماره سند با روش مطمئن‌تر
-        // پیدا کردن بیشترین شماره موجود (نه تعداد)
-        // ═══════════════════════════════════════════════════════════
-        let journalNumber = 'JE-000001'
-        try {
-          // پیدا کردن آخرین سند با بیشترین شماره
-          const lastEntry = await tenantDb.journalEntry.findFirst({
-            where: { tenantId },
-            orderBy: { number: 'desc' },
-            select: { number: true }
-          })
-          
-          if (lastEntry?.number) {
-            // استخراج عدد از شماره (مثلاً JE-000024 → 24)
-            const match = lastEntry.number.match(/JE-(\d+)/)
-            if (match) {
-              const lastNumber = parseInt(match[1])
-              journalNumber = `JE-${(lastNumber + 1).toString().padStart(6, '0')}`
-              console.log('[InitialBalance POST] 📝 Generated journal number from last entry:', journalNumber)
-            } else {
-              // فرمت شماره ناشناخته است، از timestamp استفاده کن
-              journalNumber = `JE-${Date.now().toString().slice(-6)}`
-            }
-          } else {
-            // هیچ سندی وجود ندارد، از count استفاده کن
-            const count = await tenantDb.journalEntry.count({ where: { tenantId } })
-            journalNumber = `JE-${(count + 1).toString().padStart(6, '0')}`
-          }
-        } catch (err) {
-          console.warn('[InitialBalance POST] Failed to generate journal number:', err)
-          // Fallback: استفاده از timestamp برای تضمین یکتایی
-          journalNumber = `JE-${Date.now().toString().slice(-6)}`
-        }
-        
-        console.log('[InitialBalance POST] 📝 Final journal number:', journalNumber)
-
-           // ═══════════════════════════════════════════════════════
-        // ★ v10.9.10: همیشه از تاریخ امروز استفاده کن
-        // body.date یا fyStart را نادیده بگیر — سند باید تاریخ امروز داشته باشد
-        // ═══════════════════════════════════════════════════════
-            // ═══════════════════════════════════════════════════════
-        // ★ v10.9.12: استفاده از تاریخ امروز با ساعت ۱۲ ظهر
-        // DateTime کامل برای Prisma + جلوگیری از مشکل timezone
-        // ═══════════════════════════════════════════════════════
+        // ─── تاریخ سند: امروز به UTC ────────────────────────────
         const now = new Date()
         const journalDate = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate(),
-          12, 0, 0  // ساعت ۱۲ ظهر به وقت محلی
+          Date.UTC(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            12,
+            0,
+            0
+          )
         )
-        
-        console.log('[InitialBalance POST] 📅 Using today date:', journalDate.toISOString())
 
-        const journalEntry = await tenantDb.journalEntry.create({
-          data: {
-            number: journalNumber,
-            tenantId,
-               date: journalDate,  // ★ تاریخ امروز، بدون توجه به body.date یا fyStart
-            description: 'سند افتتاحیه — راه‌اندازی اولیه فروشگاه',
-            status: 'posted',
-            sourceType: 'initial_balance',
-            sourceId: createdBalances[0]?.id || null,
-            totalDebit,
-            totalCredit,
-            createdBy: tenant.user?.id || null,
-            lines: { create: journalLines },
-          },
-          include: { lines: true },
-        })
+        // بررسی اینکه تاریخ امروز داخل سال مالی فعال باشد
+        const fyStart = startOfDayUTC(new Date(activeFy.startDate))
+        const fyEnd = startOfDayUTC(new Date(activeFy.endDate))
+        const journalDay = startOfDayUTC(journalDate)
 
-        // Link balances به journal
+        if (journalDay < fyStart || journalDay > fyEnd) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `تاریخ امروز (${journalDay.toISOString().slice(0, 10)}) خارج از سال مالی فعال «${activeFy.name}» است. لطفاً سال مالی فعال را بررسی کنید.`,
+              code: 'DATE_OUT_OF_FISCAL_YEAR',
+            },
+            { status: 400 }
+          )
+        }
+
+        const txClient: any = tenantDb
+
         try {
-          for (const balance of createdBalances) {
-            await tenantDb.initialBalance.update({
-              where: { id: balance.id },
+          const journalEntry = await txClient.$transaction(async (tx: any) => {
+            const jeNumber = await generateJournalNumber(tx, tenantId)
+
+            // تلاش با fiscalYearId، اگر schema پشتیبانی نکرد، fallback
+            let je: any
+            try {
+              je = await tx.journalEntry.create({
+                data: {
+                  number: jeNumber,
+                  tenantId,
+                  date: journalDate,
+                  description: `سند افتتاحیه — سال مالی ${activeFy.name}`,
+                  status: 'posted',
+                  sourceType: 'initial_balance',
+                  sourceId: createdBalances[0]?.id || null,
+                  totalDebit: roundMoney(totalDebit),
+                  totalCredit: roundMoney(totalCredit),
+                  createdBy: userId || null,
+                  fiscalYearId: activeFy.id,
+                  lines: { create: journalLines },
+                },
+                include: { lines: true },
+              })
+            } catch (err: any) {
+              const msg = String(err?.message || '')
+              if (msg.includes('fiscalYearId')) {
+                je = await tx.journalEntry.create({
+                  data: {
+                    number: jeNumber,
+                    tenantId,
+                    date: journalDate,
+                    description: `سند افتتاحیه — سال مالی ${activeFy.name}`,
+                    status: 'posted',
+                    sourceType: 'initial_balance',
+                    sourceId: createdBalances[0]?.id || null,
+                    totalDebit: roundMoney(totalDebit),
+                    totalCredit: roundMoney(totalCredit),
+                    createdBy: userId || null,
+                    lines: { create: journalLines },
+                  },
+                  include: { lines: true },
+                })
+              } else {
+                throw err
+              }
+            }
+
+            for (const balance of createdBalances) {
+              await tx.initialBalance.update({
+                where: { id: balance.id },
+                data: {
+                  journalEntryId: je.id,
+                  isPosted: true,
+                },
+              })
+            }
+
+            return je
+          })
+
+          return NextResponse.json(
+            {
+              success: true,
               data: {
-                journalEntryId: journalEntry.id,
-                isPosted: true,
+                balances: createdBalances,
+                journalEntry: {
+                  id: journalEntry.id,
+                  number: journalEntry.number,
+                  totalDebit: roundMoney(totalDebit),
+                  totalCredit: roundMoney(totalCredit),
+                  fiscalYearId: activeFy.id,
+                  fiscalYearName: activeFy.name,
+                },
               },
+              message: `سند افتتاحیه در سال مالی «${activeFy.name}» با موفقیت صادر شد`,
+            },
+            { status: 201 }
+          )
+        } catch (err: any) {
+          console.error('[InitialBalance POST] Journal creation failed:', err)
+
+          if (err?.code === 'P2002') {
+            return NextResponse.json({
+              success: true,
+              message: 'سند افتتاحیه قبلاً ایجاد شده است',
+              data: { skipped: true, balances: createdBalances },
             })
           }
-        } catch (err) {
-          console.warn('[InitialBalance POST] Link to journal failed:', err)
-        }
 
-        console.log('[InitialBalance POST] ✅ Journal created:', journalEntry.id)
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            balances: createdBalances,
-            journalEntry: {
-              id: journalEntry.id,
-              number: journalEntry.number,
-              totalDebit,
-              totalCredit,
+          return NextResponse.json(
+            {
+              success: false,
+              error: `خطا در ایجاد سند: ${err?.message}`,
+              errorCode: err?.code,
             },
-          },
-          message: 'موجودی اولیه و سند افتتاحیه با موفقیت ثبت شدند',
-        })
-      } catch (err: any) {
-        console.error('[InitialBalance POST] ❌ Journal creation failed:', err)
-
-        if (err?.code === 'P2002') {
-          return NextResponse.json({
-            success: true,
-            message: 'سند افتتاحیه قبلاً ایجاد شده است',
-            data: { skipped: true, balances: createdBalances },
-          })
-        }
-
-        return NextResponse.json({
-          success: false,
-          error: `خطا در ایجاد سند: ${err?.message}`,
-          errorCode: err?.code,
-        }, { status: 500 })
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: createdBalances,
-      message: body.postToJournal
-        ? 'موجودی اولیه و سند افتتاحیه با موفقیت ثبت شدند'
-        : 'موجودی اولیه به‌صورت پیش‌نویس ذخیره شد',
-    })
-  } catch (error: any) {
-    console.error('[InitialBalance POST] Fatal error:', error)
-    return NextResponse.json({
-      success: false,
-      error: error?.message || 'خطای سرور',
-    }, { status: 500 })
-  }
-})
-
-// ─── DELETE ────────────────────────────────────────────────
-export const DELETE = withTenantAndPermission('accounting')(async (
-  req: NextRequest,
-  ctx: any,
-  tenant: any
-) => {
-  try {
-    const tenantDb = tenant.tenantDb
-    const tenantId = tenant.tenantId
-    const { searchParams } = new URL(req.url)
-
-    // ★ v10.9.7: force=true → حذف کامل شامل سند صادر شده
-    const force = searchParams.get('force') === 'true'
-
-    console.log('[InitialBalance DELETE] tenantId:', tenantId, 'force:', force)
-
-    if (force) {
-      // ═══════════════════════════════════════════════════════
-      // ★ حذف کامل: InitialBalance + JournalEntry + Lines
-      // ═══════════════════════════════════════════════════════
-
-      // ۱. پیدا کردن balances با journal
-      const balancesWithJournal = await tenantDb.initialBalance.findMany({
-        where: { tenantId, journalEntryId: { not: null } },
-        select: { journalEntryId: true },
-      })
-
-      const journalIds = [...new Set(
-        balancesWithJournal
-          .map((b: any) => b.journalEntryId)
-          .filter(Boolean)
-      )] as string[]
-
-      console.log('[InitialBalance DELETE] Found', journalIds.length, 'journals to delete')
-
-      // ۲. حذف JournalEntryLines (قبل از Journal برای جلوگیری از FK error)
-      if (journalIds.length > 0) {
-        try {
-          const linesResult = await tenantDb.journalEntryLine.deleteMany({
-            where: {
-              journalEntryId: { in: journalIds },
-            },
-          })
-          console.log('[InitialBalance DELETE] ✅ Deleted', linesResult.count, 'journal lines')
-        } catch (err: any) {
-          console.warn('[InitialBalance DELETE] Delete lines failed:', err?.message)
+            { status: 500 }
+          )
         }
       }
-
-      // ۳. حذف JournalEntries (فقط سند افتتاحیه)
-      if (journalIds.length > 0) {
-        try {
-          const journalsResult = await tenantDb.journalEntry.deleteMany({
-            where: {
-              id: { in: journalIds },
-              tenantId,
-              sourceType: 'initial_balance',
-            },
-          })
-          console.log('[InitialBalance DELETE] ✅ Deleted', journalsResult.count, 'journal entries')
-        } catch (err: any) {
-          console.warn('[InitialBalance DELETE] Delete journals failed:', err?.message)
-        }
-      }
-
-      // ۴. حذف همه InitialBalances
-      const balancesResult = await tenantDb.initialBalance.deleteMany({
-        where: { tenantId },
-      })
-      console.log('[InitialBalance DELETE] ✅ Deleted', balancesResult.count, 'balances')
 
       return NextResponse.json({
         success: true,
-        message: `سند افتتاحیه به‌طور کامل حذف شد (${balancesResult.count} موجودی)`,
-        deletedCount: balancesResult.count,
-        deletedJournals: journalIds.length,
-        force: true,
+        data: createdBalances,
+        message: 'موجودی اولیه به‌صورت پیش‌نویس ذخیره شد',
       })
+    } catch (error: any) {
+      console.error('[InitialBalance POST] Fatal error:', error)
+      return NextResponse.json(
+        { success: false, error: error?.message || 'خطای سرور' },
+        { status: 500 }
+      )
     }
-
-    // ═══════════════════════════════════════════════════════
-    // حذف معمولی: فقط draft balances (غیر صادر شده)
-    // ═══════════════════════════════════════════════════════
-
-    const postedBalance = await tenantDb.initialBalance.findFirst({
-      where: { tenantId, isPosted: true },
-    })
-
-    if (postedBalance) {
-      return NextResponse.json({
-        success: false,
-        error: 'سند افتتاحیه صادر شده است. برای حذف کامل، گزینه "حذف کامل" را انتخاب کنید.',
-        needsForce: true,
-      }, { status: 400 })
-    }
-
-    const result = await tenantDb.initialBalance.deleteMany({
-      where: { tenantId },
-    })
-
-    return NextResponse.json({
-      success: true,
-      message: `${result.count} موجودی با موفقیت حذف شد`,
-      deletedCount: result.count,
-    })
-  } catch (error: any) {
-    console.error('[InitialBalance DELETE] Error:', error)
-    return NextResponse.json({
-      success: false,
-      error: 'خطا در حذف موجودی: ' + (error?.message || ''),
-    }, { status: 500 })
   }
-})
+)
+
+// ─── DELETE ──────────────────────────────────────────────────
+
+export const DELETE = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
+    try {
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
+      const { searchParams } = new URL(req.url)
+      const force = searchParams.get('force') === 'true'
+
+      if (!tenantDb?.initialBalance) {
+        return NextResponse.json(
+          { success: false, error: 'مدل موجودی اولیه وجود ندارد' },
+          { status: 400 }
+        )
+      }
+
+      if (force) {
+        // حذف کامل: balances + journal entries + lines
+        const balancesWithJournal = await tenantDb.initialBalance.findMany({
+          where: { tenantId, journalEntryId: { not: null } },
+          select: { journalEntryId: true },
+        })
+
+        const journalIds = [
+          ...new Set(
+            balancesWithJournal
+              .map((b: any) => b.journalEntryId)
+              .filter(Boolean)
+          ),
+        ] as string[]
+
+        // بررسی سال مالی سند — اگر بسته باشد، اجازه حذف نمی‌دهیم
+        if (journalIds.length > 0) {
+          try {
+            const jes = await tenantDb.journalEntry.findMany({
+              where: {
+                id: { in: journalIds },
+                tenantId,
+                sourceType: 'initial_balance',
+              },
+              select: { id: true, fiscalYearId: true },
+            })
+
+            const fyIds = [
+              ...new Set(jes.map((j: any) => j.fiscalYearId).filter(Boolean)),
+            ] as string[]
+
+            if (fyIds.length > 0) {
+              const fys = await tenantDb.fiscalYear.findMany({
+                where: { id: { in: fyIds } },
+                select: { id: true, name: true, isClosed: true },
+              })
+
+              const closedFy = fys.find((fy: any) => fy.isClosed === true)
+
+              if (closedFy) {
+                return NextResponse.json(
+                  {
+                    success: false,
+                    error: `سال مالی «${closedFy.name}» بسته شده است و امکان حذف سند افتتاحیه آن وجود ندارد.`,
+                    code: 'FISCAL_YEAR_CLOSED',
+                  },
+                  { status: 400 }
+                )
+              }
+            }
+          } catch {}
+        }
+
+        // حذف خطوط سند
+        if (journalIds.length > 0) {
+          try {
+            await tenantDb.journalEntryLine.deleteMany({
+              where: { journalEntryId: { in: journalIds } },
+            })
+          } catch {}
+
+          try {
+            await tenantDb.journalEntry.deleteMany({
+              where: {
+                id: { in: journalIds },
+                tenantId,
+                sourceType: 'initial_balance',
+              },
+            })
+          } catch {}
+        }
+
+        const balancesResult = await tenantDb.initialBalance.deleteMany({
+          where: { tenantId },
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `سند افتتاحیه به‌طور کامل حذف شد (${balancesResult.count} موجودی)`,
+          deletedCount: balancesResult.count,
+          deletedJournals: journalIds.length,
+          force: true,
+        })
+      }
+
+      // حذف معمولی: فقط draft
+      const postedBalance = await tenantDb.initialBalance.findFirst({
+        where: { tenantId, isPosted: true },
+      })
+
+      if (postedBalance) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'سند افتتاحیه صادر شده است. برای حذف کامل، از گزینه «حذف کامل سند» استفاده کنید.',
+            needsForce: true,
+          },
+          { status: 400 }
+        )
+      }
+
+      const result = await tenantDb.initialBalance.deleteMany({
+        where: { tenantId },
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: `${result.count} موجودی با موفقیت حذف شد`,
+        deletedCount: result.count,
+      })
+    } catch (error: any) {
+      console.error('[InitialBalance DELETE]', error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'خطا در حذف موجودی: ' + (error?.message || ''),
+        },
+        { status: 500 }
+      )
+    }
+  }
+)

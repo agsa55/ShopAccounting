@@ -92,17 +92,19 @@ interface SyncQueueItem {
   lastError?: string
 }
 
-// ★ v8.12: Interface برای آمار کلی
 interface GlobalPurchaseStats {
   total: number
+  paid: number          // ★ اضافه شد
+  pending: number       // ★ اضافه شد
+  partial: number       // ★ اضافه شد
   totalAmount: number
   paidAmount: number
-  byPaymentType: {
+  byPaymentType: { 
     cash: number
     credit: number
     check: number
   }
-  byInvoiceType: {
+  byInvoiceType: { 
     purchase: number
     purchaseReturn: number
     service: number
@@ -586,6 +588,7 @@ export function PurchaseInvoicesPage() {
   const tenantId = useAppStore(s => s.tenantId)
   const setCurrentView = useAppStore(s => s.setCurrentView)
   const isOnline = useAppStore(s => s.isOnline)
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId) // ★ اضافه شد
   const trulyOnline = isOnline && (typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -760,19 +763,43 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
   // ══════════════════════════════════════════════════════════════════════════
   // ★ v8.12: بارگذاری آمار کلی از سرور (مستقل از صفحه‌بندی)
   // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // ★ v8.12 + FY: بارگذاری آمار کلی از سرور (با فیلتر سال مالی)
+  // ══════════════════════════════════════════════════════════════════════════
   const loadGlobalStats = useCallback(async () => {
     const tid = tenantId || useAppStore.getState().currentTenant?.id
     if (!tid) return
 
     setLoadingStats(true)
+
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      
       const params = new URLSearchParams()
+      
+      // ★ پارامترهای پایه
       params.set('tenantId', tid)
-      if (invoiceTypeFilter !== 'all') params.set('invoiceTypeFilter', invoiceTypeFilter)
-      if (statusFilter !== 'all') params.set('statusFilter', statusFilter)
-      if (paymentTypeFilter !== 'all') params.set('paymentTypeFilter', paymentTypeFilter)
-      if (search.trim()) params.set('search', search.trim())
+      
+      // ★ فیلترهای کاربر
+      if (invoiceTypeFilter !== 'all') {
+        params.set('invoiceTypeFilter', invoiceTypeFilter)
+      }
+      if (statusFilter !== 'all') {
+        params.set('statusFilter', statusFilter)
+      }
+      if (paymentTypeFilter !== 'all') {
+        params.set('paymentTypeFilter', paymentTypeFilter)
+      }
+      if (search.trim()) {
+        params.set('search', search.trim())
+      }
+
+      // ★★ اضافه کردن فیلتر سال مالی به درخواست آمار ★★
+      if (selectedFiscalYearId) {
+        params.set('fiscalYearId', selectedFiscalYearId)
+      }
+
+      console.log('[Purchase Global Stats] Fetching with FY:', selectedFiscalYearId, 'Params:', params.toString())
 
       const res = await fetch(`/api/purchase-invoices/stats?${params.toString()}`, {
         headers: {
@@ -780,22 +807,30 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       })
+
       const result = await res.json()
 
       if (result.success && result.data) {
         setGlobalStats(result.data)
-        console.log('📊 [Purchase Global Stats] آمار کلی بارگذاری شد:', result.data)
+        console.log('📊 [Purchase Global Stats] Loaded successfully:', result.data)
       } else {
-        console.warn('⚠️ [Purchase Global Stats] خطا:', result.error)
+        console.warn('⚠️ [Purchase Global Stats] API Error:', result.error)
+        setGlobalStats(null) // پاک کردن آمار قبلی اگر خطا بود
       }
     } catch (err: any) {
-      console.error('❌ [Purchase Global Stats] خطای شبکه:', err)
+      console.error('❌ [Purchase Global Stats] Network/Error:', err)
       setGlobalStats(null)
     } finally {
       setLoadingStats(false)
     }
-  }, [tenantId, invoiceTypeFilter, statusFilter, paymentTypeFilter, search])
-
+  }, [
+    tenantId, 
+    invoiceTypeFilter, 
+    statusFilter, 
+    paymentTypeFilter, 
+    search, 
+    selectedFiscalYearId // ★ مهم: افزودن وابستگی برای رفرش خودکار
+  ])
   // ══════════════════════════════════════════════════════════════════════════
   // ★ بارگذاری داده‌ها
   // ══════════════════════════════════════════════════════════════════════════
@@ -831,25 +866,30 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
       }
       return
     }
-    try {
-      console.log('[loadData] Fetching from server...')
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      }
+        try {
+        console.log('[loadData] Fetching from server...')
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
 
-      // ★ v8.12: ارسال فیلترها به سرور
-      const queryParams = new URLSearchParams({
-        tenantId: tid,
-        page: String(page),
-        limit: String(pageSize),
-      })
-      if (statusFilter !== 'all')       queryParams.set('status', statusFilter)
-      if (paymentTypeFilter !== 'all')  queryParams.set('paymentType', paymentTypeFilter)
-      if (invoiceTypeFilter !== 'all')  queryParams.set('invoiceType', invoiceTypeFilter)
-      if (search.trim())                queryParams.set('search', search.trim())
+        // ★ v8.12 + FY: ارسال فیلترها و سال مالی به سرور
+        const queryParams = new URLSearchParams({
+          tenantId: tid,
+          page: String(page),
+          limit: String(pageSize),
+        })
 
+        if (statusFilter !== 'all') queryParams.set('status', statusFilter)
+        if (paymentTypeFilter !== 'all') queryParams.set('paymentType', paymentTypeFilter)
+        if (invoiceTypeFilter !== 'all') queryParams.set('invoiceType', invoiceTypeFilter)
+        if (search.trim()) queryParams.set('search', search.trim())
+
+        // ★★ اضافه کردن فیلتر سال مالی ★★
+        if (selectedFiscalYearId) {
+          queryParams.set('fiscalYearId', selectedFiscalYearId)
+        }
       console.log('[loadData] Making requests:', {
         invoices: `/api/purchase-invoices?${queryParams.toString()}`,
         suppliers: `/api/suppliers?tenantId=${tid}&activeOnly=true`,
@@ -925,7 +965,7 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
       setLoading(false)
       console.log('[loadData] Finished, loading = false')
     }
-  }, [tenantId, isOnline, page, pageSize, statusFilter, paymentTypeFilter, invoiceTypeFilter, search, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast])
+  }, [tenantId, isOnline, page, pageSize, statusFilter, paymentTypeFilter, invoiceTypeFilter, search, loadOfflineInvoices, saveOfflineInvoices, mergeInvoices, loadSyncQueue, toast,selectedFiscalYearId])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setPage(1) }, [search, invoiceTypeFilter, statusFilter, paymentTypeFilter])
@@ -935,7 +975,7 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
     if (trulyOnline) {
       loadGlobalStats()
     }
-  }, [loadGlobalStats, trulyOnline])
+  }, [loadGlobalStats, trulyOnline,selectedFiscalYearId])
 
   // ★ v8.12: بروزرسانی خودکار آمار هر ۶۰ ثانیه
   useEffect(() => {
@@ -1953,60 +1993,51 @@ const [checkPrintData, setCheckPrintData] = useState<CheckPrintData | null>(null
 
   // ★ v8.12: summaryStats با آمار کلی سرور (fallback محلی برای آفلاین)
   const summaryStats = useMemo(() => {
-    if (globalStats && trulyOnline) {
+    // ★ اصلاح: اطمینان از وجود آبجکت‌های داخلی قبل از دسترسی
+    if (!globalStats) {
       return {
-        total: globalStats.total,
-        totalAmount: globalStats.totalAmount,
-        paidAmount: globalStats.paidAmount,
-        cashPurchaseCount: globalStats.byPaymentType.cash,
-        creditPurchaseCount: globalStats.byPaymentType.credit,
-        checkPurchaseCount: globalStats.byPaymentType.check,
-        purchaseCount: globalStats.byInvoiceType.purchase,
-        purchaseReturnCount: globalStats.byInvoiceType.purchaseReturn,
-        serviceCount: globalStats.byInvoiceType.service,
-        repairCount: globalStats.byInvoiceType.repair,
-        isGlobal: true,
+        total: 0,
+        paid: 0,
+        pending: 0,
+        partial: 0,
+        totalAmount: 0,
+        paidAmount: 0,
+        cashPurchaseCount: 0,
+        creditPurchaseCount: 0,
+        checkPurchaseCount: 0,
+        purchaseCount: 0,
+        purchaseReturnCount: 0,
+        serviceCount: 0,
+        repairCount: 0,
+        isGlobal: false,
       }
     }
 
-    // حالت آفلاین یا خطا: محاسبه محلی
-    const total = invoices.length
-    const totalAmount = invoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0)
-    const paidAmount = invoices.reduce((sum, i) => sum + (i.paidAmount || 0), 0)
-
-    const isCheckInvoice = (inv: PurchaseInvoice): boolean => {
-      const pt = (inv.paymentType || '').toLowerCase().trim()
-      return pt === 'check' || pt === 'cheque' || pt === 'چک' || pt.includes('check') ||
-             !!(inv.checkInfo && (inv.checkInfo.id || inv.checkInfo.checkNumber)) ||
-             !!(inv.checkStatus && inv.checkStatus.toString().trim().length > 0)
-    }
-
-    const checkPurchaseCount = invoices.filter(isCheckInvoice).length
-    const cashPurchaseCount = invoices.filter(i => {
-      const pt = (i.paymentType || '').toLowerCase().trim()
-      return (pt === 'cash' || pt === 'نقدی') && !isCheckInvoice(i)
-    }).length
-    const creditPurchaseCount = invoices.filter(i => {
-      const pt = (i.paymentType || '').toLowerCase().trim()
-      return (pt === 'credit' || pt === 'نسیه') && !isCheckInvoice(i)
-    }).length
-
-    const serviceCount = invoices.filter(i => (i.invoiceType || '').toLowerCase() === 'service').length
-    const repairCount = invoices.filter(i => (i.invoiceType || '').toLowerCase() === 'repair').length
-    const purchaseReturnCount = invoices.filter(i => (i.invoiceType || '').toLowerCase() === 'purchase_return').length
-    const purchaseCount = invoices.filter(i => {
-      const t = (i.invoiceType || '').toLowerCase()
-      return !t || t === 'purchase'
-    }).length
+    // اگر globalStats از API آمده ولی ساختار کامل نیست، مقادیر پیش‌فرض بگذار
+    const byPayment = globalStats.byPaymentType || {}
+    const byType = globalStats.byInvoiceType || {}
 
     return {
-      total, totalAmount, paidAmount,
-      cashPurchaseCount, creditPurchaseCount, checkPurchaseCount,
-      purchaseCount, purchaseReturnCount, serviceCount, repairCount,
-      isGlobal: false,
+      total: globalStats.total || 0,
+      paid: globalStats.paid || 0,
+      pending: globalStats.pending || 0,
+      partial: globalStats.partial || 0,
+      totalAmount: globalStats.totalAmount || 0,
+      paidAmount: globalStats.paidAmount || 0,
+      
+      // ★ استفاده از Optional Chaining برای جلوگیری از TypeError
+      cashPurchaseCount: byPayment.cash || 0,
+      creditPurchaseCount: byPayment.credit || 0,
+      checkPurchaseCount: byPayment.check || 0,
+      
+      purchaseCount: byType.purchase || 0,
+      purchaseReturnCount: byType.purchaseReturn || 0,
+      serviceCount: byType.service || 0,
+      repairCount: byType.repair || 0,
+      
+      isGlobal: true,
     }
-  }, [invoices, globalStats, trulyOnline])
-
+  }, [globalStats])
   // ★ v8.9.4: Highlight کردن عبارت جستجو در متن
   const highlightText = (text: string, query: string): React.ReactNode => {
     if (!query || query.length < 2) return text

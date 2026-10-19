@@ -433,8 +433,15 @@ function calculateShortageValue(product: any): number {
 // ============================================================================
 //  Main Component
 // ============================================================================
-
-export function InventoryAdvancedReport() {
+export function InventoryAdvancedReport({
+  fiscalYearId,
+  dateRange: parentDateRange,
+  asOf: parentAsOf,
+}: {
+  fiscalYearId?: string | null
+  dateRange?: DateRange
+  asOf?: string | null
+}) {
   const [reportType, setReportType] = useState<string>('stockByWarehouse')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -445,11 +452,30 @@ export function InventoryAdvancedReport() {
 
   const [warehouseId, setWarehouseId] = useState<string>('all')
   const [categoryId, setCategoryId] = useState<string>('all')
-  const [dateRange, setDateRange] = useState<DateRange>({ from: daysAgoISO(30), to: todayGregorianISO() })
+
+  const [dateRange, setDateRange] = useState<DateRange>(
+    parentDateRange || {
+      from: daysAgoISO(30),
+      to: todayGregorianISO(),
+    }
+  )
+
   const [lowStockOnly, setLowStockOnly] = useState(false)
+
+  // ★ اگر والد بازه زمانی را عوض کرد، کامپوننت انبار هم آپدیت شود
+  useEffect(() => {
+    if (parentDateRange) {
+      setDateRange({
+        from: parentDateRange.from,
+        to: parentDateRange.to,
+      })
+    }
+  }, [parentDateRange?.from, parentDateRange?.to])
 
   const warehouses = data?.warehouses || []
   const categories = data?.categories || []
+
+  const effectiveAsOf = parentAsOf || dateRange.to || todayGregorianISO()
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -467,21 +493,43 @@ export function InventoryAdvancedReport() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
+
     try {
       const params = new URLSearchParams({ type: reportType })
+
+      // ★ سال مالی
+      if (fiscalYearId) {
+        params.set('fiscalYearId', fiscalYearId)
+      }
+
+      // ★ تاریخ مرجع برای گزارش‌های نقطه‌ای مثل موجودی پایان دوره
+      if (effectiveAsOf) {
+        params.set('asOf', effectiveAsOf)
+      }
+
       if (selectedBranch !== 'all') params.set('branchId', selectedBranch)
       if (warehouseId !== 'all') params.set('warehouseId', warehouseId)
       if (categoryId !== 'all') params.set('categoryId', categoryId)
+
+      // ★ برای حرکت کالا از dateFrom/dateTo استفاده می‌کنیم
       if (reportType === 'movements') {
         if (dateRange.from) params.set('dateFrom', dateRange.from)
         if (dateRange.to) params.set('dateTo', dateRange.to)
+      } else {
+        // ★ برای سایر گزارش‌ها هم بازه سال مالی را می‌فرستیم
+        // اگر API فعلاً استفاده نکند، بی‌ضرر است
+        if (dateRange.from) params.set('from', dateRange.from)
+        if (dateRange.to) params.set('to', dateRange.to)
       }
+
       if (lowStockOnly) params.set('lowStockOnly', 'true')
 
       const res = await fetch(`/api/reports/inventory-advanced?${params.toString()}`, {
         headers: getAuthHeaders(),
       })
+
       const json = await res.json()
+
       if (json.success) {
         setData(json.data)
       } else {
@@ -495,9 +543,22 @@ export function InventoryAdvancedReport() {
     } finally {
       setLoading(false)
     }
-  }, [reportType, selectedBranch, warehouseId, categoryId, dateRange.from, dateRange.to, lowStockOnly])
+  }, [
+    reportType,
+    selectedBranch,
+    warehouseId,
+    categoryId,
+    dateRange.from,
+    dateRange.to,
+    lowStockOnly,
+    fiscalYearId,
+    parentAsOf,
+    effectiveAsOf,
+  ])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   // ★ ۱. غنی‌سازی کالاها
   const enrichedProducts = useMemo(() => {

@@ -1,7 +1,14 @@
 'use client';
 
 // ============================================================================
-// src/components/pos/cashier-panel.tsx — v12.3.2 ★★★ ULTRA COMPACT + SMART DETAILS
+// src/components/pos/cashier-panel.tsx — v12.4.0 ★ FISCAL YEAR REACTIVE
+// ★ v12.4.0:
+//   - اتصال به selectedFiscalYearId از useAppStore
+//   - ارسال fiscalYearId به /api/cashier-dashboard
+//   - ارسال fiscalYearId به /api/cashier-performance
+//   - refresh خودکار کارت صندوق‌دار با تغییر سال مالی
+//   - پشتیبانی از allYears اگر selectedFiscalYearId = 'all' باشد
+//   - حذف tenantId از query params برای امنیت بیشتر
 // ★ v12.3.2:
 //   - نوار وضعیت فوق‌فشرده برای صفحه صندوق
 //   - دکمه جزئیات یک ردیف دوم بازشونده ایجاد می‌کند
@@ -28,6 +35,7 @@
 // ============================================================================
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useAppStore } from '@/lib/store';
 import {
   Wallet,
   TrendingUp,
@@ -73,9 +81,32 @@ const formatPrice = (value: any): string => {
   return toFaNum(Math.round(n).toLocaleString('en-US'));
 };
 
+function getLocalTodayIso(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 // ★ فقط مواردی که واقعاً مقدار دارند نمایش داده شوند
 function hasAmount(value: any): boolean {
   return Math.abs(Number(value || 0)) >= 1;
+}
+
+// ★ v12.4.0: افزودن پارامتر سال مالی به URLSearchParams
+function appendFiscalYearParams(
+  params: URLSearchParams,
+  fiscalYearId: string | null | undefined
+) {
+  if (!fiscalYearId) return;
+
+  // اگر در future هدر سیستم مقدار 'all' را برای همه سنوات استفاده کرد
+  if (fiscalYearId === 'all') {
+    params.set('allYears', 'true');
+    return;
+  }
+
+  params.set('fiscalYearId', fiscalYearId);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -107,18 +138,22 @@ function normalizeCashierSummary(summary: any) {
   const onlineFromApi = hasExplicitOnline ? num(explicitOnline) : 0;
 
   // ★ اگر فیلد آنلاین نبود، موجودی نقدی امروز را از تغییر صندوق برآورد می‌کنیم.
-  const estimatedPhysicalCashToday = Math.max(0, currentBalance - startOfDayBalance);
+  const estimatedPhysicalCashToday = Math.max(0, currentBalance - startOfDayBalance)
+
+  const totalCashIn = num(summary?.totalCashIn)
 
   const cashReceived = hasExplicitOnline
-    ? Math.max(0, cashSalesRaw - onlineFromApi)
-    : Math.min(cashSalesRaw, estimatedPhysicalCashToday);
+    ? Math.max(0, cashSalesRaw)
+    : Math.min(Math.max(0, cashSalesRaw), estimatedPhysicalCashToday)
 
   const onlineReceived = hasExplicitOnline
-    ? onlineFromApi
-    : Math.max(0, cashSalesRaw - cashReceived);
+    ? Math.max(0, onlineFromApi)
+    : Math.max(0, cashSalesRaw - cashReceived)
 
-  const totalReceivedToday = cashReceived + onlineReceived;
-
+  const totalReceivedToday =
+    totalCashIn > 0
+      ? totalCashIn + onlineReceived
+      : cashReceived + onlineReceived;
   const netSales =
     summary?.netSales !== undefined
       ? num(summary.netSales)
@@ -151,6 +186,26 @@ function normalizeCashierSummary(summary: any) {
 
   const totalPurchases = num(summary?.totalPurchases);
   const totalServices = num(summary?.totalServices);
+ 
+  const totalCashOut = num(summary?.totalCashOut);
+
+  const explicitWithdrawals = num(
+    summary?.totalWithdrawals ??
+      summary?.withdrawals ??
+      summary?.cashWithdrawals ??
+      summary?.withdrawalAmount ??
+      summary?.totalWithdrawalAmount
+  );
+
+  const outAmount = explicitWithdrawals || totalCashOut;
+  const outLabel = explicitWithdrawals ? 'برداشت' : 'خروجی';
+  const totalWithdrawals = num(
+    summary?.totalWithdrawals ??
+      summary?.withdrawals ??
+      summary?.cashWithdrawals ??
+      summary?.withdrawalAmount ??
+      summary?.totalWithdrawalAmount
+  );
 
   return {
     currentBalance,
@@ -181,6 +236,11 @@ function normalizeCashierSummary(summary: any) {
 
     totalPurchases,
     totalServices,
+    totalCashIn,
+    totalCashOut,
+    outAmount,
+    outLabel,
+  
   };
 }
 
@@ -278,11 +338,15 @@ export default function CashierPanel() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentTenantId, setCurrentTenantId] = useState<string>('');
 
+  // ★ v12.4.0: سال مالی انتخابی از هدر سیستم
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId);
+
   // ─── استیت‌های نوار وضعیت ───
-  const [summary, setSummary] = useState<any>(null);
-  const [loadingSummary, setLoadingSummary] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [summary, setSummary] = useState<any>(null)
+  const [loadingSummary, setLoadingSummary] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
+  const [summaryWarning, setSummaryWarning] = useState<string | null>(null)
 
   // ─── استیت‌های مودال تراکنش دستی ───
   const [showManualModal, setShowManualModal] = useState(false);
@@ -317,6 +381,7 @@ export default function CashierPanel() {
 
   // ═══════════════════════════════════════════════════════════════
   // بارگذاری خلاصه تراکنش‌های امروز
+  // ★ v12.4.0: fiscalYearId ارسال می‌شود و با تغییر سال مالی refresh می‌شود
   // ═══════════════════════════════════════════════════════════════
 
   const loadSummary = useCallback(
@@ -327,14 +392,24 @@ export default function CashierPanel() {
       else setLoadingSummary(true);
 
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const res = await fetch(
-          `/api/cashier-dashboard?cashierId=${currentUser.id}&date=${today}&tenantId=${currentTenantId}`
-        );
+           const today = getLocalTodayIso()
+
+        const params = new URLSearchParams();
+        params.set('cashierId', currentUser.id);
+        params.set('date', today);
+
+        appendFiscalYearParams(params, selectedFiscalYearId);
+
+        const url = `/api/cashier-dashboard?${params.toString()}`;
+
+        console.log('[CashierPanel] Loading dashboard:', url);
+
+        const res = await fetch(url);
         const data = await res.json();
 
         if (data.success) {
-          setSummary(data.summary);
+          setSummary(data.summary)
+          setSummaryWarning(data.warning || null)
 
           if (data.summary?.returns > 0) {
             logger.info('آمار فروش با برگشتی به‌روز شد', {
@@ -342,17 +417,22 @@ export default function CashierPanel() {
               returns: data.summary.returns,
               netSales: data.summary.netSales,
               returnsCount: data.summary.returnsCount,
-            });
+            })
           }
+        } else {
+          setSummaryWarning(data.error || 'خطا در دریافت خلاصه صندوق')
         }
-      } catch (err) {
-        console.error('[CashierPanel] Load summary error:', err);
+      } catch (err: any) {
+        console.error('[CashierPanel] Load summary error:', err)
+        setSummaryWarning(
+          err?.message || 'خطای شبکه در دریافت خلاصه صندوق'
+        )
       } finally {
         setLoadingSummary(false);
         setRefreshing(false);
       }
     },
-    [currentUser?.id, currentTenantId]
+    [currentUser?.id, currentTenantId, selectedFiscalYearId]
   );
 
   useEffect(() => {
@@ -387,6 +467,7 @@ export default function CashierPanel() {
 
   // ═══════════════════════════════════════════════════════════════
   // بارگذاری گزارش عملکرد
+  // ★ v12.4.0: fiscalYearId ارسال می‌شود
   // ═══════════════════════════════════════════════════════════════
 
   const loadReport = useCallback(async () => {
@@ -394,9 +475,16 @@ export default function CashierPanel() {
     setReportLoading(true);
 
     try {
-      const res = await fetch(
-        `/api/cashier-performance?tenantId=${currentTenantId}&period=${reportPeriod}`
-      );
+      const params = new URLSearchParams();
+      params.set('period', reportPeriod);
+
+      appendFiscalYearParams(params, selectedFiscalYearId);
+
+      const url = `/api/cashier-performance?${params.toString()}`;
+
+      console.log('[CashierPanel] Loading report:', url);
+
+      const res = await fetch(url);
       const data = await res.json();
 
       if (data.success) {
@@ -407,7 +495,7 @@ export default function CashierPanel() {
     } finally {
       setReportLoading(false);
     }
-  }, [currentTenantId, reportPeriod]);
+  }, [currentTenantId, reportPeriod, selectedFiscalYearId]);
 
   useEffect(() => {
     if (showReportModal) {
@@ -421,6 +509,11 @@ export default function CashierPanel() {
 
   const handleSubmitManualTransaction = async () => {
     setError('');
+
+    if (!currentUser?.id) {
+      setError('کاربر صندوق‌دار شناسایی نشد.');
+      return;
+    }
 
     if (!amount || Number(amount) <= 0) {
       setError('مبلغ باید بیشتر از صفر باشد');
@@ -439,7 +532,6 @@ export default function CashierPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenantId: currentTenantId,
           cashierId: currentUser.id,
           transactionType,
           amount: Number(amount),
@@ -466,6 +558,11 @@ export default function CashierPanel() {
         setDescription('');
         setError('');
         loadSummary(true);
+
+        if (showReportModal) {
+          loadReport();
+        }
+
         alert('✅ تراکنش با موفقیت ثبت شد');
       } else {
         setError(data.error || 'خطا در ثبت تراکنش');
@@ -483,9 +580,10 @@ export default function CashierPanel() {
 
   const m = useMemo(() => normalizeCashierSummary(summary), [summary]);
 
-  const hasAnyDetails = useMemo(
+   const hasAnyDetails = useMemo(
     () =>
       hasAmount(m.totalReceivedToday) ||
+          hasAmount(m.cashSalesRaw) ||
       hasAmount(m.startOfDayBalance) ||
       hasAmount(m.openingBalance) ||
       hasAmount(m.profitTotal) ||
@@ -496,7 +594,8 @@ export default function CashierPanel() {
       hasAmount(m.installmentInvoiceTotal || m.installmentSales) ||
       hasAmount(m.checkSales) ||
       hasAmount(m.totalPurchases) ||
-      hasAmount(m.totalServices),
+      hasAmount(m.totalServices) ||
+      hasAmount(m.outAmount),
     [m]
   );
 
@@ -538,6 +637,12 @@ export default function CashierPanel() {
           </div>
         ) : (
           <div className="space-y-1">
+                      {summaryWarning && (
+              <div className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[9px] font-bold text-amber-800 sm:text-[10px]">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span className="truncate">{summaryWarning}</span>
+              </div>
+            )}
             {/* ═══ ردیف اصلی: همیشه فشرده ═══ */}
             <div className="flex items-center gap-1.5 sm:gap-2">
               {/* هویت صندوق‌دار */}
@@ -570,18 +675,13 @@ export default function CashierPanel() {
                   title="موجودی فعلی صندوق نقدی"
                 />
 
-                <TinyChip
+                      <TinyChip
                   label="نقدی"
-                  value={formatPrice(m.cashReceived)}
+                  value={formatPrice(m.totalCashIn || m.cashReceived)}
                   tone="emerald"
                   icon={<CircleDollarSign className="h-3 w-3" />}
-                  title={
-                    m.hasExplicitOnline
-                      ? 'ورودی نقدی امروز'
-                      : 'برآورد ورودی نقدی امروز از تغییر موجودی صندوق'
-                  }
+                  title="ورودی نقدی صندوق در بازه انتخابی"
                 />
-
                 {/* ★ آیتم آنلاین فقط وقتی مقدار دارد نمایش داده می‌شود */}
                 {hasAmount(m.onlineReceived) && (
                   <TinyChip
@@ -614,6 +714,20 @@ export default function CashierPanel() {
                   }
                   title="سود امروز"
                 />
+
+                                          {hasAmount(m.outAmount) && (
+                  <TinyChip
+                    label={m.outLabel}
+                    value={formatPrice(m.outAmount)}
+                    tone="red"
+                    icon={<TrendingDown className="h-3 w-3" />}
+                    title={
+                      m.outLabel === 'برداشت'
+                        ? 'برداشت‌های امروز از صندوق'
+                        : 'جمع خروجی‌های نقدی امروز؛ اگر فقط برداشت ثبت کرده باشی، همان برداشت است'
+                    }
+                  />
+                )}
               </div>
 
               {/* دکمه جزئیات */}
@@ -679,7 +793,15 @@ export default function CashierPanel() {
                         title="جمع ورودی نقدی و آنلاین امروز"
                       />
                     )}
-
+                    {hasAmount(m.cashSalesRaw) && (
+                      <TinyChip
+                        label="فروش نقدی"
+                        value={formatPrice(m.cashSalesRaw)}
+                        tone="emerald"
+                        icon={<Receipt className="h-3 w-3" />}
+                        title="سهم نقدی/پیش‌پرداخت از فاکتورهای فروش در بازه انتخابی"
+                      />
+                    )}
                     {hasAmount(m.startOfDayBalance) && (
                       <TinyChip
                         label="ابتدا"

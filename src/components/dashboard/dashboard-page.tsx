@@ -20,7 +20,7 @@ import { authFetch } from '@/lib/auth-fetch'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { SetupWizard, useSetupWizard } from '@/components/setup-wizard'
+
 import {
   TrendingUp, FileText, AlertCircle, AlertTriangle,
   ShoppingCart, CreditCard, Package, ArrowLeft,
@@ -211,18 +211,25 @@ export default function DashboardPage() {
   const { setCurrentView } = useAppStore()
   const planName = useAppStore((s) => s.planName)
   const isOnline = useAppStore((s) => s.isOnline)
+
+  // ★ v9.1: دسترسی به وضعیت سال مالی برای جلوگیری از خطای 400 داشبورد
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId)
+  const fiscalYearsLoading = useAppStore((s) => s.fiscalYearsLoading)
+  const fiscalYears = useAppStore((s) => s.fiscalYears)
+  const loadFiscalYears = useAppStore((s) => s.loadFiscalYears)
+
   const plan = resolvePlan(planName)
- const { open, setOpen, handleComplete, wizardMode, renewalData } = useSetupWizard()
 
   // ✅ ✅ ✅ اصلاح قطعی: بستن اجباری ویزارد اگر پلن دمو یا تستی است (جلوگیری از Race Condition)
-  useEffect(() => {
 
-    
-    if (planName === 'demo' || planName === 'trial') {
-      setOpen(false)
-    }
-  }, [planName, setOpen])
+  // ★ v9.1: اگر سال‌های مالی هنوز بارگذاری نشده‌اند، بارگذاری شوند
+useEffect(() => {
+  if (!isOnline) return
 
+  if (fiscalYears.length === 0 && !fiscalYearsLoading) {
+    void loadFiscalYears()
+  }
+}, [isOnline, fiscalYears.length, fiscalYearsLoading, loadFiscalYears])
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -238,13 +245,26 @@ export default function DashboardPage() {
   //     تودرتوی stats را برمی‌گرداند (با صفحه سازگار است)
   // ═══════════════════════════════════════════════════════════════
 
-  const loadData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true)
-    else setLoading(true)
-    setError(null)
+const loadData = useCallback(async (isRefresh = false) => {
+  if (isRefresh) setRefreshing(true)
+  else setLoading(true)
+  setError(null)
 
-    // ─── حالت آفلاین: بارگذاری از cache ──────────────────────────
-    if (!isOnline) {
+  // ★ v9.1: اگر هنوز در حال بارگذاری سال‌های مالی هستیم، صبر کن
+  if (fiscalYearsLoading) {
+    return
+  }
+
+  // ★ v9.1: اگر سال مالی فعال/انتخاب‌شده وجود ندارد، API داشبورد را صدا نزن
+  // در این حالت معمولاً ویزارد راه‌اندازی سال جدید باز است.
+  if (!selectedFiscalYearId) {
+    setLoading(false)
+    setRefreshing(false)
+    return
+  }
+
+  // ─── حالت آفلاین: بارگذاری از cache ──────────────────────────
+  if (!isOnline) {
       const cached = loadFromStorage<DashboardCache | null>(STORAGE_KEYS.DASHBOARD_CACHE, null)
       const lastUpdate = loadFromStorage<string | null>(STORAGE_KEYS.LAST_UPDATE, null)
 
@@ -312,7 +332,7 @@ export default function DashboardPage() {
       if (isRefresh) setRefreshing(false)
       else setLoading(false)
     }
-  }, [isOnline])
+}, [isOnline, selectedFiscalYearId, fiscalYearsLoading])
 
   useEffect(() => {
     loadData()
@@ -398,12 +418,12 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
         
      
-          <Button
-            onClick={() => loadData(true)}
-            variant="outline"
-            className="gap-1.5 h-8 text-xs"
-            disabled={refreshing || !isOnline}
-          >
+   <Button
+  onClick={() => loadData(true)}
+  variant="outline"
+  className="gap-1.5 h-8 text-xs"
+  disabled={refreshing || !isOnline || !selectedFiscalYearId}
+>
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             {refreshing ? 'در حال...' : 'بروزرسانی'}
           </Button>
@@ -787,16 +807,7 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* ★★★ ویزارد راه‌اندازی — فقط در حالت آنلاین و برای پلن‌های غیر دمو */}
-      {isOnline && planName !== 'demo' && planName !== 'trial' && (
-       <SetupWizard 
-  open={open} 
-  onOpenChange={setOpen} 
-  onComplete={handleComplete} 
-  wizardMode={wizardMode}
-  renewalData={renewalData}
-/>
-      )}
+
     </div>
   )
 }

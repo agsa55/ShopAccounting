@@ -966,6 +966,7 @@ export interface CachedJournalEntry {
   isPosted?: boolean
   sourceType?: string
   isManual?: boolean
+  fiscalYearId?: string | null
   items?: Array<{
     accountId: string
     accountName: string
@@ -989,7 +990,6 @@ export interface CachedJournalEntry {
   _createdAt?: number
   _lastError?: string
 }
-
 export async function cacheJournalEntries(entries: CachedJournalEntry[]): Promise<void> {
   try {
     await idbClear(STORES.meta)

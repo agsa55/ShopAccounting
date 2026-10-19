@@ -246,8 +246,8 @@ export const POST = withTenantAndPermission('pos')(async (req: NextRequest, ctx:
         nationalCode: body.nationalCode || null,
         address: body.address || null,
         creditLimit: body.creditLimit || 0,
-        currentBalance: body.currentBalance || 0,
-        isBlacklisted: body.isBlacklisted || false,
+        currentBalance: 0,
+        isBlacklisted: Boolean(body.isBlacklisted),
         tenantId,
       },
     })
@@ -304,7 +304,22 @@ export const PUT = withTenantAndPermission('pos')(async (req: NextRequest, ctx: 
     if (body.nationalCode !== undefined) updateData.nationalCode = body.nationalCode || null
     if (body.address !== undefined) updateData.address = body.address || null
     if (body.creditLimit !== undefined) updateData.creditLimit = parseFloat(body.creditLimit) || 0
-    if (body.currentBalance !== undefined) updateData.currentBalance = parseFloat(body.currentBalance) || 0
+
+    if (
+      body.currentBalance !== undefined &&
+      Number(body.currentBalance || 0) !== Number(existing.currentBalance || 0)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'تغییر دستی مانده مشتری از این مسیر مجاز نیست. لطفاً از دریافت وجه، فاکتور، برگشت یا تنظیم حساب استفاده کنید.',
+          code: 'MANUAL_CUSTOMER_BALANCE_EDIT_BLOCKED',
+        },
+        { status: 400 }
+      )
+    }
+
     if (body.isBlacklisted !== undefined) updateData.isBlacklisted = Boolean(body.isBlacklisted)
     if (body.code !== undefined) updateData.code = body.code
 

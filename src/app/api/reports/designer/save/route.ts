@@ -17,6 +17,14 @@ import { getDataset, getDatasetField } from '@/lib/reports/report-datasets'
 import { getFeaturesByPlanName } from '@/lib/plan-features'
 import type { ReportDefinition } from '@/lib/reports/report-types'
 
+function resolveTenantPlanName(tenant: any): string {
+  return (
+    tenant?.planName ||
+    tenant?.planTierName ||
+    tenant?.plan?.name ||
+    'basic'
+  )
+}
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -37,13 +45,14 @@ function validateDefinition(definition: ReportDefinition): string[] {
   }
 
   const dataset = getDataset(definition.datasetId)
+
   if (!dataset) {
     errors.push(`dataset '${definition.datasetId}' یافت نشد.`)
     return errors
   }
 
   if (!Array.isArray(definition.columns) || definition.columns.length === 0) {
-    errors.push('حداقل یک ستون باید انتخاب شود.')
+    errors.push('حداقل یک ستون الزامی است.')
     return errors
   }
 
@@ -59,6 +68,7 @@ function validateDefinition(definition: ReportDefinition): string[] {
     }
 
     const field = getDatasetField(definition.datasetId, col.field)
+
     if (!field) {
       errors.push(`فیلد '${col.field}' در dataset وجود ندارد.`)
       continue
@@ -68,7 +78,15 @@ function validateDefinition(definition: ReportDefinition): string[] {
       errors.push(`فیلد '${col.field}' نمی‌تواند aggregate شود.`)
     }
 
-    const validAggregates = ['sum', 'avg', 'count', 'countDistinct', 'min', 'max']
+    const validAggregates = [
+      'sum',
+      'avg',
+      'count',
+      'countDistinct',
+      'min',
+      'max',
+    ]
+
     if (col.aggregate && !validAggregates.includes(col.aggregate)) {
       errors.push(`عملیات aggregate '${col.aggregate}' نامعتبر است.`)
     }
@@ -81,6 +99,7 @@ function validateDefinition(definition: ReportDefinition): string[] {
     } else {
       for (const filter of definition.filters) {
         const field = getDatasetField(definition.datasetId, filter.field)
+
         if (!field) {
           errors.push(`فیلد فیلتر '${filter.field}' یافت نشد.`)
         }
@@ -95,6 +114,7 @@ function validateDefinition(definition: ReportDefinition): string[] {
     } else {
       for (const gb of definition.groupBy) {
         const field = getDatasetField(definition.datasetId, gb.field)
+
         if (!field) {
           errors.push(`فیلد گروه‌بندی '${gb.field}' یافت نشد.`)
         }
@@ -109,9 +129,11 @@ function validateDefinition(definition: ReportDefinition): string[] {
     } else {
       for (const ob of definition.orderBy) {
         const field = getDatasetField(definition.datasetId, ob.field)
+
         if (!field) {
           errors.push(`فیلد مرتب‌سازی '${ob.field}' یافت نشد.`)
         }
+
         if (ob.direction && !['asc', 'desc'].includes(ob.direction)) {
           errors.push(`جهت مرتب‌سازی '${ob.direction}' نامعتبر است.`)
         }
@@ -121,8 +143,53 @@ function validateDefinition(definition: ReportDefinition): string[] {
 
   // Validate limit
   if (definition.limit !== undefined) {
-    if (typeof definition.limit !== 'number' || definition.limit < 1 || definition.limit > 50000) {
+    if (
+      typeof definition.limit !== 'number' ||
+      definition.limit < 1 ||
+      definition.limit > 50000
+    ) {
       errors.push('limit باید عددی بین ۱ تا ۵۰۰۰۰ باشد.')
+    }
+  }
+
+  // Validate fiscal year policy
+  if (definition.fiscalYearPolicy) {
+    const policy = definition.fiscalYearPolicy
+    const strategy = dataset.fiscalYear?.strategy || 'none'
+
+    if (
+      !policy.mode ||
+      !['active', 'selected', 'all', 'none'].includes(policy.mode)
+    ) {
+      errors.push('fiscalYearPolicy.mode نامعتبر است.')
+    }
+
+    if (policy.mode === 'selected' && !policy.fiscalYearId) {
+      errors.push(
+        'اگر fiscalYearPolicy.mode برابر selected است، fiscalYearId الزامی است.'
+      )
+    }
+if (policy.mode === 'selected' && policy.fiscalYearId) {
+  const fiscalYearId = String(policy.fiscalYearId).trim()
+
+  if (!fiscalYearId) {
+    errors.push('fiscalYearPolicy.fiscalYearId نمی‌تواند خالی باشد.')
+  }
+}
+
+    if (
+      strategy === 'none' &&
+      (policy.mode === 'active' || policy.mode === 'selected')
+    ) {
+      errors.push(
+        'این دیتاست سال‌محور نیست؛ fiscalYearPolicy.mode نمی‌تواند active یا selected باشد.'
+      )
+    }
+
+    if (strategy !== 'none' && policy.mode === 'none') {
+      errors.push(
+        'برای دیتاست سال‌محور، fiscalYearPolicy.mode نمی‌تواند none باشد. برای همه سال‌ها از all استفاده کنید.'
+      )
     }
   }
 
@@ -195,7 +262,62 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
+    if (
+  reportDefinition.fiscalYearPolicy?.mode === 'selected' &&
+  reportDefinition.fiscalYearPolicy.fiscalYearId
+) {
+  const selectedFiscalYearId = String(
+    reportDefinition.fiscalYearPolicy.fiscalYearId
+  ).trim()
 
+  const fyExists = await prisma.fiscalYear.findFirst({
+    where: {
+      id: selectedFiscalYearId,
+      tenantId,
+    },
+    select: { id: true },
+  })
+
+  if (!fyExists) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'سال مالی انتخاب‌شده یافت نشد یا به این فروشگاه تعلق ندارد.',
+        code: 'INVALID_FISCAL_YEAR_POLICY',
+      },
+      { status: 400 }
+    )
+  }
+}
+if (
+  reportDefinition.fiscalYearPolicy?.mode === 'selected' &&
+  reportDefinition.fiscalYearPolicy.fiscalYearId
+) {
+  const selectedFiscalYearId = String(
+    reportDefinition.fiscalYearPolicy.fiscalYearId
+  ).trim()
+
+  const fyExists = await prisma.fiscalYear.findFirst({
+    where: {
+      id: selectedFiscalYearId,
+      tenantId,
+    },
+    select: { id: true },
+  })
+
+  if (!fyExists) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'سال مالی انتخاب‌شده یافت نشد یا به این فروشگاه تعلق ندارد.',
+        code: 'INVALID_FISCAL_YEAR_POLICY',
+      },
+      { status: 400 }
+    )
+  }
+}
     // 5. Get tenant info for plan check
     const tenant = await getTenantInfo(tenantId)
     if (!tenant) {
@@ -209,7 +331,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 6. Check plan permissions
-    const features = getFeaturesByPlanName(tenant.planName)
+const planName = resolveTenantPlanName(tenant)
+
+const features = getFeaturesByPlanName(planName)
 
     if (!features.canUseCustomReportDesigner) {
       return NextResponse.json(

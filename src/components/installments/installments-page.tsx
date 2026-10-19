@@ -810,17 +810,37 @@ export default function InstallmentsPage() {
       return
     }
 
-    try {
+      try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      const res = await fetch('/api/installment-plans', {
+      
+      const params = new URLSearchParams()
+
+      // ★ اقساط هم مثل نسیه باید همه سال‌ها را نشان دهد
+      // تا بدهی باز مشتری با تغییر سال مالی پنهان نشود
+      params.set('allYears', 'true')
+
+          const queryString = params.toString()
+      const apiUrl = `/api/installment-plans?${queryString}`
+
+      console.log('[Installments] Request URL:', apiUrl)
+
+      const res = await fetch(apiUrl, {
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       })
 
-      if (!res.ok) {
-        throw new Error(`خطا در دریافت اطلاعات: ${res.status}`)
+        if (!res.ok) {
+        const errorText = await res.text().catch(() => '')
+
+         console.error(
+          `[Installments API Error] status=${res.status} statusText=${res.statusText} url=${apiUrl} body=${errorText.slice(0, 1000)}`
+        )
+
+        throw new Error(
+          `خطا در دریافت اطلاعات: ${res.status}${errorText ? ` - ${errorText.slice(0, 200)}` : ''}`
+        )
       }
 
       const result = await res.json()
@@ -895,15 +915,22 @@ export default function InstallmentsPage() {
   // ★★★ بارگذاری داده‌های نسیه ★★★
   // ═══════════════════════════════════════════════════════════════
 
-   const loadCreditData = useCallback(async () => {
+  const loadCreditData = useCallback(async () => {
     setCreditLoading(true)
     setCreditError(null)
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      
-      // دریافت همه فاکتورها (فیلتر دقیق در سمت کلاینت انجام می‌شود)
-      const res = await fetch('/api/invoices?limit=500', {
+
+      const params = new URLSearchParams()
+      params.set('limit', '500')
+
+      // ★ نسیه: همه سال‌های مالی را بگیر، چون بدهی باز نباید با تغییر سال مالی پنهان شود
+      params.set('allYears', 'true')
+
+      console.log('[Credit Data] Fetching all open credit invoices (all fiscal years)')
+
+      const res = await fetch(`/api/invoices?${params.toString()}`, {
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -918,21 +945,21 @@ export default function InstallmentsPage() {
 
       if (result.success) {
         const allInvoices = result.data || []
-        
-        // ★★★ اصلاح نهایی: فقط فاکتورهای "نسیه" (credit) که باز هستند را نمایش بده
+
+        // ★★★ فقط فاکتورهای نسیه باز را نمایش بده
         const openCreditInvoices = allInvoices.filter((inv: any) => {
           const pType = (inv.paymentType || '').toLowerCase()
           const status = (inv.paymentStatus || inv.status || '').toUpperCase()
-          
-          // ۱. نوع پرداخت حتماً باید نسیه (credit) باشد (قسطی نباید اینجا باشد)
+
+          // ۱. نوع پرداخت حتماً نسیه باشد
           const isCreditOnly = pType === 'credit'
-          
-          // ۲. وضعیت فاکتور نباید تسویه شده یا لغو شده باشد
+
+          // ۲. تسویه یا لغو نشده باشد
           const isOpen = status !== 'PAID' && status !== 'CANCELLED'
-          
-          // ۳. اطمینان از اینکه هنوز مبلغی باقی مانده است
+
+          // ۳. هنوز مبلغی باقی مانده باشد
           const hasRemaining = (inv.totalAmount || 0) > (inv.paidAmount || 0)
-          
+
           return isCreditOnly && isOpen && hasRemaining
         })
 
@@ -946,14 +973,22 @@ export default function InstallmentsPage() {
             paymentStatus: inv.paymentStatus,
             total: inv.totalAmount,
             paid: inv.paidAmount,
+            fiscalYearId: inv.fiscalYearId || null,
           })),
         })
 
         setCreditInvoices(openCreditInvoices)
 
-        const totalAmount = openCreditInvoices.reduce((sum: number, inv: any) => sum + (inv.totalAmount || 0), 0)
-        const totalPaid = openCreditInvoices.reduce((sum: number, inv: any) => sum + (inv.paidAmount || 0), 0)
-        
+        const totalAmount = openCreditInvoices.reduce(
+          (sum: number, inv: any) => sum + (inv.totalAmount || 0),
+          0
+        )
+
+        const totalPaid = openCreditInvoices.reduce(
+          (sum: number, inv: any) => sum + (inv.paidAmount || 0),
+          0
+        )
+
         setCreditSummary({
           totalInvoices: openCreditInvoices.length,
           totalAmount,
@@ -970,8 +1005,7 @@ export default function InstallmentsPage() {
     } finally {
       setCreditLoading(false)
     }
-  }, [])
-
+  }, []) // ★ عمداً به selectedFiscalYearId وابسته نیست تا با تغییر سال مالی، نسیه‌ها پنهان نشوند
   useEffect(() => {
     if (activeTab === 'credit') {
       loadCreditData()

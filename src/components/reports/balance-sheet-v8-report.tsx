@@ -159,13 +159,28 @@ function SectionRow({ section }: { section: any }) {
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
 
-export function BalanceSheetV8Report({ tier }: { tier: any }) {
+export function BalanceSheetV8Report({
+  tier,
+  fiscalYearId,
+  asOf: parentAsOf,
+}: {
+  tier: any
+  fiscalYearId?: string | null
+  asOf?: string | null
+}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<any>(null)
 
   const today = new Date().toISOString().slice(0, 10)
-  const [asOf, setAsOf] = useState<string | null>(today)
+  const [asOf, setAsOf] = useState<string | null>(parentAsOf || today)
+
+  // ★ اگر والد سال مالی را عوض کرد، تاریخ مرجع ترازنامه هم آپدیت شود
+  useEffect(() => {
+    if (parentAsOf) {
+      setAsOf(parentAsOf)
+    }
+  }, [parentAsOf])
 
   const currentTenant = useAppStore((s) => s.currentTenant)
   const tenantIdFromStore = useAppStore((s) => s.tenantId)
@@ -177,16 +192,33 @@ export function BalanceSheetV8Report({ tier }: { tier: any }) {
       setLoading(false)
       return
     }
+
     setLoading(true)
     setError(null)
+
     try {
       const params = new URLSearchParams()
+
       if (asOf) params.set('asOf', asOf)
+      if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
+
+      const headers: Record<string, string> = {
+        'x-tenant-id': tenantId,
+      }
+
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('token')
+        if (token) {
+          headers.Authorization = `Bearer ${token}`
+        }
+      }
 
       const res = await fetch(`/api/reports/balance-sheet?${params.toString()}`, {
-        headers: { 'x-tenant-id': tenantId },
+        headers,
       })
+
       const json = await res.json()
+
       if (json.success) {
         setData(json.data)
       } else {
@@ -197,11 +229,12 @@ export function BalanceSheetV8Report({ tier }: { tier: any }) {
     } finally {
       setLoading(false)
     }
-  }, [tenantId, asOf])
+  }, [tenantId, asOf, fiscalYearId])
 
   useEffect(() => {
     fetchReport()
   }, [fetchReport])
+
 
   // ═══════════════════════════════════════════════════════════════
   //  تبدیل داده API به ساختار مورد انتظار کامپوننت

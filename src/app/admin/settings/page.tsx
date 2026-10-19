@@ -7,12 +7,23 @@
 
 import { useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { Settings2, Database, FileText, Shield, Bell, Users, Zap } from 'lucide-react'
+import {
+  Settings2,
+  Database,
+  FileText,
+  Shield,
+  Bell,
+  Users,
+  Zap,
+  Clock,
+} from 'lucide-react'
 import { AdminBackupTab } from './backup-tab'
+import { AdminBackupScheduleTab } from './backup-schedule-tab'
 
 const TABS = [
   { id: 'general', label: 'عمومی', icon: Settings2 },
   { id: 'backup', label: 'پشتیبان‌گیری', icon: Database },
+  { id: 'backup-schedule', label: 'زمان‌بندی و آرشیو', icon: Clock },
   { id: 'logs', label: 'لاگ‌های سیستم', icon: FileText },
   { id: 'security', label: 'امنیت', icon: Shield },
   { id: 'notifications', label: 'اعلان‌ها', icon: Bell },
@@ -26,7 +37,9 @@ const TABS = [
 function SettingsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'backup')
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get('tab') || 'backup'
+  )
 
   const changeTab = (tabId: string) => {
     setActiveTab(tabId)
@@ -62,6 +75,7 @@ function SettingsContent() {
             {TABS.map((tab) => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
+
               return (
                 <button
                   key={tab.id}
@@ -84,23 +98,48 @@ function SettingsContent() {
         <div className="min-h-[400px]">
           {activeTab === 'backup' && <AdminBackupTab />}
 
+          {activeTab === 'backup-schedule' && <AdminBackupScheduleTab />}
+
           {activeTab === 'general' && (
-            <PlaceholderTab icon={Settings2} text="بخش تنظیمات عمومی به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={Settings2}
+              text="بخش تنظیمات عمومی به زودی اضافه می‌شود"
+            />
           )}
+
           {activeTab === 'logs' && (
-            <PlaceholderTab icon={FileText} text="بخش لاگ‌ها به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={FileText}
+              text="بخش لاگ‌ها به زودی اضافه می‌شود"
+            />
           )}
+
           {activeTab === 'security' && (
-            <PlaceholderTab icon={Shield} text="بخش امنیت به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={Shield}
+              text="بخش امنیت به زودی اضافه می‌شود"
+            />
           )}
+
           {activeTab === 'notifications' && (
-            <PlaceholderTab icon={Bell} text="بخش اعلان‌ها به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={Bell}
+              text="بخش اعلان‌ها به زودی اضافه می‌شود"
+            />
           )}
+
           {activeTab === 'roles' && (
-            <PlaceholderTab icon={Users} text="بخش نقش‌ها به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={Users}
+              text="بخش نقش‌ها و دسترسی‌ها به زودی اضافه می‌شود"
+            />
           )}
+
           {activeTab === 'performance' && (
-            <PlaceholderTab icon={Zap} text="بخش عملکرد به زودی اضافه می‌شود" />
+            <PlaceholderTab
+              icon={Zap}
+              text="بخش عملکرد به زودی اضافه می‌شود"
+            />
           )}
         </div>
       </div>
@@ -111,7 +150,13 @@ function SettingsContent() {
 // ═══════════════════════════════════════════════════════════
 // کامپوننت placeholder برای تب‌های غیرفعال
 // ═══════════════════════════════════════════════════════════
-function PlaceholderTab({ icon: Icon, text }: { icon: any; text: string }) {
+function PlaceholderTab({
+  icon: Icon,
+  text,
+}: {
+  icon: any
+  text: string
+}) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
       <Icon className="w-12 h-12 text-gray-300 mx-auto mb-3" />

@@ -1,26 +1,28 @@
 // ============================================================================
-// src/app/api/reports/designer/datasets/route.ts — v12.0 ★★★
+// src/app/api/reports/designer/datasets/route.ts — v12.1
 // ShopAccounting — List Report Datasets API
-// ----------------------------------------------------------------------------
-// این API لیست دیتاست‌های مجاز برای گزارش دلخواه را برمی‌گرداند.
-//
-// ★ امنیت:
-//   - فقط دیتاست‌های تعریف‌شده در سمت سرور برگردانده می‌شوند
-//   - کاربر نمی‌تواند دیتاست غیرمجازی را درخواست کند
-//   - احراز هویت از طریق JWT یا header انجام می‌شود
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTenantId } from '@/lib/reports/report-auth'
+import { extractTenantId, getTenantInfo } from '@/lib/reports/report-auth'
 import { getDatasetSummaries } from '@/lib/reports/report-datasets'
+import { getFeaturesByPlanName } from '@/lib/plan-features'
+function resolveTenantPlanName(tenant: any): string {
+  return (
+    tenant?.planName ||
+    tenant?.planTierName ||
+    tenant?.plan?.name ||
+    'basic'
+  )
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    // 1. Extract tenantId
     const tenantId = await extractTenantId(req)
+
     if (!tenantId) {
       return NextResponse.json(
         {
@@ -31,10 +33,34 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // 2. Get dataset summaries from server-side definitions
+    const tenant = await getTenantInfo(tenantId)
+
+    if (!tenant) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'فروشگاه یافت نشد.',
+        },
+        { status: 404 }
+      )
+    }
+const planName = resolveTenantPlanName(tenant)
+
+    const features = getFeaturesByPlanName(planName)
+
+    if (!(features as any).canUseCustomReportDesigner) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'طراحی گزارش دلخواه در پلن فعلی شما در دسترس نیست. لطفاً پلن خود را ارتقا دهید.',
+        },
+        { status: 403 }
+      )
+    }
+
     const summaries = getDatasetSummaries()
 
-    // 3. Return
     return NextResponse.json({
       success: true,
       data: {
@@ -42,14 +68,13 @@ export async function GET(req: NextRequest) {
         total: summaries.length,
       },
     })
-
   } catch (error: any) {
     console.error('[List Datasets API] Error:', error)
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'خطای داخلی سرور',
+        error: error?.message || 'خطای داخلی سرور',
       },
       { status: 500 }
     )

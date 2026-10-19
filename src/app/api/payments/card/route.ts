@@ -14,8 +14,26 @@ import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 
 export const GET = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
   try {
-    const tenantDb = tenant.tenantDb
+     const tenantDb = tenant.tenantDb
     const tenantId = tenant.tenantId
+
+    let activeFY: any = null
+    try {
+      activeFY = await tenantDb.fiscalYear.findFirst({
+        where: {
+          tenantId,
+          isActive: true,
+          isClosed: false,
+        },
+        orderBy: {
+          startDate: 'desc',
+        },
+      })
+    } catch {
+      activeFY = null
+    }
+
+    const body = await req.json()
 
     const { searchParams } = new URL(req.url)
     const posDeviceId = searchParams.get('posDeviceId')
@@ -71,7 +89,25 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
   try {
     const tenantDb = tenant.tenantDb
     const tenantId = tenant.tenantId
+// ★ تعیین سال مالی فعال به‌صورت امن
+let activeFY: any = null
 
+try {
+  if ((tenantDb as any).fiscalYear) {
+    activeFY = await (tenantDb as any).fiscalYear.findFirst({
+      where: {
+        tenantId,
+        isActive: true,
+        isClosed: false,
+      },
+      orderBy: {
+        startDate: 'desc',
+      },
+    })
+  }
+} catch {
+  activeFY = null
+}
     const body = await req.json()
 
     // ★ Validation
@@ -136,30 +172,64 @@ export const POST = withTenantAndPermission('accounting')(async (req: NextReques
       )
     }
 
-    const payment = await tenantDb.cardPayment.create({
-      data: {
-        amount: body.amount,
-        invoiceId: body.invoiceId || null,
-        referenceNumber: body.referenceNumber || null,
-        referenceType: body.referenceType || 'rrn',
-        traceNumber: body.traceNumber || null,
-        cardNumber: body.cardNumber ? String(body.cardNumber).slice(-4) : null,
-        cardType: body.cardType || 'unknown',
-        status: body.status || 'successful',
-        posDeviceId: body.posDeviceId || null,
-        shaparakVerified: body.shaparakVerified || false,
-        shaparakVerifyError: body.shaparakVerifyError || null,
-        description: body.description || null,
-        paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
-        tenantId,
-      },
-      include: {
-        posDevice: {
-          select: { id: true, name: true, terminalType: true, brand: true },
-        },
-      },
-    })
+       const paymentData: any = {
+      amount: body.amount,
+      invoiceId: body.invoiceId || null,
+      referenceNumber: body.referenceNumber || null,
+      referenceType: body.referenceType || 'rrn',
+      traceNumber: body.traceNumber || null,
+      cardNumber: body.cardNumber ? String(body.cardNumber).slice(-4) : null,
+      cardType: body.cardType || 'unknown',
+      status: body.status || 'successful',
+      posDeviceId: body.posDeviceId || null,
+      shaparakVerified: body.shaparakVerified || false,
+      shaparakVerifyError: body.shaparakVerifyError || null,
+      description: body.description || null,
+      paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
+      tenantId,
+    }
 
+    if (activeFY?.id) {
+      paymentData.fiscalYearId = activeFY.id
+    }
+
+    let payment: any
+
+    try {
+      payment = await tenantDb.cardPayment.create({
+        data: paymentData,
+        include: {
+          posDevice: {
+            select: { id: true, name: true, terminalType: true, brand: true },
+          },
+        },
+      })
+    } catch (err: any) {
+      const msg = String(err?.message || '')
+
+      if (
+        paymentData.fiscalYearId &&
+        msg.includes('fiscalYearId') &&
+        (
+          msg.includes('Unknown field') ||
+          msg.includes('does not exist') ||
+          msg.includes('Invalid')
+        )
+      ) {
+        delete paymentData.fiscalYearId
+
+        payment = await tenantDb.cardPayment.create({
+          data: paymentData,
+          include: {
+            posDevice: {
+              select: { id: true, name: true, terminalType: true, brand: true },
+            },
+          },
+        })
+      } else {
+        throw err
+      }
+    }
     // ★ اگه invoiceId داده شده و پرداخت موفق بود، مبلغ پرداختی فاکتور رو به‌روز کن
     if (body.invoiceId && body.status === 'successful') {
       try {

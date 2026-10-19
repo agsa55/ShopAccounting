@@ -203,7 +203,7 @@ export function BranchesPage() {
       })
       const data = await res.json()
       if (data.success) {
-        toast({ title: 'موفق', description: data.message || 'شعبه با موفقیت حذف شد' })
+     toast({ title: 'موفق', description: data.message || 'شعبه با موفقیت غیرفعال شد' })
         setDeletingBranch(null)
         loadData()
       } else {
@@ -524,36 +524,40 @@ export function BranchesPage() {
       {/* ★ مودال حذف */}
       <Dialog open={!!deletingBranch} onOpenChange={(open) => !open && setDeletingBranch(null)}>
         <DialogContent className="sm:max-w-[450px]" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base text-red-600">
-              <AlertTriangle className="w-5 h-5" />
-              حذف شعبه
-            </DialogTitle>
-            <DialogDescription className="text-xs text-gray-600">
-              آیا از حذف دائم شعبه <strong>«{deletingBranch?.name}»</strong> مطمئن هستید؟ این عملیات غیرقابل بازگشت است.
-            </DialogDescription>
-          </DialogHeader>
-
-          {deletingBranch && deletingBranch.warehouseCount > 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-              <div>
-                <p className="font-bold">هشدار: این شعبه دارای {formatNumber(deletingBranch.warehouseCount)} انبار فعال است!</p>
-                <p className="mt-1 text-amber-700">برای جلوگیری از از دست رفتن داده‌ها، لطفاً ابتدا انبارها را به شعبه دیگری منتقل کرده یا حذف نمایید.</p>
-              </div>
-            </div>
-          )}
+    <DialogHeader>
+  <DialogTitle className="flex items-center gap-2 text-base text-red-600">
+    <AlertTriangle className="w-5 h-5" />
+    غیرفعال‌سازی شعبه
+  </DialogTitle>
+  <DialogDescription className="text-xs text-gray-600">
+    آیا از غیرفعال کردن شعبه <strong>«{deletingBranch?.name}»</strong> مطمئن هستید؟
+    این شعبه حذف نمی‌شود و فقط از لیست انتخاب‌ها پنهان می‌گردد تا یکپارچگی گزارش‌های سال‌های قبل حفظ شود.
+  </DialogDescription>
+</DialogHeader>
+{deletingBranch && deletingBranch.warehouseCount > 0 && (
+  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start gap-2.5">
+    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+    <div>
+      <p className="font-bold">
+        هشدار: این شعبه دارای {formatNumber(deletingBranch.warehouseCount)} انبار متصل است.
+      </p>
+      <p className="mt-1 text-amber-700">
+        برای غیرفعال کردن این شعبه، ابتدا انبارهای متصل به آن را به شعبه دیگری منتقل کنید یا حذف نمایید.
+      </p>
+    </div>
+  </div>
+)}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setDeletingBranch(null)} className="w-full sm:w-auto">انصراف</Button>
-            <Button
-              onClick={handleDelete}
-              disabled={deleting || (deletingBranch?.warehouseCount || 0) > 0}
-              className="bg-red-600 hover:bg-red-700 text-white w-full sm:w-auto gap-1.5"
-            >
-              {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-              حذف شعبه
-            </Button>
+           <Button
+  onClick={handleDelete}
+  disabled={deleting || (deletingBranch?.warehouseCount || 0) > 0}
+  className="bg-red-600 hover:bg-red-700 text-white w-full sm:w-auto gap-1.5"
+>
+  {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+  غیرفعال‌سازی شعبه
+</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

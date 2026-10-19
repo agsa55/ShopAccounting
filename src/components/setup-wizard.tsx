@@ -47,7 +47,10 @@ import {
   RefreshCw,
   Archive,
 } from 'lucide-react'
-
+import {
+  dispatchFiscalYearEvent,
+  generateNextYearName,
+} from '@/lib/fiscal-year-events';
 // ─────────────────────────────────────────────────────────────────────────────
 //  تبدیل تاریخ شمسی ↔ میلادی
 // ─────────────────────────────────────────────────────────────────────────────
@@ -498,7 +501,9 @@ export function useSetupWizard() {
   const checkedTenantRef = useRef<string | null>(null)
   const openTimerRef = useRef<any>(null)
   const reloadingRef = useRef(false)
-
+const lastClosedEventRef = useRef(0);
+const suppressStatusCheckUntilRef = useRef(0);
+const forcedRenewalUntilRef = useRef(0);
   const completionIds = useMemo(() => {
     return normalizeIds([
       tenantId,
@@ -538,30 +543,171 @@ export function useSetupWizard() {
     setChecked(true)
   }, [])
 
-  useEffect(() => {
-    const handler = () => {
-      console.log('[useSetupWizard] 🔄 Renewal wizard triggered from fiscal-year-tab')
+useEffect(() => {
+  const handler = () => {
+    const now = Date.now();
 
-      if (typeof window !== 'undefined' && tenantId) {
-        try {
-          localStorage.setItem(`force_renewal_setup_${tenantId}`, 'true')
-        } catch {}
+    // اگر رویداد closed همین الان پردازش شد، این trigger تکراری را نادیده بگیر
+    if (now - lastClosedEventRef.current < 5000) {
+      console.log(
+        '[useSetupWizard] ⏭ Ignoring trigger-renewal-setup because fiscal-year-changed closed already handled it'
+      );
+      return;
+    }
+
+    console.log('[useSetupWizard] 🔄 Renewal wizard triggered from fiscal-year-tab');
+
+    // ★ v11.1: برای جلوگیری از race condition با checkWizardStatus
+    suppressStatusCheckUntilRef.current = now + 15000;
+    forcedRenewalUntilRef.current = now + 15000;
+
+    if (typeof window !== 'undefined' && tenantId) {
+      try {
+        localStorage.setItem(`force_renewal_setup_${tenantId}`, 'true');
+      } catch {}
+    }
+
+    checkedTenantRef.current = null;
+    clearOpenTimer();
+    setOpen(false);
+    setWizardMode(null);
+    setRenewalData(null);
+
+    setChecked(false);
+  };
+
+  window.addEventListener('trigger-renewal-setup', handler);
+
+  return () => {
+    window.removeEventListener('trigger-renewal-setup', handler);
+  };
+}, [tenantId, clearOpenTimer]);
+
+// ★ v11.0: باز شدن خودکار ویزارد راه‌اندازی سال جدید پس از بستن سال مالی
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+
+  const handler = async (e: Event) => {
+    const detail = (e as CustomEvent)?.detail || {};
+
+    if (detail.type !== 'closed') return;
+
+    const now = Date.now();
+
+    // جلوگیری از پردازش تکراری
+    if (now - lastClosedEventRef.current < 5000) return;
+
+    lastClosedEventRef.current = now;
+
+    console.log(
+      '[useSetupWizard] 🔄 Fiscal year closed — opening renewal wizard',
+      detail
+    );
+
+    // ★ v11.1: جلوگیری از اجرای checkWizardStatus در چند ثانیه آینده
+suppressStatusCheckUntilRef.current = now + 15000;
+forcedRenewalUntilRef.current = now + 15000;
+
+    // ۱) گرفتن انبارهای موجود
+    let existingWarehouses: any[] = [];
+
+    try {
+      const res = await fetch('/api/warehouses', {
+        headers: getAuthHeaders(),
+      });
+
+      const data = await res.json();
+
+      existingWarehouses = Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.data?.warehouses)
+        ? data.data.warehouses
+        : [];
+    } catch {
+      existingWarehouses = [];
+    }
+
+    // ۲) تلاش برای گرفتن اطلاعات کامل‌تر از status API
+    let wizardData: any = null;
+
+    try {
+      const res = await fetch('/api/setup-wizard/status?_t=' + Date.now(), {
+        headers: getAuthHeaders(),
+        cache: 'no-store',
+      });
+
+      const data = await res.json();
+
+      if (data?.success) {
+        wizardData = data.data?.wizardData || data.data || null;
       }
-
-      checkedTenantRef.current = null
-      clearOpenTimer()
-      setOpen(false)
-      setWizardMode(null)
-      setRenewalData(null)
-      setChecked(false)
+    } catch {
+      wizardData = null;
     }
 
-    window.addEventListener('trigger-renewal-setup', handler)
+    const lastClosedYear = wizardData?.lastClosedYear || {
+      id: detail.closedYearId,
+      name: detail.closedYearName,
+      closedAt: new Date().toISOString(),
+      startDate: detail.startDate,
+      endDate: detail.endDate,
+    };
 
-    return () => {
-      window.removeEventListener('trigger-renewal-setup', handler)
-    }
-  }, [tenantId, clearOpenTimer])
+    const suggestedFromApi = wizardData?.suggestedNewYear;
+
+    const suggestedName =
+      detail.suggestedNextYearName ||
+      suggestedFromApi?.name ||
+      generateNextYearName(detail.closedYearName || lastClosedYear?.name || 'سال مالی');
+
+    const closedEnd = lastClosedYear?.endDate
+      ? new Date(lastClosedYear.endDate)
+      : new Date();
+
+    const nextStart = new Date(closedEnd);
+    nextStart.setDate(nextStart.getDate() + 1);
+
+    const nextEnd = new Date(nextStart);
+    nextEnd.setFullYear(nextEnd.getFullYear() + 1);
+    nextEnd.setDate(nextEnd.getDate() - 1);
+
+    const payload = {
+      lastClosedYear,
+      suggestedNewYear:
+        suggestedFromApi || {
+          name: suggestedName,
+          startDate: nextStart.toISOString().slice(0, 10),
+          endDate: nextEnd.toISOString().slice(0, 10),
+        },
+      closingEntry:
+        wizardData?.closingEntry || {
+          number: detail.closingEntryNumber || '—',
+          netProfit: detail.netProfit || 0,
+        },
+      closingDetails: wizardData?.closingDetails || null,
+      existingWarehouses:
+        wizardData?.existingWarehouses || existingWarehouses || [],
+    };
+
+    // ریست وضعیت و باز کردن ویزارد در حالت تمدید
+    checkedTenantRef.current = null;
+    clearOpenTimer();
+    setOpen(false);
+    setWizardMode(null);
+    setRenewalData(null);
+    setChecked(false);
+
+    setTimeout(() => {
+      scheduleOpen('renewal_setup', payload);
+    }, 200);
+  };
+
+  window.addEventListener('fiscal-year-changed', handler);
+
+  return () => {
+    window.removeEventListener('fiscal-year-changed', handler);
+  };
+}, [clearOpenTimer, scheduleOpen]);
 
   useEffect(() => {
     return () => {
@@ -569,12 +715,22 @@ export function useSetupWizard() {
     }
   }, [clearOpenTimer])
 
-  useEffect(() => {
-    if (!tenantId || checkedTenantRef.current === tenantId) return
+useEffect(() => {
+  if (!tenantId) return;
 
-    checkedTenantRef.current = tenantId
+  // ★ v11.1: اگر تازه رویداد closed گرفته‌ایم، status check اصلی اجرا نشود
+  if (Date.now() < suppressStatusCheckUntilRef.current) {
+    console.log(
+      '[useSetupWizard] ⏭ Skipping status check because renewal wizard is being forced/opened'
+    );
+    return;
+  }
 
-    const checkWizardStatus = async () => {
+  if (checkedTenantRef.current === tenantId) return;
+
+  checkedTenantRef.current = tenantId;
+
+  const checkWizardStatus = async () => {
       console.log('[useSetupWizard] 🔄 Checking wizard status for tenant:', tenantId)
 
       let forceWizardRequested = false
@@ -960,20 +1116,30 @@ export function useSetupWizard() {
     setOpen(false)
     setWizardMode(null)
     setRenewalData(null)
+    // ★ v11.1: آزاد کردن status check بعد از تکمیل ویزارد
+suppressStatusCheckUntilRef.current = 0;
+forcedRenewalUntilRef.current = 0;
     setChecked(true)
 
     if (tenantId) {
       checkedTenantRef.current = tenantId
     }
+// ★ v11.0: به جای reload، Store را دستی refresh می‌کنیم
+try {
+  const store = useAppStore.getState() as any;
 
-    if (!reloadingRef.current && typeof window !== 'undefined') {
-      reloadingRef.current = true
+  if (typeof store.loadFiscalYears === 'function') {
+    await store.loadFiscalYears();
+  }
+} catch (err) {
+  console.warn('[SetupWizard] handleComplete store refresh error:', err);
+}
 
-      setTimeout(() => {
-        console.log('[SetupWizard] 🔄 Reloading page to fetch fresh data...')
-        window.location.reload()
-      }, 500)
-    }
+dispatchFiscalYearEvent('list-changed', {
+  reason: 'setup-wizard-complete',
+});
+
+reloadingRef.current = false;
   }, [tenantId, wizardMode, renewalData, completionIds, clearOpenTimer])
 
   return { open, setOpen, handleComplete, wizardMode, renewalData }
@@ -1441,27 +1607,63 @@ export function SetupWizard(props: SetupWizardProps) {
       setSaving(false)
     }
   }
+const handleFinish = async () => {
+  if (finishedRef.current || saving) return;
 
-  const handleFinish = async () => {
-    if (finishedRef.current || saving) return
+  finishedRef.current = true;
+  setSaving(true);
 
-    finishedRef.current = true
-    setSaving(true)
+  try {
+    if (!fyDone) await autoCreateFY();
+    if (warehouses.length === 0) await saveWH('انبار فروشگاه', 'WH-01');
 
+    toast({
+      title: '🎉 راه‌اندازی کامل شد!',
+      description: 'فروشگاه شما آماده‌ی استفاده است',
+    });
+
+    // ★ v11.0: به‌روزرسانی Store و اطلاع‌رسانی به فیلتر هدر
     try {
-      if (!fyDone) await autoCreateFY()
-      if (warehouses.length === 0) await saveWH('انبار فروشگاه', 'WH-01')
+      const store = useAppStore.getState() as any;
 
-      toast({
-        title: '🎉 راه‌اندازی کامل شد!',
-        description: 'فروشگاه شما آماده‌ی استفاده است',
-      })
+      if (typeof store.loadFiscalYears === 'function') {
+        await store.loadFiscalYears();
+      }
 
-      onComplete?.()
-    } finally {
-      setSaving(false)
+      const activeYear =
+        store.fiscalYears?.find((y: any) => y.isActive && !y.isClosed) ||
+        fyExisting.find((y: any) => y.isActive) ||
+        {
+          id: undefined,
+          name: fyName,
+          startDate: fyStart,
+          endDate: fyEnd,
+        };
+
+      if (activeYear?.id) {
+        dispatchFiscalYearEvent('activated', {
+          yearId: activeYear.id,
+          yearName: activeYear.name,
+          startDate: activeYear.startDate,
+          endDate: activeYear.endDate,
+        });
+      } else {
+        dispatchFiscalYearEvent('list-changed', {
+          reason: 'first-setup-finished',
+        });
+      }
+    } catch (err) {
+      console.warn('[SetupWizard] handleFinish store/event error:', err);
+      dispatchFiscalYearEvent('list-changed', {
+        reason: 'first-setup-finished-fallback',
+      });
     }
+
+    onComplete?.();
+  } finally {
+    setSaving(false);
   }
+};
 
   const handleAddRenewalWarehouse = async () => {
     if (!renewalNewWhName.trim()) {
@@ -1520,88 +1722,184 @@ export function SetupWizard(props: SetupWizardProps) {
     } catch {}
   }
 
-  const handleRenewalFinish = async () => {
-    if (renewalSaving) return
-    setRenewalSaving(true)
-    setRenewalError('')
-    try {
-      const res = await fetch('/api/setup-wizard/auto-opening', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          newYearName: renewalFYName,
-          startDate: renewalFYStart,
-          endDate: renewalFYEnd,
-          warehouseUpdates: renewalWarehouses,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setRenewalSuccess(true)
-        toast({
-          title: '🎉 سال مالی جدید ایجاد شد!',
-          description: `سال «${data.data?.newYear?.name || 'سال جدید'}» فعال و سند افتتاحیه صادر شد`,
-        })
+const handleRenewalFinish = async () => {
+  if (renewalSaving) return;
 
-        setTimeout(() => {
-          if (renewalFinishedRef.current) return
+  setRenewalSaving(true);
+  setRenewalError('');
 
-          renewalFinishedRef.current = true
-          onOpenChange(false)
-          onComplete?.()
-        }, 2000)
-      } else {
-        setRenewalError(data.error || 'خطا در ایجاد سال جدید')
-        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+  try {
+    const res = await fetch('/api/setup-wizard/auto-opening', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        newYearName: renewalFYName,
+        startDate: renewalFYStart,
+        endDate: renewalFYEnd,
+        warehouseUpdates: renewalWarehouses,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      setRenewalSuccess(true);
+
+      const newYear = data.data?.newYear;
+      const yearName = newYear?.name || renewalFYName;
+
+      toast({
+        title: '🎉 سال مالی جدید ایجاد شد!',
+        description: `سال «${yearName}» فعال و سند افتتاحیه صادر شد`,
+      });
+
+      // ★ v11.0: اطلاع‌رسانی به فیلتر هدر و Store
+      try {
+        const store = useAppStore.getState() as any;
+
+        if (typeof store.loadFiscalYears === 'function') {
+          await store.loadFiscalYears();
+        }
+
+        if (newYear?.id && typeof store.setSelectedFiscalYearId === 'function') {
+          store.setSelectedFiscalYearId(newYear.id);
+        }
+
+        dispatchFiscalYearEvent('activated', {
+          yearId: newYear?.id,
+          yearName: yearName,
+          startDate: newYear?.startDate || renewalFYStart,
+          endDate: newYear?.endDate || renewalFYEnd,
+        });
+
+        dispatchFiscalYearEvent('list-changed', {
+          reason: 'renewal-setup-finished',
+          yearName,
+        });
+      } catch (err) {
+        console.warn('[SetupWizard] handleRenewalFinish store/event error:', err);
+
+        dispatchFiscalYearEvent('list-changed', {
+          reason: 'renewal-setup-finished-fallback',
+        });
       }
-    } catch (err: any) {
-      setRenewalError('خطا در ارتباط با سرور')
-      toast({ title: 'خطا', description: err?.message || 'خطای شبکه', variant: 'destructive' })
-    } finally {
-      setRenewalSaving(false)
+
+      setTimeout(() => {
+        if (renewalFinishedRef.current) return;
+
+        renewalFinishedRef.current = true;
+        onOpenChange(false);
+        onComplete?.();
+      }, 2000);
+    } else {
+      setRenewalError(data.error || 'خطا در ایجاد سال جدید');
+      toast({
+        title: 'خطا',
+        description: data.error || 'خطا در ایجاد سال جدید',
+        variant: 'destructive',
+      });
     }
+  } catch (err: any) {
+    setRenewalError('خطا در ارتباط با سرور');
+    toast({
+      title: 'خطا',
+      description: err?.message || 'خطای شبکه',
+      variant: 'destructive',
+    });
+  } finally {
+    setRenewalSaving(false);
   }
+};
 
-  const handleBasicRenewalFinish = async () => {
-    if (renewalSaving) return
-    setRenewalSaving(true)
-    setRenewalError('')
-    try {
-      const res = await fetch('/api/setup-wizard/auto-opening', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          isBasicPlan: true,
-          warehouseUpdates: renewalWarehouses,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setRenewalSuccess(true)
-        toast({
-          title: '🎉 دوره جدید آماده است!',
-          description: 'انبارها به‌روزرسانی شدند و سند افتتاحیه صادر شد',
-        })
+const handleBasicRenewalFinish = async () => {
+  if (renewalSaving) return;
 
-        setTimeout(() => {
-          if (renewalFinishedRef.current) return
+  setRenewalSaving(true);
+  setRenewalError('');
 
-          renewalFinishedRef.current = true
-          onOpenChange(false)
-          onComplete?.()
-        }, 2000)
-      } else {
-        setRenewalError(data.error || 'خطا در شروع دوره جدید')
-        toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+  try {
+    const res = await fetch('/api/setup-wizard/auto-opening', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        isBasicPlan: true,
+        warehouseUpdates: renewalWarehouses,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      setRenewalSuccess(true);
+
+      const newYear = data.data?.newYear;
+      const yearName = newYear?.name || 'سال جدید';
+
+      toast({
+        title: '🎉 دوره جدید آماده است!',
+        description: 'انبارها به‌روزرسانی شدند و سند افتتاحیه صادر شد',
+      });
+
+      // ★ v11.0: اطلاع‌رسانی به فیلتر هدر و Store
+      try {
+        const store = useAppStore.getState() as any;
+
+        if (typeof store.loadFiscalYears === 'function') {
+          await store.loadFiscalYears();
+        }
+
+        if (newYear?.id && typeof store.setSelectedFiscalYearId === 'function') {
+          store.setSelectedFiscalYearId(newYear.id);
+        }
+
+        dispatchFiscalYearEvent('activated', {
+          yearId: newYear?.id,
+          yearName: yearName,
+          startDate: newYear?.startDate,
+          endDate: newYear?.endDate,
+        });
+
+        dispatchFiscalYearEvent('list-changed', {
+          reason: 'basic-renewal-setup-finished',
+          yearName,
+        });
+      } catch (err) {
+        console.warn(
+          '[SetupWizard] handleBasicRenewalFinish store/event error:',
+          err
+        );
+
+        dispatchFiscalYearEvent('list-changed', {
+          reason: 'basic-renewal-setup-finished-fallback',
+        });
       }
-    } catch (err: any) {
-      setRenewalError('خطا در ارتباط با سرور')
-      toast({ title: 'خطا', description: err?.message || 'خطای شبکه', variant: 'destructive' })
-    } finally {
-      setRenewalSaving(false)
-    }
-  }
 
+      setTimeout(() => {
+        if (renewalFinishedRef.current) return;
+
+        renewalFinishedRef.current = true;
+        onOpenChange(false);
+        onComplete?.();
+      }, 2000);
+    } else {
+      setRenewalError(data.error || 'خطا در شروع دوره جدید');
+      toast({
+        title: 'خطا',
+        description: data.error || 'خطا در شروع دوره جدید',
+        variant: 'destructive',
+      });
+    }
+  } catch (err: any) {
+    setRenewalError('خطا در ارتباط با سرور');
+    toast({
+      title: 'خطا',
+      description: err?.message || 'خطای شبکه',
+      variant: 'destructive',
+    });
+  } finally {
+    setRenewalSaving(false);
+  }
+};
   const STEPS = [
     { label: 'سال مالی', icon: <Calendar className="w-4 h-4" />, done: fyDone },
     { label: 'انبار', icon: <Building2 className="w-4 h-4" />, done: whDone || warehouses.length > 0 },

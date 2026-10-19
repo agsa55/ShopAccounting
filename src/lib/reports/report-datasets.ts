@@ -27,6 +27,12 @@ const DATASETS: Record<string, Dataset> = {
     icon: 'FileText',
     color: 'amber',
     allowGroupBy: true,
+    fiscalYear: {
+  strategy: 'direct',
+  field: 'fiscalYearId',
+  allowAllYears: true,
+  note: 'فاکتورهای فروش مستقیماً fiscalYearId دارند.',
+},
     defaultFilter: {
       field: 'invoiceType',
       operator: 'equals',
@@ -277,6 +283,10 @@ const DATASETS: Record<string, Dataset> = {
     icon: 'User',
     color: 'blue',
     allowGroupBy: true,
+    fiscalYear: {
+  strategy: 'none',
+  note: 'مشتریان اطلاعات پایه/مانده لحظه‌ای هستند و سال‌محور نیستند.',
+},
     fields: [
       {
         id: 'id',
@@ -422,6 +432,10 @@ const DATASETS: Record<string, Dataset> = {
     icon: 'Package',
     color: 'green',
     allowGroupBy: true,
+    fiscalYear: {
+  strategy: 'none',
+  note: 'کالاها موجودی لحظه‌ای/اطلاعات پایه هستند و سال‌محور نیستند.',
+},
     fields: [
       {
         id: 'id',
@@ -672,6 +686,12 @@ const DATASETS: Record<string, Dataset> = {
     color: 'purple',
     allowGroupBy: true,
         tenantFilterPath: 'invoice.tenantId',
+        fiscalYear: {
+  strategy: 'relation',
+  relationPath: 'invoice.fiscalYearId',
+  allowAllYears: true,
+  note: 'اقلام فاکتور از طریق فاکتور والد به سال مالی متصل می‌شوند.',
+},
     fields: [
       {
         id: 'id',
@@ -849,6 +869,12 @@ const DATASETS: Record<string, Dataset> = {
     icon: 'CreditCard',
     color: 'teal',
     allowGroupBy: true,
+    fiscalYear: {
+  strategy: 'date',
+  dateField: 'paidAt',
+  allowAllYears: true,
+  note: 'پرداخت‌ها بر اساس تاریخ پرداخت در سال مالی شمرده می‌شوند.',
+},
     fields: [
       {
         id: 'id',
@@ -941,6 +967,7 @@ export function getDatasetSummaries(): DatasetSummary[] {
     fieldsCount: ds.fields.length,
     aggregatableFieldsCount: ds.fields.filter((f) => f.aggregatable).length,
     allowGroupBy: ds.allowGroupBy ?? false,
+    fiscalYearStrategy: ds.fiscalYear?.strategy || 'none',
   }))
 }
 /**

@@ -16,6 +16,11 @@
 // ============================================================================
 
 import { db } from '@/lib/db'
+import {
+  saveBackupFile,
+  buildTenantBackupFileName,
+  getBackupStorageRoot,
+} from './backup-storage'
 
 // ============================================================================
 // ★ Typed SQL Executor برای رفع خطای TypeScript
@@ -95,6 +100,31 @@ interface ChildRelation {
   parentTenantColumn: string
 }
 
+
+
+// ============================================================================
+// ★ Client-side backup mode
+// ----------------------------------------------------------------------------
+// بکاپ دستی جدید نباید محتوایش را داخل دیتابیس ذخیره کند.
+// فقط متادیتای سبک ذخیره می‌شود تا در لیست ادمین نمایش داده شود.
+// فایل واقعی توسط مرورگر روی سیستم کاربر ذخیره می‌شود.
+// ============================================================================
+
+const STORE_BACKUP_METADATA: boolean = true
+const SAVE_BACKUP_DATA_TO_DB: boolean = false
+
+export type BackupStorageType = 'db' | 'client' | 'file'
+
+export interface BuiltBackup {
+  type: 'tenant' | 'full_database'
+  tenantId: string | null
+  tenantName: string | null
+  subDomain: string | null
+  fileName: string
+  jsonBuffer: Buffer
+  recordCount: number
+  backupData: any
+}
 // ═══════════════════════════════════════════════════════════
 // ★ جداول تحت هر فروشگاه
 // ═══════════════════════════════════════════════════════════
@@ -171,6 +201,10 @@ const LEGACY_BACKUP_TABLE = 'Backups'
 // ═══════════════════════════════════════════════════════════
 
 function toNodeBuffer(value: any): Buffer {
+  if (!value) {
+    return Buffer.alloc(0)
+  }
+
   if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
     return value
   }
@@ -180,12 +214,43 @@ function toNodeBuffer(value: any): Buffer {
   }
 
   if (typeof value === 'string') {
-    // Possible base64 string
-    try {
-      return Buffer.from(value, 'base64')
-    } catch {
-      return Buffer.from(value, 'utf-8')
+    const s = value.trim()
+
+    if (!s) {
+      return Buffer.alloc(0)
     }
+
+    // PostgreSQL bytea hex format: \x7b225f6d657461223a...
+    if (s.startsWith('\\x')) {
+      try {
+        return Buffer.from(s.slice(2), 'hex')
+      } catch {
+        return Buffer.from(s, 'utf-8')
+      }
+    }
+
+    // If it already looks like JSON, keep it as UTF-8.
+    if (s.startsWith('{') || s.startsWith('[')) {
+      return Buffer.from(s, 'utf-8')
+    }
+
+    // Try base64 only if it looks like base64 and decodes to JSON-like content.
+    if (/^[A-Za-z0-9+/=\s]+$/.test(s) && s.length % 4 === 0) {
+      try {
+        const decoded = Buffer.from(s, 'base64')
+
+        if (
+          decoded.length > 0 &&
+          (decoded[0] === 123 /* { */ || decoded[0] === 91 /* [ */)
+        ) {
+          return decoded
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return Buffer.from(s, 'utf-8')
   }
 
   if (value && typeof value === 'object' && Array.isArray((value as any).data)) {
@@ -194,7 +259,6 @@ function toNodeBuffer(value: any): Buffer {
 
   return Buffer.alloc(0)
 }
-
 // ═══════════════════════════════════════════════════════════
 // Helpers: JSON serialization with BigInt / Buffer support
 // ═══════════════════════════════════════════════════════════
@@ -757,7 +821,8 @@ export async function listBackups(): Promise<BackupRecord[]> {
       file_size::bigint,
       record_count,
       created_by,
-      created_at
+      created_at,
+      COALESCE(storage_type, 'db') AS storage_type
     FROM admin_backups
     ORDER BY created_at DESC
   `)
@@ -775,9 +840,9 @@ export async function listBackups(): Promise<BackupRecord[]> {
       row.created_at instanceof Date
         ? row.created_at.toISOString()
         : String(row.created_at),
+    storage_type: row.storage_type || 'db',
   }))
 }
-
 // ═══════════════════════════════════════════════════════════
 // Create tenant backup
 // ═══════════════════════════════════════════════════════════
@@ -895,6 +960,311 @@ export async function createTenantBackup(
   }
 }
 
+
+// ============================================================================
+// ★ Build tenant backup without saving payload to DB
+// ----------------------------------------------------------------------------
+// This function only reads tenant-scoped data and returns a Buffer.
+// It does NOT insert into admin_backups.
+// ============================================================================
+
+export async function buildTenantBackup(
+  tenantIdInput: string,
+  storage: 'client' | 'file' = 'client'
+): Promise<BuiltBackup> {
+  const tenantResult = await prisma.$queryRawUnsafe<
+    Array<{
+      id: string
+      companyName: string
+      subDomain: string
+    }>
+  >(
+    `
+      SELECT id, "companyName", "subDomain"
+      FROM "Tenants"
+      WHERE id = $1::varchar
+         OR "subDomain" = $1::varchar
+      LIMIT 1
+    `,
+    tenantIdInput
+  )
+
+  if (tenantResult.length === 0) {
+    throw new Error('فروشگاه یافت نشد')
+  }
+
+  const tenant = tenantResult[0]
+  const tenantId = String(tenant.id)
+
+ const backupData: Record<string, any> = {
+  _meta: {
+    type: 'tenant',
+    tenantId,
+    tenantName: tenant.companyName,
+    subDomain: tenant.subDomain,
+    createdAt: new Date().toISOString(),
+    version: '2.0',
+    scoped: true,
+    storage,
+  },
+}
+
+  let totalRecords = 0
+  const existingTables = await getExistingTables()
+
+  console.log(`[Backup] Building tenant backup for: ${tenant.companyName}`)
+  console.log(`[Backup] tenantId: ${tenantId}`)
+
+  for (const table of TENANT_TABLES) {
+    if (!existingTables.has(table)) {
+      console.log(`[Backup] ⏭️ Skipping ${table} (not exists)`)
+      continue
+    }
+
+    try {
+      const rows = await fetchTenantScopedRows(prisma, table, tenantId)
+
+      if (rows === null) {
+        console.warn(`[Backup] ⚠️ Skipping ${table}: no safe tenant scope found`)
+        continue
+      }
+
+      backupData[table] = rows
+      totalRecords += rows.length
+      console.log(`[Backup] ✅ ${table}: ${rows.length} records`)
+    } catch (err: any) {
+      console.warn(`[Backup] ⚠️ Error reading ${table}:`, err.message)
+      // Do NOT store empty array for failed tables, otherwise restore could wipe data.
+      continue
+    }
+  }
+
+  const jsonStr = serializeBackup(backupData)
+  const jsonBuffer = Buffer.from(jsonStr, 'utf-8')
+
+  const now = new Date()
+  const datePart = now.toISOString().slice(0, 16).replace(/[:T]/g, '-')
+  const fileName = `tenant-${tenant.subDomain}-${datePart}.json`
+
+  console.log(
+    `[Backup] ✅ Tenant backup built: ${fileName} (${totalRecords} records, ${formatSize(jsonBuffer.length)})`
+  )
+
+return {
+  type: 'tenant',
+  tenantId,
+  tenantName: tenant.companyName,
+  subDomain: tenant.subDomain,
+  fileName,
+  jsonBuffer,
+  recordCount: totalRecords,
+  backupData,
+}
+}
+
+// ============================================================================
+// ★ Register metadata only for client-stored backup
+// ----------------------------------------------------------------------------
+// This does NOT save backup payload into DB.
+// It only records file name / tenant / size so admin UI can list it.
+// ============================================================================
+
+export async function registerClientBackupMetadata(
+  built: BuiltBackup,
+  createdBy: string = 'admin'
+): Promise<string | null> {
+  if (!STORE_BACKUP_METADATA) return null
+
+  const result = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `
+      INSERT INTO admin_backups
+        (
+          type,
+          tenant_id,
+          tenant_name,
+          file_name,
+          file_size,
+          record_count,
+          data,
+          created_by,
+          storage_type
+        )
+      VALUES
+        (
+          $1,
+          $2::varchar,
+          $3,
+          $4,
+          $5::bigint,
+          $6::int,
+          NULL::bytea,
+          $7,
+          'client'
+        )
+      RETURNING id::text
+    `,
+    built.type,
+    built.tenantId,
+    built.tenantName,
+    built.fileName,
+    built.jsonBuffer.length,
+    built.recordCount,
+    createdBy
+  )
+
+  return result[0] ? String(result[0].id) : null
+}
+
+
+// ============================================================================
+// ★ Tenant storage backup — file on Runflare/local storage + metadata in DB
+// ----------------------------------------------------------------------------
+// This creates a gzip file inside BACKUP_STORAGE_PATH and stores only metadata
+// in admin_backups with storage_type = 'file'.
+// ============================================================================
+
+export interface CreateTenantStorageBackupOptions {
+  retentionDays?: number
+  createdBy?: string
+}
+
+export interface TenantStorageBackupResult {
+  id: string
+  fileName: string
+  storagePath: string
+  sizeOriginal: number
+  sizeCompressed: number
+  checksum: string
+  recordCount: number
+  expiresAt: string | null
+  createdAt: string
+}
+
+export async function createTenantStorageBackup(
+  tenantIdInput: string,
+  options: CreateTenantStorageBackupOptions = {}
+): Promise<TenantStorageBackupResult> {
+  const createdBy = String(options.createdBy || 'scheduler').trim() || 'scheduler'
+
+  const retentionDays =
+    options.retentionDays ??
+    Number(process.env.BACKUP_RETENTION_DAYS || 7) ??
+    7
+
+  console.log(
+    `[BackupStorage] Creating storage backup for tenant: ${tenantIdInput}`
+  )
+
+  const built = await buildTenantBackup(tenantIdInput, 'file')
+
+  const fileName = buildTenantBackupFileName({
+    subDomain: built.subDomain || built.tenantId || 'tenant',
+    tenantId: built.tenantId || undefined,
+    date: new Date(),
+  })
+
+  const saved = await saveBackupFile({
+    data: built.jsonBuffer,
+    fileName,
+    retentionDays: Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 7,
+  })
+
+  console.log(
+    `[BackupStorage] File saved: root=${getBackupStorageRoot()} path=${saved.storagePath}`
+  )
+
+  const expiresAtParam = saved.expiresAt ? saved.expiresAt.toISOString() : null
+
+  const inserted = await prisma.$queryRawUnsafe<
+    Array<{
+      id: string
+      created_at: Date | string
+    }>
+  >(
+    `
+      INSERT INTO admin_backups
+        (
+          type,
+          tenant_id,
+          tenant_name,
+          file_name,
+          file_size,
+          record_count,
+          data,
+          created_by,
+          storage_type,
+          storage_path,
+          size_original,
+          size_compressed,
+          checksum,
+          status,
+          expires_at,
+          created_at,
+          updated_at
+        )
+      VALUES
+        (
+          $1,
+          $2::varchar,
+          $3,
+          $4,
+          $5::bigint,
+          $6::int,
+          NULL::bytea,
+          $7,
+          'file',
+          $8,
+          $9::bigint,
+          $10::bigint,
+          $11,
+          'completed',
+          $12::timestamptz,
+          now(),
+          now()
+        )
+      RETURNING id::text, created_at
+    `,
+    built.type,
+    built.tenantId,
+    built.tenantName,
+    saved.fileName,
+    saved.sizeCompressed,
+    built.recordCount,
+    createdBy,
+    saved.storagePath,
+    saved.sizeOriginal,
+    saved.sizeCompressed,
+    saved.checksum,
+    expiresAtParam
+  )
+
+  if (!inserted[0]) {
+    throw new Error('ذخیره متادیتای بکاپ فایل‌محور در دیتابیس ناموفق بود.')
+  }
+
+  const row = inserted[0]
+
+  const result: TenantStorageBackupResult = {
+    id: String(row.id),
+    fileName: saved.fileName,
+    storagePath: saved.storagePath,
+    sizeOriginal: saved.sizeOriginal,
+    sizeCompressed: saved.sizeCompressed,
+    checksum: saved.checksum,
+    recordCount: built.recordCount,
+    expiresAt: saved.expiresAt ? saved.expiresAt.toISOString() : null,
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
+  }
+
+  console.log(
+    `[BackupStorage] Metadata saved: id=${result.id} file=${result.fileName}`
+  )
+
+  return result
+}
 // ═══════════════════════════════════════════════════════════
 // Create full database backup
 // ═══════════════════════════════════════════════════════════
@@ -988,16 +1358,47 @@ export async function downloadBackup(id: string): Promise<{
     Array<{
       file_name: string
       data: any
+      storage_type: string
+      data_len: number | null
     }>
-  >('SELECT file_name, data FROM admin_backups WHERE id = $1::uuid', id)
+  >(
+    `
+      SELECT
+        file_name,
+        data,
+        COALESCE(storage_type, 'db') AS storage_type,
+        octet_length(data) AS data_len
+      FROM admin_backups
+      WHERE id = $1::uuid
+    `,
+    id
+  )
 
   if (result.length === 0) {
     throw new Error('فایل بکاپ یافت نشد')
   }
 
+  const row = result[0]
+
+  if (row.storage_type === 'client') {
+    throw new Error(
+      'محتوای این بکاپ در دیتابیس ذخیره نشده است. این بکاپ روی سیستم شما ذخیره شده است.'
+    )
+  }
+
+  if (row.data === null || row.data === undefined) {
+    throw new Error('محتوای این بکاپ در دیتابیس خالی است.')
+  }
+
+  const buffer = toNodeBuffer(row.data)
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error('محتوای این بکاپ خالی یا آسیب‌دیده است.')
+  }
+
   return {
-    fileName: result[0].file_name,
-    data: toNodeBuffer(result[0].data),
+    fileName: row.file_name,
+    data: buffer,
   }
 }
 
@@ -1070,6 +1471,8 @@ export async function restoreBackup(backupId: string): Promise<RestoreResult> {
       tenant_id: string | null
       tenant_name: string | null
       data: any
+      storage_type: string
+      data_len: number | null
     }>
   >(
     `
@@ -1078,7 +1481,9 @@ export async function restoreBackup(backupId: string): Promise<RestoreResult> {
         type,
         tenant_id::text,
         tenant_name,
-        data
+        data,
+        COALESCE(storage_type, 'db') AS storage_type,
+        octet_length(data) AS data_len
       FROM admin_backups
       WHERE id = $1::uuid
     `,
@@ -1090,13 +1495,47 @@ export async function restoreBackup(backupId: string): Promise<RestoreResult> {
   }
 
   const backupRow = backupResult[0]
+
+  if (backupRow.storage_type === 'client') {
+    throw new Error(
+      'محتوای این بکاپ در دیتابیس ذخیره نشده است. این بکاپ روی سیستم شما ذخیره شده است. برای بازیابی، فایل JSON بکاپ را از سیستم خود انتخاب کنید.'
+    )
+  }
+
+  if (backupRow.data === null || backupRow.data === undefined) {
+    throw new Error(
+      'محتوای این بکاپ در دیتابیس خالی است. این بکاپ قابل بازیابی از سرور نیست.'
+    )
+  }
+
   const buffer = toNodeBuffer(backupRow.data)
-  const jsonStr = buffer.toString('utf-8')
-  const backupData = deserializeBackup(jsonStr)
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error(
+      'محتوای این بکاپ خالی یا آسیب‌دیده است. بازیابی از سرور امکان‌پذیر نیست.'
+    )
+  }
+
+  const jsonStr = buffer.toString('utf-8').trim()
+
+  if (!jsonStr) {
+    throw new Error('محتوای این بکاپ خالی است.')
+  }
+
+  let backupData: any
+
+  try {
+    backupData = deserializeBackup(jsonStr)
+  } catch (err: any) {
+    throw new Error(
+      `فایل بکاپ خراب یا ناقص است: ${err?.message || 'خطای ناشناخته'}`
+    )
+  }
+
   const meta = backupData._meta || {}
 
   console.log(
-    `[Restore] Starting restore from backup: ${backupRow.tenant_name || 'Full Database'}`
+    `[Restore] Starting restore from DB backup: ${backupRow.tenant_name || 'Full Database'}`
   )
 
   if (backupRow.type === 'tenant') {
@@ -1297,4 +1736,59 @@ async function restoreFullBackup(
     tablesRestored,
     duration,
   }
+}
+
+// ============================================================================
+// ★ Restore from uploaded JSON text (client-side backup file)
+// ============================================================================
+
+export async function restoreBackupFromJsonText(jsonText: string): Promise<RestoreResult> {
+  const startTime = Date.now()
+
+  let backupData: any
+
+  try {
+    backupData = deserializeBackup(jsonText)
+  } catch (err: any) {
+    throw new Error(`فایل بکاپ معتبر نیست: ${err?.message || 'خطای ناشناخته'}`)
+  }
+
+  const meta = backupData._meta || {}
+
+  console.log(
+    `[Restore] Uploaded backup: ${meta.tenantName || meta.type || 'Unknown'}`
+  )
+
+  if (meta.type === 'tenant') {
+    if (!ENABLE_TENANT_RESTORE) {
+      throw new Error('بازیابی تک‌فروشگاهی فعلاً غیرفعال است.')
+    }
+
+    if (meta.version !== '2.0' || meta.scoped !== true) {
+      throw new Error(
+        'این فایل بکاپ قدیمی است و برای بازیابی امن تک‌فروشگاهی قابل استفاده نیست. لطفاً با نسخه جدید بکاپ بگیرید.'
+      )
+    }
+
+    const tenantId = meta.tenantId
+
+    if (!tenantId) {
+      throw new Error('شناسه فروشگاه در فایل بکاپ موجود نیست.')
+    }
+
+    return await prisma.$transaction(
+      async (tx: SqlExecutor) => {
+        return await restoreTenantBackup(tx, backupData, String(tenantId), startTime)
+      },
+      TX_OPTIONS
+    )
+  }
+
+  if (meta.type === 'full_database') {
+    throw new Error(
+      'بازیابی کامل دیتابیس از فایل در این نسخه غیرفعال است. برای بکاپ کامل از پنل رانفلر استفاده کنید.'
+    )
+  }
+
+  throw new Error('نوع بکاپ در فایل نامعلوم است.')
 }

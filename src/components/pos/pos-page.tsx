@@ -2191,8 +2191,8 @@ useEffect(() => {
 
           const tid = getTenantIdFromStore()
           try {
-            await fetch(`/api/payments/card?tenantId=${tid}`, {
-              method: 'POST',
+        await fetch('/api/payments/card', {
+  method: 'POST',
               headers: getAuthHeaders(),
               body: JSON.stringify({
                 amount: cartTotals.totalAmount,
@@ -2335,21 +2335,21 @@ useEffect(() => {
 
       const tid = getTenantIdFromStore()
       try {
-        await fetch(`/api/payments/card?tenantId=${tid}`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            amount: result.amount,
-            referenceNumber: result.referenceNumber,
-            referenceType: result.referenceType || 'rrn',
-            traceNumber: result.traceNumber,
-            cardNumber: result.cardNumber,
-            cardType: result.cardType,
-            status: 'successful',
-            posDeviceId: deviceId,
-            description: 'پرداخت از صندوق فروش',
-          }),
-        })
+await fetch('/api/payments/card', {
+  method: 'POST',
+  headers: getAuthHeaders(),
+  body: JSON.stringify({
+    amount: result.amount,
+    referenceNumber: result.referenceNumber,
+    referenceType: result.referenceType || 'rrn',
+    traceNumber: result.traceNumber,
+    cardNumber: result.cardNumber,
+    cardType: result.cardType,
+    status: 'successful',
+    posDeviceId: deviceId,
+    description: 'پرداخت از صندوق فروش',
+  }),
+})
       } catch (err) {
         console.warn('[POS] Failed to record card payment:', err)
       }
@@ -2465,7 +2465,7 @@ useEffect(() => {
           method: 'POST',
           url: '/api/invoices',
           body: {
-            tenantId: getTenantIdFromStore(),
+      
             branchId: branchId || undefined,
             customerId: finalCustomerId,
             paymentType: ptFinal,

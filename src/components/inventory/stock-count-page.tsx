@@ -105,6 +105,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
 
 export function StockCountPage() {
   const { toast } = useToast()
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId)
+  const [showAllYears, setShowAllYears] = useState(false)
   const [stockCounts, setStockCounts] = useState<StockCount[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
@@ -177,6 +179,12 @@ export function StockCountPage() {
       const params = new URLSearchParams({ tenantId: tid })
       if (filterWarehouse !== 'all') params.set('warehouseId', filterWarehouse)
       if (filterStatus !== 'all') params.set('status', filterStatus)
+
+      if (showAllYears) {
+        params.set('allYears', 'true')
+      } else if (selectedFiscalYearId) {
+        params.set('fiscalYearId', selectedFiscalYearId)
+      }
       
       const [whRes, scRes] = await Promise.all([
         fetch(`/api/warehouses?tenantId=${tid}`, { headers: getAuthHeaders() }),
@@ -205,7 +213,7 @@ export function StockCountPage() {
       }
     }
     setLoading(false)
-  }, [filterWarehouse, filterStatus, isOnline, toast])
+  }, [filterWarehouse, filterStatus, isOnline, toast, selectedFiscalYearId, showAllYears])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -545,7 +553,7 @@ if (data.success) {
         </Button>
       </div>
 
-      <Card>
+        <Card>
         <CardContent className="p-3 flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[200px]">
             <Label className="text-xs">انبار</Label>
@@ -557,6 +565,7 @@ if (data.success) {
               </SelectContent>
             </Select>
           </div>
+
           <div className="flex-1 min-w-[150px]">
             <Label className="text-xs">وضعیت</Label>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -569,6 +578,19 @@ if (data.success) {
                 <SelectItem value="cancelled">لغو شده</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex items-end">
+            <Button
+              variant={showAllYears ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowAllYears((v) => !v)}
+              className={`h-9 text-xs gap-1 ${showAllYears ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
+              title="نمایش اسناد انبارگردانی همه سال‌های مالی"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              {showAllYears ? 'همه سال‌ها' : 'سال مالی انتخابی'}
+            </Button>
           </div>
         </CardContent>
       </Card>

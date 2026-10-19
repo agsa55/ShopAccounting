@@ -1,336 +1,514 @@
 // ============================================================================
-// src/app/api/cash-movements/route.ts — v11.7.2
-// ★ API تراکنش‌های دستی صندوق (برداشت/واریز/هزینه)
-// ★ v11.7.2: اضافه شدن موجودی اولیه و ابتدای روز به summary
+// src/app/api/cash-movements/route.ts — v12.0 Fiscal Year Isolation + Secure Tenant
+// ShopAccounting — Manual Cash Movements API
+// ----------------------------------------------------------------------------
+// ★★★ v12.0:
+//   - رفع مشکل امنیتی tenantId از query/body
+//   - استفاده از withTenantAndPermission و tenant.tenantDb
+//   - ایزولاسیون سال مالی
+//   - clamp بازه تاریخ داخل سال مالی
+//   - پشتیبانی از CashMovement.fiscalYearId در صورت وجود
+//   - استنتاج جهت تراکنش بدون وابستگی قطعی به فیلد type/direction
+//   - صدور سند خودکار با fiscalYearId در صورت پشتیبانی schema
 // ============================================================================
 
-import { NextRequest, NextResponse } from 'next/server';
-import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation';
-import { db } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server'
+import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
+import {
+  clampDateRange,
+  inferCashMovementDirection,
+  isFieldSupported,
+  normalizeToken,
+  resolveEffectiveFiscalYear,
+  safeNum,
+} from '@/lib/fiscal-year-reporting'
+import { generateJournalNumber } from '@/lib/journal-number-generator'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+const ALL_YEARS_WARNING =
+  'این گزارش همه سال‌های مالی را شامل می‌شود و فقط برای بررسی مدیریتی است. برای گزارش رسمی، یک سال مالی انتخاب کنید.'
+
+function emptySummary() {
+  return {
+    totalSales: 0,
+    totalPurchases: 0,
+    totalServices: 0,
+    totalWithdrawals: 0,
+    totalDeposits: 0,
+    totalExpenses: 0,
+    totalCashIn: 0,
+    totalCashOut: 0,
+    openingBalance: 0,
+    startOfDayBalance: 0,
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // GET: دریافت تراکنش‌های صندوق‌دار
 // ═══════════════════════════════════════════════════════════════
-export const GET = withTenantAndPermission('pos')(async (
-  req: NextRequest,
-  ctx: any,
-  tenant: any
-) => {
-  try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId') || tenant.tenantId;
-    const cashierId = searchParams.get('cashierId') || tenant.user?.id;
-    const date = searchParams.get('date'); // YYYY-MM-DD
-    const transactionType = searchParams.get('type');
+export const GET = withTenantAndPermission('pos')(
+  async (req: NextRequest, _ctx: any, tenant: any) => {
+    try {
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
 
-    const where: any = { tenantId };
+      const { searchParams } = new URL(req.url)
 
-    // فیلتر بر اساس صندوق‌دار
-    if (cashierId) {
-      where.cashierId = cashierId;
-    }
+      const cashierId = searchParams.get('cashierId') || tenant.user?.id || null
+      const dateParam = searchParams.get('date')
+      const transactionType = searchParams.get('type')
 
-    // فیلتر بر اساس تاریخ
-    if (date) {
-      const startDate = new Date(date + 'T00:00:00');
-      const endDate = new Date(date + 'T23:59:59');
-      where.createdAt = { gte: startDate, lte: endDate };
-    }
+      const fiscalYearIdParam = (searchParams.get('fiscalYearId') || '').trim()
+      const allYears = searchParams.get('allYears') === 'true'
 
-    // فیلتر بر اساس نوع تراکنش
-    if (transactionType) {
-      where.transactionType = transactionType;
-    }
+      let fy: any = null
+      let effectiveFiscalYearId: string | null = null
 
-    const movements = await db.client.cashMovement.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+      if (!allYears) {
+        try {
+          fy = await resolveEffectiveFiscalYear(
+            tenantDb,
+            tenantId,
+            fiscalYearIdParam || null
+          )
+          effectiveFiscalYearId = fy.id
+        } catch (err: any) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                err?.message ||
+                (fiscalYearIdParam
+                  ? 'سال مالی انتخابی یافت نشد.'
+                  : 'سال مالی فعالی برای این فروشگاه تعریف نشده است.'),
+              code: fiscalYearIdParam
+                ? 'INVALID_FISCAL_YEAR'
+                : 'NO_ACTIVE_FISCAL_YEAR',
+            },
+            { status: 400 }
+          )
+        }
+      }
 
-    // محاسبه خلاصه
-    const summary: any = {
-      totalSales: movements
-        .filter(m => m.transactionType === 'sale')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalPurchases: movements
-        .filter(m => m.transactionType === 'purchase')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalServices: movements
-        .filter(m => ['service', 'repair'].includes(m.transactionType))
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalWithdrawals: movements
-        .filter(m => m.transactionType === 'withdrawal')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalDeposits: movements
-        .filter(m => m.transactionType === 'deposit')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalExpenses: movements
-        .filter(m => m.transactionType === 'expense')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalCashIn: movements
-        .filter(m => m.type === 'in')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-      totalCashOut: movements
-        .filter(m => m.type === 'out')
-        .reduce((sum, m) => sum + Number(m.amount), 0),
-    };
+      let fromParam: Date | null = null
+      let toParam: Date | null = null
 
-    // ═══════════════════════════════════════════════════════════════
-    // ★ v11.7.2: محاسبه موجودی ابتدای روز و موجودی پایان روز
-    // ═══════════════════════════════════════════════════════════════
-    let openingBalance = 0;
-    let startOfDayBalance = 0;
+      if (dateParam) {
+        fromParam = new Date(`${dateParam}T00:00:00`)
+        toParam = new Date(`${dateParam}T23:59:59`)
 
-     try {
-      // تاریخ امروز (برای فیلتر)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString();
+        if (
+          Number.isNaN(fromParam.getTime()) ||
+          Number.isNaN(toParam.getTime())
+        ) {
+          return NextResponse.json(
+            { success: false, error: 'تاریخ نامعتبر است' },
+            { status: 400 }
+          )
+        }
+      }
 
-      // ─── ۱. خواندن موجودی اولیه از سند افتتاحیه ───
-      // ★ v11.7.3: بدون include account (چون relation مستقیم وجود ندارد)
-      const openingEntry = await (db.client as any).journalEntry.findFirst({
-        where: {
+      const range = clampDateRange(fy, fromParam, toParam)
+
+      const hasCashMovementFiscalYearId = isFieldSupported(
+        tenantDb.cashMovement,
+        'fiscalYearId'
+      )
+
+      const where: any = { tenantId }
+
+      if (cashierId) {
+        where.cashierId = cashierId
+      }
+
+      if (transactionType) {
+        where.transactionType = transactionType
+      }
+
+      if (range.from && range.to) {
+        where.createdAt = {
+          gte: range.from,
+          lte: range.to,
+        }
+      }
+
+      if (effectiveFiscalYearId && hasCashMovementFiscalYearId) {
+        where.fiscalYearId = effectiveFiscalYearId
+      }
+
+      const movements = range.valid
+        ? await tenantDb.cashMovement.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+        : []
+
+      const summary: any = emptySummary()
+
+      for (const m of movements) {
+        const amount = safeNum(m.amount)
+        const t = normalizeToken(m.transactionType)
+        const direction = inferCashMovementDirection(m)
+
+        if (t === 'sale') summary.totalSales += amount
+        else if (t === 'purchase') summary.totalPurchases += amount
+        else if (t === 'service' || t === 'repair') summary.totalServices += amount
+        else if (t === 'withdrawal') summary.totalWithdrawals += amount
+        else if (t === 'deposit') summary.totalDeposits += amount
+        else if (t === 'expense') summary.totalExpenses += amount
+
+        if (direction === 'in') summary.totalCashIn += amount
+        else if (direction === 'out') summary.totalCashOut += amount
+      }
+
+      // ─── موجودی اولیه از سند افتتاحیه ─────────────────────
+      let openingBalance = 0
+
+      try {
+        const openingWhere: any = {
           tenantId,
           sourceType: 'initial_balance',
           isCancelled: false,
           status: 'posted',
-        },
-        include: {
-          lines: true,  // فقط خطوط سند
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+        }
 
-      if (openingEntry?.lines && openingEntry.lines.length > 0) {
-        // گرفتن ID های منحصر به فرد حساب‌ها
-        const accountIds = [...new Set(
-          openingEntry.lines.map((l: any) => l.accountId).filter(Boolean)
-        )];
+        if (
+          effectiveFiscalYearId &&
+          isFieldSupported(tenantDb.journalEntry, 'fiscalYearId')
+        ) {
+          openingWhere.fiscalYearId = effectiveFiscalYearId
+        }
 
-        // دریافت اطلاعات حساب‌ها
-        const accounts = await (db.client as any).account.findMany({
-          where: { id: { in: accountIds } },
-          select: { id: true, code: true, name: true },
-        });
+        const openingEntry = await tenantDb.journalEntry.findFirst({
+          where: openingWhere,
+          include: { lines: true },
+          orderBy: { createdAt: 'desc' },
+        })
 
-        // ساخت map برای دسترسی سریع
-        const accountMap = new Map(accounts.map((a: any) => [a.id, a]));
+        if (openingEntry?.lines && openingEntry.lines.length > 0) {
+          const accountIds = [
+            ...new Set(
+              openingEntry.lines
+                .map((l: any) => l.accountId)
+                .filter(Boolean)
+            ),
+          ]
 
-               // پیدا کردن خط مربوط به صندوق (کد ۱۰۱۰)
-        for (const line of openingEntry.lines) {
-          const acc = accountMap.get(line.accountId) as any;
-          if (acc && (acc.code === '1010' || (acc.name || '').includes('صندوق'))) {
-            openingBalance = Number(line.debit || 0) - Number(line.credit || 0);
-            break;
+          const accounts = await tenantDb.account.findMany({
+            where: { id: { in: accountIds } },
+            select: { id: true, code: true, name: true },
+          })
+
+          const accountMap = new Map(accounts.map((a: any) => [a.id, a]))
+
+          for (const line of openingEntry.lines) {
+            const acc = accountMap.get(line.accountId) as any
+            if (
+              acc &&
+              (acc.code === '1010' ||
+                normalizeToken(acc.name).includes('صندوق'))
+            ) {
+              openingBalance =
+                safeNum(line.debit) - safeNum(line.credit)
+              break
+            }
           }
         }
+      } catch (err: any) {
+        console.warn(
+          '[CashMovements v12.0] Opening balance query failed:',
+          err?.message
+        )
       }
 
-      // ─── ۲. محاسبه تراکنش‌های قبل از امروز ───
-      const allPreviousMovements = await (db.client as any).cashMovement.findMany({
-        where: {
-          tenantId,
-          createdAt: { lt: todayStr },
-        },
-        select: {
-          type: true,
-          amount: true,
-        },
-      });
+      // ─── موجودی ابتدای روز ────────────────────────────────
+      let startOfDayBalance = 0
 
-      let previousIn = 0;
-      let previousOut = 0;
-      for (const m of allPreviousMovements) {
-        const amount = Number(m.amount);
-        if (m.type === 'in') previousIn += amount;
-        else if (m.type === 'out') previousOut += amount;
+      try {
+        const previousWhere: any = { tenantId }
+
+        if (cashierId) {
+          previousWhere.cashierId = cashierId
+        }
+
+        const previousCreatedAt: any = {}
+
+        if (range.from) {
+          previousCreatedAt.lt = range.from
+        }
+
+        if (
+          !hasCashMovementFiscalYearId &&
+          effectiveFiscalYearId &&
+          fy
+        ) {
+          previousCreatedAt.gte = new Date(fy.startDate)
+        }
+
+        if (Object.keys(previousCreatedAt).length > 0) {
+          previousWhere.createdAt = previousCreatedAt
+        }
+
+        if (
+          effectiveFiscalYearId &&
+          hasCashMovementFiscalYearId
+        ) {
+          previousWhere.fiscalYearId = effectiveFiscalYearId
+        }
+
+        const previousMovements = range.valid
+          ? await tenantDb.cashMovement.findMany({
+              where: previousWhere,
+              select: {
+                amount: true,
+                transactionType: true,
+              },
+            })
+          : []
+
+        let previousIn = 0
+        let previousOut = 0
+
+        for (const m of previousMovements) {
+          const amount = safeNum(m.amount)
+          const direction = inferCashMovementDirection(m)
+
+          if (direction === 'in') previousIn += amount
+          else if (direction === 'out') previousOut += amount
+        }
+
+        startOfDayBalance = openingBalance + previousIn - previousOut
+      } catch (err: any) {
+        console.warn(
+          '[CashMovements v12.0] Start-of-day balance query failed:',
+          err?.message
+        )
       }
 
-      startOfDayBalance = openingBalance + previousIn - previousOut;
+      summary.openingBalance = openingBalance
+      summary.startOfDayBalance = startOfDayBalance
 
-      console.log('[CashMovements] 📊 Balance calculation:', {
-        openingBalance,
-        previousIn,
-        previousOut,
-        startOfDayBalance,
-      });
-    } catch (balErr: any) {
-      console.warn('[CashMovements] ⚠️ Balance calculation failed:', balErr?.message);
+      console.log('[CashMovements v12.0] Summary', {
+        tenantId,
+        cashierId,
+        fiscalYearId: effectiveFiscalYearId,
+        allYears,
+        dateRange: {
+          from: range.from?.toISOString() || null,
+          to: range.to?.toISOString() || null,
+        },
+        movementCount: movements.length,
+        summary,
+      })
+
+      return NextResponse.json({
+        success: true,
+        fiscalYearId: effectiveFiscalYearId,
+        fiscalYearName: fy?.name || null,
+        allYears,
+        warning: allYears ? ALL_YEARS_WARNING : undefined,
+        data: movements,
+        summary,
+        diagnostics: {
+          fiscalYearApplied: Boolean(effectiveFiscalYearId && !allYears),
+          requestedFiscalYearId: fiscalYearIdParam || null,
+          allYearsRequested: allYears,
+          hasCashMovementFiscalYearId,
+          dateRangeValid: range.valid,
+          dateRange: {
+            from: range.from?.toISOString() || null,
+            to: range.to?.toISOString() || null,
+          },
+        },
+      })
+    } catch (error: any) {
+      console.error('[CashMovements v12.0] GET error:', error)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'خطا در دریافت تراکنش‌ها: ' + (error?.message || 'نامشخص'),
+        },
+        { status: 500 }
+      )
     }
-
-    // ★ v11.7.2: اضافه کردن موجودی اولیه و ابتدای روز به summary
-    summary.openingBalance = openingBalance;
-    summary.startOfDayBalance = startOfDayBalance;
-
-    return NextResponse.json({
-      success: true,
-      data: movements,
-      summary,
-    });
-  } catch (error: any) {
-    console.error('[CashMovements] GET error:', error);
-    return NextResponse.json(
-      { success: false, error: 'خطا در دریافت تراکنش‌ها' },
-      { status: 500 }
-    );
   }
-});
+)
 
 // ═══════════════════════════════════════════════════════════════
 // POST: ثبت تراکنش دستی + صدور سند حسابداری خودکار
 // ═══════════════════════════════════════════════════════════════
-export const POST = withTenantAndPermission('pos')(async (
-  req: NextRequest,
-  ctx: any,
-  tenant: any
-) => {
-  try {
-    const body = await req.json();
-    const tenantId = body.tenantId || tenant.tenantId;
-    const cashierId = body.cashierId || tenant.user?.id;
+export const POST = withTenantAndPermission('pos')(
+  async (req: NextRequest, _ctx: any, tenant: any) => {
+    try {
+      const tenantDb = tenant.tenantDb
+      const tenantId = tenant.tenantId
 
-    // ─── اعتبارسنجی ───
-    if (!body.transactionType) {
-      return NextResponse.json(
-        { success: false, error: 'نوع تراکنش الزامی است' },
-        { status: 400 }
-      );
-    }
+      const body = await req.json()
 
-    if (!body.amount || Number(body.amount) <= 0) {
-      return NextResponse.json(
-        { success: false, error: 'مبلغ تراکنش باید بیشتر از صفر باشد' },
-        { status: 400 }
-      );
-    }
+      const cashierId = body.cashierId || tenant.user?.id || null
 
-    // ─── تعیین جهت تراکنش ───
-    const type = body.transactionType;
-    let direction = 'in'; // پیش‌فرض: ورود
+      if (!body.transactionType) {
+        return NextResponse.json(
+          { success: false, error: 'نوع تراکنش الزامی است' },
+          { status: 400 }
+        )
+      }
 
-    if (['purchase', 'withdrawal', 'expense', 'repair'].includes(type)) {
-      direction = 'out';
-    }
+      const amount = safeNum(body.amount)
 
-    // ─── ثبت تراکنش در جدول صندوق ───
-    const movement = await (db.client as any).cashMovement.create({
-      data: {
+      if (!amount || amount <= 0) {
+        return NextResponse.json(
+          { success: false, error: 'مبلغ تراکنش باید بیشتر از صفر باشد' },
+          { status: 400 }
+        )
+      }
+
+      let fy: any = null
+
+      try {
+        fy = await resolveEffectiveFiscalYear(tenantDb, tenantId, null)
+      } catch (err: any) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              err?.message ||
+              'سال مالی فعالی برای ثبت تراکنش صندوق تعریف نشده است.',
+            code: 'NO_ACTIVE_FISCAL_YEAR',
+          },
+          { status: 400 }
+        )
+      }
+
+      const type = normalizeToken(body.transactionType)
+
+      let direction: 'in' | 'out' = 'in'
+
+      if (body.type) {
+        const explicit = normalizeToken(body.type)
+        direction = explicit === 'out' ? 'out' : 'in'
+      } else if (
+        ['purchase', 'withdrawal', 'expense', 'repair'].includes(type)
+      ) {
+        direction = 'out'
+      }
+
+      const movementData: any = {
         shiftId: null,
         tenantId,
         cashierId,
-        transactionType: type,
+        transactionType: body.transactionType,
         paymentMethod: body.paymentMethod || 'cash',
-        amount: Number(body.amount),
+        amount,
         type: direction,
         description: body.description || null,
         reason: body.reason || null,
-      },
-    });
-
-    console.log('[CashMovements] ✅ CashMovement created:', {
-      id: movement.id,
-      type: movement.transactionType,
-      amount: movement.amount,
-      direction: movement.type,
-    });
-
-    // ═══════════════════════════════════════════════════════════════
-    // ★ v11.6.6: صدور سند حسابداری خودکار
-    // ═══════════════════════════════════════════════════════════════
-    try {
-      // ─── پیدا کردن حساب‌های استاندارد ───
-      const accounts = await db.client.account.findMany({ 
-        where: { tenantId, isActive: true } 
-      });
-      
-      let cashAccountId: string | null = null;
-      let capitalAccountId: string | null = null;      // سرمایه مالک
-      let withdrawalAccountId: string | null = null;   // برداشت مالک
-      let expenseAccountId: string | null = null;      // هزینه متفرقه
-
-      for (const acc of accounts) {
-        const code = acc.code || '';
-        const name = (acc.name || '').toLowerCase();
-
-        // صندوق فروشگاه (۱۰۱۰)
-        if (!cashAccountId && (code === '1010' || name.includes('صندوق'))) {
-          cashAccountId = acc.id;
-        }
-        // سرمایه مالک (۳۰۰۰)
-        if (!capitalAccountId && (code === '3000' || name.includes('سرمایه مالک'))) {
-          capitalAccountId = acc.id;
-        }
-        // برداشت مالک (۳۲۰۰)
-        if (!withdrawalAccountId && (code === '3200' || name.includes('برداشت مالک'))) {
-          withdrawalAccountId = acc.id;
-        }
-        // هزینه خدمات و متفرقه (۵۱۷۰)
-        if (!expenseAccountId && (code === '5170' || name.includes('متفرقه'))) {
-          expenseAccountId = acc.id;
-        }
       }
 
-      console.log('[CashMovements] 📋 Account IDs resolved:', {
-        cash: cashAccountId ? '✓' : '✗',
-        capital: capitalAccountId ? '✓' : '✗',
-        withdrawal: withdrawalAccountId ? '✓' : '✗',
-        expense: expenseAccountId ? '✓' : '✗',
-      });
-
-      // ─── تعیین حساب‌های بدهکار و بستانکار ───
-      let debitAccountId: string | null = null;
-      let creditAccountId: string | null = null;
-      let debitDescription = '';
-      let creditDescription = '';
-
-      if (type === 'deposit') {
-        // واریز: بدهکار=صندوق، بستانکار=سرمایه مالک
-        debitAccountId = cashAccountId;
-        creditAccountId = capitalAccountId;
-        debitDescription = 'واریز به صندوق';
-        creditDescription = 'سرمایه مالک';
-      } else if (type === 'withdrawal') {
-        // برداشت: بدهکار=برداشت مالک، بستانکار=صندوق
-        debitAccountId = withdrawalAccountId;
-        creditAccountId = cashAccountId;
-        debitDescription = 'برداشت مالک';
-        creditDescription = 'برداشت از صندوق';
-      } else if (type === 'expense') {
-        // هزینه: بدهکار=هزینه متفرقه، بستانکار=صندوق
-        debitAccountId = expenseAccountId;
-        creditAccountId = cashAccountId;
-        debitDescription = 'هزینه متفرقه';
-        creditDescription = 'پرداخت از صندوق';
+      if (isFieldSupported(tenantDb.cashMovement, 'fiscalYearId')) {
+        movementData.fiscalYearId = fy.id
       }
 
-      // ─── صدور سند حسابداری ───
-      if (debitAccountId && creditAccountId) {
-        // تولید شماره منحصر به فرد
-        const count = await db.client.journalEntry.count({ where: { tenantId } });
-        const jeNumber = `JE-${(count + 1).toString().padStart(6, '0')}`;
+      const movement = await tenantDb.cashMovement.create({
+        data: movementData,
+      })
 
-        const amount = Number(body.amount);
-        const description = body.description || body.reason || 'تراکنش دستی صندوق';
+      console.log('[CashMovements v12.0] CashMovement created:', {
+        id: movement.id,
+        tenantId,
+        fiscalYearId: fy.id,
+        transactionType: movement.transactionType,
+        amount: movement.amount,
+        direction: movement.type,
+      })
 
-        const lines = [
-          {
-            accountId: debitAccountId,
-            debit: amount,
-            credit: 0,
-            description: `بدهکار: ${debitDescription} — ${description}`,
-          },
-          {
-            accountId: creditAccountId,
-            debit: 0,
-            credit: amount,
-            description: `بستانکار: ${creditDescription} — ${description}`,
-          },
-        ];
+      // ─── صدور سند حسابداری خودکار ─────────────────────────
+      try {
+        const accounts = await tenantDb.account.findMany({
+          where: { tenantId, isActive: true },
+        })
 
-        await db.client.journalEntry.create({
-          data: {
+        let cashAccountId: string | null = null
+        let capitalAccountId: string | null = null
+        let withdrawalAccountId: string | null = null
+        let expenseAccountId: string | null = null
+
+        for (const acc of accounts) {
+          const code = acc.code || ''
+          const name = normalizeToken(acc.name)
+
+          if (!cashAccountId && (code === '1010' || name.includes('صندوق'))) {
+            cashAccountId = acc.id
+          }
+
+          if (
+            !capitalAccountId &&
+            (code === '3000' || name.includes('سرمایه مالک'))
+          ) {
+            capitalAccountId = acc.id
+          }
+
+          if (
+            !withdrawalAccountId &&
+            (code === '3200' || name.includes('برداشت مالک'))
+          ) {
+            withdrawalAccountId = acc.id
+          }
+
+          if (
+            !expenseAccountId &&
+            (code === '5170' || name.includes('متفرقه'))
+          ) {
+            expenseAccountId = acc.id
+          }
+        }
+
+        let debitAccountId: string | null = null
+        let creditAccountId: string | null = null
+        let debitDescription = ''
+        let creditDescription = ''
+
+        if (type === 'deposit') {
+          debitAccountId = cashAccountId
+          creditAccountId = capitalAccountId
+          debitDescription = 'واریز به صندوق'
+          creditDescription = 'سرمایه مالک'
+        } else if (type === 'withdrawal') {
+          debitAccountId = withdrawalAccountId
+          creditAccountId = cashAccountId
+          debitDescription = 'برداشت مالک'
+          creditDescription = 'برداشت از صندوق'
+        } else if (type === 'expense') {
+          debitAccountId = expenseAccountId
+          creditAccountId = cashAccountId
+          debitDescription = 'هزینه متفرقه'
+          creditDescription = 'پرداخت از صندوق'
+        }
+
+        if (debitAccountId && creditAccountId) {
+                 const jeNumber = await generateJournalNumber(tenantDb, tenantId)
+          const description =
+            body.description || body.reason || 'تراکنش دستی صندوق'
+
+          const lines = [
+            {
+              accountId: debitAccountId,
+              debit: amount,
+              credit: 0,
+              description: `بدهکار: ${debitDescription} — ${description}`,
+            },
+            {
+              accountId: creditAccountId,
+              debit: 0,
+              credit: amount,
+              description: `بستانکار: ${creditDescription} — ${description}`,
+            },
+          ]
+
+          const journalData: any = {
             number: jeNumber,
             date: new Date(),
             description: `سند خودکار بابت تراکنش دستی — ${description}`,
@@ -342,33 +520,53 @@ export const POST = withTenantAndPermission('pos')(async (
             createdBy: cashierId || null,
             tenantId,
             lines: { create: lines },
-          },
-        });
+          }
 
-        console.log('[CashMovements] ✅ Journal Entry created:', {
-          number: jeNumber,
-          amount,
-          debit: debitDescription,
-          credit: creditDescription,
-        });
-      } else {
-        console.warn('[CashMovements] ⚠️ Cannot create journal - missing account IDs');
+          if (isFieldSupported(tenantDb.journalEntry, 'fiscalYearId')) {
+            journalData.fiscalYearId = fy.id
+          }
+
+          await tenantDb.journalEntry.create({ data: journalData })
+
+          console.log('[CashMovements v12.0] Journal Entry created:', {
+            number: jeNumber,
+            fiscalYearId: fy.id,
+            amount,
+            debit: debitDescription,
+            credit: creditDescription,
+          })
+        } else {
+          console.warn(
+            '[CashMovements v12.0] Cannot create journal - missing account IDs'
+          )
+        }
+      } catch (jeErr: any) {
+        console.warn(
+          '[CashMovements v12.0] Auto journal failed (non-blocking):',
+          jeErr?.message
+        )
       }
-    } catch (jeErr: any) {
-      console.warn('[CashMovements] ⚠️ Auto journal failed (non-blocking):', jeErr?.message);
-    }
-    // ═══════════════════════════════════════════════════════════════
 
-    return NextResponse.json({
-      success: true,
-      data: movement,
-      message: 'تراکنش با موفقیت ثبت شد و سند حسابداری صادر شد',
-    }, { status: 201 });
-  } catch (error: any) {
-    console.error('[CashMovements] POST error:', error);
-    return NextResponse.json(
-      { success: false, error: 'خطا در ثبت تراکنش: ' + error.message },
-      { status: 500 }
-    );
+      return NextResponse.json(
+        {
+          success: true,
+          data: movement,
+          fiscalYearId: fy.id,
+          fiscalYearName: fy.name,
+          message: 'تراکنش با موفقیت ثبت شد و سند حسابداری صادر شد',
+        },
+        { status: 201 }
+      )
+    } catch (error: any) {
+      console.error('[CashMovements v12.0] POST error:', error)
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'خطا در ثبت تراکنش: ' + (error?.message || 'نامشخص'),
+        },
+        { status: 500 }
+      )
+    }
   }
-});
+)

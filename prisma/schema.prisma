@@ -580,6 +580,7 @@ model Invoice {
 
   // ★ v11.6.3: تراکنش‌های صندوق مرتبط با فاکتور
   cashMovements CashMovement[] @relation("CashMovementInvoice")
+  fiscalYearId String? @db.VarChar(450)
 
   @@unique([number, tenantId])
   @@index([tenantId])
@@ -960,6 +961,7 @@ model Check {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  fiscalYearId      String?  @db.VarChar(450) 
   // ★★★ استفاده از Named Relations برای جلوگیری از conflict
   Tenant   Tenant    @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
   customer Customer? @relation("CustomerChecks", fields: [customerId], references: [id], onUpdate: NoAction, onDelete: SetNull)
@@ -1333,7 +1335,7 @@ model StockMovement {
   referenceId   String?  @db.VarChar(450)
   description   String?  @db.VarChar(500)
   createdAt     DateTime @default(now())
-
+  fiscalYearId  String?  @db.VarChar(450)
   Tenant  Tenant  @relation(fields: [tenantId], references: [id], onUpdate: NoAction, onDelete: Cascade)
   Product Product @relation(fields: [productId], references: [id], onUpdate: NoAction, onDelete: NoAction)
 
@@ -1409,6 +1411,7 @@ model PurchaseInvoice {
   journalEntry JournalEntry?         @relation("PurchaseInvoiceJournalEntry", fields: [journalEntryId], references: [id], onUpdate: NoAction, onDelete: SetNull)
   Checks       Check[]               @relation("PurchaseInvoiceChecks")
   items        PurchaseInvoiceItem[]
+ fiscalYearId String? @db.VarChar(450)
 
   @@unique([number, tenantId])
   @@index([tenantId])

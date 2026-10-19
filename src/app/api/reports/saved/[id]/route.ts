@@ -71,6 +71,21 @@ export async function GET(
 
     const dataset = getDataset(report.datasetId)
 
+    const definition: any =
+      typeof report.definition === 'object' && report.definition !== null
+        ? report.definition
+        : null
+
+    const fiscalYearPolicy = definition?.fiscalYearPolicy || null
+    const fiscalYearStrategy = dataset?.fiscalYear?.strategy || 'none'
+
+    const effectiveFiscalYearPolicy =
+      fiscalYearPolicy ||
+      ({
+        mode: fiscalYearStrategy === 'none' ? 'none' : 'active',
+        fiscalYearId: null,
+      } as any)
+
     return NextResponse.json({
       success: true,
       data: {
@@ -78,6 +93,11 @@ export async function GET(
         datasetLabel: dataset?.label || report.datasetId,
         datasetIcon: dataset?.icon || 'FileText',
         datasetColor: dataset?.color || 'gray',
+        datasetExists: Boolean(dataset),
+        fiscalYearStrategy,
+        fiscalYearPolicy,
+        effectiveFiscalYearPolicy,
+        allowsFiscalYearFilter: fiscalYearStrategy !== 'none',
       },
     })
 

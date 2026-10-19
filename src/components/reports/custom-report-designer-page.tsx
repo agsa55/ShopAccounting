@@ -602,7 +602,13 @@ function ColumnsDropZone({
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
 
-export default function CustomReportDesignerPage() {
+export default function CustomReportDesignerPage({
+  fiscalYearId,
+  dateRange,
+}: {
+  fiscalYearId?: string | null
+  dateRange?: { from: string; to: string }
+}) {
   const planName = useAppStore((s) => s.planName)
   const tenantId = useAppStore((s) => s.tenantId)
   const features = getFeaturesByPlanName(planName)
@@ -629,14 +635,28 @@ export default function CustomReportDesignerPage() {
     )
   }
 
-  return <ReportDesignerInner tenantId={tenantId || ''} />
+return (
+  <ReportDesignerInner
+    tenantId={tenantId || ''}
+    fiscalYearId={fiscalYearId}
+    dateRange={dateRange}
+  />
+)
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Inner Component
 // ═══════════════════════════════════════════════════════════════
 
-function ReportDesignerInner({ tenantId }: { tenantId: string }) {
+function ReportDesignerInner({
+  tenantId,
+  fiscalYearId,
+  dateRange,
+}: {
+  tenantId: string
+  fiscalYearId?: string | null
+  dateRange?: { from: string; to: string }
+}) {
   const [activeTab, setActiveTab] = useState<'designer' | 'saved'>('designer')
 
   // Dataset state
@@ -662,7 +682,13 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
   const [previewColumns, setPreviewColumns] = useState<ReportResultColumn[]>([])
   const [previewRows, setPreviewRows] = useState<ReportResultRow[]>([])
   const [previewMeta, setPreviewMeta] = useState<ReportResultMeta | null>(null)
-
+  // ★ با تغییر سال مالی، نتایج قبلی پاک شود تا کاربر دوباره Preview بزند
+  useEffect(() => {
+    setPreviewRows([])
+    setPreviewColumns([])
+    setPreviewMeta(null)
+    setPreviewError(null)
+  }, [fiscalYearId, dateRange?.from, dateRange?.to])
   // Saved reports state
   const [savedReports, setSavedReports] = useState<SavedReportSummary[]>([])
   const [loadingSavedReports, setLoadingSavedReports] = useState(false)
@@ -916,15 +942,12 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
     }
   }, [selectedDatasetId, columns, filters, groupBy, orderBy, limit])
 
-  // ═══════════════════════════════════════════════════════════
-  //  Preview
-  // ═══════════════════════════════════════════════════════════
-
-  const handlePreview = useCallback(async () => {
+   const handlePreview = useCallback(async () => {
     if (!selectedDatasetId) {
       setPreviewError('لطفاً ابتدا یک منبع داده انتخاب کنید.')
       return
     }
+
     if (columns.length === 0) {
       setPreviewError('لطفاً حداقل یک ستون انتخاب کنید.')
       return
@@ -934,7 +957,65 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
     setPreviewError(null)
 
     try {
-      const definition = buildDefinition()
+      const baseDefinition = buildDefinition()
+      const extraFilters: ReportFilter[] = []
+
+      // ★ اعمال خودکار دامنه سال مالی روی دیتاست
+      if (dataset) {
+        const fieldIds = new Set(dataset.fields.map((f) => f.id))
+const existingFilterFields = new Set((baseDefinition.filters ?? []).map((f) => f.field))
+
+        const hasFiscalYearField = fieldIds.has('fiscalYearId')
+
+        // اگر دیتاست فیلد fiscalYearId داشت، مستقیم فیلتر می‌کنیم
+        if (
+          fiscalYearId &&
+          hasFiscalYearField &&
+          !existingFilterFields.has('fiscalYearId')
+        ) {
+          extraFilters.push({
+            field: 'fiscalYearId',
+            operator: 'equals' as FilterOperator,
+            value: fiscalYearId,
+          })
+        }
+
+        // اگر دیتاست fiscalYearId نداشت، از بازه تاریخ سال مالی استفاده می‌کنیم
+        const dateFieldCandidates = [
+          'invoiceDate',
+          'createdAt',
+          'date',
+          'paymentDate',
+          'dueDate',
+          'settlementDate',
+          'transactionDate',
+          'entryDate',
+          'movementDate',
+        ]
+
+        const dateField = dateFieldCandidates.find(
+          (fid) => fieldIds.has(fid) && !existingFilterFields.has(fid)
+        )
+
+        if (
+          fiscalYearId &&
+          dateRange &&
+          dateField &&
+          !hasFiscalYearField
+        ) {
+          extraFilters.push({
+            field: dateField,
+            operator: 'between' as FilterOperator,
+            value: [dateRange.from, dateRange.to],
+          })
+        }
+      }
+
+      const definition = {
+        ...baseDefinition,
+filters: [...(baseDefinition.filters ?? []), ...extraFilters],
+      }
+
       const res = await fetch('/api/reports/designer/preview', {
         method: 'POST',
         headers: {
@@ -942,7 +1023,12 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
           'x-tenant-id': tenantId,
           ...getAuthHeaders(),
         },
-        body: JSON.stringify(definition),
+        body: JSON.stringify({
+          ...definition,
+          fiscalYearId: fiscalYearId || undefined,
+          dateFrom: fiscalYearId ? dateRange?.from : undefined,
+          dateTo: fiscalYearId ? dateRange?.to : undefined,
+        }),
       })
 
       const data = await res.json()
@@ -954,7 +1040,9 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
       } else {
         const msg = data.error || 'خطا در اجرای گزارش'
         const validationMsgs = data.validationErrors || []
-        setPreviewError(validationMsgs.length > 0 ? validationMsgs.join('، ') : msg)
+        setPreviewError(
+          validationMsgs.length > 0 ? validationMsgs.join('، ') : msg
+        )
         setPreviewRows([])
         setPreviewColumns([])
         setPreviewMeta(null)
@@ -967,8 +1055,16 @@ function ReportDesignerInner({ tenantId }: { tenantId: string }) {
     } finally {
       setPreviewLoading(false)
     }
-  }, [selectedDatasetId, columns, buildDefinition, tenantId])
-
+  }, [
+    selectedDatasetId,
+    columns,
+    buildDefinition,
+    tenantId,
+    dataset,
+    fiscalYearId,
+    dateRange?.from,
+    dateRange?.to,
+  ])
   // ═══════════════════════════════════════════════════════════
   //  Reset (پاک کردن کامل)
   // ═══════════════════════════════════════════════════════════

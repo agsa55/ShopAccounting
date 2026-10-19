@@ -23,7 +23,7 @@ import {
   CreditCard, BookOpen, BarChart3, Settings, Bell, LogOut, Store, Clock,
   Warehouse as WarehouseIcon, Building2, Truck, ArrowRightLeft, ClipboardList,
   Ticket as TicketIcon, MessageCircle, Sparkles, RefreshCw, Wifi, WifiOff,
-  Download, AlertTriangle, ChevronLeft, Calendar, Landmark, Archive
+  Download, AlertTriangle, ChevronLeft, Calendar, Landmark, Archive,  PlayCircle, CheckCircle2, AlertCircle, Plus,
 } from 'lucide-react'
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -74,6 +74,7 @@ import { ChecksTab } from '@/components/accounting/checks-tab'
 import { BasicYearEndPage } from '@/components/settings/basic-year-end-page'
 import UpgradePlanPage from '@/components/upgrade/upgrade-plan-page'
 // بعد از سایر import ها:
+import { SetupWizard, useSetupWizard } from '@/components/setup-wizard'
 import { SystemLogModal } from '@/components/SystemLogModal'
 // بعد از سایر import ها:
 import { installApiLogger } from '@/lib/api-logger'
@@ -839,14 +840,27 @@ function AppSidebar() {
   };
 
   return (
-       <Sidebar
+    <Sidebar
       side="right"
       collapsible="icon"
-      className="border-l border-emerald-400/15 bg-[radial-gradient(circle_at_15%_0%,rgba(16,185,129,0.20),transparent_35%),radial-gradient(circle_at_85%_100%,rgba(99,102,241,0.16),transparent_40%),linear-gradient(180deg,#475569_0%,#334155_42%,#1e293b_100%)] shadow-[0_0_45px_rgba(16,185,129,0.10)] backdrop-blur-xl"
+      className="border-l border-amber-300/40 text-emerald-50"
+      style={{
+        background:
+          'linear-gradient(180deg, #064e3b 0%, #047857 32%, #0d9488 68%, #0891b2 100%)',
+        color: '#ecfdf5',
+        boxShadow:
+          'inset -1px 0 0 rgba(251,191,36,0.35), 0 0 45px rgba(13,148,136,0.30)',
+      }}
     >
 
-
-            <SidebarHeader className="p-2 border-b border-white/10 bg-white/5 backdrop-blur-sm">
+           <SidebarHeader
+          className="p-2 border-b border-amber-300/35"
+          style={{
+            background: 'rgba(255,255,255,0.10)',
+            backdropFilter: 'blur(14px)',
+            color: '#ecfdf5',
+          }}
+        >
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -1006,12 +1020,21 @@ function AppSidebar() {
         </div>
       </SidebarHeader>
 
-<SidebarSeparator className="bg-white/10" />
+        <SidebarSeparator
+          className="h-px border-0"
+          style={{
+            background:
+              'linear-gradient(90deg, rgba(251,191,36,0.75), rgba(16,185,129,0.45), rgba(6,182,212,0.65))',
+          }}
+        />
 
       <SidebarContent>
         {visibleGroups.map((group) => (
           <SidebarGroup key={group.label} className="py-0 my-0">
-          <SidebarGroupLabel className="text-[10px] font-bold text-emerald-400/70 uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden">
+                    <SidebarGroupLabel
+              className="text-[10px] font-bold uppercase tracking-wide px-3 py-1 mb-0.5 mt-2 first:mt-0 group-data-[collapsible=icon]:hidden"
+              style={{ color: 'rgba(253, 230, 138, 0.95)' }}
+            >
               {group.label}
             </SidebarGroupLabel>
             <SidebarGroupContent className="py-0">
@@ -1036,23 +1059,23 @@ function AppSidebar() {
                           }
                         }}
                         tooltip={item.label}
-                                    className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-xl transition-all duration-200 ${
+                        className={`gap-2 sm:gap-2.5 h-8 sm:h-9 rounded-xl transition-all duration-200 ${
                           isExpired
-                            ? 'opacity-40 cursor-not-allowed hover:bg-transparent text-slate-400'
+                            ? 'opacity-45 cursor-not-allowed text-emerald-100/60 hover:bg-transparent'
                             : isItemDisabled
-                            ? 'opacity-50 cursor-not-allowed hover:bg-transparent text-slate-400'
+                            ? 'opacity-55 cursor-not-allowed text-emerald-100/70 hover:bg-transparent'
                             : isActive
-                            ? 'bg-gradient-to-l from-emerald-500/25 via-emerald-400/15 to-transparent text-white font-semibold shadow-inner shadow-emerald-500/10 border-r-2 border-emerald-400'
-                            : 'text-slate-200/85 hover:bg-white/10 hover:text-white'
+                            ? 'bg-white/18 text-white font-semibold border-r-2 border-amber-300 shadow-inner shadow-emerald-950/20'
+                            : 'text-emerald-50/90 hover:bg-white/12 hover:text-white'
                         }`}
                       >
-                               <item.icon
+                                                     <item.icon
                           className={`size-4 transition-colors ${
                             isExpired
-                              ? 'text-slate-500'
+                              ? 'text-emerald-100/50'
                               : isActive && !isItemDisabled
-                              ? 'text-emerald-300 drop-shadow-[0_0_8px_rgba(16,185,129,0.35)]'
-                              : 'text-slate-300/85'
+                              ? 'text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]'
+                              : 'text-emerald-100/85'
                           }`}
                         />
                         <span className="text-xs sm:text-sm">{item.label}</span>
@@ -1077,8 +1100,15 @@ function AppSidebar() {
         ))}
       </SidebarContent>
 
-       <SidebarFooter className="p-2 border-t border-white/10 bg-white/5 backdrop-blur-sm">
-        <SidebarSeparator className="bg-white/10" />
+         <SidebarFooter
+          className="p-2 border-t border-amber-300/35"
+          style={{
+            background: 'rgba(255,255,255,0.10)',
+            backdropFilter: 'blur(14px)',
+            color: '#ecfdf5',
+          }}
+        >
+    <SidebarSeparator className="bg-gradient-to-l from-amber-300/45 via-emerald-200/20 to-cyan-300/35" />
         <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
           <Avatar className="size-7 sm:size-8 border-2 border-emerald-400/50 bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/25 ring-1 ring-white/10">
             <AvatarFallback className="bg-transparent text-white/95 text-[10px] sm:text-xs font-semibold">
@@ -1095,8 +1125,13 @@ function AppSidebar() {
           </div>
         </div>
       </SidebarFooter>
-
-        <SidebarRail className="bg-white/5 border-l border-white/10 backdrop-blur-sm" />
+               <SidebarRail
+          className="border-l border-amber-300/45"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(251,191,36,0.80), rgba(16,185,129,0.50), rgba(6,182,212,0.70))',
+          }}
+        />
     </Sidebar>
   )
 }
@@ -1199,6 +1234,376 @@ function SyncIndicator() {
   )
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   ★ FiscalYearSelector — انتخابگر سراسری سال مالی
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ FiscalYearSelector — انتخابگر سراسری سال مالی
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ FiscalYearSelector — انتخابگر سراسری سال مالی
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ★ FiscalYearSelector v11.1 — Modern Dropdown + Event Sync
+   - DropdownMenu حرفه‌ای با shadcn/ui
+   - هماهنگی دوطرفه با تب سال مالی از طریق CustomEvent
+   - نمایش تاریخ شمسی، badge وضعیت و آیکون‌های متفاوت
+   - Empty state با لینک سریع به تعریف سال مالی
+   ═══════════════════════════════════════════════════════════════ */
+
+function FiscalYearSelector({
+  className = '',
+  tone = 'dark',
+}: {
+  className?: string
+  tone?: 'dark' | 'light'
+}) {
+  const fiscalYears = useStore((s) => s.fiscalYears)
+  const selectedFiscalYearId = useStore((s) => s.selectedFiscalYearId)
+  const setSelectedFiscalYearId = useStore((s) => s.setSelectedFiscalYearId)
+  const loadFiscalYears = useStore((s) => s.loadFiscalYears)
+  const fiscalYearsLoading = useStore((s) => s.fiscalYearsLoading)
+  const [open, setOpen] = useState(false)
+  const setCurrentView = useStore((s) => s.setCurrentView)
+
+  // بارگذاری اولیه
+  useEffect(() => {
+    loadFiscalYears()
+  }, [loadFiscalYears])
+
+  // ★ هماهنگی با تب سال مالی از طریق event
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const type = detail.type
+
+      // همیشه لیست را رفرش کن
+      loadFiscalYears()
+
+      if (type === 'activated' && detail.yearId) {
+        setSelectedFiscalYearId(detail.yearId)
+      }
+      if (type === 'closed') {
+        setSelectedFiscalYearId(null)
+      }
+      if (type === 'created' || type === 'deleted' || type === 'updated') {
+        // فقط رفرش، بدون تغییر انتخاب فعلی
+      }
+    }
+
+    window.addEventListener('fiscal-year-changed', handler)
+    return () => window.removeEventListener('fiscal-year-changed', handler)
+  }, [loadFiscalYears, setSelectedFiscalYearId])
+
+  // حذف تکراری‌ها
+  const uniqueFiscalYears = useMemo(() => {
+    const seen = new Set<string>()
+    return (fiscalYears || []).filter((fy: any) => {
+      const key = fy.id || `${fy.name}|${fy.startDate}|${fy.endDate}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }, [fiscalYears])
+
+  const isDark = tone === 'dark'
+
+  // پیدا کردن سال فعال
+  const activeYear = uniqueFiscalYears.find(
+    (fy: any) => fy.isActive && !fy.isClosed
+  )
+  const selectedExists = uniqueFiscalYears.some(
+    (fy: any) => fy.id === selectedFiscalYearId
+  )
+
+// ★ v11.1: بررسی اعتبار سال انتخاب‌شده
+const selectedYear = uniqueFiscalYears.find(
+  (fy: any) => fy.id === selectedFiscalYearId
+)
+
+// اگر سال انتخاب‌شده در لیست نیست، یا بسته‌شده، یا دیگر فعال نیست
+// → به سال فعال fallback کن
+const isSelectionValid =
+  selectedYear && selectedYear.isActive && !selectedYear.isClosed
+
+const effectiveSelectedId = isSelectionValid
+  ? selectedFiscalYearId
+  : activeYear?.id || null
+  // تبدیل تاریخ میلادی به شمسی کوتاه
+  const toJalaliShort = (iso: string): string => {
+    if (!iso) return '—'
+    try {
+      const d = new Date(iso)
+      if (Number.isNaN(d.getTime())) return '—'
+      const formatter = new Intl.DateTimeFormat('fa-IR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+      return formatter.format(d)
+    } catch {
+      return '—'
+    }
+  }
+
+  // متن دکمه trigger
+  const triggerText = fiscalYearsLoading
+    ? 'بارگذاری...'
+    : selectedYear
+    ? selectedYear.name
+    : uniqueFiscalYears.length > 0
+    ? 'انتخاب سال مالی'
+    : 'تعریف سال مالی'
+
+  // آیکون trigger
+  const triggerIcon = fiscalYearsLoading ? (
+    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+  ) : selectedYear ? (
+    <Calendar className="w-3.5 h-3.5" />
+  ) : (
+    <AlertCircle className="w-3.5 h-3.5" />
+  )
+
+  const triggerColor = isDark ? '#fde68a' : '#b45309'
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          dir="rtl"
+          disabled={fiscalYearsLoading}
+          className={`
+            group relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5
+            transition-all duration-200 backdrop-blur-md cursor-pointer
+            hover:shadow-md active:scale-[0.98]
+            disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100
+            ${className}
+          `}
+          style={{
+            border: `1px solid ${
+              isDark ? 'rgba(251,191,36,0.45)' : 'rgba(217,119,6,0.35)'
+            }`,
+            background: isDark
+              ? 'rgba(255,255,255,0.12)'
+              : 'rgba(255,251,235,0.95)',
+            color: isDark ? '#fffbeb' : '#78350f',
+            boxShadow: isDark
+              ? 'inset 0 0 0 1px rgba(255,255,255,0.04), 0 1px 2px rgba(0,0,0,0.05)'
+              : '0 1px 2px rgba(120,53,15,0.08)',
+          }}
+          title={
+            selectedYear
+              ? `سال مالی: ${selectedYear.name}`
+              : 'سال مالی را انتخاب کنید'
+          }
+        >
+          <span style={{ color: triggerColor }}>{triggerIcon}</span>
+          <span className="text-[11px] font-semibold whitespace-nowrap max-w-[120px] truncate">
+            {triggerText}
+          </span>
+          {selectedYear?.isActive && !selectedYear?.isClosed && (
+            <span
+              className="hidden sm:inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
+              title="سال مالی فعال"
+            />
+          )}
+          <ChevronLeft
+            className="w-3 h-3 transition-transform duration-200"
+            style={{
+              transform: open ? 'rotate(-90deg)' : 'rotate(0deg)',
+              color: isDark ? 'rgba(253,230,138,0.7)' : '#92400e',
+            }}
+          />
+        </button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="w-72 sm:w-80 bg-white border border-slate-200 shadow-2xl rounded-xl p-0 overflow-hidden"
+
+      >
+        {/* ─── Header ─── */}
+        <div className="px-3 py-2.5 bg-gradient-to-l from-emerald-50 to-teal-50 border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-sm">
+                <Calendar className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-800">سال مالی</p>
+                <p className="text-[10px] text-slate-500">
+                  انتخاب دوره گزارش‌گیری
+                </p>
+              </div>
+            </div>
+            <Badge
+              variant="outline"
+              className="text-[9px] h-5 bg-white border-slate-200"
+            >
+              {uniqueFiscalYears.length.toLocaleString('fa-IR')} سال
+            </Badge>
+          </div>
+        </div>
+
+        {/* ─── لیست سال‌ها ─── */}
+        <ScrollArea className="max-h-[340px]">
+          {uniqueFiscalYears.length === 0 ? (
+            <div className="p-5 text-center">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-2">
+                <AlertCircle className="w-6 h-6 text-amber-600" />
+              </div>
+              <p className="text-xs font-bold text-slate-700 mb-1">
+                سال مالی تعریف نشده
+              </p>
+              <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+                برای استفاده از گزارش‌های مالی و اسناد حسابداری، ابتدا یک
+                سال مالی تعریف کنید.
+              </p>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7 gap-1"
+                onClick={() => {
+                  setOpen(false)
+                  setCurrentView('settings' as any)
+                }}
+              >
+                <Plus className="w-3 h-3" />
+                تعریف سال مالی
+              </Button>
+            </div>
+          ) : (
+            <div className="p-1.5 space-y-0.5">
+              {uniqueFiscalYears.map((fy: any) => {
+                const isActive = fy.isActive && !fy.isClosed
+                const isClosed = fy.isClosed
+                const isSelected = fy.id === effectiveSelectedId
+
+                return (
+                  <button
+                    key={fy.id}
+                    onClick={() => {
+                      setSelectedFiscalYearId(fy.id)
+                      setOpen(false)
+                    }}
+                    className={`
+                      w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-right
+                      transition-all duration-150
+                      ${
+                        isSelected
+                          ? 'bg-emerald-50 border border-emerald-200 shadow-sm'
+                          : 'hover:bg-slate-50 border border-transparent'
+                      }
+                    `}
+                  >
+                    {/* آیکون وضعیت */}
+                    <div
+                      className={`
+                        shrink-0 w-8 h-8 rounded-lg flex items-center justify-center
+                        ${
+                          isActive
+                            ? 'bg-emerald-100 text-emerald-600'
+                            : isClosed
+                            ? 'bg-slate-100 text-slate-400'
+                            : 'bg-amber-100 text-amber-600'
+                        }
+                      `}
+                    >
+                      {isActive ? (
+                        <PlayCircle className="w-4 h-4" />
+                      ) : isClosed ? (
+                        <Archive className="w-4 h-4" />
+                      ) : (
+                        <Clock className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    {/* اطلاعات */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span
+                          className={`text-xs font-bold truncate ${
+                            isSelected ? 'text-emerald-900' : 'text-slate-800'
+                          }`}
+                        >
+                          {fy.name}
+                        </span>
+                        {isActive && (
+                          <span
+                            className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"
+                            title="فعال"
+                          />
+                        )}
+                      </div>
+                      <div
+                        className="flex items-center gap-1 text-[10px] text-slate-500 font-mono"
+                        dir="ltr"
+                      >
+                        <span>{toJalaliShort(fy.startDate)}</span>
+                        <span className="text-slate-300">—</span>
+                        <span>{toJalaliShort(fy.endDate)}</span>
+                      </div>
+                    </div>
+
+                    {/* Badge وضعیت */}
+                    <div className="shrink-0 flex flex-col items-end gap-0.5">
+                      {isActive && (
+                        <Badge className="bg-emerald-100 text-emerald-700 text-[9px] h-4 px-1.5 border-0 font-bold">
+                          فعال
+                        </Badge>
+                      )}
+                      {isClosed && !isActive && (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] h-4 px-1.5 text-slate-500 border-slate-200"
+                        >
+                          بسته
+                        </Badge>
+                      )}
+                      {!isActive && !isClosed && (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] h-4 px-1.5 text-amber-600 border-amber-200 bg-amber-50"
+                        >
+                          غیرفعال
+                        </Badge>
+                      )}
+                      {isSelected && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 mt-0.5" />
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* ─── Footer ─── */}
+        {uniqueFiscalYears.length > 0 && (
+          <div className="border-t border-slate-100 bg-slate-50/50 px-2 py-1.5">
+            <button
+              onClick={() => {
+                setOpen(false)
+                setCurrentView('settings' as any)
+              }}
+              className="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 py-1.5 rounded-md transition-colors"
+            >
+              <Settings className="w-3 h-3" />
+              مدیریت سال‌های مالی
+            </button>
+          </div>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 /* ═══════════════════════════════════════════════════════════════
    AppHeader
    ═══════════════════════════════════════════════════════════════ */
@@ -1345,16 +1750,28 @@ function AppHeader() {
 }
 
   return (
-     <header
-      className="flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-white/10 bg-[linear-gradient(90deg,rgba(71,85,105,0.92),rgba(51,65,85,0.88),rgba(30,41,59,0.86))] backdrop-blur-xl px-2 sm:px-3 md:px-4 shadow-[0_8px_30px_rgba(0,0,0,0.12)] sticky top-0 z-10"
+        <header
+      className="relative flex h-11 sm:h-12 md:h-14 items-center gap-1.5 sm:gap-2 md:gap-3 border-b border-amber-300/40 px-2 sm:px-3 md:px-4 sticky top-0 z-10"
+      style={{
+        background:
+          'linear-gradient(90deg, #064e3b 0%, #047857 35%, #0d9488 70%, #0891b2 100%)',
+        color: '#ecfdf5',
+        boxShadow: '0 8px 30px rgba(13,148,136,0.24)',
+      }}
     >
-        <SidebarTrigger className="-mr-1 shrink-0 rotate-180 text-slate-200/90 hover:bg-white/10 hover:text-white transition-colors rounded-lg" />
+             <SidebarTrigger
+        className="-mr-1 shrink-0 rotate-180 transition-colors rounded-lg hover:bg-white/15"
+        style={{ color: '#ffffff' }}
+      />
    <Separator orientation="vertical" className="h-4 sm:h-5 md:h-6 hidden xs:block bg-white/20" />
 
       <Breadcrumb className="flex-1 min-w-0 overflow-hidden">
         <BreadcrumbList className="flex-nowrap">
           <BreadcrumbItem className="hidden md:inline-block">
-                <BreadcrumbPage className="text-[10px] md:text-xs text-slate-300/80 truncate">
+                          <BreadcrumbPage
+              className="text-[10px] md:text-xs truncate"
+              style={{ color: 'rgba(236,253,245,0.95)' }}
+            >
               {storeName || 'فروشگاه'}
             </BreadcrumbPage>
           </BreadcrumbItem>
@@ -1369,12 +1786,23 @@ function AppHeader() {
 
       <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
 
-           <div
-          className="hidden sm:flex items-center gap-1.5 bg-white/10 px-2.5 py-1.5 rounded-xl border border-white/15 shadow-sm backdrop-blur-md"
+               <FiscalYearSelector className="hidden md:flex" tone="dark" />
+
+              <div
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl"
           dir="rtl"
+          style={{
+            background: 'rgba(255,255,255,0.14)',
+            border: '1px solid rgba(251,191,36,0.38)',
+            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)',
+            backdropFilter: 'blur(12px)',
+          }}
         >
-          <Clock className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-          <span className="text-[11px] font-semibold text-white/95 whitespace-nowrap">
+          <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: '#fde68a' }} />
+          <span
+            className="text-[11px] font-semibold whitespace-nowrap"
+            style={{ color: '#ffffff' }}
+          >
             {(() => {
               const now = new Date();
               const formatter = new Intl.DateTimeFormat('fa-IR', {
@@ -1478,7 +1906,7 @@ function AppHeader() {
             align="end"
             className="w-48 sm:w-52 md:w-56 bg-white border border-slate-200 shadow-lg rounded-lg"
           >
-            <DropdownMenuLabel>
+               <DropdownMenuLabel>
               <div className="flex flex-col gap-1">
                 <span className="text-xs sm:text-sm font-semibold text-slate-800">{user?.username || 'کاربر'}</span>
                 <span className="text-[10px] sm:text-xs font-normal text-slate-500">
@@ -1486,8 +1914,19 @@ function AppHeader() {
                 </span>
               </div>
             </DropdownMenuLabel>
+
             <DropdownMenuSeparator />
+
+            {/* ★ سال مالی برای موبایل داخل منوی پروفایل */}
+            <div className="px-2 py-1.5 md:hidden">
+              <p className="text-[10px] font-medium text-slate-500 mb-1">سال مالی</p>
+              <FiscalYearSelector className="w-full" tone="light" />
+            </div>
+
+            <DropdownMenuSeparator />
+
             {canAccessSettings && (
+         
               <DropdownMenuItem
                 onClick={() => useStore.getState().setCurrentView('settings')}
                 className="text-slate-700 hover:bg-slate-50 "
@@ -1511,7 +1950,16 @@ function AppHeader() {
       {/* ★ v11.9.0: مودال لاگ‌های سیستم */}
       <SystemLogModal open={showLogModal} onOpenChange={setShowLogModal} />
     </div>
-    </header>
+
+    {/* ★ خط طلایی گرادیانی زیر هدر */}
+  <div
+      className="pointer-events-none absolute bottom-0 left-0 right-0 h-[2px]"
+      style={{
+        background:
+          'linear-gradient(90deg, rgba(251,191,36,0.95), rgba(16,185,129,0.70), rgba(6,182,212,0.85))',
+      }}
+    />
+  </header>
   )
 }
 
@@ -1526,6 +1974,23 @@ export default function AppShell() {
   const planName = useStore((s) => s.planName)
   const planFeatures = getFeaturesByPlanName(planName || 'simple')
   const { content: siteContent } = useSiteContent()
+
+    // ★ v11.2: ویزارد راه‌اندازی باید سراسری mount شود
+  const {
+    open: setupWizardOpen,
+    setOpen: setSetupWizardOpen,
+    handleComplete: handleSetupWizardComplete,
+    wizardMode: setupWizardMode,
+    renewalData: setupWizardRenewalData,
+  } = useSetupWizard()
+
+
+    // ★ v11.2: اگر پلن دمو یا ترایال است، ویزارد باز نشود
+  useEffect(() => {
+    if (planName === 'demo' || planName === 'trial') {
+      setSetupWizardOpen(false)
+    }
+  }, [planName, setSetupWizardOpen])
   // ★ v11.9.0: پاکسازی خودکار لاگ‌های قدیمی
   useAutoCleanup()
 
@@ -1782,12 +2247,14 @@ useEffect(() => {
   const isOnUpgradePage = currentView === 'upgrade-plan'
   const shouldShowLockOverlay = isSystemLocked && !isOnUpgradePage
 
-  return (
+   return (
     <SidebarProvider>
       <AppSidebar />
-       <SidebarInset>
+
+      <SidebarInset>
         <OfflineBanner />
         <AppHeader />
+
         {/* ★ v10.1: بنر هشدار ۳ روزه */}
         {isWarningPeriod && !isSystemLocked && (
           <WarningBanner daysRemaining={daysRemaining} onUpgrade={handleUpgrade} />
@@ -1798,7 +2265,10 @@ useEffect(() => {
 
         {/* ★ v10.4: بنر کوچک در صفحه به‌روزرسانی برای یادآوری قفل بودن */}
         {isSystemLocked && isOnUpgradePage && (
-          <div className="mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 bg-red-50 border border-red-200 flex items-center gap-3" dir="rtl">
+          <div
+            className="mx-2 sm:mx-3 md:mx-4 mt-2 rounded-xl p-3 bg-red-50 border border-red-200 flex items-center gap-3"
+            dir="rtl"
+          >
             <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
             <p className="text-xs sm:text-sm text-red-800 font-medium flex-1">
               🔒 سیستم قفل است. برای باز شدن دسترسی، پلن خود را به‌روزرسانی کنید.
@@ -1820,6 +2290,15 @@ useEffect(() => {
           </ScrollArea>
         )}
       </SidebarInset>
+
+      {/* ★ v11.2: ویزارد راه‌اندازی سراسری — حتماً بیرون از SidebarInset باشد */}
+      <SetupWizard
+        open={setupWizardOpen}
+        onOpenChange={setSetupWizardOpen}
+        onComplete={handleSetupWizardComplete}
+        wizardMode={setupWizardMode}
+        renewalData={setupWizardRenewalData}
+      />
     </SidebarProvider>
   
   )

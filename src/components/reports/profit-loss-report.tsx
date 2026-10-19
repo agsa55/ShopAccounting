@@ -548,14 +548,32 @@ function EmptyState({ message }: { message: string }) {
 
 interface ProfitLossReportProps {
   tier: 'basic' | 'professional' | 'enterprise'
+  fiscalYearId?: string | null
+  dateRange?: { from: string; to: string }
 }
 
-export function ProfitLossReport({ tier }: ProfitLossReportProps) {
+export function ProfitLossReport({
+  tier,
+  fiscalYearId,
+  dateRange: parentDateRange,
+}: ProfitLossReportProps) {
   const [data, setData] = useState<PnLData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(getDefaultDateRange())
 
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>(
+    parentDateRange || getDefaultDateRange()
+  )
+
+  // ★ اگر والد سال مالی را عوض کرد، بازه تاریخ سود و زیان هم آپدیت شود
+  useEffect(() => {
+    if (parentDateRange) {
+      setDateRange({
+        from: parentDateRange.from,
+        to: parentDateRange.to,
+      })
+    }
+  }, [parentDateRange?.from, parentDateRange?.to])
   // ★★★ Stateهای جدید برای فیلتر شعبه
   const [branchId, setBranchId] = useState<string>('all')
   const [branches, setBranches] = useState<any[]>([])
@@ -573,21 +591,32 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
     fetchBranches()
   }, [])
 
-  const fetchData = useCallback(async () => {
+   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
-    try {
-      const params = new URLSearchParams({ dateFrom: dateRange.from, dateTo: dateRange.to })
 
-      // ★★★ ارسال branchId به بک‌اند اگر "همه شعب" انتخاب نشده باشد
+    try {
+      const params = new URLSearchParams({
+        dateFrom: dateRange.from,
+        dateTo: dateRange.to,
+      })
+
+      // ★ ارسال شعبه
       if (branchId !== 'all') {
         params.set('branchId', branchId)
       }
-      
+
+      // ★ ارسال سال مالی انتخابی
+      if (fiscalYearId) {
+        params.set('fiscalYearId', fiscalYearId)
+      }
+
       const res = await fetch(`/api/reports/profit-loss?${params.toString()}`, {
         headers: getAuthHeaders(),
       })
+
       const json = await res.json()
+
       if (json.success && json.data) {
         setData(json.data)
       } else {
@@ -600,7 +629,7 @@ export function ProfitLossReport({ tier }: ProfitLossReportProps) {
     } finally {
       setLoading(false)
     }
-  }, [dateRange.from, dateRange.to, branchId])
+  }, [dateRange.from, dateRange.to, branchId, fiscalYearId])
 
   useEffect(() => { fetchData() }, [fetchData])
 

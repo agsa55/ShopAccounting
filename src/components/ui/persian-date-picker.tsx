@@ -84,6 +84,88 @@ export function fromFaNum(s: string): string {
     .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/**
+ * ★ v3.28 production-safe:
+ * هر ورودی تاریخ را به ISO میلادی date-only تبدیل می‌کند:
+ * YYYY-MM-DD
+ *
+ * پشتیبانی از:
+ * - string ISO: 2026-10-17
+ * - string ISO با زمان: 2026-10-17T00:00:00.000Z
+ * - Date object
+ * - timestamp number
+ * - رشته شمسی: 1405-07-25
+ */
+function toIsoDateOnly(value: any): string | null {
+  if (value === null || value === undefined || value === '') return null
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null
+    const y = value.getFullYear()
+    const m = value.getMonth() + 1
+    const d = value.getDate()
+    return `${y}-${pad2(m)}-${pad2(d)}`
+  }
+
+  const raw = String(value).trim()
+  if (!raw) return null
+
+  // timestamp number as string
+  if (/^\d{10,}$/.test(raw)) {
+    const d = new Date(Number(raw))
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      const day = d.getDate()
+      return `${y}-${pad2(m)}-${pad2(day)}`
+    }
+  }
+
+  const match = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+
+  if (match) {
+    const y = Number(match[1])
+    const m = Number(match[2])
+    const d = Number(match[3])
+
+    if (m < 1 || m > 12 || d < 1) return null
+
+    // اگر تاریخ شمسی متنی بود، مثلاً 1405-07-25
+    if (y >= 1000 && y <= 1700) {
+      if (d <= daysInJalaliMonth(y, m)) {
+        return jalaliToISO(y, m, d)
+      }
+      return null
+    }
+
+    // اگر تاریخ میلادی بود، مثلاً 2026-10-17
+    if (y > 1700 && y < 2500) {
+      const check = new Date(Date.UTC(y, m - 1, d))
+      if (
+        check.getUTCFullYear() === y &&
+        check.getUTCMonth() + 1 === m &&
+        check.getUTCDate() === d
+      ) {
+        return `${y}-${pad2(m)}-${pad2(d)}`
+      }
+    }
+  }
+
+  // fallback برای رشته‌های تاریخ استاندارد دیگر
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear()
+    const m = parsed.getMonth() + 1
+    const d = parsed.getDate()
+    return `${y}-${pad2(m)}-${pad2(d)}`
+  }
+
+  return null
+}
 // ============================================================================
 //  ★★★ الگوریتم صحیح تبدیل تاریخ شمسی-میلادی (Jalaali.js v1.1.0)
 //
@@ -225,25 +307,29 @@ export function daysInJalaliMonth(jy: number, jm: number): number {
   return isJalaliLeapYear(jy) ? 30 : 29
 }
 
-// تبدیل ISO (YYYY-MM-DD) به شمسی
-export function isoToJalali(iso: string | null | undefined): { jy: number; jm: number; jd: number } | null {
+// تبدیل ISO / Date / timestamp / شمسی متنی به شمسی
+export function isoToJalali(value: any): { jy: number; jm: number; jd: number } | null {
+  const iso = toIsoDateOnly(value)
   if (!iso) return null
+
+  const [y, m, d] = iso.split('-').map(Number)
+
+  const check = new Date(Date.UTC(y, m - 1, d))
+  if (
+    check.getUTCFullYear() !== y ||
+    check.getUTCMonth() + 1 !== m ||
+    check.getUTCDate() !== d
+  ) {
+    return null
+  }
+
   try {
-    // ★★★ اصلاح باگ یک روز عقب افتادن:
-    // اگر رشته زمان (T) نداشت، ساعت ۱۲ ظهر را به آن اضافه می‌کنیم تا 
-    // تبدیل UTC به Local Time باعث عقب رفتن روز نشود.
-    const safeDateStr = iso.includes('T') ? iso : `${iso}T12:00:00`
-    
-    const d = new Date(safeDateStr)
-    if (isNaN(d.getTime())) return null
-    
-    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    const [jy, jm, jd] = gregorianToJalali(y, m, d)
     return { jy, jm, jd }
   } catch {
     return null
   }
 }
-
 // تبدیل شمسی به ISO
 export function jalaliToISO(jy: number, jm: number, jd: number): string {
   const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd)
@@ -300,35 +386,56 @@ export function PersianDatePicker({
   const [open, setOpen] = React.useState(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
 
+  const normalizedValue = React.useMemo(
+    () => toIsoDateOnly(value),
+    [value]
+  )
+
+  const minIso = React.useMemo(
+    () => toIsoDateOnly(minDate),
+    [minDate]
+  )
+
+  const maxIso = React.useMemo(
+    () => toIsoDateOnly(maxDate),
+    [maxDate]
+  )
+
   const displayText = React.useMemo(() => {
-    if (!value) return ''
-    const j = isoToJalali(value)
+    if (!normalizedValue) return ''
+    const j = isoToJalali(normalizedValue)
     if (!j) return ''
     return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2, '۰')}/${toFaNum(j.jd).padStart(2, '۰')}`
-  }, [value])
+  }, [normalizedValue])
 
   const todayJalali = React.useMemo(() => {
     const now = new Date()
-    const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
-    return { jy, jm, jd, iso: now.toISOString().split('T')[0] }
+    const gy = now.getFullYear()
+    const gm = now.getMonth() + 1
+    const gd = now.getDate()
+    const [jy, jm, jd] = gregorianToJalali(gy, gm, gd)
+    return {
+      jy,
+      jm,
+      jd,
+      iso: `${gy}-${pad2(gm)}-${pad2(gd)}`,
+    }
   }, [])
 
   const initial = React.useMemo(() => {
-    const j = value ? isoToJalali(value) : null
+    const j = normalizedValue ? isoToJalali(normalizedValue) : null
     return j || { jy: todayJalali.jy, jm: todayJalali.jm, jd: todayJalali.jd }
-  }, [value, todayJalali])
-
+  }, [normalizedValue, todayJalali])
   const [viewYear, setViewYear] = React.useState<number>(initial.jy)
   const [viewMonth, setViewMonth] = React.useState<number>(initial.jm)
 
   React.useEffect(() => {
-    const j = value ? isoToJalali(value) : null
+    const j = normalizedValue ? isoToJalali(normalizedValue) : null
     if (j) {
       setViewYear(j.jy)
       setViewMonth(j.jm)
     }
-  }, [value])
-
+  }, [normalizedValue])
   // بستن popup با کلیک خارج
   React.useEffect(() => {
     if (!open) return
@@ -345,24 +452,28 @@ export function PersianDatePicker({
 
   const firstDayOffset = React.useMemo(() => {
     const [gy, gm, gd] = jalaliToGregorian(viewYear, viewMonth, 1)
-    const jsDay = new Date(gy, gm - 1, gd).getDay()
+    const jsDay = new Date(Date.UTC(gy, gm - 1, gd)).getUTCDay()
     return (jsDay + 1) % 7
   }, [viewYear, viewMonth])
-
   const cells: (number | null)[] = []
   for (let i = 0; i < firstDayOffset; i++) cells.push(null)
   for (let d = 1; d <= daysCount; d++) cells.push(d)
   while (cells.length % 7 !== 0) cells.push(null)
 
-  const selectedJalali = value ? isoToJalali(value) : null
+  const selectedJalali = normalizedValue ? isoToJalali(normalizedValue) : null
 
   const isDayDisabled = (jd: number): boolean => {
     const cellIso = jalaliToISO(viewYear, viewMonth, jd)
-    if (minDate && cellIso < minDate) return true
-    if (maxDate && cellIso > maxDate) return true
+
+    if (!cellIso || !/^\d{4}-\d{2}-\d{2}$/.test(cellIso)) {
+      return true
+    }
+
+    if (minIso && cellIso < minIso) return true
+    if (maxIso && cellIso > maxIso) return true
+
     return false
   }
-
   const goPrevMonth = () => {
     if (viewMonth === 1) { setViewMonth(12); setViewYear((y) => y - 1) }
     else setViewMonth((m) => m - 1)

@@ -13,92 +13,352 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
 import { db } from '@/lib/db'
 import { getStandardAccountIds } from '@/lib/accounts-auto-seed'
-
+import { getActiveFiscalYear } from '@/lib/fiscal-year'
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/stock-counts — لیست اسناد انبار گردانی
 // ═══════════════════════════════════════════════════════════════
 
-export const GET = withTenantAndPermission('accounting')(async (req: NextRequest, ctx: any, tenant: any) => {
-  try {
-    const tenantDb = tenant.tenantDb as any
-    const tenantId = tenant.tenantId
-    const { searchParams } = new URL(req.url)
-    const status = searchParams.get('status') || 'all'
-    const warehouseId = searchParams.get('warehouseId')
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200)
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/stock-counts — لیست اسناد انبار گردانی
+//  ★ v6.6: فیلتر سال مالی + نمایش اسناد باز از همه سال‌ها
+// ═══════════════════════════════════════════════════════════════
 
-    const where: any = { tenantId }
-    if (status && status !== 'all') where.status = status
-    if (warehouseId) where.warehouseId = warehouseId
+const OPEN_STOCK_COUNT_STATUSES = ['draft', 'in_progress']
 
-    const scClient = tenantDb.stockCount || (db.client as any).stockCount
-    if (!scClient) {
-      return NextResponse.json({
-        success: false,
-        error: 'مدل StockCount در Prisma client موجود نیست. لطفاً npx prisma generate را اجرا کنید.',
-      }, { status: 500 })
-    }
+function fiscalBounds(fy: any): { start: Date; end: Date } | null {
+  if (!fy || !fy.startDate || !fy.endDate) return null
 
-    let stockCounts: any[] = []
+  const start = new Date(fy.startDate)
+  const end = new Date(fy.endDate)
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+
+  start.setHours(0, 0, 0, 0)
+  end.setHours(23, 59, 59, 999)
+
+  return { start, end }
+}
+
+export const GET = withTenantAndPermission('accounting')(
+  async (req: NextRequest, ctx: any, tenant: any) => {
     try {
-      stockCounts = await scClient.findMany({
-        where,
-        orderBy: { countDate: 'desc' },
-        take: limit,
-        include: {
-          items: {
-            include: {
-              Product: { select: { id: true, name: true, code: true } },
+      const tenantDb = tenant.tenantDb as any
+      const tenantId = tenant.tenantId
+      const { searchParams } = new URL(req.url)
+
+      const status = searchParams.get('status') || 'all'
+      const warehouseId = searchParams.get('warehouseId')
+      const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200)
+
+      const fiscalYearIdParam = (searchParams.get('fiscalYearId') || '').trim()
+      const allYears = searchParams.get('allYears') === 'true'
+
+      const scClient = tenantDb.stockCount || (db.client as any).stockCount
+      if (!scClient) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'مدل StockCount در Prisma client موجود نیست. لطفاً npx prisma generate را اجرا کنید.',
+          },
+          { status: 500 }
+        )
+      }
+
+      let fy: any = null
+      let effectiveFiscalYearId: string | null = null
+      let bounds: { start: Date; end: Date } | null = null
+      let fiscalYearWarning: string | null = null
+
+      if (!allYears) {
+        try {
+          if (fiscalYearIdParam) {
+            fy = await tenantDb.fiscalYear.findFirst({
+              where: {
+                id: fiscalYearIdParam,
+                tenantId,
+              },
+            })
+
+            if (!fy) {
+              throw new Error('سال مالی انتخابی یافت نشد.')
+            }
+          } else {
+            fy = await getActiveFiscalYear(tenantDb, tenantId)
+          }
+
+          effectiveFiscalYearId = fy.id
+          bounds = fiscalBounds(fy)
+        } catch (err: any) {
+          fiscalYearWarning =
+            err?.message ||
+            'سال مالی معتبری یافت نشد؛ همه سنوات نمایش داده می‌شود.'
+          effectiveFiscalYearId = null
+          bounds = null
+        }
+      }
+
+      const baseWhere: any = { tenantId }
+
+      if (status && status !== 'all') {
+        baseWhere.status = status
+      }
+
+      if (warehouseId) {
+        baseWhere.warehouseId = warehouseId
+      }
+
+      const includeShape = {
+        items: {
+          include: {
+            Product: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
             },
           },
         },
+      }
+
+      const fetchWithWhere = async (where: any): Promise<any[]> => {
+        try {
+          return await scClient.findMany({
+            where,
+            orderBy: {
+              countDate: 'desc',
+            },
+            take: limit,
+            include: includeShape,
+          })
+        } catch (err: any) {
+          console.warn('[StockCounts GET] query failed:', err?.message)
+          return []
+        }
+      }
+
+      let scopedRows: any[] = []
+      let openRows: any[] = []
+
+      if (allYears || !effectiveFiscalYearId || !bounds) {
+        scopedRows = await fetchWithWhere(baseWhere)
+      } else {
+        const fiscalStart = bounds.start
+        const fiscalEnd = bounds.end
+
+        const dateOnlyWhere = {
+          ...baseWhere,
+          countDate: {
+            gte: fiscalStart,
+            lte: fiscalEnd,
+          },
+        }
+
+        const fiscalOrDateWhere = {
+          ...baseWhere,
+          OR: [
+            { fiscalYearId: effectiveFiscalYearId },
+            {
+              countDate: {
+                gte: fiscalStart,
+                lte: fiscalEnd,
+              },
+            },
+          ],
+        }
+
+        scopedRows = await fetchWithWhere(fiscalOrDateWhere)
+
+        // اگر فیلد fiscalYearId در مدل StockCount وجود نداشته باشد،
+        // کوئری OR خطا می‌دهد و fetchWithWhere آرایه خالی برمی‌گرداند.
+        // در این حالت fallback به فیلتر تاریخی می‌کنیم.
+        if (scopedRows.length === 0) {
+          scopedRows = await fetchWithWhere(dateOnlyWhere)
+        }
+
+        // اسناد باز باید از همه سال‌ها دیده شوند، مگر اینکه کاربر
+        // فیلتر وضعیت روی اسناد بسته مثل completed/cancelled گذاشته باشد.
+        const shouldIncludeOpenAllYears =
+          !status ||
+          status === 'all' ||
+          OPEN_STOCK_COUNT_STATUSES.includes(status)
+
+        if (shouldIncludeOpenAllYears) {
+          const openWhere: any = { ...baseWhere }
+          delete openWhere.status
+
+          if (
+            status &&
+            status !== 'all' &&
+            OPEN_STOCK_COUNT_STATUSES.includes(status)
+          ) {
+            openWhere.status = status
+          } else {
+            openWhere.status = {
+              in: OPEN_STOCK_COUNT_STATUSES,
+            }
+          }
+
+          openRows = await fetchWithWhere(openWhere)
+        }
+      }
+
+      const mergedMap = new Map<string, any>()
+
+      const fiscalStart = bounds?.start ?? null
+      const fiscalEnd = bounds?.end ?? null
+
+      const addRow = (row: any, source: 'scoped' | 'open') => {
+        if (!row?.id) return
+
+        const isInFiscalScope = (() => {
+          if (allYears || !effectiveFiscalYearId || !fiscalStart || !fiscalEnd) {
+            return true
+          }
+
+          if ((row as any).fiscalYearId === effectiveFiscalYearId) {
+            return true
+          }
+
+          const d = row.countDate ? new Date(row.countDate) : null
+          if (!d || Number.isNaN(d.getTime())) return false
+
+          return d >= fiscalStart && d <= fiscalEnd
+        })()
+
+        const rowStatus = String(row.status || '').toLowerCase()
+        const isOpenStatus = OPEN_STOCK_COUNT_STATUSES.includes(rowStatus)
+        const isCrossYearOpen = !allYears && isOpenStatus && !isInFiscalScope
+
+        const existing = mergedMap.get(row.id)
+
+        const enriched = {
+          ...row,
+          _source: existing ? `${existing._source}+${source}` : source,
+          _isInFiscalScope: isInFiscalScope,
+          _isCrossYearOpen: isCrossYearOpen,
+        }
+
+        mergedMap.set(row.id, enriched)
+      }
+
+      scopedRows.forEach((row) => addRow(row, 'scoped'))
+      openRows.forEach((row) => addRow(row, 'open'))
+
+      const stockCounts = Array.from(mergedMap.values())
+        .sort((a, b) => {
+          const da = a.countDate ? new Date(a.countDate).getTime() : 0
+          const db = b.countDate ? new Date(b.countDate).getTime() : 0
+          return db - da
+        })
+        .slice(0, limit)
+
+      const warehouseIds = [
+        ...new Set(stockCounts.map((sc: any) => sc.warehouseId).filter(Boolean)),
+      ]
+
+      const userIds = [
+        ...new Set([
+          ...stockCounts.map((sc: any) => sc.countedBy).filter(Boolean),
+          ...stockCounts.map((sc: any) => sc.approvedBy).filter(Boolean),
+        ]),
+      ]
+
+      const [warehouses, users]: [any[], any[]] = await Promise.all([
+        warehouseIds.length > 0
+          ? tenantDb.warehouse.findMany({
+              where: { id: { in: warehouseIds } },
+              select: { id: true, name: true, code: true },
+            })
+          : [],
+        userIds.length > 0
+          ? tenantDb.storeUser.findMany({
+              where: { id: { in: userIds } },
+              select: { id: true, username: true },
+            })
+          : [],
+      ])
+
+      const warehouseMap = new Map<string, any>(
+        warehouses.map((w: any) => [w.id, w])
+      )
+
+      const userMap = new Map<string, any>(users.map((u: any) => [u.id, u]))
+
+      const result = stockCounts.map((sc: any) => {
+        const {
+          _source,
+          _isInFiscalScope,
+          _isCrossYearOpen,
+          ...clean
+        } = sc
+
+        return {
+          ...clean,
+          warehouseName: warehouseMap.get(sc.warehouseId)?.name || '—',
+          warehouseCode: warehouseMap.get(sc.warehouseId)?.code || null,
+          countedByName: sc.countedBy
+            ? userMap.get(sc.countedBy)?.username || null
+            : null,
+          approvedByName: sc.approvedBy
+            ? userMap.get(sc.approvedBy)?.username || null
+            : null,
+          itemsCount: sc.items?.length || 0,
+          computedDifference:
+            sc.items?.reduce(
+              (sum: number, item: any) => sum + (item.differenceAmount || 0),
+              0
+            ) || 0,
+          crossYearOpen: Boolean(_isCrossYearOpen),
+        }
       })
-    } catch (err: any) {
+
+      console.log('[StockCounts GET v6.6] Result', {
+        tenantId,
+        fiscalYearId: effectiveFiscalYearId,
+        fiscalYearName: fy?.name || null,
+        allYears,
+        statusFilter: status,
+        warehouseFilter: warehouseId || null,
+        scopedCount: scopedRows.length,
+        openCount: openRows.length,
+        mergedCount: stockCounts.length,
+        returnedCount: result.length,
+      })
+
       return NextResponse.json({
         success: true,
-        data: [],
-        warning: 'خطا در query — بررسی کنید مدل‌ها به‌درستی migrate شده باشند',
+        data: result,
+        fiscalYearId: effectiveFiscalYearId,
+        fiscalYearName: fy?.name || null,
+        allYears,
+        warning: allYears
+          ? 'این لیست همه سال‌های مالی را شامل می‌شود.'
+          : fiscalYearWarning || undefined,
+        diagnostics: {
+          fiscalYearApplied: Boolean(effectiveFiscalYearId && !allYears),
+          requestedFiscalYearId: fiscalYearIdParam || null,
+          allYearsRequested: allYears,
+          openDocumentsIncludedAllYears:
+            !allYears && Boolean(effectiveFiscalYearId),
+          scopedCount: scopedRows.length,
+          openCount: openRows.length,
+          mergedCount: stockCounts.length,
+          scopeMethod: effectiveFiscalYearId
+            ? 'fiscalYearId-or-countDate + open-status-exception'
+            : 'all-years-fallback',
+        },
       })
+    } catch (error: any) {
+      console.error('[StockCounts GET] Error:', error?.message || error)
+      return NextResponse.json(
+        { success: false, error: 'خطا در بارگذاری اسناد انبار گردانی' },
+        { status: 500 }
+      )
     }
-
-    const warehouseIds = [...new Set(stockCounts.map((sc: any) => sc.warehouseId).filter(Boolean))]
-    const userIds = [...new Set([
-      ...stockCounts.map((sc: any) => sc.countedBy).filter(Boolean),
-      ...stockCounts.map((sc: any) => sc.approvedBy).filter(Boolean),
-    ])]
-
-    // ★★★ اصلاح TypeScript: تعیین نوع صریح برای آرایه‌های خروجی Promise.all
-    const [warehouses, users]: [any[], any[]] = await Promise.all([
-      warehouseIds.length > 0 ? tenantDb.warehouse.findMany({
-        where: { id: { in: warehouseIds } },
-        select: { id: true, name: true, code: true },
-      }) : [],
-      userIds.length > 0 ? tenantDb.storeUser.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, username: true },
-      }) : [],
-    ])
-
-    // ★★★ اصلاح TypeScript: تعیین نوع صریح برای Map
-    const warehouseMap = new Map<string, any>(warehouses.map((w: any) => [w.id, w]))
-    const userMap = new Map<string, any>(users.map((u: any) => [u.id, u]))
-
-    const result = stockCounts.map((sc: any) => ({
-      ...sc,
-      warehouseName: warehouseMap.get(sc.warehouseId)?.name || '—',
-      warehouseCode: warehouseMap.get(sc.warehouseId)?.code || null,
-      countedByName: sc.countedBy ? userMap.get(sc.countedBy)?.username : null,
-      approvedByName: sc.approvedBy ? userMap.get(sc.approvedBy)?.username : null,
-      itemsCount: sc.items?.length || 0,
-      computedDifference: sc.items?.reduce((sum: number, item: any) => sum + (item.differenceAmount || 0), 0) || 0,
-    }))
-
-    return NextResponse.json({ success: true, data: result })
-  } catch (error: any) {
-    console.error('[StockCounts GET] Error:', error?.message || error)
-    return NextResponse.json({ success: false, error: 'خطا در بارگذاری اسناد انبار گردانی' }, { status: 500 })
   }
-})
+)
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/stock-counts — ایجاد سند انبار گردانی جدید
@@ -275,7 +535,30 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
       return NextResponse.json({ success: true, message: 'سند انبارگردانی لغو شد' })
     }
 
+    let activeFY: any = null
+    try {
+      activeFY = await getActiveFiscalYear(tenantDb, tenantId)
+    } catch {
+      activeFY = null
+    }
+
+    const countFiscalYearId =
+      (stockCount as any).fiscalYearId || activeFY?.id || null
+
+    if (!countFiscalYearId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'سال مالی فعال یا سال مالی سند یافت نشد؛ برای تأیید و صدور سند حسابداری لازم است.',
+          code: 'NO_FISCAL_YEAR_FOR_STOCK_COUNT_APPROVAL',
+        },
+        { status: 400 }
+      )
+    }
+
     const accounts = await getStandardAccountIds(tenantId)
+  
     if (!accounts.inventoryAccountId) {
       return NextResponse.json({ success: false, error: 'حساب موجودی کالا (1200) در کدینگ یافت نشد' }, { status: 500 })
     }
@@ -318,7 +601,7 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
         })
       )
 
-      stockMovementsData.push({
+          stockMovementsData.push({
         tenantId,
         productId: item.productId,
         toWarehouseId: stockCount.warehouseId,
@@ -328,6 +611,7 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
         movementType: 'adjustment',
         referenceType: 'stock_count',
         referenceId: stockCount.id,
+        fiscalYearId: countFiscalYearId,
         description: `تعدیل انبارگردانی: ${item.difference > 0 ? 'اضافی' : 'کسری'} (${item.reason || 'بدون دلیل'})`,
       })
 
@@ -390,7 +674,7 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
         const jeCount = await tx.journalEntry.count({ where: { tenantId } })
         const jeNumber = `JE-SC-${String(jeCount + 1).padStart(6, '0')}`
 
-        await tx.journalEntry.create({
+           await tx.journalEntry.create({
           data: {
             tenantId,
             number: jeNumber,
@@ -399,6 +683,7 @@ export const PATCH = withTenantAndPermission('accounting')(async (req: NextReque
             status: 'posted',
             sourceType: 'stock_count',
             sourceId: stockCount.id,
+            fiscalYearId: countFiscalYearId,
             totalDebit: totalAdjustmentDebit,
             totalCredit: totalAdjustmentCredit,
             createdBy: approvedBy || tenant.user?.id || 'system',

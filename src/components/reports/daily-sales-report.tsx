@@ -34,10 +34,6 @@ interface DateRange {
   to: string
 }
 
-interface DailySalesReportProps {
-  invoices: any[]
-}
-
 // ═══════════════════════════════════════════════════════════════
 //  Constants
 // ═══════════════════════════════════════════════════════════════
@@ -706,11 +702,33 @@ function InvoiceCard({
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
 
-export function DailySalesReport({ invoices }: DailySalesReportProps) {
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: daysAgoISO(30),
-    to: todayGregorianISO(),
-  })
+interface DailySalesReportProps {
+  invoices: any[]
+  fiscalYearId?: string | null
+  dateRange?: DateRange
+}
+
+export function DailySalesReport({
+  invoices,
+  fiscalYearId,
+  dateRange: parentDateRange,
+}: DailySalesReportProps) {
+  const [dateRange, setDateRange] = useState<DateRange>(
+    parentDateRange || {
+      from: daysAgoISO(30),
+      to: todayGregorianISO(),
+    }
+  )
+
+  // ★ اگر والد سال مالی را عوض کرد، بازه تاریخ فروش روزانه هم آپدیت شود
+  useEffect(() => {
+    if (parentDateRange) {
+      setDateRange({
+        from: parentDateRange.from,
+        to: parentDateRange.to,
+      })
+    }
+  }, [parentDateRange?.from, parentDateRange?.to])
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null)
@@ -783,6 +801,11 @@ const availableWarehouses = useMemo(() => {
   // فیلتر فاکتورها بر اساس تاریخ و فیلترهای کاربر
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
+      // ★ فیلتر سال مالی در سطح خود فاکتور
+      if (fiscalYearId && inv.fiscalYearId && inv.fiscalYearId !== fiscalYearId) {
+        return false
+      }
+
       const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
       if (!d) return false
       if (d < dateRange.from || d > dateRange.to) return false
@@ -836,7 +859,7 @@ if (warehouseFilter !== 'all') {
 
       return true
     })
-  }, [invoices, dateRange.from, dateRange.to, paymentFilter, warehouseFilter, searchQuery])
+  }, [invoices, fiscalYearId, dateRange.from, dateRange.to, paymentFilter, warehouseFilter, searchQuery])
 
   // گروه‌بندی فاکتورها بر اساس تاریخ
   const salesByDate = useMemo(() => {

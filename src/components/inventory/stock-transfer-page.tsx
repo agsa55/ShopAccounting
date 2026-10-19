@@ -20,7 +20,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  ArrowRightLeft, Search, Loader2, CheckCircle2, Package, AlertTriangle,
+  ArrowRightLeft, Search, Loader2, CheckCircle2, Package, AlertTriangle, Calendar,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { logger } from '@/lib/system-logger'
@@ -64,6 +64,8 @@ function getAuthHeaders(): Record<string, string> {
 
 export function StockTransferPage() {
   const tenantId = useAppStore((s) => s.tenantId)
+  const selectedFiscalYearId = useAppStore((s) => s.selectedFiscalYearId)
+  const [showAllYears, setShowAllYears] = useState(false)
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [loading, setLoading] = useState(true)
@@ -122,9 +124,21 @@ export function StockTransferPage() {
     
     try {
       if (!tid) { setLoading(false); return }
+       const transferParams = new URLSearchParams({
+        tenantId: tid,
+        type: 'transfer',
+        limit: '50',
+      })
+
+      if (showAllYears) {
+        transferParams.set('allYears', 'true')
+      } else if (selectedFiscalYearId) {
+        transferParams.set('fiscalYearId', selectedFiscalYearId)
+      }
+
       const [whRes, trRes] = await Promise.all([
         fetch(`/api/warehouses?tenantId=${tid}`, { headers: getAuthHeaders() }),
-        fetch(`/api/stock-movements?tenantId=${tid}&type=transfer&limit=50`, { headers: getAuthHeaders() }),
+        fetch(`/api/stock-movements?${transferParams.toString()}`, { headers: getAuthHeaders() }),
       ])
       const [whData, trData] = await Promise.all([whRes.json(), trRes.json()])
       
@@ -152,7 +166,7 @@ export function StockTransferPage() {
       }
     }
     setLoading(false)
-  }, [tenantId, isOnline, toast])
+  }, [tenantId, isOnline, toast, selectedFiscalYearId, showAllYears])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -318,13 +332,34 @@ if (data.success) {
             </p>
           </div>
         </div>
-        <Button onClick={() => setDialogOpen(true)} className="gap-1.5 bg-blue-600 hover:bg-blue-700 w-full sm:w-auto" disabled={warehouses.length < 2}>
-          <ArrowRightLeft className="w-4 h-4" />
-          <span className="hidden sm:inline">انتقال جدید</span>
-          <span className="sm:hidden">جدید</span>
-        </Button>
-      </div>
+           <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant={showAllYears ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowAllYears((v) => !v)}
+            className={`h-9 text-xs gap-1 ${showAllYears ? 'bg-indigo-600 hover:bg-indigo-700' : ''}`}
+            title="نمایش انتقال‌های همه سال‌های مالی"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {showAllYears ? 'همه سال‌ها' : 'سال مالی انتخابی'}
+            </span>
+            <span className="sm:hidden">
+              {showAllYears ? 'همه' : 'سال'}
+            </span>
+          </Button>
 
+          <Button
+            onClick={() => setDialogOpen(true)}
+            className="gap-1.5 bg-blue-600 hover:bg-blue-700 flex-1 sm:flex-none"
+            disabled={warehouses.length < 2}
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">انتقال جدید</span>
+            <span className="sm:hidden">جدید</span>
+          </Button>
+        </div>
+      </div>
       {warehouses.length < 2 && (
         <Card className="border-amber-200 bg-amber-50/50">
           <CardContent className="p-3 flex items-center gap-2">

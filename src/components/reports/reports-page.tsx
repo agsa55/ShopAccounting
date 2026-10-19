@@ -1,5 +1,16 @@
 // src/components/reports/reports-page.tsx
-// ShopAccounting v10.0.0 — Reports Page (DailySales Overhaul)
+// ShopAccounting v10.0.1 — Reports Page (Fiscal Year Global-First)
+// ============================================================================
+// ★ PART 1 of 2
+// ★ DO NOT BUILD UNTIL PART 2 IS APPENDED
+// ============================================================================
+// ★ تغییرات نهایی این بخش:
+//   - حذف TEST MODE
+//   - اتصال گزارش‌ها به فیلتر اصلی سال مالی
+//   - محدود کردن date range به بازه سال مالی
+//   - آماده‌سازی برای استفاده از store مرکزی
+//   - اصلاح PersianDateRangePicker برای پشتیبانی از minDate/maxDate
+// ============================================================================
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -14,13 +25,13 @@ import {
   Loader2, AlertCircle, Printer, BookOpen, CheckCircle2, XCircle, Clock, AlertTriangle,
   Package, Percent, PieChart as PieIcon, Activity, Crown, ArrowLeft, Store,
   Receipt, CreditCard, Banknote, LayoutDashboard,
-  ChevronDown, RotateCcw, X,Settings2,
+  ChevronDown, RotateCcw, X, Settings2, CalendarRange, Globe,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
-
+import { Label } from '@/components/ui/label'
 import { useAppStore } from '@/lib/store'
 import {
   getFeaturesByPlanName, resolvePlan, isPlanAtLeast,
@@ -30,18 +41,20 @@ import {
   exportToExcel, printReport, formatNumberFa, toFaNum,
   type ReportColumn, type ReportMeta,
 } from '@/lib/report-utils'
-
 import { ProfitLossReport } from '@/components/reports/profit-loss-report'
 import { InventoryAdvancedReport } from '@/components/reports/inventory-advanced-report'
 import { BalanceSheetV8Report } from '@/components/reports/balance-sheet-v8-report'
 import { DailySalesReport } from '@/components/reports/daily-sales-report'
 import CustomReportDesignerPage from '@/components/reports/custom-report-designer-page'
+
 // ============================================================================
 //  Constants & Theme
 // ============================================================================
 
 const TIER_LABELS: Record<PlanTier, string> = {
-  basic: 'ساده', professional: 'حرفه‌ای', enterprise: 'سازمانی',
+  basic: 'ساده',
+  professional: 'حرفه‌ای',
+  enterprise: 'سازمانی',
 }
 
 const TIER_COLORS: Record<PlanTier, { bg: string; text: string; border: string; ring: string }> = {
@@ -51,193 +64,704 @@ const TIER_COLORS: Record<PlanTier, { bg: string; text: string; border: string; 
 }
 
 const EMERALD = {
-  primary: '#047857', primaryLt: '#10b981', primaryDk: '#065f46',
-  accent: '#0d9488', accentLt: '#14b8a6',
-  textMain: '#1f2937', textMute: '#6b7280', textSoft: '#9ca3af',
-  border: '#e5e7eb', borderSoft: '#f3f4f6',
-  bgSoft: '#f9fafb', bgCard: '#ffffff', popupBg: '#ffffff',
-  headerBg: '#ecfdf5', weekendBg: '#f0fdfa', todayRing: '#14b8a6',
+  primary: '#047857',
+  primaryLt: '#10b981',
+  primaryDk: '#065f46',
+  accent: '#0d9488',
+  accentLt: '#14b8a6',
+  textMain: '#1f2937',
+  textMute: '#6b7280',
+  textSoft: '#9ca3af',
+  border: '#e5e7eb',
+  borderSoft: '#f3f4f6',
+  bgSoft: '#f9fafb',
+  bgCard: '#ffffff',
+  popupBg: '#ffffff',
+  headerBg: '#ecfdf5',
+  weekendBg: '#f0fdfa',
+  todayRing: '#14b8a6',
 }
 
 const PAYMENT_COLORS: Record<string, string> = {
-  Cash: '#10b981', Card: '#3b82f6', Credit: '#f59e0b',
-  Installment: '#8b5cf6', Check: '#ec4899', Online: '#06b6d4',
+  Cash: '#10b981',
+  Card: '#3b82f6',
+  Credit: '#f59e0b',
+  Installment: '#8b5cf6',
+  Check: '#ec4899',
+  Online: '#06b6d4',
 }
 
 const PAYMENT_LABELS_FA: Record<string, string> = {
-  Cash: 'نقدی', Card: 'کارتی', Credit: 'نسیه',
-  Installment: 'قسطی', Check: 'چک', Online: 'آنلاین',
+  Cash: 'نقدی',
+  Card: 'کارتی',
+  Credit: 'نسیه',
+  Installment: 'قسطی',
+  Check: 'چک',
+  Online: 'آنلاین',
 }
 
-const JALALI_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند']
+const JALALI_MONTHS = [
+  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند',
+]
+
 const PERSIAN_WEEKDAYS = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج']
 
 // ============================================================================
 //  Persian/Jalali Date Utilities
 // ============================================================================
 
-function div(a: number, b: number): number { return Math.floor(a / b) }
-function mod(a: number, b: number): number { return a - Math.floor(a / b) * b }
+function div(a: number, b: number): number {
+  return Math.floor(a / b)
+}
+
+function mod(a: number, b: number): number {
+  return a - Math.floor(a / b) * b
+}
 
 function gregorianToJalali(gy: number, gm: number, gd: number): [number, number, number] {
   const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
   let jy: number
-  if (gy > 1600) { jy = 979; gy -= 1600 } else { jy = 0; gy -= 621 }
+
+  if (gy > 1600) {
+    jy = 979
+    gy -= 1600
+  } else {
+    jy = 0
+    gy -= 621
+  }
+
   const gy2 = gm > 2 ? gy + 1 : gy
   let days = 365 * gy + div(gy2 + 3, 4) - div(gy2 + 99, 100) + div(gy2 + 399, 400) - 80 + gd + g_d_m[gm - 1]
-  jy += 33 * div(days, 12053); days = mod(days, 12053)
-  jy += 4 * div(days, 1461); days = mod(days, 1461)
-  if (days > 365) { jy += div(days - 1, 365); days = mod(days - 1, 365) }
+  jy += 33 * div(days, 12053)
+  days = mod(days, 12053)
+  jy += 4 * div(days, 1461)
+  days = mod(days, 1461)
+
+  if (days > 365) {
+    jy += div(days - 1, 365)
+    days = mod(days - 1, 365)
+  }
+
   const jm = days < 186 ? 1 + div(days, 31) : 7 + div(days - 186, 30)
   const jd = 1 + (days < 186 ? mod(days, 31) : mod(days - 186, 30))
+
   return [jy, jm, jd]
 }
 
 function jalaliToGregorian(jy: number, jm: number, jd: number): [number, number, number] {
   let gy: number
-  if (jy > 979) { gy = 1600; jy -= 979 } else { gy = 621 }
+
+  if (jy > 979) {
+    gy = 1600
+    jy -= 979
+  } else {
+    gy = 621
+  }
+
   let days = 365 * jy + div(jy, 33) * 8 + div(mod(jy, 33) + 3, 4) + 78 + jd + (jm < 7 ? (jm - 1) * 31 : (jm - 7) * 30 + 186)
-  gy += 400 * div(days, 146097); days = mod(days, 146097)
-  if (days > 36524) { gy += 100 * div(--days, 36524); days = mod(days, 36524); if (days >= 365) days++ }
-  gy += 4 * div(days, 1461); days = mod(days, 1461)
-  if (days > 365) { gy += div(days - 1, 365); days = mod(days - 1, 365) }
+  gy += 400 * div(days, 146097)
+  days = mod(days, 146097)
+
+  if (days > 36524) {
+    gy += 100 * div(--days, 36524)
+    days = mod(days, 36524)
+    if (days >= 365) days++
+  }
+
+  gy += 4 * div(days, 1461)
+  days = mod(days, 1461)
+
+  if (days > 365) {
+    gy += div(days - 1, 365)
+    days = mod(days - 1, 365)
+  }
+
   let gd = days + 1
-  const sal_a = [0, 31, (gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  const sal_a = [
+    0, 31,
+    (gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0 ? 29 : 28,
+    31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+  ]
+
   let gm: number
-  for (gm = 0; gm < 13; gm++) { const v = sal_a[gm]; if (gd <= v) break; gd -= v }
+  for (gm = 0; gm < 13; gm++) {
+    const v = sal_a[gm]
+    if (gd <= v) break
+    gd -= v
+  }
+
   return [gy, gm, gd]
 }
 
 function jalCal(jy: number): { leap: number; gy: number; march: number } {
   const breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178]
-  const bl = breaks.length; const gy = jy + 621; let leapJ = -14
-  let jp = breaks[0]; let jm = 0, jump = 0, leap = 0, n = 0
+  const bl = breaks.length
+  const gy = jy + 621
+  let leapJ = -14
+  let jp = breaks[0]
+  let jm = 0
+  let jump = 0
+  let leap = 0
+  let n = 0
+
   if (jy < jp || jy >= breaks[bl - 1]) throw new Error('Invalid Jalaali year ' + jy)
-  for (let i = 1; i < bl; i += 1) { jm = breaks[i]; jump = jm - jp; if (jy < jm) break; leapJ = leapJ + div(jump, 33) * 8 + div(mod(jump, 33), 4); jp = jm }
-  n = jy - jp; leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33) + 3, 4)
+
+  for (let i = 1; i < bl; i += 1) {
+    jm = breaks[i]
+    jump = jm - jp
+    if (jy < jm) break
+    leapJ = leapJ + div(jump, 33) * 8 + div(mod(jump, 33), 4)
+    jp = jm
+  }
+
+  n = jy - jp
+  leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33) + 3, 4)
+
   if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1
+
   const leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150
   const march = 20 + leapJ - leapG
+
   if (jump - n < 6) n = n - jump + div(jump + 4, 33) * 33
-  leap = mod(mod(n + 1, 33) - 1, 4); if (leap === -1) leap = 4
+
+  leap = mod(mod(n + 1, 33) - 1, 4)
+  if (leap === -1) leap = 4
+
   return { leap, gy, march }
 }
 
-function isJalaliLeapYear(jy: number): boolean { return jalCal(jy).leap === 0 }
-function daysInJalaliMonth(jy: number, jm: number): number { if (jm <= 6) return 31; if (jm <= 11) return 30; return isJalaliLeapYear(jy) ? 30 : 29 }
+function isJalaliLeapYear(jy: number): boolean {
+  return jalCal(jy).leap === 0
+}
+
+function daysInJalaliMonth(jy: number, jm: number): number {
+  if (jm <= 6) return 31
+  if (jm <= 11) return 30
+  return isJalaliLeapYear(jy) ? 30 : 29
+}
 
 function isoToJalali(iso: string): { jy: number; jm: number; jd: number } | null {
   if (!iso) return null
+
   try {
     const safeDateStr = iso.includes('T') ? iso : `${iso}T12:00:00`
     const d = new Date(safeDateStr)
     if (isNaN(d.getTime())) return null
+
     const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
     return { jy, jm, jd }
-  } catch { 
-    return null 
+  } catch {
+    return null
   }
 }
 
-function jalaliToISO(jy: number, jm: number, jd: number): string { const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd); return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}` }
-function formatJalaliShort(isoDate: string): string { try { const d = new Date(isoDate); const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate()); return `${toFaNum(jy)}/${toFaNum(jm).padStart(2, '۰')}/${toFaNum(jd).padStart(2, '۰')}` } catch { return isoDate } }
-function formatJalaliLong(isoDate: string): string { try { const d = new Date(isoDate); const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate()); return `${toFaNum(jd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}` } catch { return isoDate } }
-function formatJalaliDateTime(isoDate: string): string { try { const d = new Date(isoDate); const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate()); const hh = toFaNum(d.getHours()).padStart(2, '۰'); const mm = toFaNum(d.getMinutes()).padStart(2, '۰'); return `${toFaNum(jy)}/${toFaNum(jm).padStart(2, '۰')}/${toFaNum(jd).padStart(2, '۰')} - ${hh}:${mm}` } catch { return isoDate } }
-function todayGregorianISO(): string { return new Date().toISOString().split('T')[0] }
-function daysAgoISO(n: number): string { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0] }
-function firstDayOfCurrentJalaliMonthISO(): string { const now = new Date(); const [jy, jm] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate()); const [gy, gm, gd] = jalaliToGregorian(jy, jm, 1); return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}` }
-function firstDayOfCurrentJalaliYearISO(): string { const now = new Date(); const [jy] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate()); const [gy, gm, gd] = jalaliToGregorian(jy, 1, 1); return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}` }
+function jalaliToISO(jy: number, jm: number, jd: number): string {
+  const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd)
+  return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
+}
+function formatJalaliShort(isoDate: string): string {
+  try {
+    const d = parseLocalDate(isoDate)
+    if (!d) return isoDate
+
+    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    return `${toFaNum(jy)}/${toFaNum(jm).padStart(2, '۰')}/${toFaNum(jd).padStart(2, '۰')}`
+  } catch {
+    return isoDate
+  }
+}
+
+function formatJalaliLong(isoDate: string): string {
+  try {
+    const d = parseLocalDate(isoDate)
+    if (!d) return isoDate
+
+    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    return `${toFaNum(jd)} ${JALALI_MONTHS[jm - 1]} ${toFaNum(jy)}`
+  } catch {
+    return isoDate
+  }
+}
+function formatJalaliDateTime(isoDate: string): string {
+  try {
+    const d = parseLocalDate(isoDate)
+    if (!d) return isoDate
+
+    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate())
+    const hh = toFaNum(d.getHours()).padStart(2, '۰')
+    const mm = toFaNum(d.getMinutes()).padStart(2, '۰')
+    return `${toFaNum(jy)}/${toFaNum(jm).padStart(2, '۰')}/${toFaNum(jd).padStart(2, '۰')} - ${hh}:${mm}`
+  } catch {
+    return isoDate
+  }
+}
+function toLocalISODate(d: Date): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseLocalDate(value: any): Date | null {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value.getTime())
+  }
+
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+
+  // تاریخ خالص مثل 2026-10-19 را به‌صورت محلی و امن parse کن
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const d = new Date(`${raw}T12:00:00`)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function todayGregorianISO(): string {
+  return toLocalISODate(new Date())
+}
+
+function daysAgoISO(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return toLocalISODate(d)
+}
+
+function firstDayOfCurrentJalaliMonthISO(): string {
+  const now = new Date()
+  const [jy, jm] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
+  const [gy, gm, gd] = jalaliToGregorian(jy, jm, 1)
+  return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
+}
+
+function firstDayOfCurrentJalaliYearISO(): string {
+  const now = new Date()
+  const [jy] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
+  const [gy, gm, gd] = jalaliToGregorian(jy, 1, 1)
+  return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`
+}
+
+function getJalaliYearLabel(dateValue: string | Date | null | undefined): string {
+  if (!dateValue) return 'سال مالی نامشخص'
+
+  const d = parseLocalDate(dateValue)
+  if (!d) return 'سال مالی نامشخص'
+
+  try {
+    const [jy] = gregorianToJalali(
+      d.getFullYear(),
+      d.getMonth() + 1,
+      d.getDate()
+    )
+    return `سال مالی ${toFaNum(jy)}`
+  } catch {
+    return `سال مالی ${d.getFullYear()}`
+  }
+}
 
 // ============================================================================
 //  Store Helpers
 // ============================================================================
 
 function getTenantIdFromStore(): string {
-  const state = useAppStore.getState(); const ct = state.currentTenant as any
+  const state = useAppStore.getState()
+  const ct = state.currentTenant as any
+
   if (ct && typeof ct === 'object' && ct.id) return ct.id
   if (ct && typeof ct === 'string') return ct
   if (state.tenantId) return state.tenantId
   if (state.user?.tenantId) return state.user.tenantId
+
   return ''
 }
-function getStoreName(): string { const state = useAppStore.getState(); return state.storeName || state.currentTenant?.companyName || 'فروشگاه' }
-function getAuthHeaders(): Record<string, string> { const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null; return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
 
-function getInvoiceDate(inv: any): string { return inv.invoiceDate || inv.createdAt || inv.date || '' }
-function getInvoiceTotal(inv: any): number { return Number(inv.finalAmount ?? inv.totalAmount ?? 0) }
-function getInvoiceStatus(inv: any): string { return String(inv.status || inv.paymentStatus || '').toUpperCase() }
-function getInvoicePaymentType(inv: any): string { return String(inv.paymentType || 'cash') }
-function getInvoiceCustomer(inv: any): string {
-  return inv.customerName || inv.customer?.name || (inv.customer ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim() : '') || (inv.customerId ? `مشتری ${String(inv.customerId).substring(0, 8)}` : 'بدون مشتری')
+function getStoreName(): string {
+  const state = useAppStore.getState()
+  return state.storeName || state.currentTenant?.companyName || 'فروشگاه'
 }
-function getInvoiceNumber(inv: any): string { return inv.invoiceNumber || inv.number || '-' }
-function getInvoiceCashier(inv: any): string { return inv.cashierName || inv.cashier?.username || inv.createdByUser?.username || inv.user?.username || 'سیستم' }
+
+function getAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+function getInvoiceDate(inv: any): string {
+  return inv.invoiceDate || inv.createdAt || inv.date || ''
+}
+
+function getInvoiceTotal(inv: any): number {
+  return Number(inv.finalAmount ?? inv.totalAmount ?? 0)
+}
+
+function getInvoiceStatus(inv: any): string {
+  return String(inv.status || inv.paymentStatus || '').toUpperCase()
+}
+
+function getInvoicePaymentType(inv: any): string {
+  return String(inv.paymentType || 'cash')
+}
+
+function getInvoiceCustomer(inv: any): string {
+  return (
+    inv.customerName ||
+    inv.customer?.name ||
+    (inv.customer ? `${inv.customer.firstName || ''} ${inv.customer.lastName || ''}`.trim() : '') ||
+    (inv.customerId ? `مشتری ${String(inv.customerId).substring(0, 8)}` : 'بدون مشتری')
+  )
+}
+
+function getInvoiceNumber(inv: any): string {
+  return inv.invoiceNumber || inv.number || '-'
+}
+
+function getInvoiceCashier(inv: any): string {
+  return (
+    inv.cashierName ||
+    inv.cashier?.username ||
+    inv.createdByUser?.username ||
+    inv.user?.username ||
+    'سیستم'
+  )
+}
 
 // ============================================================================
 //  Persian Date Picker
 // ============================================================================
 
-interface PersianDatePickerProps { value: string; onChange: (iso: string) => void; placeholder?: string; label?: string; minDate?: string; maxDate?: string; size?: 'sm' | 'md' }
+interface PersianDatePickerProps {
+  value: string
+  onChange: (iso: string) => void
+  placeholder?: string
+  label?: string
+  minDate?: string
+  maxDate?: string
+  size?: 'sm' | 'md'
+}
 
-function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تاریخ', label, minDate, maxDate, size = 'md' }: PersianDatePickerProps) {
-  const [open, setOpen] = useState(false); const containerRef = useRef<HTMLDivElement>(null)
-  const displayText = useMemo(() => { if (!value) return ''; const j = isoToJalali(value); if (!j) return ''; return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2, '۰')}/${toFaNum(j.jd).padStart(2, '۰')}` }, [value])
-  const todayJalali = useMemo(() => { const now = new Date(); const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate()); return { jy, jm, jd, iso: now.toISOString().split('T')[0] } }, [])
-  const initial = useMemo(() => { const j = value ? isoToJalali(value) : null; return j || { jy: todayJalali.jy, jm: todayJalali.jm, jd: todayJalali.jd } }, [value, todayJalali])
-  const [viewYear, setViewYear] = useState<number>(initial.jy); const [viewMonth, setViewMonth] = useState<number>(initial.jm)
-  useEffect(() => { const j = value ? isoToJalali(value) : null; if (j) { setViewYear(j.jy); setViewMonth(j.jm) } }, [value])
-  useEffect(() => { if (!open) return; const handler = (e: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false) }; document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler) }, [open])
+function PersianDatePicker({
+  value,
+  onChange,
+  placeholder = 'انتخاب تاریخ',
+  label,
+  minDate,
+  maxDate,
+  size = 'md',
+}: PersianDatePickerProps) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const displayText = useMemo(() => {
+    if (!value) return ''
+    const j = isoToJalali(value)
+    if (!j) return ''
+    return `${toFaNum(j.jy)}/${toFaNum(j.jm).padStart(2, '۰')}/${toFaNum(j.jd).padStart(2, '۰')}`
+  }, [value])
+
+const todayJalali = useMemo(() => {
+  const now = new Date()
+  const [jy, jm, jd] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
+  return { jy, jm, jd, iso: todayGregorianISO() }
+}, [])
+
+  const initial = useMemo(() => {
+    const j = value ? isoToJalali(value) : null
+    return j || { jy: todayJalali.jy, jm: todayJalali.jm, jd: todayJalali.jd }
+  }, [value, todayJalali])
+
+  const [viewYear, setViewYear] = useState<number>(initial.jy)
+  const [viewMonth, setViewMonth] = useState<number>(initial.jm)
+
+  useEffect(() => {
+    const j = value ? isoToJalali(value) : null
+    if (j) {
+      setViewYear(j.jy)
+      setViewMonth(j.jm)
+    }
+  }, [value])
+
+  useEffect(() => {
+    if (!open) return
+
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
   const daysCount = daysInJalaliMonth(viewYear, viewMonth)
-  const firstDayOffset = useMemo(() => { const [gy, gm, gd] = jalaliToGregorian(viewYear, viewMonth, 1); const jsDay = new Date(gy, gm - 1, gd).getDay(); return (jsDay + 1) % 7 }, [viewYear, viewMonth])
-  const cells: (number | null)[] = []; for (let i = 0; i < firstDayOffset; i++) cells.push(null); for (let d = 1; d <= daysCount; d++) cells.push(d); while (cells.length % 7 !== 0) cells.push(null)
+
+  const firstDayOffset = useMemo(() => {
+    const [gy, gm, gd] = jalaliToGregorian(viewYear, viewMonth, 1)
+    const jsDay = new Date(gy, gm - 1, gd).getDay()
+    return (jsDay + 1) % 7
+  }, [viewYear, viewMonth])
+
+  const cells: (number | null)[] = []
+  for (let i = 0; i < firstDayOffset; i++) cells.push(null)
+  for (let d = 1; d <= daysCount; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
   const selectedJalali = value ? isoToJalali(value) : null
-  const isDayDisabled = (jd: number): boolean => { const cellIso = jalaliToISO(viewYear, viewMonth, jd); if (minDate && cellIso < minDate) return true; if (maxDate && cellIso > maxDate) return true; return false }
-  const goPrevMonth = () => { if (viewMonth === 1) { setViewMonth(12); setViewYear((y) => y - 1) } else setViewMonth((m) => m - 1) }
-  const goNextMonth = () => { if (viewMonth === 12) { setViewMonth(1); setViewYear((y) => y + 1) } else setViewMonth((m) => m + 1) }
-  const goPrevYear = () => setViewYear((y) => y - 1); const goNextYear = () => setViewYear((y) => y + 1)
-  const pickToday = () => { onChange(todayJalali.iso); setOpen(false) }
-  const handleDayClick = (jd: number) => { if (isDayDisabled(jd)) return; onChange(jalaliToISO(viewYear, viewMonth, jd)); setOpen(false) }
+
+  const isDayDisabled = (jd: number): boolean => {
+    const cellIso = jalaliToISO(viewYear, viewMonth, jd)
+    if (minDate && cellIso < minDate) return true
+    if (maxDate && cellIso > maxDate) return true
+    return false
+  }
+
+  const goPrevMonth = () => {
+    if (viewMonth === 1) {
+      setViewMonth(12)
+      setViewYear((y) => y - 1)
+    } else {
+      setViewMonth((m) => m - 1)
+    }
+  }
+
+  const goNextMonth = () => {
+    if (viewMonth === 12) {
+      setViewMonth(1)
+      setViewYear((y) => y + 1)
+    } else {
+      setViewMonth((m) => m + 1)
+    }
+  }
+
+  const goPrevYear = () => setViewYear((y) => y - 1)
+  const goNextYear = () => setViewYear((y) => y + 1)
+
+  const pickToday = () => {
+    onChange(todayJalali.iso)
+    setOpen(false)
+  }
+
+  const handleDayClick = (jd: number) => {
+    if (isDayDisabled(jd)) return
+    onChange(jalaliToISO(viewYear, viewMonth, jd))
+    setOpen(false)
+  }
+
   const heightClass = size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm'
-  const navBtnStyle: React.CSSProperties = { padding: '2px 6px', borderRadius: 4, border: 'none', background: 'transparent', color: EMERALD.primary, fontSize: 12, cursor: 'pointer', lineHeight: 1 }
+
+  const navBtnStyle: React.CSSProperties = {
+    padding: '2px 6px',
+    borderRadius: 4,
+    border: 'none',
+    background: 'transparent',
+    color: EMERALD.primary,
+    fontSize: 12,
+    cursor: 'pointer',
+    lineHeight: 1,
+  }
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
-      {label && <p style={{ fontSize: 10, color: EMERALD.textMute, marginBottom: 3, fontWeight: 500 }}>{label}</p>}
-      <button type="button" onClick={() => setOpen((o) => !o)} className={`w-full ${heightClass} px-2.5 rounded-md border flex items-center justify-between gap-1.5 cursor-pointer transition-colors hover:border-emerald-400 hover:bg-emerald-50/50`} style={{ borderColor: EMERALD.border, backgroundColor: EMERALD.bgCard }}>
+      {label && (
+        <p style={{ fontSize: 10, color: EMERALD.textMute, marginBottom: 3, fontWeight: 500 }}>
+          {label}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full ${heightClass} px-2.5 rounded-md border flex items-center justify-between gap-1.5 cursor-pointer transition-colors hover:border-emerald-400 hover:bg-emerald-50/50`}
+        style={{ borderColor: EMERALD.border, backgroundColor: EMERALD.bgCard }}
+      >
         <Calendar className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-        <span className="flex-1 text-right font-mono" style={{ color: displayText ? EMERALD.textMain : EMERALD.textSoft, fontSize: 11 }} dir="ltr">{displayText || placeholder}</span>
+        <span
+          className="flex-1 text-right font-mono"
+          style={{ color: displayText ? EMERALD.textMain : EMERALD.textSoft, fontSize: 11 }}
+          dir="ltr"
+        >
+          {displayText || placeholder}
+        </span>
       </button>
+
       {open && (
         <>
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 }} onClick={() => setOpen(false)} />
-          <div dir="rtl" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 3, zIndex: 50, width: 240, backgroundColor: EMERALD.popupBg, border: `1px solid ${EMERALD.border}`, borderRadius: 10, boxShadow: '0 8px 24px -4px rgba(4, 120, 87, 0.18), 0 4px 8px -2px rgba(4, 120, 87, 0.1)', padding: 10, overflow: 'hidden' }}>
-            <div style={{ background: `linear-gradient(135deg, ${EMERALD.headerBg} 0%, #d1fae5 100%)`, margin: -10, marginBottom: 8, padding: '8px 10px', borderRadius: '10px 10px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 }}
+            onClick={() => setOpen(false)}
+          />
+
+          <div
+            dir="rtl"
+            style={{
+              position: 'absolute',
+              top: '100%',
+              right: 0,
+              marginTop: 3,
+              zIndex: 50,
+              width: 240,
+              backgroundColor: EMERALD.popupBg,
+              border: `1px solid ${EMERALD.border}`,
+              borderRadius: 10,
+              boxShadow: '0 8px 24px -4px rgba(4, 120, 87, 0.18), 0 4px 8px -2px rgba(4, 120, 87, 0.1)',
+              padding: 10,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                background: `linear-gradient(135deg, ${EMERALD.headerBg} 0%, #d1fae5 100%)`,
+                margin: -10,
+                marginBottom: 8,
+                padding: '8px 10px',
+                borderRadius: '10px 10px 0 0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
               <button type="button" onClick={goPrevYear} title="سال قبل" style={navBtnStyle}>«</button>
               <button type="button" onClick={goPrevMonth} title="ماه قبل" style={navBtnStyle}>‹</button>
-              <div style={{ flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 700, color: EMERALD.primaryDk }}>{JALALI_MONTHS[viewMonth - 1]} {toFaNum(viewYear)}</div>
+
+              <div style={{ flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 700, color: EMERALD.primaryDk }}>
+                {JALALI_MONTHS[viewMonth - 1]} {toFaNum(viewYear)}
+              </div>
+
               <button type="button" onClick={goNextMonth} title="ماه بعد" style={navBtnStyle}>›</button>
               <button type="button" onClick={goNextYear} title="سال بعد" style={navBtnStyle}>»</button>
             </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 2 }}>
-              {PERSIAN_WEEKDAYS.map((w, i) => (<div key={i} style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, color: i === 6 ? EMERALD.primary : EMERALD.textMute, padding: '2px 0' }}>{w}</div>))}
+              {PERSIAN_WEEKDAYS.map((w, i) => (
+                <div
+                  key={i}
+                  style={{
+                    textAlign: 'center',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: i === 6 ? EMERALD.primary : EMERALD.textMute,
+                    padding: '2px 0',
+                  }}
+                >
+                  {w}
+                </div>
+              ))}
             </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
               {cells.map((d, i) => {
                 if (d === null) return <div key={i} style={{ height: 24 }} />
-                const isSelected = selectedJalali && selectedJalali.jy === viewYear && selectedJalali.jm === viewMonth && selectedJalali.jd === d
-                const isToday = todayJalali.jy === viewYear && todayJalali.jm === viewMonth && todayJalali.jd === d
-                const isFriday = i % 7 === 6; const disabled = isDayDisabled(d)
+
+                const isSelected =
+                  selectedJalali &&
+                  selectedJalali.jy === viewYear &&
+                  selectedJalali.jm === viewMonth &&
+                  selectedJalali.jd === d
+
+                const isToday =
+                  todayJalali.jy === viewYear &&
+                  todayJalali.jm === viewMonth &&
+                  todayJalali.jd === d
+
+                const isFriday = i % 7 === 6
+                const disabled = isDayDisabled(d)
+
                 return (
-                  <button key={i} type="button" disabled={disabled} onClick={() => handleDayClick(d)} style={{ height: 24, borderRadius: 5, fontSize: 11, border: isSelected ? 'none' : (isToday ? `1px solid ${EMERALD.todayRing}` : 'none'), backgroundColor: isSelected ? EMERALD.primary : (isToday ? EMERALD.headerBg : 'transparent'), color: isSelected ? '#fff' : (disabled ? EMERALD.textSoft : (isToday ? EMERALD.primaryDk : (isFriday ? EMERALD.primary : EMERALD.textMain))), cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: isSelected ? 700 : (isToday ? 600 : (isFriday ? 500 : 400)), transition: 'background-color 0.1s' }}
-                    onMouseEnter={(e) => { if (!disabled && !isSelected) e.currentTarget.style.backgroundColor = '#d1fae5' }}
-                    onMouseLeave={(e) => { if (!disabled && !isSelected) e.currentTarget.style.backgroundColor = isToday ? EMERALD.headerBg : 'transparent' }}
-                  >{toFaNum(d)}</button>
+                  <button
+                    key={i}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handleDayClick(d)}
+                    style={{
+                      height: 24,
+                      borderRadius: 5,
+                      fontSize: 11,
+                      border: isSelected
+                        ? 'none'
+                        : isToday
+                          ? `1px solid ${EMERALD.todayRing}`
+                          : 'none',
+                      backgroundColor: isSelected
+                        ? EMERALD.primary
+                        : isToday
+                          ? EMERALD.headerBg
+                          : 'transparent',
+                      color: isSelected
+                        ? '#fff'
+                        : disabled
+                          ? EMERALD.textSoft
+                          : isToday
+                            ? EMERALD.primaryDk
+                            : isFriday
+                              ? EMERALD.primary
+                              : EMERALD.textMain,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      fontWeight: isSelected ? 700 : isToday ? 600 : isFriday ? 500 : 400,
+                      transition: 'background-color 0.1s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!disabled && !isSelected) e.currentTarget.style.backgroundColor = '#d1fae5'
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!disabled && !isSelected) {
+                        e.currentTarget.style.backgroundColor = isToday ? EMERALD.headerBg : 'transparent'
+                      }
+                    }}
+                  >
+                    {toFaNum(d)}
+                  </button>
                 )
               })}
             </div>
-            <div style={{ marginTop: 8, paddingTop: 6, borderTop: `1px dashed ${EMERALD.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <button type="button" onClick={pickToday} style={{ fontSize: 10, color: EMERALD.primary, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>امروز: {toFaNum(todayJalali.jd)} {JALALI_MONTHS[todayJalali.jm - 1]} {toFaNum(todayJalali.jy)}</button>
-              <button type="button" onClick={() => setOpen(false)} style={{ fontSize: 10, color: EMERALD.textMute, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>بستن ✕</button>
+
+            <div
+              style={{
+                marginTop: 8,
+                paddingTop: 6,
+                borderTop: `1px dashed ${EMERALD.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <button
+                type="button"
+                onClick={pickToday}
+                style={{
+                  fontSize: 10,
+                  color: EMERALD.primary,
+                  fontWeight: 600,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                امروز: {toFaNum(todayJalali.jd)} {JALALI_MONTHS[todayJalali.jm - 1]} {toFaNum(todayJalali.jy)}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  fontSize: 10,
+                  color: EMERALD.textMute,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                بستن ✕
+              </button>
             </div>
           </div>
         </>
@@ -247,19 +771,107 @@ function PersianDatePicker({ value, onChange, placeholder = 'انتخاب تار
 }
 
 // ============================================================================
-//  Persian Date Range Picker
+//  Persian Date Range Picker — Fiscal Year Aware
 // ============================================================================
 
-interface DateRange { from: string; to: string }
+interface DateRange {
+  from: string
+  to: string
+}
 
-function PersianDateRangePicker({ value, onChange, size = 'md' }: { value: DateRange; onChange: (v: DateRange) => void; size?: 'sm' | 'md' }) {
-  const safeValue: DateRange = { from: value.from || todayGregorianISO(), to: value.to || todayGregorianISO() }
-  const handleFromChange = (iso: string) => { if (iso > safeValue.to) onChange({ from: iso, to: iso }); else onChange({ from: iso, to: safeValue.to }) }
-  const handleToChange = (iso: string) => { if (iso < safeValue.from) onChange({ from: iso, to: iso }); else onChange({ from: safeValue.from, to: iso }) }
+function toISODate(value: any): string {
+  if (!value) return ''
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : toLocalISODate(value)
+  }
+
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw
+  }
+
+  const d = parseLocalDate(raw)
+  return d ? toLocalISODate(d) : ''
+}
+
+function clampDateToRange(iso: string, min?: string, max?: string): string {
+  let next = iso
+
+  if (min && next < min) next = min
+  if (max && next > max) next = max
+
+  return next
+}
+
+function PersianDateRangePicker({
+  value,
+  onChange,
+  size = 'md',
+  minDate,
+  maxDate,
+}: {
+  value: DateRange
+  onChange: (v: DateRange) => void
+  size?: 'sm' | 'md'
+  minDate?: string
+  maxDate?: string
+}) {
+  const safeFrom = clampDateToRange(value.from || todayGregorianISO(), minDate, maxDate)
+  const safeTo = clampDateToRange(value.to || todayGregorianISO(), minDate, maxDate)
+
+  const safeValue: DateRange = {
+    from: safeFrom,
+    to: safeTo < safeFrom ? safeFrom : safeTo,
+  }
+
+  const handleFromChange = (iso: string) => {
+    const nextFrom = clampDateToRange(iso, minDate, maxDate)
+    const nextTo = clampDateToRange(safeValue.to, nextFrom, maxDate)
+
+    onChange({
+      from: nextFrom,
+      to: nextTo < nextFrom ? nextFrom : nextTo,
+    })
+  }
+
+  const handleToChange = (iso: string) => {
+    const nextTo = clampDateToRange(iso, minDate, maxDate)
+    const nextFrom = clampDateToRange(safeValue.from, minDate, nextTo)
+
+    onChange({
+      from: nextFrom > nextTo ? nextTo : nextFrom,
+      to: nextTo,
+    })
+  }
+
   return (
     <div className="flex items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-      <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}><PersianDatePicker value={safeValue.from} onChange={handleFromChange} placeholder="از تاریخ" label="از تاریخ" maxDate={safeValue.to} size={size} /></div>
-      <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}><PersianDatePicker value={safeValue.to} onChange={handleToChange} placeholder="تا تاریخ" label="تا تاریخ" minDate={safeValue.from} size={size} /></div>
+      <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}>
+        <PersianDatePicker
+          value={safeValue.from}
+          onChange={handleFromChange}
+          placeholder="از تاریخ"
+          label="از تاریخ"
+          maxDate={safeValue.to}
+          minDate={minDate}
+          size={size}
+        />
+      </div>
+
+      <div style={{ width: size === 'sm' ? 130 : 150, flexShrink: 0 }}>
+        <PersianDatePicker
+          value={safeValue.to}
+          onChange={handleToChange}
+          placeholder="تا تاریخ"
+          label="تا تاریخ"
+          minDate={safeValue.from}
+          maxDate={maxDate}
+          size={size}
+        />
+      </div>
     </div>
   )
 }
@@ -268,24 +880,89 @@ function PersianDateRangePicker({ value, onChange, size = 'md' }: { value: DateR
 //  Shared UI Components
 // ============================================================================
 
-interface ReportActionsProps { onExportExcel: () => void; onPrint: () => void; disabled?: boolean; size?: 'sm' | 'md' }
+interface ReportActionsProps {
+  onExportExcel: () => void
+  onPrint: () => void
+  disabled?: boolean
+  size?: 'sm' | 'md'
+}
 
 function generatePdfFromHtml(html: string) {
   if (typeof window === 'undefined') return
-  try { const blob = new Blob([html], { type: 'text/html;charset=utf-8' }); const url = URL.createObjectURL(blob); const printWindow = window.open(url, '_blank'); if (!printWindow) { alert('پاپ‌آپ مسدود شده است.'); URL.revokeObjectURL(url); return }; printWindow.onload = function() { setTimeout(function() { printWindow.focus(); printWindow.print(); setTimeout(function() { URL.revokeObjectURL(url) }, 1000) }, 500) }; setTimeout(function() { try { printWindow.focus(); printWindow.print() } catch (e) { console.error('Print fallback:', e) } }, 2000) } catch (e) { console.error('PDF generation error:', e) }
+
+  try {
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const printWindow = window.open(url, '_blank')
+
+    if (!printWindow) {
+      alert('پاپ‌آپ مسدود شده است.')
+      URL.revokeObjectURL(url)
+      return
+    }
+
+    printWindow.onload = function () {
+      setTimeout(function () {
+        printWindow.focus()
+        printWindow.print()
+        setTimeout(function () {
+          URL.revokeObjectURL(url)
+        }, 1000)
+      }, 500)
+    }
+
+    setTimeout(function () {
+      try {
+        printWindow.focus()
+        printWindow.print()
+      } catch (e) {
+        console.error('Print fallback:', e)
+      }
+    }, 2000)
+  } catch (e) {
+    console.error('PDF generation error:', e)
+  }
 }
 
 function ReportActions({ onExportExcel, onPrint, disabled, size = 'sm' }: ReportActionsProps) {
   const sizeClass = size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm'
+
   return (
     <div className="flex items-center gap-1.5">
-      <Button variant="outline" onClick={onExportExcel} disabled={disabled} className={`gap-1.5 ${sizeClass} border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300`} title="دانلود فایل اکسل"><Download className="w-3.5 h-3.5" />اکسل</Button>
-      <Button variant="outline" onClick={onPrint} disabled={disabled} className={`gap-1.5 ${sizeClass} border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300`} title="چاپ / ذخیره PDF"><Printer className="w-3.5 h-3.5" />PDF / چاپ</Button>
+      <Button
+        variant="outline"
+        onClick={onExportExcel}
+        disabled={disabled}
+        className={`gap-1.5 ${sizeClass} border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300`}
+        title="دانلود فایل اکسل"
+      >
+        <Download className="w-3.5 h-3.5" />
+        اکسل
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onPrint}
+        disabled={disabled}
+        className={`gap-1.5 ${sizeClass} border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300`}
+        title="چاپ / ذخیره PDF"
+      >
+        <Printer className="w-3.5 h-3.5" />
+        PDF / چاپ
+      </Button>
     </div>
   )
 }
 
-interface StatCardProps { label: string; value: number | string; icon?: React.ReactNode; color?: 'emerald' | 'blue' | 'amber' | 'red' | 'purple' | 'gray' | 'teal' | 'pink' | 'indigo'; suffix?: string; dir?: 'rtl' | 'ltr'; hint?: string }
+interface StatCardProps {
+  label: string
+  value: number | string
+  icon?: React.ReactNode
+  color?: 'emerald' | 'blue' | 'amber' | 'red' | 'purple' | 'gray' | 'teal' | 'pink' | 'indigo'
+  suffix?: string
+  dir?: 'rtl' | 'ltr'
+  hint?: string
+}
 
 function StatCard({ label, value, icon, color = 'emerald', suffix, dir = 'ltr', hint }: StatCardProps) {
   const colorMap: Record<string, { bg: string; border: string; text: string; iconBg: string }> = {
@@ -299,38 +976,80 @@ function StatCard({ label, value, icon, color = 'emerald', suffix, dir = 'ltr', 
     pink: { bg: 'bg-pink-50/50', border: 'border-pink-200', text: 'text-pink-700', iconBg: 'bg-pink-100 text-pink-600' },
     indigo: { bg: 'bg-indigo-50/50', border: 'border-indigo-200', text: 'text-indigo-700', iconBg: 'bg-indigo-100 text-indigo-600' },
   }
-  const c = colorMap[color]; const display = typeof value === 'number' ? formatNumberFa(value) : value
+
+  const c = colorMap[color]
+  const display = typeof value === 'number' ? formatNumberFa(value) : value
+
   return (
     <Card className={`border ${c.border} ${c.bg} overflow-hidden`}>
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] text-gray-500 mb-1 truncate">{label}</p>
-            <p className={`text-base font-bold ${c.text} truncate`} dir={dir}>{display}{suffix && <span className="text-[10px] text-gray-400 mr-1">{suffix}</span>}</p>
+            <p className={`text-base font-bold ${c.text} truncate`} dir={dir}>
+              {display}
+              {suffix && <span className="text-[10px] text-gray-400 mr-1">{suffix}</span>}
+            </p>
             {hint && <p className="text-[9px] text-gray-400 mt-0.5 truncate">{hint}</p>}
           </div>
-          {icon && <div className={`w-8 h-8 rounded-lg ${c.iconBg} flex items-center justify-center shrink-0`}>{icon}</div>}
+
+          {icon && (
+            <div className={`w-8 h-8 rounded-lg ${c.iconBg} flex items-center justify-center shrink-0`}>
+              {icon}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function ChartCard({ title, icon, children, action, className = '' }: { title: string; icon?: React.ReactNode; children?: React.ReactNode; action?: React.ReactNode; className?: string }) {
+function ChartCard({
+  title,
+  icon,
+  children,
+  action,
+  className = '',
+}: {
+  title: string
+  icon?: React.ReactNode
+  children?: React.ReactNode
+  action?: React.ReactNode
+  className?: string
+}) {
   return (
     <Card className={`border-gray-200 ${className}`}>
-      <CardHeader className="p-3 pb-2"><div className="flex items-center justify-between"><CardTitle className="text-xs sm:text-sm flex items-center gap-1.5 text-gray-700">{icon}{title}</CardTitle>{action}</div></CardHeader>
+      <CardHeader className="p-3 pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-xs sm:text-sm flex items-center gap-1.5 text-gray-700">
+            {icon}
+            {title}
+          </CardTitle>
+          {action}
+        </div>
+      </CardHeader>
+
       <CardContent className="p-3 pt-0">{children}</CardContent>
     </Card>
   )
 }
 
 function EmptyState({ message = 'داده‌ای برای نمایش وجود ندارد', icon }: { message?: string; icon?: React.ReactNode }) {
-  return (<div className="py-12 text-center text-gray-400">{icon || <AlertCircle className="w-10 h-10 mx-auto mb-2 text-gray-300" />}<p className="text-sm">{message}</p></div>)
+  return (
+    <div className="py-12 text-center text-gray-400">
+      {icon || <AlertCircle className="w-10 h-10 mx-auto mb-2 text-gray-300" />}
+      <p className="text-sm">{message}</p>
+    </div>
+  )
 }
 
 function LoadingState({ message = 'در حال بارگذاری...' }: { message?: string }) {
-  return (<div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-emerald-500" /><span className="mr-2 text-sm text-gray-500">{message}</span></div>)
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+      <span className="mr-2 text-sm text-gray-500">{message}</span>
+    </div>
+  )
 }
 
 function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
@@ -338,7 +1057,11 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
     <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
       <AlertCircle className="w-6 h-6 text-red-500 mx-auto mb-2" />
       <p className="text-sm text-red-700">{message}</p>
-      {onRetry && <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={onRetry}>تلاش مجدد</Button>}
+      {onRetry && (
+        <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={onRetry}>
+          تلاش مجدد
+        </Button>
+      )}
     </div>
   )
 }
@@ -348,31 +1071,88 @@ const PAGE_SIZE = 10
 function Pagination({ page, total, onPageChange }: { page: number; total: number; onPageChange: (p: number) => void }) {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   if (total <= PAGE_SIZE) return null
-  const from = (page - 1) * PAGE_SIZE + 1; const to = Math.min(page * PAGE_SIZE, total)
+
+  const from = (page - 1) * PAGE_SIZE + 1
+  const to = Math.min(page * PAGE_SIZE, total)
+
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-gray-100 bg-gray-50/50">
-      <p className="text-[10px] text-gray-500">نمایش {toFaNum(from)} تا {toFaNum(to)} از {toFaNum(total)} رکورد</p>
+      <p className="text-[10px] text-gray-500">
+        نمایش {toFaNum(from)} تا {toFaNum(to)} از {toFaNum(total)} رکورد
+      </p>
+
       <div className="flex items-center gap-1.5">
-        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>قبلی</Button>
-        <span className="text-xs text-gray-600 px-2 font-medium">صفحه {toFaNum(page)} از {toFaNum(totalPages)}</span>
-        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>بعدی</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          قبلی
+        </Button>
+
+        <span className="text-xs text-gray-600 px-2 font-medium">
+          صفحه {toFaNum(page)} از {toFaNum(totalPages)}
+        </span>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          بعدی
+        </Button>
       </div>
     </div>
   )
 }
 
-function paginate(data: any[], page: number): any[] { const start = (page - 1) * PAGE_SIZE; return data.slice(start, start + PAGE_SIZE) }
+function paginate(data: any[], page: number): any[] {
+  const start = (page - 1) * PAGE_SIZE
+  return data.slice(start, start + PAGE_SIZE)
+}
 
-function ShowListButton({ onClick, loading, visible, totalCount }: { onClick: () => void; loading?: boolean; visible: boolean; totalCount?: number }) {
-  if (visible) return (
-    <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-200">
-      <CheckCircle2 className="w-3.5 h-3.5" />
-      <span>لیست نمایش داده شد{typeof totalCount === 'number' ? ` (${toFaNum(totalCount)} رکورد)` : ''}</span>
-      <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-gray-500 hover:text-gray-700 mr-1" onClick={onClick}>پنهان کنید</Button>
-    </div>
-  )
+function ShowListButton({
+  onClick,
+  loading,
+  visible,
+  totalCount,
+}: {
+  onClick: () => void
+  loading?: boolean
+  visible: boolean
+  totalCount?: number
+}) {
+  if (visible) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-200">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        <span>
+          لیست نمایش داده شد
+          {typeof totalCount === 'number' ? ` (${toFaNum(totalCount)} رکورد)` : ''}
+        </span>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-[10px] text-gray-500 hover:text-gray-700 mr-1"
+          onClick={onClick}
+        >
+          پنهان کنید
+        </Button>
+      </div>
+    )
+  }
+
   return (
-    <Button onClick={onClick} disabled={loading} className="gap-1.5 h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600">
+    <Button
+      onClick={onClick}
+      disabled={loading}
+      className="gap-1.5 h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
+    >
       {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
       نمایش لیست
     </Button>
@@ -380,17 +1160,31 @@ function ShowListButton({ onClick, loading, visible, totalCount }: { onClick: ()
 }
 
 function EmptyListPlaceholder({ message = 'برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید' }: { message?: string }) {
-  return (<div className="py-10 text-center bg-gray-50/30 rounded-lg border border-dashed border-gray-200"><FileText className="w-8 h-8 mx-auto mb-2 text-gray-300" /><p className="text-xs text-gray-400">{message}</p></div>)
+  return (
+    <div className="py-10 text-center bg-gray-50/30 rounded-lg border border-dashed border-gray-200">
+      <FileText className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+      <p className="text-xs text-gray-400">{message}</p>
+    </div>
+  )
 }
 
 function PersianChartTooltip({ active, payload, label, formatter }: any) {
   if (!active || !payload || !payload.length) return null
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 text-xs" dir="rtl">
       {label && <p className="font-bold text-gray-700 mb-1.5 border-b border-gray-100 pb-1.5">{label}</p>}
+
       {payload.map((entry: any, idx: number) => {
         const value = formatter ? formatter(entry.value) : formatNumberFa(entry.value)
-        return (<div key={idx} className="flex items-center gap-2 py-0.5"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color || entry.fill }} /><span className="text-gray-600">{entry.name}:</span><span className="font-bold text-gray-800" dir="ltr">{value}</span></div>)
+
+        return (
+          <div key={idx} className="flex items-center gap-2 py-0.5">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color || entry.fill }} />
+            <span className="text-gray-600">{entry.name}:</span>
+            <span className="font-bold text-gray-800" dir="ltr">{value}</span>
+          </div>
+        )
       })}
     </div>
   )
@@ -402,25 +1196,127 @@ function PersianChartTooltip({ active, payload, label, formatter }: any) {
 
 async function fetchInvoicesApi(tenantId: string): Promise<any[]> {
   if (!tenantId) return []
-  try { const params = new URLSearchParams({ tenantId, limit: '9999', include: 'payments' }); const res = await fetch(`/api/invoices?${params.toString()}`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) { const list = data.data.invoices || data.data; return Array.isArray(list) ? list : [] }; return [] } catch (err) { console.error('[Reports] fetchInvoices error:', err); return [] }
+
+  try {
+    const params = new URLSearchParams({ tenantId, limit: '9999', include: 'payments' })
+    const res = await fetch(`/api/invoices?${params.toString()}`, { headers: getAuthHeaders() })
+    const data = await res.json()
+
+    if (data.success && data.data) {
+      const list = data.data.invoices || data.data
+      return Array.isArray(list) ? list : []
+    }
+
+    return []
+  } catch (err) {
+    console.error('[Reports] fetchInvoices error:', err)
+    return []
+  }
 }
+
 async function fetchJournalEntriesApi(tenantId: string): Promise<any[]> {
   if (!tenantId) return []
-  try { const res = await fetch(`/api/journal-entries?tenantId=${tenantId}`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) { const list = data.data.entries || data.data.journalEntries || data.data; return Array.isArray(list) ? list : [] }; return [] } catch (err) { console.error('[Reports] fetchJournalEntries error:', err); return [] }
+
+  try {
+    const res = await fetch(`/api/journal-entries?tenantId=${tenantId}`, { headers: getAuthHeaders() })
+    const data = await res.json()
+
+    if (data.success && data.data) {
+      const list = data.data.entries || data.data.journalEntries || data.data
+      return Array.isArray(list) ? list : []
+    }
+
+    return []
+  } catch (err) {
+    console.error('[Reports] fetchJournalEntries error:', err)
+    return []
+  }
 }
+
 async function fetchCustomersApi(tenantId: string): Promise<any[]> {
   if (!tenantId) return []
-  try { const res = await fetch(`/api/customers?tenantId=${tenantId}&limit=9999`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) { const list = data.data.customers || data.data; return Array.isArray(list) ? list : [] }; return [] } catch (err) { console.error('[Reports] fetchCustomers error:', err); return [] }
+
+  try {
+    const res = await fetch(`/api/customers?tenantId=${tenantId}&limit=9999`, { headers: getAuthHeaders() })
+    const data = await res.json()
+
+    if (data.success && data.data) {
+      const list = data.data.customers || data.data
+      return Array.isArray(list) ? list : []
+    }
+
+    return []
+  } catch (err) {
+    console.error('[Reports] fetchCustomers error:', err)
+    return []
+  }
 }
-async function fetchInstallmentPlansApi(tenantId: string): Promise<any[]> {
+
+async function fetchInstallmentPlansApi(
+  tenantId: string,
+  fiscalYearId?: string | null,
+  allYears = false
+): Promise<any[]> {
   if (!tenantId) return []
-  try { const res = await fetch(`/api/installment-plans?tenantId=${tenantId}`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) { const list = data.data.plans || data.data; return Array.isArray(list) ? list : [] }; return [] } catch (err) { console.error('[Reports] fetchInstallmentPlans error:', err); return [] }
+
+  try {
+    const params = new URLSearchParams({ tenantId })
+
+    if (allYears) {
+      params.set('allYears', 'true')
+    } else if (fiscalYearId) {
+      params.set('fiscalYearId', fiscalYearId)
+    }
+
+    const res = await fetch(`/api/installment-plans?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    })
+
+    const data = await res.json()
+
+    if (data.success && data.data) {
+      const list = Array.isArray(data.data)
+        ? data.data
+        : data.data.plans || data.data.installmentPlans || []
+
+      return Array.isArray(list) ? list : []
+    }
+
+    return []
+  } catch (err) {
+    console.error('[Reports] fetchInstallmentPlans error:', err)
+    return []
+  }
 }
+
 async function fetchDashboardStatsApi(): Promise<any | null> {
-  try { const res = await fetch(`/api/dashboard/stats`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) return data.data; return null } catch (err) { console.error('[Reports] fetchDashboardStats error:', err); return null }
+  try {
+    const res = await fetch(`/api/dashboard/stats`, { headers: getAuthHeaders() })
+    const data = await res.json()
+
+    if (data.success && data.data) return data.data
+    return null
+  } catch (err) {
+    console.error('[Reports] fetchDashboardStats error:', err)
+    return null
+  }
 }
+
 async function fetchBranchesApi(): Promise<any[]> {
-  try { const res = await fetch(`/api/branches`, { headers: getAuthHeaders() }); const data = await res.json(); if (data.success && data.data) { const list = data.data.branches || data.data; return Array.isArray(list) ? list : [] }; return [] } catch (err) { console.error('[Reports] fetchBranches error:', err); return [] }
+  try {
+    const res = await fetch(`/api/branches`, { headers: getAuthHeaders() })
+    const data = await res.json()
+
+    if (data.success && data.data) {
+      const list = data.data.branches || data.data
+      return Array.isArray(list) ? list : []
+    }
+
+    return []
+  } catch (err) {
+    console.error('[Reports] fetchBranches error:', err)
+    return []
+  }
 }
 
 // ============================================================================
@@ -428,117 +1324,521 @@ async function fetchBranchesApi(): Promise<any[]> {
 // ============================================================================
 
 interface PnLData {
-  grossSales: number; salesReturns: number; discounts: number; netSales: number;
-  taxAmount: number; cogs: number; grossProfit: number;
-  operatingExpenses: { name: string; amount: number }[]; totalOperatingExpenses: number;
-  operatingProfit: number; otherIncome: number; otherExpenses: number;
-  profitBeforeTax: number; incomeTax: number; netProfit: number; invoiceCount: number;
+  grossSales: number
+  salesReturns: number
+  discounts: number
+  netSales: number
+  taxAmount: number
+  cogs: number
+  grossProfit: number
+  operatingExpenses: { name: string; amount: number }[]
+  totalOperatingExpenses: number
+  operatingProfit: number
+  otherIncome: number
+  otherExpenses: number
+  profitBeforeTax: number
+  incomeTax: number
+  netProfit: number
+  invoiceCount: number
 }
 
-function computePnLFromInvoices(invoices: any[], dateFrom: string, dateTo: string, journalEntries?: any[]): PnLData {
-  let validInvoices = invoices.filter((inv) => { const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]; if (!d) return false; return d >= dateFrom && d <= dateTo && getInvoiceStatus(inv) !== 'CANCELLED' })
-  if (validInvoices.length === 0 && invoices.length > 0) validInvoices = invoices.filter((inv) => getInvoiceStatus(inv) !== 'CANCELLED')
-  const saleInvoices = validInvoices.filter((inv) => { const invType = (inv as any).invoiceType; return invType !== 'sale_return' && invType !== 'purchase_return' })
-  const returnInvoices = validInvoices.filter((inv) => { const invType = (inv as any).invoiceType; return invType === 'sale_return' || invType === 'purchase_return' })
-  const grossSales = saleInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0) - returnInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0)
-  const discounts = saleInvoices.reduce((s, i) => s + (Number(i.discountAmount) || 0), 0) - returnInvoices.reduce((s, i) => s + (Number(i.discountAmount) || 0), 0)
-  const taxAmount = saleInvoices.reduce((s, i) => s + (Number(i.taxAmount) || 0), 0) - returnInvoices.reduce((s, i) => s + (Number(i.taxAmount) || 0), 0)
-  const salesReturns = returnInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0); const netSales = grossSales - discounts
-  const saleCogs = saleInvoices.reduce((s, i) => { const cogsAmount = Number(i.cogsAmount) || 0; if (cogsAmount > 0) return s + cogsAmount; if (Array.isArray(i.items)) return s + i.items.reduce((ss: number, it: any) => { const cost = Number(it.cost) || Number(it.purchasePrice) || 0; return ss + cost * (Number(it.quantity) || 0) }, 0); return s }, 0)
-  const returnCogs = returnInvoices.reduce((s, i) => { const cogsAmount = Number(i.cogsAmount) || 0; if (cogsAmount > 0) return s + cogsAmount; if (Array.isArray(i.items)) return s + i.items.reduce((ss: number, it: any) => { const cost = Number(it.cost) || Number(it.purchasePrice) || 0; return ss + cost * (Number(it.quantity) || 0) }, 0); return s }, 0)
-  const cogs = saleCogs - returnCogs; const grossProfit = netSales - cogs
-  const operatingExpenses: { name: string; amount: number }[] = []; let totalOperatingExpenses = 0; let computedOtherIncome = 0
+function computePnLFromInvoices(
+  invoices: any[],
+  dateFrom: string,
+  dateTo: string,
+  journalEntries?: any[]
+): PnLData {
+  let validInvoices = invoices.filter((inv) => {
+    const d = toISODate(getInvoiceDate(inv))
+    if (!d) return false
+    return d >= dateFrom && d <= dateTo && getInvoiceStatus(inv) !== 'CANCELLED'
+  })
+
+  const saleInvoices = validInvoices.filter((inv) => {
+    const invType = (inv as any).invoiceType
+    return invType !== 'sale_return' && invType !== 'purchase_return'
+  })
+
+  const returnInvoices = validInvoices.filter((inv) => {
+    const invType = (inv as any).invoiceType
+    return invType === 'sale_return' || invType === 'purchase_return'
+  })
+
+  const grossSales =
+    saleInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0) -
+    returnInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0)
+
+  const discounts =
+    saleInvoices.reduce((s, i) => s + (Number(i.discountAmount) || 0), 0) -
+    returnInvoices.reduce((s, i) => s + (Number(i.discountAmount) || 0), 0)
+
+  const taxAmount =
+    saleInvoices.reduce((s, i) => s + (Number(i.taxAmount) || 0), 0) -
+    returnInvoices.reduce((s, i) => s + (Number(i.taxAmount) || 0), 0)
+
+  const salesReturns = returnInvoices.reduce((s, i) => s + getInvoiceTotal(i), 0)
+  const netSales = grossSales - discounts
+
+  const saleCogs = saleInvoices.reduce((s, i) => {
+    const cogsAmount = Number(i.cogsAmount) || 0
+    if (cogsAmount > 0) return s + cogsAmount
+
+    if (Array.isArray(i.items)) {
+      return (
+        s +
+        i.items.reduce((ss: number, it: any) => {
+          const cost = Number(it.cost) || Number(it.purchasePrice) || 0
+          return ss + cost * (Number(it.quantity) || 0)
+        }, 0)
+      )
+    }
+
+    return s
+  }, 0)
+
+  const returnCogs = returnInvoices.reduce((s, i) => {
+    const cogsAmount = Number(i.cogsAmount) || 0
+    if (cogsAmount > 0) return s + cogsAmount
+
+    if (Array.isArray(i.items)) {
+      return (
+        s +
+        i.items.reduce((ss: number, it: any) => {
+          const cost = Number(it.cost) || Number(it.purchasePrice) || 0
+          return ss + cost * (Number(it.quantity) || 0)
+        }, 0)
+      )
+    }
+
+    return s
+  }, 0)
+
+  const cogs = saleCogs - returnCogs
+  const grossProfit = netSales - cogs
+
+  const operatingExpenses: { name: string; amount: number }[] = []
+  let totalOperatingExpenses = 0
+  let computedOtherIncome = 0
+
   const SALES_REVENUE_PREFIXES = ['41', '42', '43']
+
   if (journalEntries && journalEntries.length > 0) {
-    const validEntries = journalEntries.filter((je: any) => { const jeDate = new Date(je.date || je.entryDate || je.createdAt || '').toISOString().split('T')[0]; if (!jeDate) return false; return jeDate >= dateFrom && jeDate <= dateTo })
+    const validEntries = journalEntries.filter((je: any) => {
+   const jeDate = toISODate(je.date || je.entryDate || je.createdAt || '')
+      if (!jeDate) return false
+      return jeDate >= dateFrom && jeDate <= dateTo
+    })
+
     const expenseMap = new Map<string, number>()
+
     for (const je of validEntries) {
-      if (je.sourceType === 'invoice' || je.sourceType === 'sale_return' || je.sourceType === 'purchase_return' || je.sourceType === 'purchase') continue
+      if (
+        je.sourceType === 'invoice' ||
+        je.sourceType === 'sale_return' ||
+        je.sourceType === 'purchase_return' ||
+        je.sourceType === 'purchase'
+      ) {
+        continue
+      }
+
       const lines = je.lines || je.items || []
+
       for (const line of lines) {
-        const accName = line.accountName || line.description || 'سایر'; const accCode = String(line.accountCode || ''); const accType = (line.accountType || '').toLowerCase()
-        const isExpense = accType === 'expense' || accType === 'cogs' || accType === 'cost' || accCode.startsWith('5') || accName.includes('هزینه') || accName.includes('دستمزد') || accName.includes('اجاره') || accName.includes('حقوق')
-        const isSalesRevenueAccount = SALES_REVENUE_PREFIXES.some(p => accCode.startsWith(p))
-        const isOtherIncomeAccount = (accType === 'income' || accType === 'revenue') && !isSalesRevenueAccount || (accCode.startsWith('44') || accCode.startsWith('49'))
-        if (isExpense && (Number(line.debit) > 0)) { const current = expenseMap.get(accName) || 0; expenseMap.set(accName, current + (Number(line.debit) || 0)) } else if (isOtherIncomeAccount && (Number(line.credit) > 0)) { computedOtherIncome += Number(line.credit) || 0 }
+        const accName = line.accountName || line.description || 'سایر'
+        const accCode = String(line.accountCode || '')
+        const accType = (line.accountType || '').toLowerCase()
+
+        const isExpense =
+          accType === 'expense' ||
+          accType === 'cogs' ||
+          accType === 'cost' ||
+          accCode.startsWith('5') ||
+          accName.includes('هزینه') ||
+          accName.includes('دستمزد') ||
+          accName.includes('اجاره') ||
+          accName.includes('حقوق')
+
+        const isSalesRevenueAccount = SALES_REVENUE_PREFIXES.some((p) => accCode.startsWith(p))
+
+        const isOtherIncomeAccount =
+          ((accType === 'income' || accType === 'revenue') && !isSalesRevenueAccount) ||
+          accCode.startsWith('44') ||
+          accCode.startsWith('49')
+
+        if (isExpense && Number(line.debit) > 0) {
+          const current = expenseMap.get(accName) || 0
+          expenseMap.set(accName, current + (Number(line.debit) || 0))
+        } else if (isOtherIncomeAccount && Number(line.credit) > 0) {
+          computedOtherIncome += Number(line.credit) || 0
+        }
       }
     }
-    for (const [name, amount] of expenseMap) { operatingExpenses.push({ name, amount }); totalOperatingExpenses += amount }
+
+    for (const [name, amount] of expenseMap) {
+      operatingExpenses.push({ name, amount })
+      totalOperatingExpenses += amount
+    }
   }
-  const operatingProfit = grossProfit - totalOperatingExpenses; const otherIncome = computedOtherIncome; const otherExpenses = 0; const profitBeforeTax = operatingProfit + otherIncome - otherExpenses; const incomeTax = 0; const netProfit = profitBeforeTax - incomeTax
-  return { grossSales, salesReturns, discounts, netSales, taxAmount, cogs, grossProfit, operatingExpenses, totalOperatingExpenses, operatingProfit, otherIncome, otherExpenses, profitBeforeTax, incomeTax, netProfit, invoiceCount: validInvoices.length }
+
+  const operatingProfit = grossProfit - totalOperatingExpenses
+  const otherIncome = computedOtherIncome
+  const otherExpenses = 0
+  const profitBeforeTax = operatingProfit + otherIncome - otherExpenses
+  const incomeTax = 0
+  const netProfit = profitBeforeTax - incomeTax
+
+  return {
+    grossSales,
+    salesReturns,
+    discounts,
+    netSales,
+    taxAmount,
+    cogs,
+    grossProfit,
+    operatingExpenses,
+    totalOperatingExpenses,
+    operatingProfit,
+    otherIncome,
+    otherExpenses,
+    profitBeforeTax,
+    incomeTax,
+    netProfit,
+    invoiceCount: validInvoices.length,
+  }
 }
+
 // ============================================================================
 //  REPORT 1: Dashboard Overview
 // ============================================================================
 
 function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dashboardData: any }) {
-  const stats = dashboardData?.stats; const dailySales30 = dashboardData?.dailySales30 || []; const paymentMethods = dashboardData?.paymentMethods || []; const monthComparison = dashboardData?.monthComparison; const topProducts = dashboardData?.topProducts || []; const lowStockProducts = dashboardData?.lowStockProducts || []
-  const chartData = useMemo(() => dailySales30.map((d: any) => ({ name: d.date, فروش: d.sales })), [dailySales30])
-  const pieData = useMemo(() => paymentMethods.filter((p: any) => p.value > 0).map((p: any) => ({ name: p.label || PAYMENT_LABELS_FA[p.name] || p.name, value: p.value, count: p.count, color: p.color || PAYMENT_COLORS[p.name] || '#64748b' })), [paymentMethods])
-  const handleExportExcel = () => { const meta: ReportMeta = { title: 'گزارش داشبورد خلاصه', storeName: getStoreName(), period: '۳۰ روز اخیر', summary: [{ label: 'فروش امروز', value: formatNumberFa(stats?.todaySales || 0), color: 'green' }, { label: 'فروش ماه', value: formatNumberFa(stats?.monthSales || 0), color: 'blue' }, { label: 'سود ماه', value: formatNumberFa(stats?.monthlyProfit || 0), color: stats?.monthlyProfit >= 0 ? 'green' : 'red' }, { label: 'اقساط سررسید شده', value: formatNumberFa(stats?.overdueInstallments || 0), color: 'amber' }, { label: 'مطالبات کل', value: formatNumberFa(stats?.totalReceivable || 0), color: 'amber' }, { label: 'موجودی بحرانی', value: formatNumberFa(stats?.lowStockProducts || 0), color: 'red' }] }; const columns: ReportColumn[] = [{ key: 'date', label: 'تاریخ', align: 'right' }, { key: 'sales', label: 'فروش روزانه', isCurrency: true, align: 'left' }]; exportToExcel(meta, columns, dailySales30.map((d: any) => ({ date: d.date, sales: d.sales })), 'داشبورد-خلاصه') }
-  const handlePrint = () => { const meta: ReportMeta = { title: 'گزارش داشبورد خلاصه', storeName: getStoreName(), period: '۳۰ روز اخیر', summary: [{ label: 'فروش امروز', value: formatNumberFa(stats?.todaySales || 0), color: 'green' }, { label: 'فروش ماه', value: formatNumberFa(stats?.monthSales || 0), color: 'blue' }, { label: 'سود ماه', value: formatNumberFa(stats?.monthlyProfit || 0), color: stats?.monthlyProfit >= 0 ? 'green' : 'red' }, { label: 'اقساط سررسید شده', value: formatNumberFa(stats?.overdueInstallments || 0), color: 'amber' }], note: 'این گزارش خلاصه‌ای از وضعیت فروشگاه در ۳۰ روز اخیر است.' }; const columns: ReportColumn[] = [{ key: 'date', label: 'تاریخ', align: 'right' }, { key: 'sales', label: 'فروش روزانه', isCurrency: true, align: 'left' }]; printReport(meta, columns, dailySales30.map((d: any) => ({ date: d.date, sales: d.sales }))) }
-  if (!stats) return <EmptyState message="داده‌ای برای نمایش داشبورد موجود نیست" icon={<LayoutDashboard className="w-10 h-10 mx-auto mb-2 text-gray-300" />} />
-  const growthBadge = (growth: number, label: string) => { if (growth > 0) return <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200"><TrendingUp className="w-3 h-3 ml-1" />{toFaNum(growth)}٪ رشد {label}</Badge>; if (growth < 0) return <Badge className="text-[10px] bg-red-100 text-red-700 border-red-200"><TrendingDown className="w-3 h-3 ml-1" />{toFaNum(Math.abs(growth))}٪ افت {label}</Badge>; return <Badge className="text-[10px] bg-gray-100 text-gray-600 border-gray-200">بدون تغییر</Badge> }
+  const stats = dashboardData?.stats
+  const dailySales30 = dashboardData?.dailySales30 || []
+  const paymentMethods = dashboardData?.paymentMethods || []
+  const monthComparison = dashboardData?.monthComparison
+  const topProducts = dashboardData?.topProducts || []
+  const lowStockProducts = dashboardData?.lowStockProducts || []
+
+  const chartData = useMemo(
+    () => dailySales30.map((d: any) => ({ name: d.date, فروش: d.sales })),
+    [dailySales30]
+  )
+
+  const pieData = useMemo(
+    () =>
+      paymentMethods
+        .filter((p: any) => p.value > 0)
+        .map((p: any) => ({
+          name: p.label || PAYMENT_LABELS_FA[p.name] || p.name,
+          value: p.value,
+          count: p.count,
+          color: p.color || PAYMENT_COLORS[p.name] || '#64748b',
+        })),
+    [paymentMethods]
+  )
+
+  const handleExportExcel = () => {
+    const meta: ReportMeta = {
+      title: 'گزارش داشبورد خلاصه',
+      storeName: getStoreName(),
+      period: '۳۰ روز اخیر',
+      summary: [
+        { label: 'فروش امروز', value: formatNumberFa(stats?.todaySales || 0), color: 'green' },
+        { label: 'فروش ماه', value: formatNumberFa(stats?.monthSales || 0), color: 'blue' },
+        {
+          label: 'سود ماه',
+          value: formatNumberFa(stats?.monthlyProfit || 0),
+          color: stats?.monthlyProfit >= 0 ? 'green' : 'red',
+        },
+        { label: 'اقساط سررسید شده', value: formatNumberFa(stats?.overdueInstallments || 0), color: 'amber' },
+        { label: 'مطالبات کل', value: formatNumberFa(stats?.totalReceivable || 0), color: 'amber' },
+        { label: 'موجودی بحرانی', value: formatNumberFa(stats?.lowStockProducts || 0), color: 'red' },
+      ],
+    }
+
+    const columns: ReportColumn[] = [
+      { key: 'date', label: 'تاریخ', align: 'right' },
+      { key: 'sales', label: 'فروش روزانه', isCurrency: true, align: 'left' },
+    ]
+
+    exportToExcel(
+      meta,
+      columns,
+      dailySales30.map((d: any) => ({ date: d.date, sales: d.sales })),
+      'داشبورد-خلاصه'
+    )
+  }
+
+  const handlePrint = () => {
+    const meta: ReportMeta = {
+      title: 'گزارش داشبورد خلاصه',
+      storeName: getStoreName(),
+      period: '۳۰ روز اخیر',
+      summary: [
+        { label: 'فروش امروز', value: formatNumberFa(stats?.todaySales || 0), color: 'green' },
+        { label: 'فروش ماه', value: formatNumberFa(stats?.monthSales || 0), color: 'blue' },
+        {
+          label: 'سود ماه',
+          value: formatNumberFa(stats?.monthlyProfit || 0),
+          color: stats?.monthlyProfit >= 0 ? 'green' : 'red',
+        },
+        { label: 'اقساط سررسید شده', value: formatNumberFa(stats?.overdueInstallments || 0), color: 'amber' },
+      ],
+      note: 'این گزارش خلاصه‌ای از وضعیت فروشگاه در ۳۰ روز اخیر است.',
+    }
+
+    const columns: ReportColumn[] = [
+      { key: 'date', label: 'تاریخ', align: 'right' },
+      { key: 'sales', label: 'فروش روزانه', isCurrency: true, align: 'left' },
+    ]
+
+    printReport(
+      meta,
+      columns,
+      dailySales30.map((d: any) => ({ date: d.date, sales: d.sales }))
+    )
+  }
+
+  if (!stats) {
+    return (
+      <EmptyState
+        message="داده‌ای برای نمایش داشبورد موجود نیست"
+        icon={<LayoutDashboard className="w-10 h-10 mx-auto mb-2 text-gray-300" />}
+      />
+    )
+  }
+
+  const growthBadge = (growth: number, label: string) => {
+    if (growth > 0) {
+      return (
+        <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">
+          <TrendingUp className="w-3 h-3 ml-1" />
+          {toFaNum(growth)}٪ رشد {label}
+        </Badge>
+      )
+    }
+
+    if (growth < 0) {
+      return (
+        <Badge className="text-[10px] bg-red-100 text-red-700 border-red-200">
+          <TrendingDown className="w-3 h-3 ml-1" />
+          {toFaNum(Math.abs(growth))}٪ افت {label}
+        </Badge>
+      )
+    }
+
+    return <Badge className="text-[10px] bg-gray-100 text-gray-600 border-gray-200">بدون تغییر</Badge>
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Badge variant="outline" className={`text-[10px] ${TIER_COLORS[tier].bg} ${TIER_COLORS[tier].text} ${TIER_COLORS[tier].border}`}><LayoutDashboard className="w-3 h-3 ml-1" />خلاصه عملکرد — پلن {TIER_LABELS[tier]}</Badge>
+        <Badge
+          variant="outline"
+          className={`text-[10px] ${TIER_COLORS[tier].bg} ${TIER_COLORS[tier].text} ${TIER_COLORS[tier].border}`}
+        >
+          <LayoutDashboard className="w-3 h-3 ml-1" />
+          خلاصه عملکرد — پلن {TIER_LABELS[tier]}
+        </Badge>
+
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={!stats} />
       </div>
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-        <StatCard label="فروش امروز" value={stats.todaySales || 0} icon={<Wallet className="w-4 h-4" />} color="emerald" suffix="تومان" hint={`${toFaNum(stats.todayInvoices || 0)} فاکتور`} />
-        <StatCard label="فروش ماه" value={stats.monthSales || 0} icon={<TrendingUp className="w-4 h-4" />} color="blue" suffix="تومان" hint={`${toFaNum(stats.monthInvoices || 0)} فاکتور`} />
-        <StatCard label="سود ماه" value={stats.monthlyProfit || 0} icon={<Coins className="w-4 h-4" />} color={stats.monthlyProfit >= 0 ? 'emerald' : 'red'} suffix="تومان" />
-        <StatCard label="مطالبات کل" value={stats.totalReceivable || 0} icon={<Receipt className="w-4 h-4" />} color="amber" suffix="تومان" hint={`${toFaNum(stats.overdueInstallments || 0)} قسط سررسید`} />
-        <StatCard label="موجودی بحرانی" value={stats.lowStockProducts || 0} icon={<AlertTriangle className="w-4 h-4" />} color="red" suffix="کالا" />
-        <StatCard label="پلن فعلی" value={TIER_LABELS[tier]} icon={<Crown className="w-4 h-4" />} color="purple" dir="rtl" />
+        <StatCard
+          label="فروش امروز"
+          value={stats.todaySales || 0}
+          icon={<Wallet className="w-4 h-4" />}
+          color="emerald"
+          suffix="تومان"
+          hint={`${toFaNum(stats.todayInvoices || 0)} فاکتور`}
+        />
+
+        <StatCard
+          label="فروش ماه"
+          value={stats.monthSales || 0}
+          icon={<TrendingUp className="w-4 h-4" />}
+          color="blue"
+          suffix="تومان"
+          hint={`${toFaNum(stats.monthInvoices || 0)} فاکتور`}
+        />
+
+        <StatCard
+          label="سود ماه"
+          value={stats.monthlyProfit || 0}
+          icon={<Coins className="w-4 h-4" />}
+          color={stats.monthlyProfit >= 0 ? 'emerald' : 'red'}
+          suffix="تومان"
+        />
+
+        <StatCard
+          label="مطالبات کل"
+          value={stats.totalReceivable || 0}
+          icon={<Receipt className="w-4 h-4" />}
+          color="amber"
+          suffix="تومان"
+          hint={`${toFaNum(stats.overdueInstallments || 0)} قسط سررسید`}
+        />
+
+        <StatCard
+          label="موجودی بحرانی"
+          value={stats.lowStockProducts || 0}
+          icon={<AlertTriangle className="w-4 h-4" />}
+          color="red"
+          suffix="کالا"
+        />
+
+        <StatCard
+          label="پلن فعلی"
+          value={TIER_LABELS[tier]}
+          icon={<Crown className="w-4 h-4" />}
+          color="purple"
+          dir="rtl"
+        />
       </div>
+
       {monthComparison && (
         <Card className={`border ${TIER_COLORS[tier].border} ${TIER_COLORS[tier].bg}`}>
           <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-3"><Activity className="w-4 h-4 text-emerald-600" /><p className="text-xs sm:text-sm font-bold text-gray-700">مقایسه با ماه قبل</p></div>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className="w-4 h-4 text-emerald-600" />
+              <p className="text-xs sm:text-sm font-bold text-gray-700">مقایسه با ماه قبل</p>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="bg-white rounded-lg p-3 border border-gray-100">
-                <div className="flex items-center justify-between mb-1"><span className="text-[10px] text-gray-500">فروش</span>{growthBadge(monthComparison.salesGrowth, '')}</div>
-                <div className="flex items-center justify-between text-xs"><span className="text-gray-600">این ماه: <span className="font-bold text-emerald-700" dir="ltr">{formatNumberFa(monthComparison.currentMonth.sales)}</span></span></div>
-                <div className="flex items-center justify-between text-xs mt-0.5"><span className="text-gray-500">ماه قبل: <span className="font-medium text-gray-600" dir="ltr">{formatNumberFa(monthComparison.previousMonth.sales)}</span></span></div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-gray-500">فروش</span>
+                  {growthBadge(monthComparison.salesGrowth, '')}
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">
+                    این ماه:
+                    <span className="font-bold text-emerald-700" dir="ltr">
+                      {formatNumberFa(monthComparison.currentMonth.sales)}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs mt-0.5">
+                  <span className="text-gray-500">
+                    ماه قبل:
+                    <span className="font-medium text-gray-600" dir="ltr">
+                      {formatNumberFa(monthComparison.previousMonth.sales)}
+                    </span>
+                  </span>
+                </div>
               </div>
+
               <div className="bg-white rounded-lg p-3 border border-gray-100">
-                <div className="flex items-center justify-between mb-1"><span className="text-[10px] text-gray-500">تعداد فاکتور</span>{growthBadge(monthComparison.invoicesGrowth, '')}</div>
-                <div className="flex items-center justify-between text-xs"><span className="text-gray-600">این ماه: <span className="font-bold text-blue-700" dir="ltr">{formatNumberFa(monthComparison.currentMonth.invoices)}</span></span></div>
-                <div className="flex items-center justify-between text-xs mt-0.5"><span className="text-gray-500">ماه قبل: <span className="font-medium text-gray-600" dir="ltr">{formatNumberFa(monthComparison.previousMonth.invoices)}</span></span></div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-gray-500">تعداد فاکتور</span>
+                  {growthBadge(monthComparison.invoicesGrowth, '')}
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">
+                    این ماه:
+                    <span className="font-bold text-blue-700" dir="ltr">
+                      {formatNumberFa(monthComparison.currentMonth.invoices)}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs mt-0.5">
+                  <span className="text-gray-500">
+                    ماه قبل:
+                    <span className="font-medium text-gray-600" dir="ltr">
+                      {formatNumberFa(monthComparison.previousMonth.invoices)}
+                    </span>
+                  </span>
+                </div>
               </div>
+
               <div className="bg-white rounded-lg p-3 border border-gray-100">
-                <div className="flex items-center justify-between mb-1"><span className="text-[10px] text-gray-500">سود</span>{growthBadge(monthComparison.profitGrowth, '')}</div>
-                <div className="flex items-center justify-between text-xs"><span className="text-gray-600">این ماه: <span className="font-bold text-emerald-700" dir="ltr">{formatNumberFa(monthComparison.currentMonth.profit)}</span></span></div>
-                <div className="flex items-center justify-between text-xs mt-0.5"><span className="text-gray-500">ماه قبل: <span className="font-medium text-gray-600" dir="ltr">{formatNumberFa(monthComparison.previousMonth.profit)}</span></span></div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-gray-500">سود</span>
+                  {growthBadge(monthComparison.profitGrowth, '')}
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">
+                    این ماه:
+                    <span className="font-bold text-emerald-700" dir="ltr">
+                      {formatNumberFa(monthComparison.currentMonth.profit)}
+                    </span>
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs mt-0.5">
+                  <span className="text-gray-500">
+                    ماه قبل:
+                    <span className="font-medium text-gray-600" dir="ltr">
+                      {formatNumberFa(monthComparison.previousMonth.profit)}
+                    </span>
+                  </span>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <ChartCard title="روند فروش ۳۰ روز اخیر" icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} className="lg:col-span-2">
-          {chartData.length === 0 ? <EmptyState message="داده‌ای موجود نیست" /> : (
+        <ChartCard
+          title="روند فروش ۳۰ روز اخیر"
+          icon={<TrendingUp className="w-4 h-4 text-emerald-600" />}
+          className="lg:col-span-2"
+        >
+          {chartData.length === 0 ? (
+            <EmptyState message="داده‌ای موجود نیست" />
+          ) : (
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                <defs><linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
+                <defs>
+                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6b7280' }} interval={4} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={(v) => toFaNum(Math.round(v / 1000)) + 'k'} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                  tickFormatter={(v) => toFaNum(Math.round(v / 1000)) + 'k'}
+                  tickLine={false}
+                  axisLine={{ stroke: '#e5e7eb' }}
+                />
                 <Tooltip content={<PersianChartTooltip formatter={(v: number) => formatNumberFa(v) + ' تومان'} />} />
                 <Area type="monotone" dataKey="فروش" stroke="#047857" strokeWidth={2} fill="url(#colorSales)" />
               </AreaChart>
             </ResponsiveContainer>
           )}
         </ChartCard>
+
         <ChartCard title="توزیع روش‌های پرداخت (ماه جاری)" icon={<PieIcon className="w-4 h-4 text-purple-600" />}>
-          {pieData.length === 0 ? <EmptyState message="داده‌ای موجود نیست" /> : (
+          {pieData.length === 0 ? (
+            <EmptyState message="داده‌ای موجود نیست" />
+          ) : (
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={80} paddingAngle={2}>{pieData.map((entry: any, idx: number) => (<Cell key={idx} fill={entry.color} />))}</Pie>
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={45}
+                  outerRadius={80}
+                  paddingAngle={2}
+                >
+                  {pieData.map((entry: any, idx: number) => (
+                    <Cell key={idx} fill={entry.color} />
+                  ))}
+                </Pie>
+
                 <Tooltip content={<PersianChartTooltip formatter={(v: number) => toFaNum(v) + '٪'} />} />
                 <Legend iconType="circle" layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: 10, fontFamily: 'Tahoma' }} />
               </PieChart>
@@ -546,13 +1846,26 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
           )}
         </ChartCard>
       </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ChartCard title="پرفروش‌ترین کالاها ماه" icon={<Package className="w-4 h-4 text-indigo-600" />}>
-          {topProducts.length === 0 ? <EmptyState message="داده‌ای موجود نیست" /> : (
+          {topProducts.length === 0 ? (
+            <EmptyState message="داده‌ای موجود نیست" />
+          ) : (
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={topProducts.map((p: any) => ({ name: p.name, فروش: p.totalSales, تعداد: p.totalQuantity }))} layout="vertical" margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+              <BarChart
+                data={topProducts.map((p: any) => ({ name: p.name, فروش: p.totalSales, تعداد: p.totalQuantity }))}
+                layout="vertical"
+                margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={(v) => toFaNum(Math.round(v / 1000)) + 'k'} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                  tickFormatter={(v) => toFaNum(Math.round(v / 1000)) + 'k'}
+                  tickLine={false}
+                  axisLine={{ stroke: '#e5e7eb' }}
+                />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#374151' }} width={80} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
                 <Tooltip content={<PersianChartTooltip formatter={(v: number) => formatNumberFa(v) + ' تومان'} />} />
                 <Bar dataKey="فروش" fill="#6366f1" radius={[0, 4, 4, 0]} />
@@ -560,15 +1873,25 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
             </ResponsiveContainer>
           )}
         </ChartCard>
+
         <ChartCard title="کالاهای رو به اتمام" icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}>
           {lowStockProducts.length === 0 ? (
-            <div className="py-8 text-center"><CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500" /><p className="text-sm text-emerald-600">همه کالاها موجود هستند ✓</p></div>
+            <div className="py-8 text-center">
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500" />
+              <p className="text-sm text-emerald-600">همه کالاها موجود هستند ✓</p>
+            </div>
           ) : (
             <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
               {lowStockProducts.slice(0, 8).map((p: any, idx: number) => (
                 <div key={idx} className="flex items-center justify-between p-2 bg-amber-50/50 rounded-md border border-amber-100">
-                  <div className="flex-1 min-w-0"><p className="text-xs font-medium text-gray-700 truncate">{p.name}</p><p className="text-[10px] text-gray-400">{p.category}</p></div>
-                  <Badge variant="outline" className="text-[9px] bg-red-100 text-red-700 border-red-200 mr-2">{toFaNum(p.currentStock)} {p.unit}</Badge>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-700 truncate">{p.name}</p>
+                    <p className="text-[10px] text-gray-400">{p.category}</p>
+                  </div>
+
+                  <Badge variant="outline" className="text-[9px] bg-red-100 text-red-700 border-red-200 mr-2">
+                    {toFaNum(p.currentStock)} {p.unit}
+                  </Badge>
                 </div>
               ))}
             </div>
@@ -579,17 +1902,23 @@ function DashboardOverviewReport({ tier, dashboardData }: { tier: PlanTier; dash
   )
 }
 
-
 // ============================================================================
-//  REPORT 3: Customer Statement
+//  REPORT 3: Customer Statement — Fiscal Year Aware
 // ============================================================================
-
-function CustomerStatementReport({ invoices, customers }: { invoices: any[]; customers: any[] }) {
+function CustomerStatementReport({
+  invoices,
+  customers,
+  dateRange,
+  onDateRangeChange,
+  fiscalYearRange,
+}: {
+  invoices: any[]
+  customers: any[]
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: daysAgoISO(90),
-    to: todayGregorianISO(),
-  })
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
 
@@ -612,7 +1941,7 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
       return (invCustomerId && invCustomerId === customer.id) || (targetName && invCustomerName === targetName)
     }).filter((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return false
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
+      const d = toISODate(getInvoiceDate(inv))
       if (!d) return false
       return d >= dateRange.from && d <= dateRange.to
     })
@@ -644,7 +1973,6 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
       }
     })
     t.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
     let running = 0
     return t.map((x) => { running += x.debit - x.credit; return { ...x, balance: running } })
   }, [customerInvoices])
@@ -654,10 +1982,8 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
   const customerBalance = customer?.currentBalance || customer?.balance || 0
   const customerCreditLimit = customer?.creditLimit || 0
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
   const totalDebit = transactions.reduce((s, t) => s + t.debit, 0)
   const totalCredit = transactions.reduce((s, t) => s + t.credit, 0)
-
   const paginatedTransactions = paginate(transactions, page)
 
   const handleExportExcel = () => {
@@ -753,10 +2079,14 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
             </SelectContent>
           </Select>
         </div>
-        <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
+        <PersianDateRangePicker
+          value={dateRange}
+          onChange={onDateRangeChange}
+          minDate={fiscalYearRange?.from}
+          maxDate={fiscalYearRange?.to}
+        />
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={transactions.length === 0} />
       </div>
-
       {customer && (
         <Card className="border-gray-200">
           <CardContent className="p-3 sm:p-4">
@@ -784,7 +2114,6 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
           </CardContent>
         </Card>
       )}
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -795,7 +2124,6 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
               totalCount={transactions.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده تراکنش‌ها، دکمه «نمایش لیست» را بزنید" />
           ) : transactions.length === 0 ? (
@@ -849,20 +2177,27 @@ function CustomerStatementReport({ invoices, customers }: { invoices: any[]; cus
 }
 
 // ============================================================================
-//  REPORT 4: Simple Profit & Loss — سود و زیان ساده (تک‌دفتری)
+//  REPORT 4: Simple Profit & Loss
 // ============================================================================
-
-function SimpleProfitLossReport({ tier, invoices, journalEntries }: { tier: PlanTier; invoices: any[]; journalEntries?: any[] }) {
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: firstDayOfCurrentJalaliMonthISO(),
-    to: todayGregorianISO(),
-  })
-
+function SimpleProfitLossReport({
+  tier,
+  invoices,
+  journalEntries,
+  dateRange,
+  onDateRangeChange,
+  fiscalYearRange,
+}: {
+  tier: PlanTier
+  invoices: any[]
+  journalEntries?: any[]
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const data = useMemo(
     () => computePnLFromInvoices(invoices, dateRange.from, dateRange.to, journalEntries),
     [invoices, dateRange.from, dateRange.to, journalEntries]
   )
-
   const totalExpenses = data.cogs + data.totalOperatingExpenses + data.otherExpenses
   const isProfit = data.netProfit >= 0
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
@@ -932,12 +2267,15 @@ function SimpleProfitLossReport({ tier, invoices, journalEntries }: { tier: Plan
           گزارش تک‌دفتری — پلن {TIER_LABELS[tier]}
         </Badge>
       </div>
-
       <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
+        <PersianDateRangePicker
+          value={dateRange}
+          onChange={onDateRangeChange}
+          minDate={fiscalYearRange?.from}
+          maxDate={fiscalYearRange?.to}
+        />
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={data.invoiceCount === 0} />
       </div>
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard label="درآمد فروش" value={data.netSales} icon={<TrendingUp className="w-4 h-4" />} color="emerald" suffix="تومان" />
         <StatCard label="مجموع هزینه‌ها" value={totalExpenses} icon={<TrendingDown className="w-4 h-4" />} color="red" suffix="تومان" />
@@ -950,7 +2288,6 @@ function SimpleProfitLossReport({ tier, invoices, journalEntries }: { tier: Plan
           suffix="تومان"
         />
       </div>
-
       <Card className="border-gray-200">
         <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6 pt-3 sm:pt-6">
           <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
@@ -1009,15 +2346,23 @@ function SimpleProfitLossReport({ tier, invoices, journalEntries }: { tier: Plan
 // ============================================================================
 //  REPORT 5: Standard Profit & Loss
 // ============================================================================
-
-function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: PlanTier; invoices: any[]; journalEntries?: any[] }) {
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: firstDayOfCurrentJalaliMonthISO(),
-    to: todayGregorianISO(),
-  })
+function StandardProfitLossReport({
+  tier,
+  invoices,
+  journalEntries,
+  dateRange,
+  onDateRangeChange,
+  fiscalYearRange,
+}: {
+  tier: PlanTier
+  invoices: any[]
+  journalEntries?: any[]
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [selectedBranch, setSelectedBranch] = useState<string>('all')
   const [branches, setBranches] = useState<any[]>([])
-
   const isEnterprise = tier === 'enterprise'
 
   useEffect(() => {
@@ -1030,7 +2375,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
     () => computePnLFromInvoices(invoices, dateRange.from, dateRange.to, journalEntries),
     [invoices, dateRange.from, dateRange.to, journalEntries]
   )
-
   const isProfit = data.netProfit >= 0
   const grossMargin = data.netSales > 0 ? (data.grossProfit / data.netSales) * 100 : 0
   const netMargin = data.netSales > 0 ? (data.netProfit / data.netSales) * 100 : 0
@@ -1110,9 +2454,13 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
           </Badge>
         )}
       </div>
-
       <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
+        <PersianDateRangePicker
+          value={dateRange}
+          onChange={onDateRangeChange}
+          minDate={fiscalYearRange?.from}
+          maxDate={fiscalYearRange?.to}
+        />
         {isEnterprise && (
           <div className="w-[150px] sm:w-[180px]">
             <Select value={selectedBranch} onValueChange={setSelectedBranch}>
@@ -1129,7 +2477,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
         )}
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={data.invoiceCount === 0} />
       </div>
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard label="درآمد خالص فروش" value={data.netSales} icon={<TrendingUp className="w-4 h-4" />} color="emerald" suffix="تومان" />
         <StatCard label="سود ناخالص" value={data.grossProfit} icon={<Coins className="w-4 h-4" />} color="blue" suffix="تومان" hint={`حاشیه: ${toFaNum(Math.round(grossMargin))}٪`} />
@@ -1143,7 +2490,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
           hint={`حاشیه: ${toFaNum(Math.round(netMargin))}٪`}
         />
       </div>
-
       <Card className="border-gray-200">
         <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6 pt-3 sm:pt-6">
           <CardTitle className="text-sm sm:text-lg flex items-center gap-2">
@@ -1179,7 +2525,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
                 <span className="text-xs sm:text-sm font-bold text-gray-900">درآمد خالص فروش</span>
                 <span className="text-xs sm:text-sm font-bold text-emerald-700" dir="ltr">{formatNumberFa(data.netSales)}</span>
               </div>
-
               <div className="py-2 border-b-2 border-gray-200 mt-3">
                 <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">۲. بهای تمام شده کالای فروش رفته</p>
               </div>
@@ -1191,7 +2536,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
                 <span className="text-xs sm:text-sm font-bold text-gray-900">سود ناخالص</span>
                 <span className="text-xs sm:text-sm font-bold text-blue-700" dir="ltr">{formatNumberFa(data.grossProfit)}</span>
               </div>
-
               <div className="py-2 border-b-2 border-gray-200 mt-3">
                 <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">۳. هزینه‌های عملیاتی</p>
               </div>
@@ -1209,7 +2553,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
                 <span className="text-xs sm:text-sm font-bold text-gray-900">سود عملیاتی</span>
                 <span className="text-xs sm:text-sm font-bold text-amber-700" dir="ltr">{formatNumberFa(data.operatingProfit)}</span>
               </div>
-
               <div className="py-2 border-b-2 border-gray-200 mt-3">
                 <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">۴. سایر درآمدها و هزینه‌ها</p>
               </div>
@@ -1225,7 +2568,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
                 <span className="text-xs sm:text-sm font-bold text-gray-900">سود قبل از مالیات</span>
                 <span className="text-xs sm:text-sm font-bold text-gray-900" dir="ltr">{formatNumberFa(data.profitBeforeTax)}</span>
               </div>
-
               <div className="py-2 border-b-2 border-gray-200 mt-3">
                 <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">۵. مالیات بر درآمد</p>
               </div>
@@ -1233,7 +2575,6 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
                 <span className="text-xs sm:text-sm text-gray-700 pr-4">مالیات بر درآمد (۲۵٪)</span>
                 <span className="text-xs sm:text-sm font-medium text-red-600" dir="ltr">({formatNumberFa(data.incomeTax)})</span>
               </div>
-
               <div className={`flex justify-between items-center py-4 px-3 -mx-3 rounded-lg mt-3 ${isProfit ? 'bg-gradient-to-l from-emerald-50 to-emerald-100/50 border border-emerald-300' : 'bg-gradient-to-l from-red-50 to-red-100/50 border border-red-300'}`}>
                 <span className="text-sm sm:text-base font-bold text-gray-900">
                   {isProfit ? 'سود خالص دوره' : 'زیان خالص دوره'}
@@ -1251,10 +2592,15 @@ function StandardProfitLossReport({ tier, invoices, journalEntries }: { tier: Pl
 }
 
 // ============================================================================
-//  REPORT 6: Inventory — موجودی کالاها (v6.9 اصلاح‌شده با فیلتر هوشمند انبار)
+//  REPORT 6: Inventory
 // ============================================================================
-
-function InventoryReport() {
+function InventoryReport({
+  fiscalYearId,
+  asOf,
+}: {
+  fiscalYearId?: string | null
+  asOf?: string
+}) {
   const [loading, setLoading] = useState(true)
   const [products, setProducts] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
@@ -1264,7 +2610,6 @@ function InventoryReport() {
   const [error, setError] = useState<string | null>(null)
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('all')
 
@@ -1298,7 +2643,8 @@ function InventoryReport() {
       params.set('summary', 'true')
       if (selectedCategory !== 'all') params.set('categoryId', selectedCategory)
       if (selectedWarehouse !== 'all') params.set('warehouseId', selectedWarehouse)
-
+      if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
+      if (asOf) params.set('asOf', asOf)
       const res = await fetch(`/api/reports/inventory?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await res.json()
       if (data.success) {
@@ -1312,7 +2658,7 @@ function InventoryReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [selectedCategory, selectedWarehouse])
+  }, [selectedCategory, selectedWarehouse, fiscalYearId, asOf])
 
   useEffect(() => {
     const fetchWarehouses = async () => {
@@ -1341,7 +2687,6 @@ function InventoryReport() {
 
   const filteredProducts = useMemo(() => {
     let result = enrichedProducts
-
     if (selectedWarehouse !== 'all') {
       result = result.filter((p: any) => {
         if (p.warehouseStocks && Array.isArray(p.warehouseStocks)) {
@@ -1350,26 +2695,21 @@ function InventoryReport() {
         return true
       })
     }
-
     if (showOnlyLowStock) {
       result = result.filter((p: any) => p.stockStatus === 'low' || p.stockStatus === 'out')
     }
-
     return result
   }, [enrichedProducts, selectedWarehouse, showOnlyLowStock])
-  
 
   const calculatedSummary = useMemo(() => {
     if (!summary) return null
     if (filteredProducts.length === 0) return { ...summary, totalProducts: 0, totalStockValue: 0, totalRetailValue: 0, totalPotentialProfit: 0, lowStockCount: 0, outOfStockCount: 0 }
-
     const totalProducts = filteredProducts.length
     const totalStockValue = filteredProducts.reduce((sum, p) => sum + (p.stockValue || 0), 0)
     const totalRetailValue = filteredProducts.reduce((sum, p) => sum + (p.retailValue || 0), 0)
     const totalPotentialProfit = filteredProducts.reduce((sum, p) => sum + (p.potentialProfit || 0), 0)
     const lowStockCount = filteredProducts.filter((p) => p.stockStatus === 'low').length
     const outOfStockCount = filteredProducts.filter((p) => p.stockStatus === 'out').length
-
     return {
       ...summary,
       totalProducts,
@@ -1428,7 +2768,6 @@ function InventoryReport() {
               </div>
             </div>
           </div>
-
           <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1441,7 +2780,6 @@ function InventoryReport() {
               </div>
             </div>
           </div>
-
           <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1454,7 +2792,6 @@ function InventoryReport() {
               </div>
             </div>
           </div>
-
           <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1467,7 +2804,6 @@ function InventoryReport() {
               </div>
             </div>
           </div>
-
           <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1480,7 +2816,6 @@ function InventoryReport() {
               </div>
             </div>
           </div>
-
           <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-2.5 sm:p-3 text-white shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1495,7 +2830,6 @@ function InventoryReport() {
           </div>
         </div>
       )}
-
       <div className="flex items-center gap-2 flex-wrap">
         <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
           <SelectTrigger className="w-48 h-8 text-xs">
@@ -1509,7 +2843,6 @@ function InventoryReport() {
             ))}
           </SelectContent>
         </Select>
-
         <Select value={selectedCategory} onValueChange={setSelectedCategory}>
           <SelectTrigger className="w-48 h-8 text-xs">
             <SelectValue placeholder="همه دسته‌ها" />
@@ -1521,7 +2854,6 @@ function InventoryReport() {
             ))}
           </SelectContent>
         </Select>
-        
         <label className="flex items-center gap-1.5 text-xs cursor-pointer">
           <input type="checkbox" checked={showOnlyLowStock} onChange={(e) => setShowOnlyLowStock(e.target.checked)} className="w-3.5 h-3.5" />
           <span>فقط کالاهای رو به اتمام و ناموجود</span>
@@ -1533,7 +2865,6 @@ function InventoryReport() {
           disabled={filteredProducts.length === 0}
         />
       </div>
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -1544,7 +2875,6 @@ function InventoryReport() {
               totalCount={filteredProducts.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : filteredProducts.length === 0 ? (
@@ -1599,18 +2929,28 @@ function InventoryReport() {
 }
 
 // ============================================================================
-//  REPORT 7: VAT
+//  REPORT 7: VAT — Fiscal Year Aware
 // ============================================================================
-
-function VATReport() {
+function VATReport({
+  fiscalYearId,
+  dateRange,
+  onDateRangeChange,
+  fiscalYearRange,
+}: {
+  fiscalYearId?: string | null
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [loading, setLoading] = useState(true)
   const [invoices, setInvoices] = useState<any[]>([])
   const [summary, setSummary] = useState<any>(null)
-  const [dateFrom, setDateFrom] = useState(firstDayOfCurrentJalaliMonthISO())
-  const [dateTo, setDateTo] = useState(todayGregorianISO())
   const [error, setError] = useState<string | null>(null)
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
+
+  const dateFrom = dateRange.from
+  const dateTo = dateRange.to
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -1619,7 +2959,7 @@ function VATReport() {
       const params = new URLSearchParams()
       if (dateFrom) params.set('from', dateFrom)
       if (dateTo) params.set('to', dateTo)
-
+      if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
       const res = await fetch(`/api/reports/vat?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await res.json()
       if (data.success) {
@@ -1632,7 +2972,7 @@ function VATReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [dateFrom, dateTo])
+  }, [dateFrom, dateTo, fiscalYearId])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { setListVisible(false); setPage(1) }, [dateFrom, dateTo])
@@ -1708,7 +3048,6 @@ function VATReport() {
           <StatCard label="قابل پرداخت" value={summary.vatPayable} icon={<Building2 className="w-4 h-4" />} color="purple" suffix="تومان" />
         </div>
       )}
-
       {summary?.taxRates?.length > 0 && (
         <ChartCard title="تفکیک نرخ‌های مالیاتی" icon={<Percent className="w-4 h-4 text-gray-500" />}>
           <Table dir="rtl">
@@ -1733,11 +3072,12 @@ function VATReport() {
           </Table>
         </ChartCard>
       )}
-
       <div className="flex items-center gap-2 flex-wrap">
         <PersianDateRangePicker
-          value={{ from: dateFrom, to: dateTo }}
-          onChange={(v) => { setDateFrom(v.from); setDateTo(v.to) }}
+          value={dateRange}
+          onChange={onDateRangeChange}
+          minDate={fiscalYearRange?.from}
+          maxDate={fiscalYearRange?.to}
         />
         <div className="flex-1" />
         <ReportActions
@@ -1746,7 +3086,6 @@ function VATReport() {
           disabled={invoices.length === 0}
         />
       </div>
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -1757,13 +3096,12 @@ function VATReport() {
               totalCount={invoices.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده فاکتورها، دکمه «نمایش لیست» را بزنید" />
           ) : invoices.length === 0 ? (
             <EmptyState message="فاکتوری در این بازه یافت نشد" />
           ) : (
-             <div className="overflow-x-auto -mx-3 sm:-mx-4">
+            <div className="overflow-x-auto -mx-3 sm:-mx-4">
               <Table dir="rtl">
                 <TableHeader>
                   <TableRow className="bg-gray-50">
@@ -1808,7 +3146,6 @@ function VATReport() {
               </Table>
               <Pagination page={page} total={invoices.length} onPageChange={setPage} />
             </div>
-
           )}
         </CardContent>
       </Card>
@@ -1817,18 +3154,16 @@ function VATReport() {
 }
 
 // ============================================================================
-//  REPORT 8: Cashier Performance — عملکرد صندوق‌دار (پلن حرفه‌ای+)
+//  REPORT 8: Cashier Performance
 // ============================================================================
-
 function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; dateRange: DateRange }) {
   const [selectedCashier, setSelectedCashier] = useState<string>('all')
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-
   useEffect(() => { setListVisible(false); setPage(1) }, [selectedCashier, dateRange.from, dateRange.to])
 
- const stats = useMemo(() => {
-    const map: Record<string, { 
+  const stats = useMemo(() => {
+    const map: Record<string, {
       name: string
       count: number
       total: number
@@ -1841,29 +3176,26 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
     }> = {}
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
+      const d = toISODate(getInvoiceDate(inv))
       if (!d || d < dateRange.from || d > dateRange.to) return
       const name = getInvoiceCashier(inv)
-      if (!map[name]) map[name] = { 
-        name, 
-        count: 0, 
-        total: 0, 
-        cash: 0, 
-        card: 0, 
-        check: 0, 
-        installment: 0, 
-        credit: 0, 
-        profit: 0 
+      if (!map[name]) map[name] = {
+        name,
+        count: 0,
+        total: 0,
+        cash: 0,
+        card: 0,
+        check: 0,
+        installment: 0,
+        credit: 0,
+        profit: 0
       }
       const total = getInvoiceTotal(inv)
       map[name].count++
       map[name].total += total
-      
-      // ★ محاسبه سود/زیان فروش: مبلغ فروش - بهای تمام شده
       const cogsAmount = Number(inv.cogsAmount) || 0
       const invoiceProfit = total - cogsAmount
       map[name].profit += invoiceProfit
-      
       const pt = getInvoicePaymentType(inv).toLowerCase()
       if (pt === 'cash') {
         map[name].cash += total
@@ -1874,7 +3206,6 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
       } else if (pt === 'installment') {
         map[name].installment += total
       } else {
-        // نسیه و سایر روش‌ها
         map[name].credit += total
       }
     })
@@ -1883,21 +3214,18 @@ function CashierPerformanceReport({ invoices, dateRange }: { invoices: any[]; da
 
   const cashiers = stats.map((s) => s.name)
   const filtered = selectedCashier === 'all' ? stats : stats.filter((c) => c.name === selectedCashier)
-
- const grandTotal = filtered.reduce((s, c) => s + c.total, 0)
-const grandCash = filtered.reduce((s, c) => s + c.cash, 0)
-const grandCard = filtered.reduce((s, c) => s + c.card, 0)
-const grandCheck = filtered.reduce((s, c) => s + c.check, 0)
-const grandInstallment = filtered.reduce((s, c) => s + c.installment, 0)
-const grandCredit = filtered.reduce((s, c) => s + c.credit, 0)
-const grandProfit = filtered.reduce((s, c) => s + c.profit, 0)
-const totalCount = filtered.reduce((s, c) => s + c.count, 0)
+  const grandTotal = filtered.reduce((s, c) => s + c.total, 0)
+  const grandCash = filtered.reduce((s, c) => s + c.cash, 0)
+  const grandCard = filtered.reduce((s, c) => s + c.card, 0)
+  const grandCheck = filtered.reduce((s, c) => s + c.check, 0)
+  const grandInstallment = filtered.reduce((s, c) => s + c.installment, 0)
+  const grandCredit = filtered.reduce((s, c) => s + c.credit, 0)
+  const grandProfit = filtered.reduce((s, c) => s + c.profit, 0)
+  const totalCount = filtered.reduce((s, c) => s + c.count, 0)
   const cashierFilterText = selectedCashier === 'all' ? 'همه صندوق‌داران' : selectedCashier
-
   const paginatedStats = paginate(filtered, page)
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
- const chartData = filtered.map((s) => ({
+  const chartData = filtered.map((s) => ({
     name: s.name,
     'فروش نقدی': s.cash,
     'فروش چکی': s.check,
@@ -1905,7 +3233,7 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
     'فروش نسیه': s.credit,
   }))
 
- const columns: ReportColumn[] = [
+  const columns: ReportColumn[] = [
     { key: 'name', label: 'نام صندوق‌دار', align: 'right' },
     { key: 'count', label: 'تعداد فاکتور', isNumeric: true, align: 'center' },
     { key: 'cash', label: 'فروش نقدی', isCurrency: true, align: 'left' },
@@ -1917,7 +3245,8 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
     { key: 'profit', label: 'سود/زیان فروش', isCurrency: true, align: 'left' },
     { key: 'avg', label: 'میانگین فاکتور', isCurrency: true, align: 'left' },
   ]
- const rows = filtered.map((s) => ({
+
+  const rows = filtered.map((s) => ({
     name: s.name,
     count: s.count,
     cash: s.cash,
@@ -1929,17 +3258,18 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
     profit: s.profit,
     avg: s.count > 0 ? Math.round(s.total / s.count) : 0,
   }))
+
   const meta: ReportMeta = {
     title: 'گزارش عملکرد صندوق‌داران',
     storeName: getStoreName(),
     period: periodText,
     filters: [{ label: 'صندوق‌دار', value: cashierFilterText }],
- summary: [
+    summary: [
       { label: 'تعداد صندوق‌دار', value: formatNumberFa(filtered.length), color: 'blue' },
       { label: 'تعداد فاکتور', value: formatNumberFa(totalCount), color: 'gray' },
       { label: 'فروش نقدی', value: formatNumberFa(grandCash), color: 'green' },
       { label: 'فروش چکی', value: formatNumberFa(grandCheck), color: 'amber' },
-  { label: 'فروش اقساطی', value: formatNumberFa(grandInstallment), color: 'blue' },
+      { label: 'فروش اقساطی', value: formatNumberFa(grandInstallment), color: 'blue' },
       { label: 'جمع فروش', value: formatNumberFa(grandTotal), color: 'green' },
       { label: 'سود/زیان فروش', value: formatNumberFa(grandProfit), color: grandProfit >= 0 ? 'green' : 'red' },
     ],
@@ -1964,8 +3294,7 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
           disabled={filtered.length === 0}
         />
       </div>
-
-   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
         <StatCard label="تعداد صندوق‌دار" value={filtered.length} icon={<UserCheck className="w-4 h-4" />} color="blue" dir="rtl" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
         <StatCard label="فروش نقدی" value={grandCash} icon={<Banknote className="w-4 h-4" />} color="emerald" suffix="تومان" />
@@ -1973,8 +3302,6 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
         <StatCard label="فروش اقساطی" value={grandInstallment} icon={<CalendarClock className="w-4 h-4" />} color="purple" suffix="تومان" />
         <StatCard label="جمع فروش" value={grandTotal} icon={<Wallet className="w-4 h-4" />} color="teal" suffix="تومان" />
       </div>
-
-      {/* کارت سود/زیان فروش */}
       <div className="grid grid-cols-1 gap-2">
         <div className={`rounded-xl p-3 text-white shadow-sm ${grandProfit >= 0 ? 'bg-gradient-to-br from-emerald-600 to-teal-600' : 'bg-gradient-to-br from-red-500 to-red-600'}`}>
           <div className="flex items-center justify-between">
@@ -1989,8 +3316,7 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
           </div>
         </div>
       </div>
-
-  {chartData.length > 0 && (
+      {chartData.length > 0 && (
         <ChartCard title="مقایسه عملکرد صندوق‌داران" icon={<BarChart3 className="w-4 h-4 text-blue-600" />}>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -2017,7 +3343,6 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
               totalCount={filtered.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : filtered.length === 0 ? (
@@ -2025,7 +3350,7 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
           ) : (
             <div className="overflow-x-auto -mx-3 sm:-mx-4">
               <Table>
-            <TableHeader>
+                <TableHeader>
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-right text-xs whitespace-nowrap">نام صندوق‌دار</TableHead>
                     <TableHead className="text-right text-xs whitespace-nowrap">تعداد فاکتور</TableHead>
@@ -2039,7 +3364,7 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
                     <TableHead className="text-right text-xs whitespace-nowrap hidden md:table-cell">میانگین فاکتور</TableHead>
                   </TableRow>
                 </TableHeader>
-             <TableBody>
+                <TableBody>
                   {paginatedStats.map((stat) => (
                     <TableRow key={stat.name} className="hover:bg-emerald-50/50">
                       <TableCell className="text-xs sm:text-sm font-medium whitespace-nowrap">{stat.name}</TableCell>
@@ -2068,37 +3393,70 @@ const totalCount = filtered.reduce((s, c) => s + c.count, 0)
 }
 
 // ============================================================================
-//  REPORT 9: Installments — گزارش اقساط (پلن حرفه‌ای+)
+//  REPORT 9: Installments
 // ============================================================================
-// ★★★ v2.0: رفع باگ فیلتر تاریخ + fallback هوشمند + لاگ دقیق
 // ============================================================================
-
-function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: DateRange }) {
+//  REPORT: Installments — Fiscal Year Aware
+// ============================================================================
+function InstallmentReport({
+  plans,
+  dateRange,
+  fiscalYearRange,
+}: {
+  plans: any[]
+  dateRange: DateRange
+  fiscalYearRange?: DateRange | null
+}) {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-  const [showAll, setShowAll] = useState(false)
 
-  const safeDateRange: DateRange = {
-    from: new Date(new Date().setFullYear(new Date().getFullYear() - 5)).toISOString().split('T')[0],
-    to: new Date(new Date().setFullYear(new Date().getFullYear() + 5)).toISOString().split('T')[0],
-  };
-
-  useEffect(() => { 
+  useEffect(() => {
     setListVisible(false)
-    setPage(1) 
-  }, [statusFilter, dateRange.from, dateRange.to])
+    setPage(1)
+  }, [statusFilter, dateRange.from, dateRange.to, fiscalYearRange?.from, fiscalYearRange?.to])
+
+  const effectiveRange = useMemo<DateRange>(() => {
+    const fyFrom = fiscalYearRange?.from
+    const fyTo = fiscalYearRange?.to
+
+    let from = dateRange.from || fyFrom || daysAgoISO(365 * 5)
+    let to = dateRange.to || fyTo || todayGregorianISO()
+
+    // ★ هرگز از سال مالی بیرون نرو
+    if (fyFrom && from < fyFrom) from = fyFrom
+    if (fyTo && to > fyTo) to = fyTo
+
+    // اگر بازه نامعتبر شد، به بازه سال مالی برگرد
+    if (from > to) {
+      from = fyFrom || from
+      to = fyTo || to
+    }
+
+    return { from, to }
+  }, [dateRange.from, dateRange.to, fiscalYearRange?.from, fiscalYearRange?.to])
 
   const allInstallments = useMemo(() => {
     const list: any[] = []
+
     if (!Array.isArray(plans)) return list
 
-    plans.forEach((plan) => {
+    plans.forEach((plan: any) => {
       const schedules = plan.schedules || plan.installments || []
-      const customerName = plan.customerName || 
-        (plan.invoice?.customer ? `${plan.invoice.customer.firstName || ''} ${plan.invoice.customer.lastName || ''}`.trim() : 'مشتری نامشخص')
+      const customerName =
+        plan.customerName ||
+        (plan.invoice?.customer
+          ? `${plan.invoice.customer.firstName || ''} ${plan.invoice.customer.lastName || ''}`.trim()
+          : 'مشتری نامشخص')
+
       const invoiceNumber = plan.invoiceNumber || plan.invoice?.number || '---'
-      const totalInstallments = plan.numberOfInstallments || plan.totalInstallments || schedules.length
+      const totalInstallments =
+        plan.numberOfInstallments || plan.totalInstallments || schedules.length
+
+      const planFiscalYearId =
+        plan.fiscalYearId ||
+        plan.invoice?.fiscalYearId ||
+        null
 
       schedules.forEach((s: any) => {
         list.push({
@@ -2107,51 +3465,86 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
           invoiceNumber,
           installmentNumber: s.installmentNumber,
           totalInstallments,
-          dueDate: s.dueDate,
+      dueDate: toISODate(s.dueDate),
           amount: Number(s.amount) || 0,
           paidAmount: Number(s.paidAmount) || 0,
           status: (s.status || 'PENDING').toUpperCase(),
+          fiscalYearId: s.fiscalYearId || planFiscalYearId || null,
         })
       })
     })
-    
-    console.log('[InstallmentReport] Total flattened installments:', list.length)
-    if (list.length > 0) {
-      console.log('[InstallmentReport] Sample installment:', list[0])
-      console.log('[InstallmentReport] Date range received:', {
-        from: dateRange.from,
-        to: dateRange.to,
-        fromDateObj: new Date(dateRange.from).toISOString(),
-        toDateObj: new Date(dateRange.to).toISOString(),
-      })
-    }
+
     return list
-  }, [plans, dateRange.from, dateRange.to])
+  }, [plans])
 
   const filtered = useMemo(() => {
-    return allInstallments.filter((ins) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    return allInstallments.filter((ins: any) => {
+    const due = toISODate(ins.dueDate)
+      if (!due) return false
+
+      // ★ فیلتر اصلی: سررسید باید داخل بازه مؤثر سال مالی باشد
+      if (due < effectiveRange.from || due > effectiveRange.to) return false
+
       if (statusFilter !== 'all') {
-        const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
-        const displayStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+        const dueDateObj = new Date(`${due}T00:00:00`)
+        const isOverdue = ins.status !== 'PAID' && dueDateObj < today
+        const displayStatus =
+          isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+
         if (displayStatus !== statusFilter) return false
       }
+
       return true
     })
-  }, [allInstallments, statusFilter])
+  }, [allInstallments, statusFilter, effectiveRange.from, effectiveRange.to])
 
-  console.log('[InstallmentReport] Final filtered installments:', filtered.length)
+const pendingCount = useMemo(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
 
-  const pendingCount = filtered.filter((i) => i.status === 'PENDING' && new Date(i.dueDate).setHours(0,0,0,0) >= new Date().setHours(0,0,0,0)).length
-  const overdueCount = filtered.filter((i) => i.status !== 'PAID' && new Date(i.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)).length
-  const paidCount = filtered.filter((i) => i.status === 'PAID').length
-  const totalRemaining = filtered.filter((i) => i.status !== 'PAID').reduce((s, i) => s + (i.amount - i.paidAmount), 0)
+  return filtered.filter((ins: any) => {
+    const due = toISODate(ins.dueDate)
+    if (!due) return false
+
+    const dueDateObj = new Date(`${due}T00:00:00`)
+    return ins.status === 'PENDING' && dueDateObj >= today
+  }).length
+}, [filtered])
+
+const overdueCount = useMemo(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  return filtered.filter((ins: any) => {
+    const due = toISODate(ins.dueDate)
+    if (!due) return false
+
+    const dueDateObj = new Date(`${due}T00:00:00`)
+    return ins.status !== 'PAID' && dueDateObj < today
+  }).length
+}, [filtered])
+
+  const paidCount = filtered.filter((ins: any) => ins.status === 'PAID').length
+
+  const totalRemaining = filtered
+    .filter((ins: any) => ins.status !== 'PAID')
+    .reduce((s: number, ins: any) => s + Math.max(0, ins.amount - ins.paidAmount), 0)
 
   const paginatedInstallments = paginate(filtered, page)
 
-  const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-  const statusText = statusFilter === 'all' ? 'همه وضعیت‌ها' :
-    statusFilter === 'PENDING' ? 'سررسید نشده' :
-    statusFilter === 'OVERDUE' ? 'سررسید گذشته' : 'پرداخت شده'
+  const periodText = `${formatJalaliLong(effectiveRange.from)} تا ${formatJalaliLong(effectiveRange.to)}`
+
+  const statusText =
+    statusFilter === 'all'
+      ? 'همه وضعیت‌ها'
+      : statusFilter === 'PENDING'
+        ? 'سررسید نشده'
+        : statusFilter === 'OVERDUE'
+          ? 'سررسید گذشته'
+          : 'پرداخت شده'
 
   const columns: ReportColumn[] = [
     { key: 'customerName', label: 'مشتری', align: 'right' },
@@ -2161,7 +3554,9 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
     { key: 'amount', label: 'مبلغ قسط', isCurrency: true, align: 'left' },
     { key: 'paidAmount', label: 'پرداخت شده', isCurrency: true, align: 'left' },
     {
-      key: 'status', label: 'وضعیت', align: 'center',
+      key: 'status',
+      label: 'وضعیت',
+      align: 'center',
       colorClass: (value: any) => {
         const v = String(value || '').toUpperCase()
         if (v === 'PAID' || v === 'پرداخت شده') return 'text-green-600'
@@ -2171,53 +3566,60 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
     },
   ]
 
-  // ✅ اصلاح: ترجمه وضعیت‌ها به فارسی برای چاپ و اکسل
-  const rows = filtered.map((ins) => {
-    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
-    const rawStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
-    const translatedStatus = rawStatus === 'PAID' ? 'پرداخت شده' : rawStatus === 'OVERDUE' ? 'سررسید گذشته' : 'در انتظار'
-    return {
-      customerName: ins.customerName,
-      invoiceNumber: ins.invoiceNumber,
-      installmentNumber: `${toFaNum(ins.installmentNumber)} از ${toFaNum(ins.totalInstallments)}`,
-      dueDate: formatJalaliLong(ins.dueDate),
-      amount: ins.amount,
-      paidAmount: ins.paidAmount,
-      status: translatedStatus,
-    }
-  })
+const rows = filtered.map((ins: any) => {
+  const due = toISODate(ins.dueDate)
+  const dueDateObj = new Date(`${due}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const isOverdue = ins.status !== 'PAID' && dueDateObj < today
+  const rawStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+  const translatedStatus =
+    rawStatus === 'PAID'
+      ? 'پرداخت شده'
+      : rawStatus === 'OVERDUE'
+        ? 'سررسید گذشته'
+        : 'در انتظار'
+
+  return {
+    customerName: ins.customerName,
+    invoiceNumber: ins.invoiceNumber,
+    installmentNumber: `${toFaNum(ins.installmentNumber)} از ${toFaNum(ins.totalInstallments)}`,
+    dueDate: formatJalaliLong(due),
+    amount: ins.amount,
+    paidAmount: ins.paidAmount,
+    status: translatedStatus,
+  }
+})
 
   const meta: ReportMeta = {
     title: 'گزارش اقساط',
     storeName: getStoreName(),
     period: periodText,
-    filters: [{ label: 'وضعیت', value: statusText }],
+    filters: [
+      { label: 'وضعیت', value: statusText },
+      ...(fiscalYearRange
+        ? [{ label: 'سال مالی', value: `${formatJalaliLong(fiscalYearRange.from)} تا ${formatJalaliLong(fiscalYearRange.to)}` }]
+        : []),
+    ],
     summary: [
       { label: 'اقساط پرداخت شده', value: formatNumberFa(paidCount), color: 'green' },
       { label: 'اقساط در انتظار', value: formatNumberFa(pendingCount), color: 'amber' },
       { label: 'اقساط سررسید گذشته', value: formatNumberFa(overdueCount), color: 'red' },
       { label: 'مانده اقساط', value: formatNumberFa(totalRemaining), color: 'gray' },
     ],
-    note: 'این گزارش بر اساس تاریخ سررسید اقساط در بازه مشخص شده تولید شده است.',
+    note: 'این گزارش فقط اقساطی را نشان می‌دهد که سررسید آن‌ها داخل سال مالی/بازه انتخابی است.',
   }
 
-  const dateFilterIsEmpty = useMemo(() => {
-    if (allInstallments.length === 0) return false
-    const dateFilteredOnly = allInstallments.filter((ins) => {
-      try {
-        const dueDateObj = new Date(ins.dueDate)
-        dueDateObj.setHours(0, 0, 0, 0)
-        const fromDate = new Date(dateRange.from)
-        fromDate.setHours(0, 0, 0, 0)
-        const toDate = new Date(dateRange.to)
-        toDate.setHours(23, 59, 59, 999)
-        return dueDateObj >= fromDate && dueDateObj <= toDate
-      } catch {
-        return false
-      }
+  useEffect(() => {
+    console.log('[InstallmentReport] FY-aware filter', {
+      fiscalYearRange: fiscalYearRange || null,
+      parentDateRange: dateRange,
+      effectiveRange,
+      allInstallmentsCount: allInstallments.length,
+      filteredCount: filtered.length,
     })
-    return dateFilteredOnly.length === 0
-  }, [allInstallments, dateRange.from, dateRange.to])
+  }, [fiscalYearRange, dateRange.from, dateRange.to, effectiveRange.from, effectiveRange.to, allInstallments.length, filtered.length])
 
   return (
     <div className="space-y-4">
@@ -2235,17 +3637,10 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
             </SelectContent>
           </Select>
         </div>
-        
-        <button
-          onClick={() => setShowAll(!showAll)}
-          className={`px-3 py-2 text-xs rounded-lg border transition-colors ${
-            showAll 
-              ? 'bg-purple-100 text-purple-700 border-purple-300' 
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          {showAll ? '✓ نمایش همه اقساط' : 'نمایش همه اقساط (بدون فیلتر تاریخ)'}
-        </button>
+
+        <div className="text-xs text-gray-600">
+          بازه مؤثر: <span className="font-bold">{periodText}</span>
+        </div>
 
         <ReportActions
           onExportExcel={() => exportToExcel(meta, columns, rows, 'گزارش-اقساط')}
@@ -2254,14 +3649,14 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
         />
       </div>
 
-      {dateFilterIsEmpty && allInstallments.length > 0 && !showAll && (
+      {allInstallments.length > 0 && filtered.length === 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div className="flex-1 text-xs text-amber-800">
-            <p className="font-bold mb-1">هیچ قسطی در بازه تاریخ انتخاب‌شده یافت نشد</p>
+            <p className="font-bold mb-1">هیچ قسطی با سررسید داخل این بازه یافت نشد</p>
             <p>
               {toFaNum(allInstallments.length)} قسط در سیستم وجود دارد، اما سررسید آنها در بازه {periodText} نیست.
-              برای مشاهده همه اقساط، دکمه «نمایش همه اقساط» را بزنید یا بازه تاریخ را گسترش دهید.
+              برای مشاهده همه، از فیلتر سراسری «همه سال‌ها» استفاده کنید.
             </p>
           </div>
         </div>
@@ -2279,9 +3674,9 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
           <div className="flex items-center justify-between gap-2 mb-3">
             <p className="text-sm font-medium text-gray-700">
               لیست اقساط ({formatNumberFa(filtered.length)} مورد)
-              {dateFilterIsEmpty && allInstallments.length > 0 && !showAll && (
-                <span className="text-xs text-amber-600 mr-2">
-                  (از {formatNumberFa(allInstallments.length)} قسط کل)
+              {allInstallments.length > 0 && (
+                <span className="text-xs text-gray-500 mr-2">
+                  از {formatNumberFa(allInstallments.length)} قسط کل
                 </span>
               )}
             </p>
@@ -2311,25 +3706,42 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedInstallments.map((ins) => {
-                    const isOverdue = ins.status !== 'PAID' && new Date(ins.dueDate).setHours(0,0,0,0) < new Date().setHours(0,0,0,0)
-                    const displayStatus = isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
-                    
+         {paginatedInstallments.map((ins: any) => {
+  const due = toISODate(ins.dueDate)
+  const dueDateObj = new Date(`${due}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const isOverdue = ins.status !== 'PAID' && dueDateObj < today
+  const displayStatus =
+    isOverdue && ins.status === 'PENDING' ? 'OVERDUE' : ins.status
+
                     return (
                       <TableRow key={ins.id} className="hover:bg-gray-50/50">
                         <TableCell className="text-sm font-medium">{ins.customerName}</TableCell>
                         <TableCell className="text-sm font-mono hidden sm:table-cell" dir="ltr">{ins.invoiceNumber}</TableCell>
-                        <TableCell className="text-sm text-center hidden md:table-cell">{formatNumberFa(ins.installmentNumber)} از {formatNumberFa(ins.totalInstallments)}</TableCell>
-                        <TableCell className="text-sm hidden lg:table-cell">{formatJalaliLong(ins.dueDate)}</TableCell>
+                        <TableCell className="text-sm text-center hidden md:table-cell">
+                          {formatNumberFa(ins.installmentNumber)} از {formatNumberFa(ins.totalInstallments)}
+                        </TableCell>
+                <TableCell className="text-sm hidden lg:table-cell">{formatJalaliLong(due)}</TableCell>
                         <TableCell className="text-sm font-mono text-left" dir="ltr">{formatNumberFa(ins.amount)}</TableCell>
                         <TableCell className="text-sm font-mono text-left hidden sm:table-cell" dir="ltr">{formatNumberFa(ins.paidAmount)}</TableCell>
                         <TableCell className="text-center">
-                          <Badge className={`text-[10px] ${
-                            displayStatus === 'PAID' ? 'bg-green-100 text-green-700 border-green-200' : 
-                            displayStatus === 'OVERDUE' ? 'bg-red-100 text-red-700 border-red-200' : 
-                            'bg-amber-100 text-amber-700 border-amber-200'
-                          }`} variant="outline">
-                            {displayStatus === 'PAID' ? 'پرداخت شده' : displayStatus === 'OVERDUE' ? 'سررسید گذشته' : 'در انتظار'}
+                          <Badge
+                            className={`text-[10px] ${
+                              displayStatus === 'PAID'
+                                ? 'bg-green-100 text-green-700 border-green-200'
+                                : displayStatus === 'OVERDUE'
+                                  ? 'bg-red-100 text-red-700 border-red-200'
+                                  : 'bg-amber-100 text-amber-700 border-amber-200'
+                            }`}
+                            variant="outline"
+                          >
+                            {displayStatus === 'PAID'
+                              ? 'پرداخت شده'
+                              : displayStatus === 'OVERDUE'
+                                ? 'سررسید گذشته'
+                                : 'در انتظار'}
                           </Badge>
                         </TableCell>
                       </TableRow>
@@ -2347,20 +3759,30 @@ function InstallmentReport({ plans, dateRange }: { plans: any[]; dateRange: Date
 }
 
 // ============================================================================
-//  REPORT 10: Balance Sheet — ترازنامه (پلن حرفه‌ای+)
+//  REPORT 10: Balance Sheet (local legacy) — Fiscal Year Aware
 // ============================================================================
-
-function BalanceSheetReport() {
+function BalanceSheetReport({
+  fiscalYearId,
+  asOf,
+  onAsOfChange,
+  fiscalYearRange,
+}: {
+  fiscalYearId?: string | null
+  asOf: string
+  onAsOfChange: (iso: string) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [asOf, setAsOf] = useState<string>(todayGregorianISO())
 
   const loadData = useCallback(async (asOfDate: string) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/reports/balance-sheet?asOf=${asOfDate}`, { headers: getAuthHeaders() })
+      const params = new URLSearchParams({ asOf: asOfDate })
+      if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
+      const res = await fetch(`/api/reports/balance-sheet?${params.toString()}`, { headers: getAuthHeaders() })
       const result = await res.json()
       if (result.success) setData(result.data)
       else setError(result.error || 'خطا در بارگذاری ترازنامه')
@@ -2368,7 +3790,7 @@ function BalanceSheetReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [])
+  }, [fiscalYearId])
 
   useEffect(() => { loadData(asOf) }, [loadData, asOf])
 
@@ -2388,7 +3810,6 @@ function BalanceSheetReport() {
     data.equity.accounts.forEach((a: any) => rows.push({ section: '', code: a.code, name: a.name, balance: a.balance }))
     rows.push({ section: 'جمع حقوق صاحبان سهام', code: '', name: '', balance: data.totalEquity })
     rows.push({ section: 'جمع بدهی‌ها و حقوق صاحبان سهام', code: '', name: '', balance: data.totalLiabilitiesAndEquity })
-
     const meta: ReportMeta = {
       title: 'ترازنامه',
       storeName: getStoreName(),
@@ -2422,7 +3843,6 @@ function BalanceSheetReport() {
     data.equity.accounts.forEach((a: any) => rows.push({ section: '', code: a.code, name: a.name, balance: a.balance }))
     rows.push({ section: 'جمع حقوق صاحبان سهام', code: '', name: '', balance: data.totalEquity })
     rows.push({ section: 'جمع بدهی‌ها و حقوق صاحبان سهام', code: '', name: '', balance: data.totalLiabilitiesAndEquity })
-
     const meta: ReportMeta = {
       title: 'ترازنامه',
       storeName: getStoreName(),
@@ -2457,12 +3877,18 @@ function BalanceSheetReport() {
         </div>
         <div className="flex items-center gap-2">
           <div style={{ width: 150 }}>
-            <PersianDatePicker value={asOf} onChange={(iso) => setAsOf(iso || todayGregorianISO())} placeholder="تاریخ مرجع" size="sm" />
+            <PersianDatePicker
+              value={asOf}
+              onChange={(iso) => onAsOfChange(iso || fiscalYearRange?.to || todayGregorianISO())}
+              placeholder="تاریخ مرجع"
+              size="sm"
+              minDate={fiscalYearRange?.from}
+              maxDate={fiscalYearRange?.to}
+            />
           </div>
           <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={!data} />
         </div>
       </div>
-
       <div className={`rounded-lg p-3 flex items-center gap-2 ${data.isBalanced ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
         {data.isBalanced ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" /> : <XCircle className="w-5 h-5 text-amber-600 shrink-0" />}
         <div className="flex-1">
@@ -2476,17 +3902,14 @@ function BalanceSheetReport() {
           </p>
         </div>
       </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard label="جمع دارایی‌ها" value={data.totalAssets} icon={<Wallet className="w-4 h-4" />} color="emerald" suffix="ریال" hint={`${toFaNum(data.assets.accounts.length)} حساب`} />
         <StatCard label="جمع بدهی‌ها" value={data.totalLiabilities} icon={<TrendingDown className="w-4 h-4" />} color="red" suffix="ریال" hint={`${toFaNum(data.liabilities.accounts.length)} حساب`} />
         <StatCard label="حقوق صاحبان سهام" value={data.totalEquity} icon={<Coins className="w-4 h-4" />} color="blue" suffix="ریال" hint={`${toFaNum(data.equity.accounts.length)} حساب`} />
       </div>
-
       <AccountSectionTable title="دارایی‌ها" icon={<Wallet className="w-4 h-4 text-emerald-600" />} accounts={data.assets.accounts} total={data.totalAssets} colorClass="emerald" />
       <AccountSectionTable title="بدهی‌ها" icon={<TrendingDown className="w-4 h-4 text-red-600" />} accounts={data.liabilities.accounts} total={data.totalLiabilities} colorClass="red" />
       <AccountSectionTable title="حقوق صاحبان سهام" icon={<Coins className="w-4 h-4 text-blue-600" />} accounts={data.equity.accounts} total={data.totalEquity} colorClass="blue" />
-
       <Card className="border-2 border-emerald-300 bg-gradient-to-l from-emerald-50/50 to-transparent">
         <CardContent className="p-4">
           <div className="grid grid-cols-2 gap-4">
@@ -2510,7 +3933,6 @@ function BalanceSheetReport() {
   )
 }
 
-// helper برای جدول بخش‌های ترازنامه
 function AccountSectionTable({
   title, icon, accounts, total, colorClass,
 }: {
@@ -2522,11 +3944,10 @@ function AccountSectionTable({
 }) {
   const colorMap = {
     emerald: { border: 'border-emerald-200', bg: 'bg-emerald-50', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700' },
-    red:     { border: 'border-red-200',     bg: 'bg-red-50',     text: 'text-red-700',     badge: 'bg-red-100 text-red-700' },
-    blue:    { border: 'border-blue-200',    bg: 'bg-blue-50',    text: 'text-blue-700',    badge: 'bg-blue-100 text-blue-700' },
+    red: { border: 'border-red-200', bg: 'bg-red-50', text: 'text-red-700', badge: 'bg-red-100 text-red-700' },
+    blue: { border: 'border-blue-200', bg: 'bg-blue-50', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-700' },
   }
   const c = colorMap[colorClass]
-
   return (
     <Card className="border-gray-200">
       <CardHeader className="p-3 pb-2">
@@ -2569,21 +3990,31 @@ function AccountSectionTable({
 }
 
 // ============================================================================
-//  REPORT 11: Aging — سنین بدهی (پلن حرفه‌ای+)
+//  REPORT 11: Aging — Fiscal Year Aware
 // ============================================================================
-
-function AgingReport() {
+function AgingReport({
+  fiscalYearId,
+  asOf,
+  onAsOfChange,
+  fiscalYearRange,
+}: {
+  fiscalYearId?: string | null
+  asOf: string
+  onAsOfChange: (iso: string) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [asOf, setAsOf] = useState<string>(todayGregorianISO())
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null)
 
   const loadData = useCallback(async (asOfDate: string) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/reports/aging?asOf=${asOfDate}`, { headers: getAuthHeaders() })
+      const params = new URLSearchParams({ asOf: asOfDate })
+      if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
+      const res = await fetch(`/api/reports/aging?${params.toString()}`, { headers: getAuthHeaders() })
       const result = await res.json()
       if (result.success) setData(result.data)
       else setError(result.error || 'خطا در بارگذاری گزارش سنین بدهی')
@@ -2591,7 +4022,7 @@ function AgingReport() {
       setError(err?.message || 'خطا در ارتباط با سرور')
     }
     setLoading(false)
-  }, [])
+  }, [fiscalYearId])
 
   useEffect(() => { loadData(asOf) }, [loadData, asOf])
 
@@ -2600,10 +4031,10 @@ function AgingReport() {
   if (!data) return null
 
   const bucketColors: Record<string, { bg: string; text: string; border: string; cell: string }> = {
-    '0-30':  { bg: 'bg-emerald-50',  text: 'text-emerald-700',  border: 'border-emerald-200',  cell: 'text-emerald-700' },
-    '31-60': { bg: 'bg-amber-50',    text: 'text-amber-700',    border: 'border-amber-200',    cell: 'text-amber-700' },
-    '61-90': { bg: 'bg-orange-50',   text: 'text-orange-700',   border: 'border-orange-200',   cell: 'text-orange-700' },
-    '90+':   { bg: 'bg-red-50',      text: 'text-red-700',      border: 'border-red-200',      cell: 'text-red-700' },
+    '0-30': { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', cell: 'text-emerald-700' },
+    '31-60': { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', cell: 'text-amber-700' },
+    '61-90': { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', cell: 'text-orange-700' },
+    '90+': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', cell: 'text-red-700' },
   }
 
   const handleExportExcel = () => {
@@ -2692,12 +4123,18 @@ function AgingReport() {
         </div>
         <div className="flex items-center gap-2">
           <div style={{ width: 150 }}>
-            <PersianDatePicker value={asOf} onChange={(iso) => setAsOf(iso || todayGregorianISO())} placeholder="تاریخ مرجع" size="sm" />
+            <PersianDatePicker
+              value={asOf}
+              onChange={(iso) => onAsOfChange(iso || fiscalYearRange?.to || todayGregorianISO())}
+              placeholder="تاریخ مرجع"
+              size="sm"
+              minDate={fiscalYearRange?.from}
+              maxDate={fiscalYearRange?.to}
+            />
           </div>
           <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={!hasData} />
         </div>
       </div>
-
       {!hasData ? (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
           <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
@@ -2725,7 +4162,6 @@ function AgingReport() {
               )
             })}
           </div>
-
           <Card className="border-gray-200">
             <CardHeader className="p-3 pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -2798,7 +4234,7 @@ function AgingReport() {
                                       </div>
                                       <div className="flex items-center gap-3">
                                         <span className="text-gray-500">سن: {toFaNum(d.ageDays)} روز</span>
-                                        <Badge className={`text-[9px] ${bucketColors[d.bucket].bg} ${bucketColors[d.bucket].text} border-0`}>
+                                        <Badge className={`text-[9px] ${bucketColors[d.bucket]?.bg || 'bg-gray-100'} ${bucketColors[d.bucket]?.text || 'text-gray-700'} border-0`}>
                                           {data.bucketRanges.find((b: any) => b.key === d.bucket)?.label}
                                         </Badge>
                                         <span className="font-mono font-bold text-gray-800">{formatNumberFa(d.remainingAmount)}</span>
@@ -2824,32 +4260,35 @@ function AgingReport() {
 }
 
 // ============================================================================
-//  REPORT 12: Sales Trend & Payment Analysis — روند فروش و تحلیل پرداخت
+//  REPORT 12: Sales Trend & Payment Analysis — Fiscal Year Aware
 // ============================================================================
-
-function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]; dashboardData: any }) {
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: daysAgoISO(90),
-    to: todayGregorianISO(),
-  })
+function SalesTrendAnalysisReport({
+  invoices,
+  dashboardData,
+  dateRange,
+  onDateRangeChange,
+  fiscalYearRange,
+}: {
+  invoices: any[]
+  dashboardData: any
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  fiscalYearRange?: DateRange | null
+}) {
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-
   useEffect(() => { setListVisible(false); setPage(1) }, [dateRange.from, dateRange.to])
 
   const monthlyTrend = useMemo(() => {
     const map: Record<string, { month: string; total: number; count: number; cash: number; credit: number }> = {}
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
-      const d = new Date(getInvoiceDate(inv))
-      const iso = d.toISOString().split('T')[0]
+      const iso = toISODate(getInvoiceDate(inv))
       if (!iso || iso < dateRange.from || iso > dateRange.to) return
-
       const j = isoToJalali(iso)
       if (!j) return
       const key = `${j.jy}/${String(j.jm).padStart(2, '0')}`
       const monthLabel = `${JALALI_MONTHS[j.jm - 1]} ${toFaNum(j.jy)}`
-
       if (!map[key]) map[key] = { month: monthLabel, total: 0, count: 0, cash: 0, credit: 0 }
       const total = getInvoiceTotal(inv)
       map[key].total += total
@@ -2865,21 +4304,17 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
     const weekdays = ['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه']
     const stats: Record<string, { day: string; total: number; count: number; avg: number }> = {}
     weekdays.forEach((d) => stats[d] = { day: d, total: 0, count: 0, avg: 0 })
-
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
-      const d = new Date(getInvoiceDate(inv))
-      const iso = d.toISOString().split('T')[0]
+      const iso = toISODate(getInvoiceDate(inv))
       if (!iso || iso < dateRange.from || iso > dateRange.to) return
-
+      const d = new Date(`${iso}T12:00:00`)
       const jsDay = d.getDay()
       const persianDayIdx = (jsDay + 1) % 7
       const persianDayName = weekdays[persianDayIdx]
-
       stats[persianDayName].total += getInvoiceTotal(inv)
       stats[persianDayName].count++
     })
-
     return Object.values(stats).map((s) => ({
       ...s,
       avg: s.count > 0 ? Math.round(s.total / s.count) : 0,
@@ -2890,9 +4325,8 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
     const map: Record<string, { name: string; label: string; value: number; count: number; color: string }> = {}
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
+      const d = toISODate(getInvoiceDate(inv))
       if (!d || d < dateRange.from || d > dateRange.to) return
-
       const pt = getInvoicePaymentType(inv)
       const label = PAYMENT_LABELS_FA[pt] || pt
       if (!map[pt]) {
@@ -2913,34 +4347,28 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
   const totalSales = monthlyTrend.reduce((s, m) => s + m.total, 0)
   const totalCount = monthlyTrend.reduce((s, m) => s + m.count, 0)
   const avgInvoice = totalCount > 0 ? Math.round(totalSales / totalCount) : 0
-
   const lastTwoMonths = monthlyTrend.slice(-2)
   const growthRate = lastTwoMonths.length === 2 && lastTwoMonths[0].total > 0
     ? Math.round(((lastTwoMonths[1].total - lastTwoMonths[0].total) / lastTwoMonths[0].total) * 100)
     : 0
-
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
   const chartMonthlyData = monthlyTrend.map((m) => ({
     name: m.month,
     'فروش کل': m.total,
     'فروش نقدی': m.cash,
     'فروش نسیه': m.credit,
   }))
-
   const pieData = paymentBreakdown.map((p) => ({
     name: p.label,
     value: p.value,
     count: p.count,
     color: p.color,
   }))
-
   const weekdayChartData = weekdayStats.map((w) => ({
     name: w.day,
     'میانگین فاکتور': w.avg,
     'تعداد': w.count,
   }))
-
   const paginatedMonthlyTrend = paginate(monthlyTrend, page)
 
   const handleExportExcel = () => {
@@ -2998,10 +4426,14 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
   return (
     <div className="space-y-3 sm:space-y-4">
       <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <PersianDateRangePicker value={dateRange} onChange={setDateRange} />
+        <PersianDateRangePicker
+          value={dateRange}
+          onChange={onDateRangeChange}
+          minDate={fiscalYearRange?.from}
+          maxDate={fiscalYearRange?.to}
+        />
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={monthlyTrend.length === 0} />
       </div>
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard label="فروش کل" value={totalSales} icon={<Wallet className="w-4 h-4" />} color="emerald" suffix="تومان" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
@@ -3015,7 +4447,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
           hint={lastTwoMonths.length === 2 ? `${lastTwoMonths[0].month} → ${lastTwoMonths[1].month}` : ''}
         />
       </div>
-
       <ChartCard
         title="روند ماهانه فروش (نقدی / نسیه)"
         icon={<TrendingUp className="w-4 h-4 text-emerald-600" />}
@@ -3051,7 +4482,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
           </ResponsiveContainer>
         )}
       </ChartCard>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ChartCard title="توزیع روش‌های پرداخت" icon={<PieIcon className="w-4 h-4 text-purple-600" />}>
           {pieData.length === 0 ? (
@@ -3068,7 +4498,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
               </PieChart>
             </ResponsiveContainer>
           )}
-
           {pieData.length > 0 && (
             <div className="mt-3 space-y-1.5">
               {pieData.map((p, idx) => {
@@ -3091,7 +4520,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
             </div>
           )}
         </ChartCard>
-
         <ChartCard title="الگوی فروش بر اساس روز هفته" icon={<Calendar className="w-4 h-4 text-blue-600" />}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={weekdayChartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
@@ -3107,7 +4535,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
           </ResponsiveContainer>
         </ChartCard>
       </div>
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -3118,7 +4545,6 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
               totalCount={monthlyTrend.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : monthlyTrend.length === 0 ? (
@@ -3159,17 +4585,14 @@ function SalesTrendAnalysisReport({ invoices, dashboardData }: { invoices: any[]
 }
 
 // ============================================================================
-//  REPORT 13: Branch Consolidated — گزارش تلفیقی شعب (پلن سازمانی)
+//  REPORT 13: Branch Consolidated
 // ============================================================================
-
 function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTier; invoices: any[]; dateRange: DateRange }) {
   const [branches, setBranches] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [listVisible, setListVisible] = useState(false)
   const [page, setPage] = useState(1)
-
   useEffect(() => { setListVisible(false); setPage(1) }, [dateRange.from, dateRange.to])
-
   useEffect(() => {
     fetchBranchesApi().then((b) => {
       setBranches(b)
@@ -3179,7 +4602,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
 
   const branchStats = useMemo(() => {
     const map: Record<string, { id: string; name: string; total: number; count: number; cash: number; credit: number }> = {}
-
     if (branches.length === 0) {
       map['main'] = { id: 'main', name: 'شعبه مرکزی (پیش‌فرض)', total: 0, count: 0, cash: 0, credit: 0 }
     } else {
@@ -3187,18 +4609,15 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
         map[b.id] = { id: b.id, name: b.name, total: 0, count: 0, cash: 0, credit: 0 }
       })
     }
-
     invoices.forEach((inv) => {
       if (getInvoiceStatus(inv) === 'CANCELLED') return
-      const d = new Date(getInvoiceDate(inv)).toISOString().split('T')[0]
+      const d = toISODate(getInvoiceDate(inv))
       if (!d || d < dateRange.from || d > dateRange.to) return
-
       const branchId = inv.branchId || 'main'
       if (!map[branchId]) {
         const fallbackName = branchId === 'main' ? 'شعبه مرکزی (پیش‌فرض)' : `شعبه ${branchId}`
         map[branchId] = { id: branchId, name: inv.branchName || fallbackName, total: 0, count: 0, cash: 0, credit: 0 }
       }
-      
       const total = getInvoiceTotal(inv)
       map[branchId].total += total
       map[branchId].count++
@@ -3206,7 +4625,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
       if (pt === 'Cash' || pt === 'cash') map[branchId].cash += total
       else map[branchId].credit += total
     })
-
     return Object.values(map).filter((s) => s.count > 0).sort((a, b) => b.total - a.total)
   }, [invoices, branches, dateRange.from, dateRange.to])
 
@@ -3215,9 +4633,7 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
   const grandCredit = branchStats.reduce((s, b) => s + b.credit, 0)
   const totalCount = branchStats.reduce((s, b) => s + b.count, 0)
   const periodText = `${formatJalaliLong(dateRange.from)} تا ${formatJalaliLong(dateRange.to)}`
-
   const paginatedBranchStats = paginate(branchStats, page)
-
   const chartData = branchStats.map((b) => ({
     name: b.name,
     'فروش نقدی': b.cash,
@@ -3298,19 +4714,15 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
           گزارش تلفیقی — پلن {TIER_LABELS[tier]}
         </Badge>
       </div>
-
       <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-        <PersianDateRangePicker value={dateRange} onChange={() => { /* controlled by parent */ }} />
         <ReportActions onExportExcel={handleExportExcel} onPrint={handlePrint} disabled={branchStats.length === 0} />
       </div>
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
         <StatCard label="تعداد شعب فعال" value={branchStats.length} icon={<Building2 className="w-4 h-4" />} color="purple" dir="rtl" />
         <StatCard label="تعداد فاکتور" value={totalCount} icon={<FileText className="w-4 h-4" />} color="gray" dir="rtl" />
         <StatCard label="فروش نقدی" value={grandCash} icon={<Banknote className="w-4 h-4" />} color="emerald" suffix="تومان" />
         <StatCard label="فروش کل" value={grandTotal} icon={<Wallet className="w-4 h-4" />} color="teal" suffix="تومان" />
       </div>
-
       {chartData.length > 0 && (
         <ChartCard title="مقایسه فروش شعب" icon={<BarChart3 className="w-4 h-4 text-purple-600" />}>
           <ResponsiveContainer width="100%" height={280}>
@@ -3326,7 +4738,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
           </ResponsiveContainer>
         </ChartCard>
       )}
-
       <Card className="border-gray-200">
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -3337,7 +4748,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
               totalCount={branchStats.length}
             />
           </div>
-
           {!listVisible ? (
             <EmptyListPlaceholder message="برای مشاهده رکوردها، دکمه «نمایش لیست» را بزنید" />
           ) : branchStats.length === 0 ? (
@@ -3403,7 +4813,6 @@ function BranchConsolidatedReport({ tier, invoices, dateRange }: { tier: PlanTie
 // ============================================================================
 //  Main Reports Page
 // ============================================================================
-
 type ReportType =
   | 'dashboard-overview'
   | 'daily-sales'
@@ -3431,6 +4840,15 @@ interface ReportMetaInfo {
   requiresInstallments?: boolean
   requiresCustomDesigner?: boolean
   category: 'overview' | 'sales' | 'financial' | 'analytics' | 'enterprise'
+}
+
+interface FiscalYearOption {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  isActive: boolean
+  isClosed: boolean
 }
 
 const REPORT_DEFINITIONS: ReportMetaInfo[] = [
@@ -3498,15 +4916,6 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
     category: 'financial',
   },
   {
-    id: 'profit-loss',
-    title: 'صورت سود و زیان با COGS',
-    description: 'صورت سود و زیان با بهای تمام شده واقعی (میانگین وزنی) + نمودار روند و محصول برتر',
-    icon: Scale,
-    color: 'bg-emerald-100 text-emerald-600',
-    minTier: 'professional',
-    category: 'financial',
-  },
-  {
     id: 'cashier-performance',
     title: 'عملکرد صندوق‌دار',
     description: 'بررسی عملکرد صندوق‌داران فروشگاه با نمودار مقایسه‌ای',
@@ -3521,7 +4930,7 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
     description: 'وضعیت اقساط و سررسیدها با فیلتر وضعیت',
     icon: CalendarClock,
     color: 'bg-amber-100 text-amber-600',
-      minTier: 'basic', 
+    minTier: 'basic',
     requiresInstallments: true,
     category: 'financial',
   },
@@ -3561,8 +4970,7 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
     minTier: 'enterprise',
     category: 'enterprise',
   },
-
-    {
+  {
     id: 'custom-report-designer',
     title: 'طراحی گزارش دلخواه',
     description: 'ساخت گزارش اختصاصی با انتخاب فیلدها، فیلترها، گروه‌بندی، مرتب‌سازی و خروجی — مخصوص شما',
@@ -3574,7 +4982,6 @@ const REPORT_DEFINITIONS: ReportMetaInfo[] = [
   },
 ]
 
-// ★ فیلتر کردن گزارش‌ها بر اساس پلن فعلی (مخفی کردن کامل گزارش‌های غیرفعال)
 function getAccessibleReports(tier: PlanTier, features: PlanFeatureSet): ReportMetaInfo[] {
   return REPORT_DEFINITIONS.filter((r) => {
     if (!isPlanAtLeast(tier, r.minTier)) return false
@@ -3584,13 +4991,12 @@ function getAccessibleReports(tier: PlanTier, features: PlanFeatureSet): ReportM
   })
 }
 
-// ★ گروه‌بندی گزارش‌ها بر اساس دسته
 const CATEGORY_LABELS: Record<ReportMetaInfo['category'], { label: string; color: string; icon: any }> = {
-  overview:   { label: 'نمای کلی',     color: 'emerald', icon: LayoutDashboard },
-  sales:      { label: 'گزارش‌های فروش', color: 'blue',    icon: BarChart3 },
-  financial:  { label: 'گزارش‌های مالی', color: 'purple',  icon: Scale },
-  analytics:  { label: 'تحلیل‌ها',      color: 'teal',    icon: Activity },
-  enterprise: { label: 'سازمانی',       color: 'purple',  icon: Building2 },
+  overview: { label: 'نمای کلی', color: 'emerald', icon: LayoutDashboard },
+  sales: { label: 'گزارش‌های فروش', color: 'blue', icon: BarChart3 },
+  financial: { label: 'گزارش‌های مالی', color: 'purple', icon: Scale },
+  analytics: { label: 'تحلیل‌ها', color: 'teal', icon: Activity },
+  enterprise: { label: 'سازمانی', color: 'purple', icon: Building2 },
 }
 
 export default function ReportsPage() {
@@ -3612,49 +5018,199 @@ export default function ReportsPage() {
   const [journalEntries, setJournalEntries] = useState<any[]>([])
   const [dashboardData, setDashboardData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+
+  // ★ Fiscal Year State — global-first
+  const [fiscalYears, setFiscalYears] = useState<FiscalYearOption[]>([])
+  const [localSelectedFiscalYearId, setLocalSelectedFiscalYearId] = useState<string | null>(null)
+  const [isLoadingFYs, setIsLoadingFYs] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
 
-  const loadReportData = useCallback(async (reportId: ReportType) => {
-    const tenantId = getTenantIdFromStore()
-    if (!tenantId) return
+  const globalSelectedFiscalYearId = useAppStore((s: any) => s.selectedFiscalYearId ?? null)
+  const setGlobalSelectedFiscalYearId = useAppStore((s: any) => s.setSelectedFiscalYearId)
+  const globalFiscalYearBounds = useAppStore((s: any) => s.fiscalYearBounds ?? null)
+  const fiscalYearBounds = globalFiscalYearBounds
 
-    setReportLoading(true)
-    try {
-      const needsInvoices = ['daily-sales', 'customer-statement', 'profit-loss', 'cashier-performance', 'sales-trend', 'branch-consolidated'].includes(reportId || '')
-      const needsCustomers = ['customer-statement'].includes(reportId || '')
-      const needsJournal = (tier === 'basic') && ['profit-loss'].includes(reportId || '')
-      const needsInstallments = ['installments'].includes(reportId || '')
-
-      const promises: Promise<any>[] = []
-      if (needsInvoices && invoices.length === 0) promises.push(fetchInvoicesApi(tenantId).then(setInvoices))
-      if (needsCustomers && customers.length === 0) promises.push(fetchCustomersApi(tenantId).then(setCustomers))
-      if (needsJournal && journalEntries.length === 0) promises.push(fetchJournalEntriesApi(tenantId).then(setJournalEntries))
-      if (needsInstallments && features.canAccessInstallments && installmentPlans.length === 0) {
-        promises.push(fetchInstallmentPlansApi(tenantId).then(setInstallmentPlans))
-      }
-
-      if (promises.length > 0) {
-        await Promise.all(promises)
-      }
-    } catch (err: any) {
-      console.error('[Reports] loadReportData error:', err)
+  const selectedFiscalYearId = useMemo(() => {
+    if (globalSelectedFiscalYearId && fiscalYears.some((y) => y.id === globalSelectedFiscalYearId)) {
+      return globalSelectedFiscalYearId
     }
-    setReportLoading(false)
-  }, [invoices.length, customers.length, journalEntries.length, installmentPlans.length, features.canAccessInstallments])
 
+    if (localSelectedFiscalYearId && fiscalYears.some((y) => y.id === localSelectedFiscalYearId)) {
+      return localSelectedFiscalYearId
+    }
+
+    if (globalFiscalYearBounds) {
+      const boundsFrom = toISODate(globalFiscalYearBounds.from)
+      const boundsTo = toISODate(globalFiscalYearBounds.to)
+
+      const matchedByBounds = fiscalYears.find(
+        (y) => toISODate(y.startDate) === boundsFrom && toISODate(y.endDate) === boundsTo
+      )
+
+      if (matchedByBounds) return matchedByBounds.id
+    }
+
+    const activeYear = fiscalYears.find((y) => y.isActive && !y.isClosed)
+    return activeYear?.id || null
+  }, [globalSelectedFiscalYearId, localSelectedFiscalYearId, fiscalYears, globalFiscalYearBounds])
+
+  const setSelectedFiscalYearId = useCallback(
+    (id: string | null) => {
+      setLocalSelectedFiscalYearId(id)
+
+      if (typeof setGlobalSelectedFiscalYearId === 'function') {
+        setGlobalSelectedFiscalYearId(id)
+      }
+    },
+    [setGlobalSelectedFiscalYearId]
+  )
+
+  const selectedFiscalYear = useMemo(() => {
+    if (!selectedFiscalYearId) return null
+    return fiscalYears.find((y) => y.id === selectedFiscalYearId) || null
+  }, [fiscalYears, selectedFiscalYearId])
+
+  const selectedFiscalYearRange = useMemo<DateRange | null>(() => {
+    if (!selectedFiscalYear) return null
+
+    const from = toISODate(selectedFiscalYear.startDate)
+    const to = toISODate(selectedFiscalYear.endDate)
+
+    if (!from || !to) return null
+
+    return { from, to }
+  }, [selectedFiscalYear])
+
+  const loadReportData = useCallback(
+    async (reportId: ReportType) => {
+      const tenantId = getTenantIdFromStore()
+      if (!tenantId) {
+        setReportLoading(false)
+        return
+      }
+      setReportLoading(true)
+      try {
+        const needsInvoices = [
+          'daily-sales',
+          'customer-statement',
+          'profit-loss',
+          'cashier-performance',
+          'sales-trend',
+          'branch-consolidated',
+        ].includes(reportId || '')
+
+        if (needsInvoices && invoices.length === 0) {
+          try {
+            const fetchedInvoices = await fetchInvoicesApi(tenantId)
+            if (Array.isArray(fetchedInvoices)) {
+              setInvoices(fetchedInvoices)
+            } else {
+              setInvoices([])
+            }
+          } catch (fetchErr) {
+            console.error('[Reports] FETCH ERROR in loadReportData:', fetchErr)
+          }
+        }
+
+        const needsCustomers = ['customer-statement', 'aging'].includes(reportId || '')
+        if (needsCustomers && customers.length === 0) {
+          try {
+            const custs = await fetchCustomersApi(tenantId)
+            setCustomers(Array.isArray(custs) ? custs : [])
+          } catch (e) {
+            console.error('[Reports] fetchCustomers error:', e)
+          }
+        }
+const needsPlans = ['installments'].includes(reportId || '')
+if (needsPlans && installmentPlans.length === 0) {
+  try {
+    const allYears = !selectedFiscalYearId
+    const plans = await fetchInstallmentPlansApi(
+      tenantId,
+      selectedFiscalYearId,
+      allYears
+    )
+    setInstallmentPlans(Array.isArray(plans) ? plans : [])
+  } catch (e) {
+    console.error('[Reports] fetchInstallmentPlans error:', e)
+  }
+}
+
+        const needsJournals = ['profit-loss'].includes(reportId || '')
+        if (needsJournals && journalEntries.length === 0) {
+          try {
+            const jes = await fetchJournalEntriesApi(tenantId)
+            setJournalEntries(Array.isArray(jes) ? jes : [])
+          } catch (e) {
+            console.error('[Reports] fetchJournalEntries error:', e)
+          }
+        }
+      } catch (err: any) {
+        console.error('[Reports] GENERAL ERROR in loadReportData:', err)
+      } finally {
+        setReportLoading(false)
+      }
+},
+[
+  invoices.length,
+  customers.length,
+  installmentPlans.length,
+  journalEntries.length,
+  selectedFiscalYearId,
+]
+)
   useEffect(() => {
     if (activeReport) {
       loadReportData(activeReport)
     }
   }, [activeReport, loadReportData])
 
+  const filteredInvoices = useMemo(() => {
+    if (invoices.length === 0) return []
+
+    const range =
+      selectedFiscalYearRange ||
+      (globalFiscalYearBounds
+        ? {
+          from: toISODate(globalFiscalYearBounds.from),
+          to: toISODate(globalFiscalYearBounds.to),
+        }
+        : null)
+
+    if (!selectedFiscalYearId && !range) {
+      return invoices
+    }
+
+    const startTs = range?.from ? new Date(`${range.from}T00:00:00`).getTime() : -Infinity
+    const endTs = range?.to ? new Date(`${range.to}T23:59:59.999`).getTime() : Infinity
+
+    return invoices.filter((inv: any) => {
+      if (selectedFiscalYearId && inv.fiscalYearId) {
+        return inv.fiscalYearId === selectedFiscalYearId
+      }
+
+      if (!range) return true
+
+      const dateStr = getInvoiceDate(inv)
+      const iso = toISODate(dateStr)
+
+      if (!iso) return false
+
+      const invTs = new Date(`${iso}T12:00:00`).getTime()
+
+      return invTs >= startTs && invTs <= endTs
+    })
+  }, [invoices, selectedFiscalYearId, selectedFiscalYearRange, globalFiscalYearBounds])
+
   const accessibleReports = useMemo(() => getAccessibleReports(tier, features), [tier, features])
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+
     const tenantId = getTenantIdFromStore()
+
     if (!tenantId) {
       setError('tenant در دسترس نیست. لطفاً دوباره وارد شوید.')
       setLoading(false)
@@ -3662,21 +5218,36 @@ export default function ReportsPage() {
     }
 
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      console.warn('[Reports] حالت آفلاین: بارگذاری آمار متوقف شد')
+      console.warn('[Reports] حالت آفلاین: بارگذاری داده‌ها متوقف شد')
       setDashboardData(null)
+      setCustomers([])
+      setInstallmentPlans([])
+      setJournalEntries([])
       setLoading(false)
       return
     }
 
     try {
-      const dash = await fetchDashboardStatsApi()
+      const [dash, custs, plans, jes] = await Promise.all([
+        fetchDashboardStatsApi(),
+        fetchCustomersApi(tenantId),
+        fetchInstallmentPlansApi(tenantId),
+        fetchJournalEntriesApi(tenantId),
+      ])
+
       setDashboardData(dash)
+      setCustomers(Array.isArray(custs) ? custs : [])
+      setInstallmentPlans(Array.isArray(plans) ? plans : [])
+      setJournalEntries(Array.isArray(jes) ? jes : [])
     } catch (err: any) {
       console.error('[Reports] loadData error:', err)
 
       if (err?.message?.includes('fetch') || (typeof window !== 'undefined' && !navigator.onLine)) {
         console.warn('[Reports] خطای شبکه. ادامه کار در حالت آفلاین.')
         setDashboardData(null)
+        setCustomers([])
+        setInstallmentPlans([])
+        setJournalEntries([])
       } else {
         setError(err?.message || 'خطا در بارگذاری داده‌ها')
       }
@@ -3684,8 +5255,152 @@ export default function ReportsPage() {
       setLoading(false)
     }
   }, [])
+
   useEffect(() => { loadData() }, [loadData])
 
+  // ═══ Load Fiscal Years — final global-first loader ═══
+  const loadFiscalYears = useCallback(async () => {
+    setIsLoadingFYs(true)
+
+    try {
+      const res = await fetch('/api/fiscal-years', { headers: getAuthHeaders() })
+      const json = await res.json()
+
+      if (json.success && json.data?.years && Array.isArray(json.data.years)) {
+        const mappedYears: FiscalYearOption[] = json.data.years
+          .map((fy: any) => {
+            const startDate = fy.startDate
+            const endDate = fy.endDate
+            const cleanName = getJalaliYearLabel(startDate || endDate)
+
+            return {
+              id: fy.id,
+              name: cleanName,
+              startDate,
+              endDate,
+              isActive: !!fy.isActive,
+              isClosed: !!fy.isClosed,
+            }
+          })
+          .sort((a: FiscalYearOption, b: FiscalYearOption) => {
+            return new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
+          })
+
+        setFiscalYears(mappedYears)
+
+        const state = useAppStore.getState() as any
+        const globalId = state.selectedFiscalYearId || null
+        const bounds = state.fiscalYearBounds || null
+
+        let initialId: string | null = null
+
+        if (globalId && mappedYears.some((y) => y.id === globalId)) {
+          initialId = globalId
+        }
+
+        if (!initialId && bounds) {
+          const boundsFrom = toISODate(bounds.from)
+          const boundsTo = toISODate(bounds.to)
+
+          const matchedByBounds = mappedYears.find(
+            (y) => toISODate(y.startDate) === boundsFrom && toISODate(y.endDate) === boundsTo
+          )
+
+          if (matchedByBounds) {
+            initialId = matchedByBounds.id
+          }
+        }
+
+        if (!initialId) {
+          const activeYear = mappedYears.find((y) => y.isActive && !y.isClosed)
+          initialId = activeYear?.id || null
+        }
+
+        setLocalSelectedFiscalYearId(initialId)
+
+        if (initialId && typeof state.setSelectedFiscalYearId === 'function') {
+          state.setSelectedFiscalYearId(initialId)
+        }
+
+        const selectedYear = mappedYears.find((y) => y.id === initialId)
+
+        if (selectedYear) {
+          const from = toISODate(selectedYear.startDate)
+          const to = toISODate(selectedYear.endDate)
+
+          if (from && to) {
+            setSharedDateRange({ from, to })
+          }
+        }
+      } else {
+        console.warn('[Reports] Invalid fiscal years response format:', json)
+        setFiscalYears([])
+      }
+    } catch (err) {
+      console.error('[Reports] Error loading fiscal years:', err)
+      setFiscalYears([])
+    } finally {
+      setIsLoadingFYs(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadFiscalYears()
+  }, [loadFiscalYears])
+
+  // ═══ Sync global fiscal year -> local fiscal year ═══
+  useEffect(() => {
+    if (
+      globalSelectedFiscalYearId &&
+      fiscalYears.some((y) => y.id === globalSelectedFiscalYearId)
+    ) {
+      setLocalSelectedFiscalYearId(globalSelectedFiscalYearId)
+    }
+  }, [globalSelectedFiscalYearId, fiscalYears])
+
+  // ═══ Reset shared date range when fiscal year changes ═══
+  useEffect(() => {
+    if (!selectedFiscalYearRange) return
+
+    setSharedDateRange({
+      from: selectedFiscalYearRange.from,
+      to: selectedFiscalYearRange.to,
+    })
+  }, [selectedFiscalYearId, selectedFiscalYearRange?.from, selectedFiscalYearRange?.to])
+
+  useEffect(() => {
+  if (activeReport !== 'installments') return
+
+  const tenantId = getTenantIdFromStore()
+  if (!tenantId) return
+
+  const allYears = !selectedFiscalYearId
+
+  let cancelled = false
+
+  fetchInstallmentPlansApi(tenantId, selectedFiscalYearId, allYears)
+    .then((plans) => {
+      if (cancelled) return
+
+      setInstallmentPlans(Array.isArray(plans) ? plans : [])
+
+      console.log('[Reports] Installment plans reloaded for fiscal scope', {
+        fiscalYearId: selectedFiscalYearId || null,
+        allYears,
+        count: plans.length,
+      })
+    })
+    .catch((err) => {
+      if (cancelled) return
+
+      console.error('[Reports] Failed to reload installment plans:', err)
+      setInstallmentPlans([])
+    })
+
+  return () => {
+    cancelled = true
+  }
+}, [activeReport, selectedFiscalYearId])
   const reportsByCategory = useMemo<Record<string, ReportMetaInfo[]>>(() => {
     const grouped: Record<string, ReportMetaInfo[]> = {}
     accessibleReports.forEach((r) => {
@@ -3694,9 +5409,7 @@ export default function ReportsPage() {
       const exists = grouped[key].some((x) => x.id === r.id)
       if (!exists) {
         let displayReport: ReportMetaInfo = r
-        if (false) {
-          displayReport = { ...r, title: 'سود و زیان (ساده)', description: 'گزارش ساده درآمد و هزینه (تک‌دفتری)' }
-        } else if (r.id === 'profit-loss' && tier !== 'basic') {
+        if (r.id === 'profit-loss' && tier !== 'basic') {
           displayReport = { ...r, title: 'صورت سود و زیان استاندارد', description: 'صورت سود و زیان استاندارد با تفکیک بخش‌های درآمد، هزینه و سود' }
         }
         grouped[key].push(displayReport)
@@ -3706,8 +5419,19 @@ export default function ReportsPage() {
   }, [accessibleReports, tier])
 
   const onUpgrade = () => setCurrentView('settings-subscription')
-
   const activeReportInfo = REPORT_DEFINITIONS.find((r) => r.id === activeReport)
+
+  const accountingReports = [
+    'balance-sheet',
+    'profit-loss',
+    'aging',
+    'vat',
+    'inventory-advanced',
+    'custom-report-designer',
+  ]
+
+  const requiresFiscalYear = accountingReports.includes(activeReport || '')
+  const fiscalYearMissing = requiresFiscalYear && !selectedFiscalYearId
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-emerald-50/30 p-3 sm:p-4 md:p-6" dir="rtl">
@@ -3722,12 +5446,64 @@ export default function ReportsPage() {
             <p className="text-[10px] sm:text-sm text-gray-500">
               دسترسی به انواع گزارش‌های فروشگاهی بر اساس پلن فعلی شما
               <span className="mr-2 text-emerald-600">•</span>
-              <span className="mr-1">پلن: <Badge variant="outline" className={`text-[10px] mx-1 ${TIER_COLORS[tier].bg} ${TIER_COLORS[tier].text} ${TIER_COLORS[tier].border}`}>{plan.label}</Badge></span>
+              <span className="mr-1">
+                پلن:{' '}
+                <Badge variant="outline" className={`text-[10px] mx-1 ${TIER_COLORS[tier].bg} ${TIER_COLORS[tier].text} ${TIER_COLORS[tier].border}`}>
+                  {plan.label}
+                </Badge>
+              </span>
               <span className="mr-2 text-gray-300">•</span>
-              <span className="mr-1">{formatNumberFa(invoices.length)} فاکتور</span>
+              <span className="mr-1">{formatNumberFa(filteredInvoices.length)} فاکتور (سال مالی انتخابی)</span>
             </p>
           </div>
           {loading && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+        </div>
+
+        {/* ★ Fiscal Year Selector Bar — global-first */}
+        <div className="flex flex-wrap items-center gap-3 mt-4 p-3 bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="flex items-center gap-2">
+            <CalendarRange className="w-4 h-4 text-indigo-600" />
+            <Label className="text-xs font-bold text-gray-700">سال مالی:</Label>
+          </div>
+
+          <Select
+            value={selectedFiscalYearId || 'all'}
+            onValueChange={(val) => {
+              if (val === 'all') {
+                setSelectedFiscalYearId(null)
+              } else {
+                setSelectedFiscalYearId(val)
+              }
+            }}
+            disabled={isLoadingFYs}
+          >
+            <SelectTrigger className="w-[200px] sm:w-[250px] h-9 bg-gray-50 border-gray-200 focus:ring-indigo-500">
+              <SelectValue placeholder={isLoadingFYs ? 'بارگذاری...' : 'انتخاب سال'} />
+            </SelectTrigger>
+
+            <SelectContent>
+              <SelectItem value="all">همه سال‌ها</SelectItem>
+
+              {fiscalYears.map((fy) => (
+                <SelectItem key={fy.id} value={fy.id}>
+                  {fy.name}
+                  {fy.isClosed ? ' — بسته' : fy.isActive ? ' — فعال' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {selectedFiscalYear && selectedFiscalYearRange && (
+            <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-700 bg-emerald-50">
+              {selectedFiscalYear.name} • {formatJalaliLong(selectedFiscalYearRange.from)} تا {formatJalaliLong(selectedFiscalYearRange.to)}
+            </Badge>
+          )}
+
+          {!selectedFiscalYearId && (
+            <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50 animate-pulse">
+              ⚠️ بدون ایزولاسیون سال مالی
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -3795,7 +5571,6 @@ export default function ReportsPage() {
               </div>
             )
           })}
-
           {accessibleReports.length === 0 && !loading && (
             <Card className="border-gray-200">
               <CardContent className="p-12 text-center">
@@ -3834,56 +5609,168 @@ export default function ReportsPage() {
 
             <div className="hidden sm:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-0">
               {(activeReport === 'cashier-performance' || activeReport === 'installments' || activeReport === 'branch-consolidated') && (
-                <PersianDateRangePicker value={sharedDateRange} onChange={setSharedDateRange} size="sm" />
+                <PersianDateRangePicker
+                  value={sharedDateRange}
+                  onChange={setSharedDateRange}
+                  size="sm"
+                  minDate={selectedFiscalYearRange?.from}
+                  maxDate={selectedFiscalYearRange?.to}
+                />
               )}
             </div>
 
             <div className="sm:hidden w-full flex justify-center mt-1">
               {(activeReport === 'cashier-performance' || activeReport === 'installments' || activeReport === 'branch-consolidated') && (
-                <PersianDateRangePicker value={sharedDateRange} onChange={setSharedDateRange} size="sm" />
+                <PersianDateRangePicker
+                  value={sharedDateRange}
+                  onChange={setSharedDateRange}
+                  size="sm"
+                  minDate={selectedFiscalYearRange?.from}
+                  maxDate={selectedFiscalYearRange?.to}
+                />
               )}
             </div>
 
             <div className="hidden sm:block w-[150px] shrink-0"></div>
           </div>
 
+          {fiscalYearMissing && (
+            <Card className="border-amber-200 bg-amber-50 mb-4">
+              <CardContent className="p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">
+                    برای نمایش این گزارش، یک سال مالی مشخص انتخاب کنید.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    گزارش‌های حسابداری مانند ترازنامه، سود و زیان، سنین بدهی و مالیات نباید بین چند سال مالی ترکیب شوند.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {loading ? (
             <LoadingState message="در حال بارگذاری داده‌ها..." />
           ) : reportLoading ? (
             <LoadingState message="در حال آماده‌سازی داده‌های گزارش..." />
+          ) : fiscalYearMissing ? (
+            <EmptyState message="لطفاً ابتدا یک سال مالی مشخص انتخاب کنید." icon={<CalendarRange className="w-10 h-10 mx-auto mb-2 text-amber-300" />} />
           ) : (
             <>
               {activeReport === 'dashboard-overview' && (
                 <DashboardOverviewReport tier={tier} dashboardData={dashboardData} />
               )}
+
               {activeReport === 'daily-sales' && (
-                <DailySalesReport invoices={invoices} />
+                <DailySalesReport invoices={filteredInvoices} />
               )}
+
               {activeReport === 'customer-statement' && (
-                <CustomerStatementReport invoices={invoices} customers={customers} />
+                <CustomerStatementReport
+                  invoices={filteredInvoices}
+                  customers={customers}
+                  dateRange={sharedDateRange}
+                  onDateRangeChange={setSharedDateRange}
+                  fiscalYearRange={selectedFiscalYearRange}
+                />
               )}
+
               {activeReport === 'profit-loss' && (
-                <ProfitLossReport tier={tier} />
+                <ProfitLossReport
+                  tier={tier}
+                  {...({
+                    fiscalYearId: selectedFiscalYearId,
+                    dateRange: sharedDateRange,
+                    asOf: sharedDateRange.to,
+                    fiscalYearRange: selectedFiscalYearRange,
+                  } as any)}
+                />
               )}
-              {activeReport === 'inventory' && <InventoryReport />}
-              {activeReport === 'inventory-advanced' && <InventoryAdvancedReport />}
-              {activeReport === 'vat' && <VATReport />}
+
+              {activeReport === 'inventory' && (
+                <InventoryReport
+                  fiscalYearId={selectedFiscalYearId}
+                  asOf={sharedDateRange.to}
+                />
+              )}
+
+              {activeReport === 'inventory-advanced' && (
+                <InventoryAdvancedReport
+                  fiscalYearId={selectedFiscalYearId}
+                  dateRange={sharedDateRange}
+                  asOf={sharedDateRange.to}
+                />
+              )}
+
+              {activeReport === 'vat' && (
+                <VATReport
+                  fiscalYearId={selectedFiscalYearId}
+                  dateRange={sharedDateRange}
+                  onDateRangeChange={setSharedDateRange}
+                  fiscalYearRange={selectedFiscalYearRange}
+                />
+              )}
+
               {activeReport === 'cashier-performance' && (
-                <CashierPerformanceReport invoices={invoices} dateRange={sharedDateRange} />
+                <CashierPerformanceReport invoices={filteredInvoices} dateRange={sharedDateRange} />
               )}
-              {activeReport === 'installments' && (
-                <InstallmentReport plans={installmentPlans} dateRange={sharedDateRange} />
+
+       {activeReport === 'installments' && (
+  <InstallmentReport
+    plans={installmentPlans}
+    dateRange={sharedDateRange}
+    fiscalYearRange={selectedFiscalYearRange}
+  />
+)}
+              {activeReport === 'balance-sheet' && (
+                <BalanceSheetV8Report
+                  tier={tier}
+                  fiscalYearId={selectedFiscalYearId}
+                  asOf={sharedDateRange.to}
+                />
               )}
-              {activeReport === 'balance-sheet' && <BalanceSheetV8Report tier={tier} />}
-              {activeReport === 'aging' && <AgingReport />}
+
+              {activeReport === 'aging' && (
+                <AgingReport
+                  fiscalYearId={selectedFiscalYearId}
+                  asOf={sharedDateRange.to}
+                  onAsOfChange={(iso) => {
+                    const next = toISODate(iso) || selectedFiscalYearRange?.to || todayGregorianISO()
+                    const clamped = clampDateToRange(next, selectedFiscalYearRange?.from, selectedFiscalYearRange?.to)
+
+                    setSharedDateRange((prev) => ({
+                      from: prev.from > clamped ? clamped : prev.from,
+                      to: clamped,
+                    }))
+                  }}
+                  fiscalYearRange={selectedFiscalYearRange}
+                />
+              )}
+
               {activeReport === 'sales-trend' && (
-                <SalesTrendAnalysisReport invoices={invoices} dashboardData={dashboardData} />
+                <SalesTrendAnalysisReport
+                  invoices={filteredInvoices}
+                  dashboardData={dashboardData}
+                  dateRange={sharedDateRange}
+                  onDateRangeChange={setSharedDateRange}
+                  fiscalYearRange={selectedFiscalYearRange}
+                />
               )}
-                    {activeReport === 'branch-consolidated' && (
-                <BranchConsolidatedReport tier={tier} invoices={invoices} dateRange={sharedDateRange} />
+
+              {activeReport === 'branch-consolidated' && (
+                <BranchConsolidatedReport tier={tier} invoices={filteredInvoices} dateRange={sharedDateRange} />
               )}
+
               {activeReport === 'custom-report-designer' && (
-                <CustomReportDesignerPage />
+                <CustomReportDesignerPage
+                  {...({
+                    fiscalYearId: selectedFiscalYearId,
+                    dateRange: sharedDateRange,
+                    asOf: sharedDateRange.to,
+                    fiscalYearRange: selectedFiscalYearRange,
+                  } as any)}
+                />
               )}
             </>
           )}
@@ -3892,4 +5779,3 @@ export default function ReportsPage() {
     </div>
   )
 }
-

@@ -1,105 +1,285 @@
 // ============================================================================
-// src/app/api/reports/trial-balance/route.ts — GET (v8.4 ★★★)
+// src/app/api/reports/trial-balance/route.ts — GET (v10.1 Standard Trial Balance)
 // ShopAccounting — Trial Balance Report API
 // ----------------------------------------------------------------------------
-// ★★★ v8.4: این API تراز آزمایشی کامل را با قابلیت‌های زیر ارائه می‌دهد:
-//
-//   ✓ شامل تمام اسناد (دستی، خودکار فاکتور، خودکار پرداخت آنلاین)
-//   ✓ فیلتر بر اساس بازه تاریخ
-//   ✓ محاسبه مانده (بد/بس) برای هر حساب
-//   ✓ تفکیک بر اساس نوع حساب (دارایی، بدهی، درآمد، هزینه)
-//   ✓ خروجی مناسب برای Excel و چاپ
-//   ✓ بررسی تعادل تراز
-//
-// ★ پارامترهای Query:
-//   - dateFrom: تاریخ شروع (YYYY-MM-DD) — اختیاری
-//   - dateTo: تاریخ پایان (YYYY-MM-DD) — پیش‌فرض امروز
-//   - includeZero: شامل حساب‌های با مانده صفر (پیش‌فرض: false)
-//   - groupByType: گروه‌بندی بر اساس نوع حساب (پیش‌فرض: true)
-//
-// ★ خروجی:
-//   {
-//     success: true,
-//     data: {
-//       isBalanced: boolean,
-//       grandDebit: number,
-//       grandCredit: number,
-//       difference: number,
-//       accountCount: number,
-//       dateRange: { from, to },
-//       groups: [
-//         {
-//           type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense',
-//           typeLabel: string,
-//           subtotalDebit: number,
-//           subtotalCredit: number,
-//           accounts: [
-//             {
-//               accountId, accountCode, accountName, accountType,
-//               totalDebit, totalCredit, balance, balanceLabel
-//             }
-//           ]
-//         }
-//       ],
-//       flatRows: [...]  // همان حساب‌ها به‌صورت لیست مسطح
-//     }
-//   }
+// ★★★ v10.1:
+//   - رفع double counting در سال‌های مالی دارای سند افتتاحیه
+//   - اگر fiscal_year_open وجود داشته باشد، مانده سنوات قبل جداگانه اضافه نشود
+//   - فقط حرکات همان سال مالی برای opening balance قبل از تاریخ انتخابی محاسبه شود
+//   - حفظ رفتار قبلی برای سنواتی که سند افتتاحیه ندارند
+//   - پشتیبانی از fiscalYearId / allYears
+//   - پشتیبانی از mode=balance پیش‌فرض و mode=movement
+//   - بازگشت fiscalYear کامل برای frontend
+//   - fallback امن اگر فیلد fiscalYearId در JournalEntry وجود نداشت
+//   - احتساب حساب‌های غیرفعال که مانده یا حرکت دارند
+//   - clamp تاریخ داخل سال مالی
+//   - warning مناسب برای همه سنوات / نبود سال مالی فعال
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withTenantAndPermission } from '@/lib/middleware/tenant-isolation'
+import {
+  getActiveFiscalYear,
+  getFiscalYearById,
+} from '@/lib/fiscal-year'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // ═══════════════════════════════════════════════════════════════
-//  ثابت‌ها — انواع حساب و برچسب فارسی
+//  Constants
 // ═══════════════════════════════════════════════════════════════
 
-const ACCOUNT_TYPE_GROUPS: Record<string, { group: string; label: string; order: number }> = {
-  // دارایی‌ها
-  cash:        { group: 'asset',     label: 'دارایی‌های جاری',     order: 1 },
-  bank:        { group: 'asset',     label: 'دارایی‌های جاری',     order: 1 },
-  receivable:  { group: 'asset',     label: 'دارایی‌های جاری',     order: 1 },
-  inventory:   { group: 'asset',     label: 'دارایی‌های جاری',     order: 1 },
-  // بدهی‌ها
-  payable:     { group: 'liability', label: 'بدهی‌های جاری',       order: 2 },
-  tax:         { group: 'liability', label: 'بدهی‌های جاری',       order: 2 },
-  // حقوق صاحبان سهام (کد 3xx)
-  equity:      { group: 'equity',    label: 'حقوق صاحبان سهام',   order: 3 },
-  // درآمدها
-  revenue:     { group: 'revenue',   label: 'درآمدها',             order: 4 },
-  income:      { group: 'revenue',   label: 'درآمدها',             order: 4 },
-  // هزینه‌ها
-  cogs:        { group: 'expense',   label: 'بهای تمام شده',       order: 5 },
-  expense:     { group: 'expense',   label: 'هزینه‌های عملیاتی',   order: 5 },
-  cost:        { group: 'expense',   label: 'هزینه‌های عملیاتی',   order: 5 },
+const ALL_YEARS_WARNING =
+  'این گزارش همه سال‌های مالی را شامل می‌شود و فقط برای بررسی مدیریتی است. برای گزارش رسمی، یک سال مالی انتخاب کنید.'
+
+const NO_ACTIVE_FISCAL_YEAR_WARNING =
+  'سال مالی فعالی تعریف نشده است. گزارش به‌صورت همه سنوات نمایش داده می‌شود و فقط برای بررسی است.'
+
+const DATE_RANGE_OUTSIDE_FISCAL_YEAR_WARNING =
+  'بازه تاریخ انتخابی با سال مالی انتخابی هم‌پوشانی ندارد. گزارش خالی نمایش داده شد.'
+
+const POSTED_STATUS_VALUES = [
+  'posted',
+  'POSTED',
+  'Posted',
+  'confirmed',
+  'Confirmed',
+]
+
+const ACCOUNT_TYPE_GROUPS: Record<
+  string,
+  { group: string; label: string; order: number }
+> = {
+  cash: { group: 'asset', label: 'دارایی‌های جاری', order: 1 },
+  bank: { group: 'asset', label: 'دارایی‌های جاری', order: 1 },
+  receivable: { group: 'asset', label: 'دارایی‌های جاری', order: 1 },
+  inventory: { group: 'asset', label: 'دارایی‌های جاری', order: 1 },
+
+  payable: { group: 'liability', label: 'بدهی‌های جاری', order: 2 },
+  tax: { group: 'liability', label: 'بدهی‌های جاری', order: 2 },
+
+  equity: { group: 'equity', label: 'حقوق صاحبان سهام', order: 3 },
+
+  revenue: { group: 'revenue', label: 'درآمدها', order: 4 },
+  income: { group: 'revenue', label: 'درآمدها', order: 4 },
+
+  cogs: { group: 'expense', label: 'بهای تمام شده', order: 5 },
+  expense: { group: 'expense', label: 'هزینه‌های عملیاتی', order: 5 },
+  cost: { group: 'expense', label: 'هزینه‌های عملیاتی', order: 5 },
 }
 
 const GROUP_LABELS: Record<string, string> = {
-  asset:     'دارایی‌ها',
+  asset: 'دارایی‌ها',
   liability: 'بدهی‌ها',
-  equity:    'حقوق صاحبان سهام',
-  revenue:   'درآمدها',
-  expense:   'هزینه‌ها',
+  equity: 'حقوق صاحبان سهام',
+  revenue: 'درآمدها',
+  expense: 'هزینه‌ها',
+  other: 'سایر',
 }
 
-function classifyAccount(account: any): { group: string; label: string; order: number } {
-  const accType = (account.type || '').toLowerCase()
-  const accCode = account.code || ''
+// ═══════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════
 
-  // ★ اگر نوع حساب در جدول موجود است
+function roundMoney(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.round(value)
+}
+
+function parseDateOnly(value: string | null | undefined): Date | null {
+  if (!value) return null
+
+  const s = String(value).trim()
+  if (!s) return null
+
+  const match = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (match) {
+    const y = Number(match[1])
+    const m = Number(match[2])
+    const d = Number(match[3])
+
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null
+
+    return new Date(Date.UTC(y, m - 1, d))
+  }
+
+  const date = new Date(s)
+  if (Number.isNaN(date.getTime())) return null
+
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  )
+}
+
+function truncateUtcDay(value: any): Date | null {
+  if (!value) return null
+
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  )
+}
+
+function classifyAccount(account: {
+  code?: string | null
+  name?: string | null
+  type?: string | null
+}): { group: string; label: string; order: number } {
+  const accType = String(account.type || '').toLowerCase().trim()
+  const accCode = String(account.code || '').trim()
+
   if (ACCOUNT_TYPE_GROUPS[accType]) {
     return ACCOUNT_TYPE_GROUPS[accType]
   }
 
-  // ★ fallback بر اساس کد حساب
-  if (accCode.startsWith('1')) return { group: 'asset',     label: 'دارایی‌ها',             order: 1 }
-  if (accCode.startsWith('2')) return { group: 'liability', label: 'بدهی‌ها',               order: 2 }
-  if (accCode.startsWith('3')) return { group: 'equity',    label: 'حقوق صاحبان سهام',     order: 3 }
-  if (accCode.startsWith('4')) return { group: 'revenue',   label: 'درآمدها',               order: 4 }
-  if (accCode.startsWith('5') || accCode.startsWith('6') || accCode.startsWith('7')) {
+  if (accCode.startsWith('1')) {
+    return { group: 'asset', label: 'دارایی‌ها', order: 1 }
+  }
+
+  if (accCode.startsWith('2')) {
+    return { group: 'liability', label: 'بدهی‌ها', order: 2 }
+  }
+
+  if (accCode.startsWith('3')) {
+    return { group: 'equity', label: 'حقوق صاحبان سهام', order: 3 }
+  }
+
+  if (accCode.startsWith('4')) {
+    return { group: 'revenue', label: 'درآمدها', order: 4 }
+  }
+
+  if (
+    accCode.startsWith('5') ||
+    accCode.startsWith('6') ||
+    accCode.startsWith('7')
+  ) {
     return { group: 'expense', label: 'هزینه‌ها', order: 5 }
   }
 
   return { group: 'other', label: 'سایر', order: 6 }
+}
+
+function shouldIncludeEntry(entry: any): boolean {
+  if (entry?.isCancelled === true) return false
+
+  const status = String(entry?.status || '')
+    .toLowerCase()
+    .trim()
+
+  return status === 'posted' || status === 'confirmed'
+}
+
+async function queryJournalEntries(
+  tenantDb: any,
+  where: any,
+  fiscalYearId: string | null
+): Promise<any[]> {
+  const include = {
+    lines: {
+      select: {
+        accountId: true,
+        debit: true,
+        credit: true,
+      },
+    },
+  }
+
+  const orderBy = { date: 'asc' as const }
+
+  if (!fiscalYearId) {
+    return await tenantDb.journalEntry.findMany({
+      where,
+      include,
+      orderBy,
+    })
+  }
+
+  try {
+    return await tenantDb.journalEntry.findMany({
+      where: {
+        ...where,
+        fiscalYearId,
+      },
+      include,
+      orderBy,
+    })
+  } catch (err: any) {
+    const message = String(err?.message || '')
+
+    // fallback امن اگر schema هنوز fiscalYearId را روی JournalEntry نداشت
+    if (message.includes('fiscalYearId')) {
+      return await tenantDb.journalEntry.findMany({
+        where,
+        include,
+        orderBy,
+      })
+    }
+
+    throw err
+  }
+}
+
+function buildFiscalYearPayload(fy: any) {
+  if (!fy) return null
+
+  return {
+    id: fy.id || null,
+    name: fy.name || null,
+    startDate: fy.startDate || null,
+    endDate: fy.endDate || null,
+    isActive: Boolean(fy.isActive),
+    isClosed: Boolean(fy.isClosed),
+  }
+}
+
+function makeEmptyResponse({
+  mode,
+  fiscalYearId,
+  fiscalYearName,
+  fiscalYear,
+  allYears,
+  warning,
+  fromDate,
+  toDate,
+  fiscalYearRange,
+}: {
+  mode: 'balance' | 'movement'
+  fiscalYearId: string | null
+  fiscalYearName: string | null
+  fiscalYear: any
+  allYears: boolean
+  warning: string | null
+  fromDate: Date | null
+  toDate: Date | null
+  fiscalYearRange: { from: string; to: string } | null
+}) {
+  return NextResponse.json({
+    success: true,
+    mode,
+    fiscalYearId,
+    fiscalYearName,
+    fiscalYear,
+    allYears,
+    warning,
+    data: {
+      mode,
+      isBalanced: true,
+      grandDebit: 0,
+      grandCredit: 0,
+      difference: 0,
+      accountCount: 0,
+      dateRange: {
+        from: fromDate ? fromDate.toISOString() : null,
+        to: toDate ? toDate.toISOString() : null,
+      },
+      fiscalYearRange,
+      groups: [],
+      flatRows: [],
+    },
+  })
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -113,123 +293,192 @@ export const GET = withTenantAndPermission('accounting')(
       const tenantId = tenant.tenantId
 
       const { searchParams } = new URL(req.url)
-      const dateFrom = searchParams.get('dateFrom')
-      const dateTo = searchParams.get('dateTo')
+
+      const dateFromParam = searchParams.get('dateFrom')
+      const dateToParam = searchParams.get('dateTo')
       const includeZero = searchParams.get('includeZero') === 'true'
       const groupByType = searchParams.get('groupByType') !== 'false'
 
-      // ═══════════════════════════════════════════════════════════════
-      // ★ تنظیم بازه تاریخ
-      // ═══════════════════════════════════════════════════════════════
-      const now = new Date()
-      const toDate = dateTo ? new Date(dateTo) : now
-      if (isNaN(toDate.getTime())) {
+      const modeParam = searchParams.get('mode')
+      const mode: 'balance' | 'movement' =
+        modeParam === 'movement' ? 'movement' : 'balance'
+
+      const fiscalYearIdParam = (searchParams.get('fiscalYearId') || '').trim()
+      let allYears = searchParams.get('allYears') === 'true'
+
+      let fy: any = null
+      let effectiveFiscalYearId: string | null = null
+      let baseWarning: string | null = null
+
+      // ═════════════════════════════════════════════════════════
+      //  ۱. تعیین سال مالی مؤثر
+      // ═════════════════════════════════════════════════════════
+      if (!allYears) {
+        if (fiscalYearIdParam) {
+          try {
+            fy = await getFiscalYearById(
+              tenantDb,
+              tenantId,
+              fiscalYearIdParam
+            )
+          } catch (err: any) {
+            return NextResponse.json(
+              {
+                success: false,
+                error:
+                  err?.message || 'سال مالی انتخابی یافت نشد.',
+                code: 'INVALID_FISCAL_YEAR',
+              },
+              { status: 400 }
+            )
+          }
+
+          if (!fy) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: 'سال مالی انتخابی یافت نشد.',
+                code: 'INVALID_FISCAL_YEAR',
+              },
+              { status: 400 }
+            )
+          }
+        } else {
+          try {
+            fy = await getActiveFiscalYear(tenantDb, tenantId)
+          } catch {
+            allYears = true
+            baseWarning = NO_ACTIVE_FISCAL_YEAR_WARNING
+          }
+        }
+
+        if (fy) {
+          effectiveFiscalYearId = fy.id || null
+        }
+      }
+
+      const fiscalYearPayload = buildFiscalYearPayload(fy)
+
+      // ═════════════════════════════════════════════════════════
+      //  ۲. نرمال‌سازی تاریخ‌ها
+      // ═════════════════════════════════════════════════════════
+      let fromDate = dateFromParam ? parseDateOnly(dateFromParam) : null
+      let toDate = dateToParam ? parseDateOnly(dateToParam) : null
+
+      if (dateFromParam && !fromDate) {
+        return NextResponse.json(
+          { success: false, error: 'تاریخ شروع نامعتبر است' },
+          { status: 400 }
+        )
+      }
+
+      if (dateToParam && !toDate) {
         return NextResponse.json(
           { success: false, error: 'تاریخ پایان نامعتبر است' },
           { status: 400 }
         )
       }
 
-      const toDateEnd = new Date(toDate)
-      toDateEnd.setHours(23, 59, 59, 999)
+      let fiscalYearRange: { from: string; to: string } | null = null
 
-      const fromDate = dateFrom ? new Date(dateFrom) : null
-      if (fromDate && isNaN(fromDate.getTime())) {
-        return NextResponse.json(
-          { success: false, error: 'تاریخ شروع نامعتبر است' },
-          { status: 400 }
-        )
-      }
-      if (fromDate) {
-        fromDate.setHours(0, 0, 0, 0)
+      if (fy) {
+        const fyStart = truncateUtcDay(fy.startDate)
+        const fyEnd = truncateUtcDay(fy.endDate)
+
+        if (fyStart && fyEnd) {
+          fiscalYearRange = {
+            from: fyStart.toISOString(),
+            to: fyEnd.toISOString(),
+          }
+
+          if (!fromDate) fromDate = fyStart
+          if (!toDate) toDate = fyEnd
+
+          if (fromDate && fromDate < fyStart) fromDate = fyStart
+          if (toDate && toDate > fyEnd) toDate = fyEnd
+        }
       }
 
-      console.log('[TrialBalance] Querying', {
+      if (fromDate && toDate && fromDate > toDate) {
+        return makeEmptyResponse({
+          mode,
+          fiscalYearId: effectiveFiscalYearId,
+          fiscalYearName: fy?.name || null,
+          fiscalYear: fiscalYearPayload,
+          allYears,
+          warning: DATE_RANGE_OUTSIDE_FISCAL_YEAR_WARNING,
+          fromDate,
+          toDate,
+          fiscalYearRange,
+        })
+      }
+
+      const toDateExclusive = toDate
+        ? new Date(toDate.getTime() + 86400000)
+        : null
+
+      console.log('[TrialBalance v10.1] Query context', {
         tenantId,
-        dateFrom: fromDate?.toISOString(),
-        dateTo: toDateEnd.toISOString(),
+        mode,
+        fiscalYearId: effectiveFiscalYearId,
+        fiscalYearName: fy?.name || null,
+        allYears,
+        fromDate: fromDate?.toISOString() || null,
+        toDate: toDate?.toISOString() || null,
         includeZero,
         groupByType,
       })
 
-      // ═══════════════════════════════════════════════════════════════
-      // ★ DEBUG: آخرین اسناد این tenant را لاگ بگیر
-      // این کمک می‌کند بفهمیم JE-000012 اصلاً در دیتابیس وجود دارد یا نه
-      // ═══════════════════════════════════════════════════════════════
-      try {
-        const recentEntries = await tenantDb.journalEntry.findMany({
-          where: { tenantId },
-          select: {
-            id: true,
-            number: true,
-            status: true,
-            isCancelled: true,
-            date: true,
-            sourceType: true,
-            sourceId: true,
-          },
-          orderBy: { date: 'desc' },
-          take: 30,
-        })
+      // ═════════════════════════════════════════════════════════
+      //  ★ v10.1: تشخیص سند افتتاحیه برای سال مالی انتخابی
+      // ═════════════════════════════════════════════════════════
+      let hasFiscalYearOpeningEntry = false
 
-        console.log('[TrialBalance][DEBUG] Recent journal entries:', recentEntries.map((e: any) => ({
-          number: e.number,
-          status: e.status,
-          isCancelled: e.isCancelled,
-          date: e.date,
-          sourceType: e.sourceType,
-        })))
-      } catch (debugErr: any) {
-        console.warn('[TrialBalance][DEBUG] Recent entries query failed:', debugErr?.message)
+      if (effectiveFiscalYearId) {
+        try {
+          const openingEntryProbe = await tenantDb.journalEntry.findFirst({
+            where: {
+              tenantId,
+              fiscalYearId: effectiveFiscalYearId,
+              sourceType: 'fiscal_year_open',
+              status: {
+                in: POSTED_STATUS_VALUES,
+              },
+              isCancelled: false,
+            },
+            select: {
+              id: true,
+            },
+          })
+
+          hasFiscalYearOpeningEntry = Boolean(openingEntryProbe)
+        } catch (err: any) {
+          console.warn(
+            '[TrialBalance v10.1] Opening entry probe failed:',
+            err?.message || err
+          )
+          hasFiscalYearOpeningEntry = false
+        }
       }
 
-      // ═══════════════════════════════════════════════════════════════
-      //  ۱. دریافت اسناد حسابداری در بازه
-      //  ★ اصلاح مهم: isCancelled را اینجا فیلتر سخت نمی‌کنیم
-      // ═══════════════════════════════════════════════════════════════
-      const dateWhere: any = {
-        lte: toDateEnd,
-      }
-      if (fromDate) {
-        dateWhere.gte = fromDate
-      }
+      console.log('[TrialBalance v10.1] Opening entry detection', {
+        effectiveFiscalYearId,
+        hasFiscalYearOpeningEntry,
+      })
 
-      const where: any = {
-        tenantId,
-        status: {
-          in: ['posted', 'POSTED', 'confirmed', 'Confirmed'],
+      // ═════════════════════════════════════════════════════════
+      //  ۳. دریافت حساب‌ها
+      //     ★ همه حساب‌ها، حتی غیرفعال، چون ممکن است مانده داشته باشند
+      // ═════════════════════════════════════════════════════════
+      const accountsRaw = await tenantDb.account.findMany({
+        where: { tenantId },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          type: true,
+          isActive: true,
         },
-        date: dateWhere,
-      }
-
-      const rawJournalEntries = await tenantDb.journalEntry.findMany({
-        where,
-        include: { lines: true },
-        orderBy: { date: 'asc' },
-      })
-
-      console.log('[TrialBalance] Raw found journal entries:', rawJournalEntries.length)
-
-      // ═══════════════════════════════════════════════════════════════
-      // ★ فیلتر نرم لغوشده‌ها
-      // فقط اگر isCancelled دقیقاً true باشد حذف می‌شود.
-      // null یا undefined حذف نمی‌شود.
-      // ═══════════════════════════════════════════════════════════════
-      const journalEntries = rawJournalEntries.filter((je: any) => {
-        if (je.isCancelled === true) return false
-
-        const status = String(je.status || '').toLowerCase().trim()
-        return status === 'posted' || status === 'confirmed'
-      })
-
-      console.log('[TrialBalance] After cancelled filter:', journalEntries.length)
-      console.log('[TrialBalance] Included entry numbers:', journalEntries.map((je: any) => je.number))
-
-      // ═══════════════════════════════════════════════════════════════
-      //  ۲. دریافت تمام حساب‌ها (برای نام و کد)
-      // ═══════════════════════════════════════════════════════════════
-         const accountsRaw = await tenantDb.account.findMany({
-        where: { tenantId, isActive: true },
       })
 
       const accounts = (accountsRaw || []) as any[]
@@ -237,118 +486,379 @@ export const GET = withTenantAndPermission('accounting')(
       const accountMap = new Map<string, any>(
         accounts.map((a: any) => [String(a?.id || ''), a])
       )
-      // ═══════════════════════════════════════════════════════════════
-      //  ۳. تجمیع مبالغ بر اساس حساب
-      // ═══════════════════════════════════════════════════════════════
-      const accountBalances = new Map<
-        string,
-        {
-          accountId: string
-          accountCode: string
-          accountName: string
-          accountType: string
-          totalDebit: number
-          totalCredit: number
+
+      // ═════════════════════════════════════════════════════════
+      //  ۴. کوئری اسناد
+      // ═════════════════════════════════════════════════════════
+      const baseWhere: any = {
+        tenantId,
+        status: {
+          in: POSTED_STATUS_VALUES,
+        },
+        isCancelled: false,
+      }
+
+      // ─── حرکات داخل بازه ─────────────────────────────────────
+      const movementWhere: any = { ...baseWhere }
+
+      if (fromDate && toDateExclusive) {
+        movementWhere.date = {
+          gte: fromDate,
+          lt: toDateExclusive,
         }
-      >()
-
-         for (const je of journalEntries) {
-        const lines = (je as any).lines || []
-
-        for (const line of lines) {
-          const accountId = String((line as any).accountId || '').trim()
-
-          if (!accountId) {
-            continue
-          }
-
-          const acc = accountMap.get(accountId) as any | undefined
-
-          if (!acc) {
-            continue
-          }
-
-          const key = accountId
-
-          if (!accountBalances.has(key)) {
-            accountBalances.set(key, {
-              accountId,
-              accountCode: String(acc.code || '—'),
-              accountName: String(acc.name || 'نامشخص'),
-              accountType: String(acc.type || '').toLowerCase(),
-              totalDebit: 0,
-              totalCredit: 0,
-            })
-          }
-
-          const row = accountBalances.get(key)!
-
-          row.totalDebit += Number((line as any).debit) || 0
-          row.totalCredit += Number((line as any).credit) || 0
+      } else if (fromDate) {
+        movementWhere.date = {
+          gte: fromDate,
+        }
+      } else if (toDateExclusive) {
+        movementWhere.date = {
+          lt: toDateExclusive,
         }
       }
 
-      // ═══════════════════════════════════════════════════════════════
-      //  ۴. محاسبه مانده و فیلتر
-      // ═══════════════════════════════════════════════════════════════
-      const flatRows = Array.from(accountBalances.values())
-        .map((row) => {
-          const balance = row.totalDebit - row.totalCredit
-          const balanceLabel = balance > 0
-            ? `${Math.abs(balance).toLocaleString('fa-IR')} بد`
-            : balance < 0
-              ? `${Math.abs(balance).toLocaleString('fa-IR')} بس`
-              : '—'
-          return {
-            ...row,
-            balance,
-            balanceLabel,
-            classification: classifyAccount(row),
-          }
-        })
-        .filter((row) => {
-          if (!includeZero && Math.abs(row.balance) < 1 && row.totalDebit === 0 && row.totalCredit === 0) {
-            return false
-          }
-          return true
-        })
-        .sort((a, b) => a.accountCode.localeCompare(b.accountCode))
+      const movementEntries = await queryJournalEntries(
+        tenantDb,
+        movementWhere,
+        effectiveFiscalYearId
+      )
 
-      // ═══════════════════════════════════════════════════════════════
-      //  ۵. گروه‌بندی بر اساس نوع
-      // ═══════════════════════════════════════════════════════════════
+      // ─── مانده افتتاحیه قبل از fromDate ──────────────────────
+      // ★ فقط در حالت balance نیاز است
+      const needOpening = mode === 'balance' && Boolean(fromDate)
+
+      let openingEntries: any[] = []
+
+      let openingScope:
+        | 'none'
+        | 'same_fiscal_year_only'
+        | 'all_prior_periods' = 'none'
+
+      if (needOpening && fromDate) {
+        // ★ v10.1:
+        // اگر سال مالی انتخابی سند افتتاحیه دارد، مانده سنوات قبل را اضافه نکن.
+        // فقط حرکات همان سال مالی قبل از fromDate لحاظ می‌شود.
+        //
+        // دلیل:
+        // سند افتتاحیه خودش مانده سنوات قبل را منتقل کرده است.
+        // اگر دوباره مانده سنوات قبل را اضافه کنیم، double counting رخ می‌دهد.
+        openingScope = hasFiscalYearOpeningEntry
+          ? 'same_fiscal_year_only'
+          : 'all_prior_periods'
+
+        const openingWhere: any = {
+          ...baseWhere,
+          date: {
+            lt: fromDate,
+          },
+        }
+
+        const openingFiscalYearId = hasFiscalYearOpeningEntry
+          ? effectiveFiscalYearId
+          : null
+
+        openingEntries = await queryJournalEntries(
+          tenantDb,
+          openingWhere,
+          openingFiscalYearId
+        )
+      }
+
+      console.log('[TrialBalance v10.1] Opening scope', {
+        openingScope,
+        needOpening,
+        fromDate: fromDate?.toISOString() || null,
+      })
+
+      console.log('[TrialBalance v10.1] Entries fetched', {
+        movementEntries: movementEntries.length,
+        openingEntries: openingEntries.length,
+      })
+
+      // ═════════════════════════════════════════════════════════
+      //  ۵. تجمیع مانده افتتاحیه
+      // ═════════════════════════════════════════════════════════
+      const openingNetMap = new Map<string, number>()
+
+      for (const je of openingEntries) {
+        if (!shouldIncludeEntry(je)) continue
+
+        const lines = je?.lines || []
+
+        for (const line of lines) {
+          const accountId = String(line?.accountId || '').trim()
+          if (!accountId) continue
+
+          const acc = accountMap.get(accountId)
+          if (!acc) continue
+
+          const debit = Number(line?.debit || 0)
+          const credit = Number(line?.credit || 0)
+
+          openingNetMap.set(
+            accountId,
+            (openingNetMap.get(accountId) || 0) + debit - credit
+          )
+        }
+      }
+
+      // ═════════════════════════════════════════════════════════
+      //  ۶. تجمیع حرکات دوره
+      // ═════════════════════════════════════════════════════════
+      const movementMap = new Map<
+        string,
+        { debit: number; credit: number }
+      >()
+
+      for (const je of movementEntries) {
+        if (!shouldIncludeEntry(je)) continue
+
+        const lines = je?.lines || []
+
+        for (const line of lines) {
+          const accountId = String(line?.accountId || '').trim()
+          if (!accountId) continue
+
+          const acc = accountMap.get(accountId)
+          if (!acc) continue
+
+          const debit = Number(line?.debit || 0)
+          const credit = Number(line?.credit || 0)
+
+          if (!movementMap.has(accountId)) {
+            movementMap.set(accountId, { debit: 0, credit: 0 })
+          }
+
+          const row = movementMap.get(accountId)!
+          row.debit += debit
+          row.credit += credit
+        }
+      }
+
+      // ═════════════════════════════════════════════════════════
+      //  ۷. ساخت ردیف‌ها
+      // ═════════════════════════════════════════════════════════
+      const allAccountIds = new Set<string>([
+        ...openingNetMap.keys(),
+        ...movementMap.keys(),
+      ])
+
+      // ★ اگر includeZero=true باشد، همه حساب‌های چارت هم اضافه می‌شوند
+      if (includeZero) {
+        for (const acc of accounts) {
+          const id = String(acc?.id || '').trim()
+          if (id) allAccountIds.add(id)
+        }
+      }
+
+      interface InternalRow {
+        accountId: string
+        accountCode: string
+        accountName: string
+        accountType: string
+        openingBalance: number
+        movementDebit: number
+        movementCredit: number
+        closingBalance: number
+        totalDebit: number
+        totalCredit: number
+        balance: number
+        balanceLabel: string
+        classification: { group: string; label: string; order: number }
+      }
+
+      const rawRows: InternalRow[] = []
+
+      for (const accountId of allAccountIds) {
+        const acc = accountMap.get(accountId)
+        if (!acc) continue
+
+        const openingBalance =
+          mode === 'balance' ? openingNetMap.get(accountId) || 0 : 0
+
+        const movement = movementMap.get(accountId) || {
+          debit: 0,
+          credit: 0,
+        }
+
+        const movementDebit = movement.debit
+        const movementCredit = movement.credit
+
+        const closingBalance =
+          openingBalance + movementDebit - movementCredit
+
+        let totalDebit = 0
+        let totalCredit = 0
+        let balance = 0
+
+        if (mode === 'movement') {
+          // رفتار قبلی: فقط حرکات دوره
+          totalDebit = movementDebit
+          totalCredit = movementCredit
+          balance = movementDebit - movementCredit
+        } else {
+          // تراز آزمایشی استاندارد: مانده پایان دوره در ستون بدهکار/بستانکار
+          if (closingBalance > 0) {
+            totalDebit = closingBalance
+            totalCredit = 0
+          } else if (closingBalance < 0) {
+            totalDebit = 0
+            totalCredit = Math.abs(closingBalance)
+          } else {
+            totalDebit = 0
+            totalCredit = 0
+          }
+
+          balance = closingBalance
+        }
+
+        const balanceLabel =
+          balance > 0
+            ? `${roundMoney(balance).toLocaleString('fa-IR')} بد`
+            : balance < 0
+            ? `${roundMoney(Math.abs(balance)).toLocaleString('fa-IR')} بس`
+            : '—'
+
+        rawRows.push({
+          accountId,
+          accountCode: String(acc.code || '—'),
+          accountName: String(acc.name || 'نامشخص'),
+          accountType: String(acc.type || '').toLowerCase(),
+          openingBalance,
+          movementDebit,
+          movementCredit,
+          closingBalance,
+          totalDebit,
+          totalCredit,
+          balance,
+          balanceLabel,
+          classification: classifyAccount(acc),
+        })
+      }
+
+      // ═════════════════════════════════════════════════════════
+      //  ۸. فیلتر حساب‌های صفر
+      // ═════════════════════════════════════════════════════════
+      let filteredRows = rawRows
+
+      if (!includeZero) {
+        filteredRows = rawRows.filter((row) => {
+          const hasOpening = Math.abs(row.openingBalance) >= 1
+          const hasMovementDebit = Math.abs(row.movementDebit) >= 1
+          const hasMovementCredit = Math.abs(row.movementCredit) >= 1
+          const hasClosing = Math.abs(row.closingBalance) >= 1
+          const hasDisplayedBalance = Math.abs(row.balance) >= 1
+
+          return (
+            hasOpening ||
+            hasMovementDebit ||
+            hasMovementCredit ||
+            hasClosing ||
+            hasDisplayedBalance
+          )
+        })
+      }
+
+      filteredRows.sort((a, b) =>
+        String(a.accountCode || '').localeCompare(
+          String(b.accountCode || ''),
+          undefined,
+          { numeric: true }
+        )
+      )
+
+      // ═════════════════════════════════════════════════════════
+      //  ۹. ساخت خروجی نهایی با round
+      // ═════════════════════════════════════════════════════════
+      const flatRows = filteredRows.map((row) => ({
+        accountId: row.accountId,
+        accountCode: row.accountCode,
+        accountName: row.accountName,
+        accountType: row.accountType,
+        openingBalance: roundMoney(row.openingBalance),
+        movementDebit: roundMoney(row.movementDebit),
+        movementCredit: roundMoney(row.movementCredit),
+        closingBalance: roundMoney(row.closingBalance),
+        totalDebit: roundMoney(row.totalDebit),
+        totalCredit: roundMoney(row.totalCredit),
+        balance: roundMoney(row.balance),
+        balanceLabel: row.balanceLabel,
+        group: row.classification.group,
+        typeLabel: row.classification.label,
+      }))
+
+      // ═════════════════════════════════════════════════════════
+      //  ۱۰. گروه‌بندی
+      // ═════════════════════════════════════════════════════════
       let groups: any[] = []
+
       if (groupByType) {
-        const groupMap = new Map<string, any>()
+        const groupMap = new Map<
+          string,
+          {
+            type: string
+            typeLabel: string
+            order: number
+            subtotalDebit: number
+            subtotalCredit: number
+            accounts: any[]
+          }
+        >()
+
         for (const row of flatRows) {
-          const groupKey = row.classification.group
+          const classification = classifyAccount({
+            code: row.accountCode,
+            name: row.accountName,
+            type: row.accountType,
+          })
+
+          const groupKey = classification.group
+
           if (!groupMap.has(groupKey)) {
             groupMap.set(groupKey, {
               type: groupKey,
-              typeLabel: GROUP_LABELS[groupKey] || row.classification.label,
-              order: row.classification.order,
+              typeLabel:
+                GROUP_LABELS[groupKey] || classification.label,
+              order: classification.order,
               subtotalDebit: 0,
               subtotalCredit: 0,
               accounts: [],
             })
           }
+
           const g = groupMap.get(groupKey)!
           g.subtotalDebit += row.totalDebit
           g.subtotalCredit += row.totalCredit
           g.accounts.push(row)
         }
-        groups = Array.from(groupMap.values()).sort((a, b) => a.order - b.order)
+
+        groups = Array.from(groupMap.values())
+          .map((g) => ({
+            ...g,
+            subtotalDebit: roundMoney(g.subtotalDebit),
+            subtotalCredit: roundMoney(g.subtotalCredit),
+          }))
+          .sort((a, b) => a.order - b.order)
       }
 
-      // ═══════════════════════════════════════════════════════════════
-      //  ۶. محاسبه جمع کل و بررسی تعادل
-      // ═══════════════════════════════════════════════════════════════
+      // ═════════════════════════════════════════════════════════
+      //  ۱۱. جمع کل و تعادل
+      // ═════════════════════════════════════════════════════════
       const grandDebit = flatRows.reduce((s, r) => s + r.totalDebit, 0)
       const grandCredit = flatRows.reduce((s, r) => s + r.totalCredit, 0)
       const difference = grandDebit - grandCredit
       const isBalanced = Math.abs(difference) < 1
 
-      console.log('[TrialBalance] Computed', {
+      let warning = baseWarning
+
+      if (allYears) {
+        warning = warning || ALL_YEARS_WARNING
+      }
+
+      console.log('[TrialBalance v10.1] Computed', {
+        mode,
+        fiscalYearId: effectiveFiscalYearId,
+        hasFiscalYearOpeningEntry,
+        openingScope,
         accountCount: flatRows.length,
         grandDebit,
         grandCredit,
@@ -358,35 +868,42 @@ export const GET = withTenantAndPermission('accounting')(
 
       return NextResponse.json({
         success: true,
+        mode,
+        fiscalYearId: effectiveFiscalYearId,
+        fiscalYearName: fy?.name || null,
+        fiscalYear: fiscalYearPayload,
+        allYears,
+        warning,
+        hasFiscalYearOpeningEntry,
+        openingScope,
         data: {
+          mode,
           isBalanced,
-          grandDebit: Math.round(grandDebit),
-          grandCredit: Math.round(grandCredit),
-          difference: Math.round(difference),
+          grandDebit: roundMoney(grandDebit),
+          grandCredit: roundMoney(grandCredit),
+          difference: roundMoney(difference),
           accountCount: flatRows.length,
           dateRange: {
             from: fromDate ? fromDate.toISOString() : null,
-            to: toDateEnd.toISOString(),
+            to: toDate ? toDate.toISOString() : null,
           },
+          fiscalYearRange,
           groups,
-          flatRows: flatRows.map((r) => ({
-            accountId: r.accountId,
-            accountCode: r.accountCode,
-            accountName: r.accountName,
-            accountType: r.accountType,
-            totalDebit: Math.round(r.totalDebit),
-            totalCredit: Math.round(r.totalCredit),
-            balance: Math.round(r.balance),
-            balanceLabel: r.balanceLabel,
-            group: r.classification.group,
-          })),
+          flatRows,
         },
       })
     } catch (error: any) {
-      console.error('[TrialBalance] Error:', error?.message || error)
+      console.error('[TrialBalance v10.1] Error:', error?.message || error)
+
       return NextResponse.json(
-        { success: false, error: 'خطا در دریافت تراز آزمایشی: ' + (error?.message || 'نامشخص') },
-        { status: 500 }
+        {
+          success: false,
+          error:
+            'خطا در دریافت تراز آزمایشی: ' +
+            (error?.message || 'نامشخص'),
+          code: error?.code || 'UNKNOWN',
+        },
+        { status: error?.status || 500 }
       )
     }
   }

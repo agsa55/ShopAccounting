@@ -115,7 +115,15 @@ function SummaryCard({
 //  Main Component
 // ═══════════════════════════════════════════════════════════════
 
-export function SettlementsReport({ tier }: { tier: any }) {
+export function SettlementsReport({
+  tier,
+  fiscalYearId,
+  dateRange: parentDateRange,
+}: {
+  tier: any
+  fiscalYearId?: string | null
+  dateRange?: { from: string; to: string }
+}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<any>(null)
@@ -125,8 +133,20 @@ export function SettlementsReport({ tier }: { tier: any }) {
   // ★ فیلترها
   const today = new Date().toISOString().slice(0, 10)
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [dateFrom, setDateFrom] = useState<string | null>(null)
-  const [dateTo, setDateTo] = useState<string | null>(today)
+  const [dateFrom, setDateFrom] = useState<string | null>(
+    parentDateRange?.from ?? null
+  )
+  const [dateTo, setDateTo] = useState<string | null>(
+    parentDateRange?.to ?? today
+  )
+
+  // ★ اگر والد سال مالی را عوض کرد، بازه تاریخ تسویه‌ها هم آپدیت شود
+  useEffect(() => {
+    if (parentDateRange) {
+      setDateFrom(parentDateRange.from)
+      setDateTo(parentDateRange.to)
+    }
+  }, [parentDateRange?.from, parentDateRange?.to])
 
   const currentTenant = useAppStore((s) => s.currentTenant)
   const tenantIdFromStore = useAppStore((s) => s.tenantId)
@@ -143,9 +163,11 @@ export function SettlementsReport({ tier }: { tier: any }) {
   setError(null)
   try {
     const params = new URLSearchParams({ summary: 'true' })
+
     if (statusFilter !== 'all') params.set('status', statusFilter)
     if (dateFrom) params.set('dateFrom', dateFrom)
     if (dateTo) params.set('dateTo', dateTo)
+    if (fiscalYearId) params.set('fiscalYearId', fiscalYearId)
 
     const res = await fetch(`/api/payments/online/settlements?${params.toString()}`, {
       headers: { 'x-tenant-id': tenantId },
@@ -163,7 +185,7 @@ export function SettlementsReport({ tier }: { tier: any }) {
   } finally {
     setLoading(false)
   }
-}, [tenantId, statusFilter, dateFrom, dateTo])
+}, [tenantId, statusFilter, dateFrom, dateTo, fiscalYearId])
 
   useEffect(() => {
     fetchReport()

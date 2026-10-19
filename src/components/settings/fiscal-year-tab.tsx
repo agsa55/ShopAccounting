@@ -1,12 +1,18 @@
 'use client'
 
 // ============================================================================
-// src/components/settings/fiscal-year-tab.tsx — v4.1 ★★★
-// ★ v4.0: حذف ساخت سال جدید و سند افتتاحیه
-//   - فقط بستن سال + سند اختتامیه
-//   - سال جدید توسط SetupWizard ساخته می‌شود
-//   - ۳ مرحله: prerequisites → closing-preview → confirm
-// ★ v4.1: اضافه شدن لاگ‌های سیستم برای دیباگ بهتر
+// src/components/settings/fiscal-year-tab.tsx — v5.2 ★★★ EVENT SYNC
+// ============================================================================
+// ★ v5.2 تغییرات (هماهنگی کامل با فیلتر سال مالی هدر + ویزارد راه‌اندازی):
+//   - استفاده از سیستم رویداد مرکزی (fiscal-year-events)
+//   - حذف window.location.reload() بعد از بستن سال
+//   - باز کردن خودکار ویزارد راه‌اندازی سال جدید بعد از بستن
+//   - اطلاع‌رسانی به هدر بعد از هر عملیات (ایجاد/فعال‌سازی/حذف/ویرایش/بستن)
+//   - شرط فعال بودن دکمه "بستن سال مالی" فقط در بازه مجاز
+//     (≥۱۸۰ روز گذشته یا ≤۷ روز مانده)
+// ★ شرایط باقی‌مانده:
+//   - ویزارد بستن فقط وقتی سال تمام شده یا در بازه مجاز باشد اجرا می‌شود
+//   - ۳ مرحله: پیش‌نیازها → پیش‌نمایش اختتامیه → تأیید و اجرا
 // ============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
@@ -19,6 +25,10 @@ import {
   gregorianISOToJalali,
   isoToJalaliFa,
 } from '@/lib/jalali-utils'
+import {
+  dispatchFiscalYearEvent,
+  triggerRenewalSetup,
+} from '@/lib/fiscal-year-events'
 import { PersianDatePicker } from '@/components/ui/persian-date-picker'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -86,13 +96,21 @@ const toFaNum = (n: number | string | null | undefined): string => {
   return String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[parseInt(d)])
 }
 
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('token')
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  کامپوننت اصلی
 // ═══════════════════════════════════════════════════════════════
 
 export function FiscalYearTab() {
   const planName = useAppStore((s) => s.planName)
-  const tenantId = useAppStore((s) => s.tenantId)
   const features = useMemo(() => getFeaturesByPlanName(planName), [planName])
   const { toast } = useToast()
 
@@ -129,10 +147,8 @@ export function FiscalYearTab() {
   const loadYears = useCallback(async () => {
     setLoading(true)
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/fiscal-years', {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: getAuthHeaders(),
       })
       if (res.ok) {
         const data = await res.json()
@@ -154,6 +170,34 @@ export function FiscalYearTab() {
     }
   }, [features.canFiscalYearManagement, features.canCloseFiscalYear, loadYears, refreshKey])
 
+  // ─── هماهنگی دوطرفه با سایر کامپوننت‌ها ─────────────────────
+  // وقتی از بیرون (ویزارد راه‌اندازی، هدر، یا هر جای دیگر)
+  // سال مالی تغییر می‌کند، این تب هم به‌روزرسانی شود.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleExternalChange = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail || {}
+      const type = detail.type
+
+      if (
+        type === 'created' ||
+        type === 'activated' ||
+        type === 'closed' ||
+        type === 'deleted' ||
+        type === 'updated' ||
+        type === 'list-changed'
+      ) {
+        loadYears()
+      }
+    }
+
+    window.addEventListener('fiscal-year-changed', handleExternalChange)
+    return () => {
+      window.removeEventListener('fiscal-year-changed', handleExternalChange)
+    }
+  }, [loadYears])
+
   useEffect(() => {
     if (formOpen && !formStartISO) {
       const isoToday = todayISO()
@@ -173,28 +217,35 @@ export function FiscalYearTab() {
 
   const handleSave = async () => {
     if (!formName.trim() || formName.trim().length < 2) {
-      alert('نام سال مالی باید حداقل ۲ کاراکتر باشد')
+      toast({
+        title: 'خطا',
+        description: 'نام سال مالی باید حداقل ۲ کاراکتر باشد',
+        variant: 'destructive',
+      })
       return
     }
     if (!formStartISO || !formEndISO) {
-      alert('تاریخ شروع و پایان الزامی هستند')
+      toast({
+        title: 'خطا',
+        description: 'تاریخ شروع و پایان الزامی هستند',
+        variant: 'destructive',
+      })
       return
     }
     if (formStartISO >= formEndISO) {
-      alert('تاریخ شروع باید قبل از تاریخ پایان باشد')
+      toast({
+        title: 'خطا',
+        description: 'تاریخ شروع باید قبل از تاریخ پایان باشد',
+        variant: 'destructive',
+      })
       return
     }
 
     setFormSaving(true)
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/fiscal-years', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: formName.trim(),
           startDate: formStartISO,
@@ -203,8 +254,8 @@ export function FiscalYearTab() {
         }),
       })
       const data = await res.json()
+
       if (data.success) {
-        // ★ v4.1: لاگ ثبت سال مالی جدید
         logger.info('سال مالی جدید ثبت شد', {
           yearId: data.data?.id,
           yearName: formName.trim(),
@@ -217,6 +268,23 @@ export function FiscalYearTab() {
           })(),
         })
 
+        // ★ v5.2: اطلاع‌رسانی به هدر فیلتر سال مالی و سایر کامپوننت‌ها
+        if (formActivate) {
+          dispatchFiscalYearEvent('activated', {
+            yearId: data.data?.id || data.meta?.yearId,
+            yearName: formName.trim(),
+            startDate: formStartISO || undefined,
+            endDate: formEndISO || undefined,
+          })
+        } else {
+          dispatchFiscalYearEvent('created', {
+            yearId: data.data?.id || data.meta?.yearId,
+            yearName: formName.trim(),
+            startDate: formStartISO || undefined,
+            endDate: formEndISO || undefined,
+          })
+        }
+
         toast({ title: data.message })
         setFormOpen(false)
         setFormName('')
@@ -225,7 +293,6 @@ export function FiscalYearTab() {
         setFormActivate(true)
         setRefreshKey((k) => k + 1)
       } else {
-        // ★ v4.1: لاگ خطای ثبت سال مالی
         logger.error('خطا در ثبت سال مالی', undefined, {
           error: data.error,
           formName: formName.trim(),
@@ -233,7 +300,10 @@ export function FiscalYearTab() {
           endDate: formEndISO,
         })
 
-        toast({ title: data.error || 'خطا در ایجاد سال مالی', variant: 'destructive' })
+        toast({
+          title: data.error || 'خطا در ایجاد سال مالی',
+          variant: 'destructive',
+        })
       }
     } catch (err: any) {
       logger.error('خطای شبکه در ثبت سال مالی', err, {
@@ -248,23 +318,27 @@ export function FiscalYearTab() {
     if (!confirm(`آیا از فعال‌سازی سال مالی «${yearName}» مطمئن هستید؟ سال فعلی غیرفعال خواهد شد.`))
       return
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch(`/api/fiscal-years/${yearId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ action: 'activate' }),
       })
       const data = await res.json()
+
       if (data.success) {
-        // ★ v4.1: لاگ فعال‌سازی سال مالی
         logger.info('سال مالی فعال شد', {
           yearId: yearId,
           yearName: yearName,
           previousActiveYear: activeYear?.name || null,
+        })
+
+        // ★ v5.2: اطلاع‌رسانی به هدر فیلتر سال مالی
+        // سال فعال تغییر کرد → فیلتر هدر باید به سال جدید تغییر کند
+        dispatchFiscalYearEvent('activated', {
+          yearId: yearId,
+          yearName: yearName,
+          startDate: data.meta?.startDate,
+          endDate: data.meta?.endDate,
         })
 
         toast({ title: data.message })
@@ -275,7 +349,10 @@ export function FiscalYearTab() {
           yearName,
           error: data.error,
         })
-        toast({ title: data.error || 'خطا در فعال‌سازی', variant: 'destructive' })
+        toast({
+          title: data.error || 'خطا در فعال‌سازی',
+          variant: 'destructive',
+        })
       }
     } catch (err: any) {
       logger.error('خطای شبکه در فعال‌سازی سال مالی', err, {
@@ -289,28 +366,33 @@ export function FiscalYearTab() {
   const handleEditSave = async () => {
     if (!editingYear) return
     if (!editName.trim() || editName.trim().length < 2) {
-      alert('نام سال مالی باید حداقل ۲ کاراکتر باشد')
+      toast({
+        title: 'خطا',
+        description: 'نام سال مالی باید حداقل ۲ کاراکتر باشد',
+        variant: 'destructive',
+      })
       return
     }
     setEditSaving(true)
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch(`/api/fiscal-years/${editingYear.id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ action: 'update', name: editName.trim() }),
       })
       const data = await res.json()
+
       if (data.success) {
-        // ★ v4.1: لاگ ویرایش سال مالی
         logger.info('سال مالی ویرایش شد', {
           yearId: editingYear.id,
           oldName: editingYear.name,
           newName: editName.trim(),
+        })
+
+        // ★ v5.2: اطلاع‌رسانی به هدر فیلتر سال مالی
+        dispatchFiscalYearEvent('updated', {
+          yearId: editingYear.id,
+          yearName: editName.trim(),
         })
 
         toast({ title: data.message })
@@ -322,7 +404,10 @@ export function FiscalYearTab() {
           yearId: editingYear.id,
           error: data.error,
         })
-        toast({ title: data.error || 'خطا در به‌روزرسانی', variant: 'destructive' })
+        toast({
+          title: data.error || 'خطا در به‌روزرسانی',
+          variant: 'destructive',
+        })
       }
     } catch (err: any) {
       logger.error('خطای شبکه در ویرایش سال مالی', err, {
@@ -337,18 +422,22 @@ export function FiscalYearTab() {
     if (!confirm(`آیا از حذف سال مالی «${yearName}» مطمئن هستید؟ این عمل قابل بازگشت نیست.`))
       return
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch(`/api/fiscal-years/${yearId}`, {
         method: 'DELETE',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: getAuthHeaders(),
       })
       const data = await res.json()
+
       if (data.success) {
-        // ★ v4.1: لاگ حذف سال مالی
         logger.info('سال مالی حذف شد', {
           yearId: yearId,
           yearName: yearName,
+        })
+
+        // ★ v5.2: اطلاع‌رسانی به هدر فیلتر سال مالی
+        dispatchFiscalYearEvent('deleted', {
+          deletedYearId: yearId,
+          deletedYearName: yearName,
         })
 
         toast({ title: data.message })
@@ -381,22 +470,18 @@ export function FiscalYearTab() {
     setEarlyCloseReason('')
     setEarlyCloseConfirmed(false)
 
-    // ★ v4.1: لاگ شروع فرآیند بستن سال
     logger.info('شروع فرآیند بستن سال مالی', {
       activeYearName: activeYear?.name || null,
       activeYearId: activeYear?.id || null,
     })
 
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
       const res = await fetch('/api/fiscal-years/pre-close-check', {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: getAuthHeaders(),
       })
       const data = await res.json()
 
       if (data.success) {
-        // ★ v4.1: لاگ موفقیت بررسی پیش‌نیازها
         logger.info('پیش‌نیازهای بستن سال بررسی شد', {
           closeMode: data.data?.closeMode,
           canProceed: data.data?.canProceed,
@@ -410,7 +495,10 @@ export function FiscalYearTab() {
         logger.error('خطا در بررسی پیش‌نیازهای بستن سال', undefined, {
           error: data.error,
         })
-        toast({ title: data.error || 'خطا در بررسی', variant: 'destructive' })
+        toast({
+          title: data.error || 'خطا در بررسی',
+          variant: 'destructive',
+        })
         setWizardOpen(false)
       }
     } catch (err: any) {
@@ -430,21 +518,18 @@ export function FiscalYearTab() {
     setExecuting(true)
     setWizardStep('executing')
 
-    // ★ v4.1: لاگ اجرای بستن سال
     logger.info('اجرای بستن سال مالی', {
       yearName: preCheckData.activeYear?.name,
       yearId: preCheckData.activeYear?.id,
       closeMode: preCheckData.closeMode,
-      earlyCloseReason: preCheckData.closeMode === 'early' ? earlyCloseReason : null,
+      earlyCloseReason:
+        preCheckData.closeMode === 'early' ? earlyCloseReason : null,
       netProfit: preCheckData.closingPreview?.netProfit,
       totalRevenue: preCheckData.closingPreview?.totalRevenue,
       totalExpense: preCheckData.closingPreview?.totalExpense,
     })
 
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null
-
       const body: any = {
         forceClose: false,
       }
@@ -456,17 +541,13 @@ export function FiscalYearTab() {
 
       const res = await fetch('/api/fiscal-years', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(body),
       })
 
       const data = await res.json()
 
       if (data.success) {
-        // ★ v4.1: لاگ موفقیت بستن سال
         logger.info('سال مالی با موفقیت بسته شد', {
           closedYearId: data.data?.closedYear?.id,
           closedYearName: data.data?.closedYear?.name,
@@ -479,42 +560,62 @@ export function FiscalYearTab() {
         setWizardResult(data.data)
         setWizardStep('completed')
         setRefreshKey((k) => k + 1)
+
+        // ★ v5.2: اطلاع‌رسانی به هدر فیلتر سال مالی و سایر کامپوننت‌ها
+        // سال بسته شد → فیلتر هدر باید انتخابش را پاک کند
+        dispatchFiscalYearEvent('closed', {
+          closedYearId: data.data?.closedYear?.id,
+          closedYearName: data.data?.closedYear?.name,
+          suggestedNextYearName: data.data?.suggestedNextYearName,
+          closingEntryNumber: data.data?.closingEntry?.number,
+          netProfit: data.data?.closingEntry?.netProfit,
+        })
+
         toast({
           title: '🎉 سال مالی با موفقیت بسته شد!',
           description: 'در حال آماده‌سازی ویزارد راه‌اندازی سال جدید...',
         })
-        
-        // ★ بعد از ۲ ثانیه، Wizard بستن را ببند و صفحه را reload کن
+
+        // ★ v5.2: بعد از ۲.۵ ثانیه، ویزارد بستن را ببند و
+        // ویزارد راه‌اندازی سال جدید را خودکار باز کن.
+        // به جای window.location.reload() از رویداد مستقیم استفاده می‌کنیم
+        // تا هماهنگی کامل با فیلتر هدر و ویزارد راه‌اندازی حفظ شود.
         setTimeout(() => {
           setWizardOpen(false)
-          
-          // ★ بعد از ۵۰۰ms، صفحه را reload کن تا SetupWizard به صورت خودکار باز شود
+
+          // ★ باز کردن خودکار ویزارد راه‌اندازی سال جدید
+          // این رویداد توسط useSetupWizard در setup-wizard.tsx شنیده می‌شود
           setTimeout(() => {
-            console.log('[FiscalYearTab] 🔄 Reloading page to trigger setup wizard...')
-            window.location.reload()
-          }, 500)
-        }, 2000)
+            triggerRenewalSetup()
+          }, 300)
+        }, 2500)
       } else {
         logger.error('خطا در بستن سال مالی', undefined, {
           yearName: preCheckData.activeYear?.name,
           error: data.error,
           closeMode: preCheckData.closeMode,
         })
-        toast({ title: data.error || 'خطا در بستن سال مالی', variant: 'destructive' })
+        toast({
+          title: data.error || 'خطا در بستن سال مالی',
+          variant: 'destructive',
+        })
         setWizardStep('confirm')
       }
     } catch (err: any) {
       logger.error('خطای شبکه در بستن سال مالی', err, {
         yearName: preCheckData.activeYear?.name,
       })
-      toast({ title: err?.message || 'خطا در ارتباط', variant: 'destructive' })
+      toast({
+        title: err?.message || 'خطا در ارتباط',
+        variant: 'destructive',
+      })
       setWizardStep('confirm')
     } finally {
       setExecuting(false)
     }
   }
 
-  // ─── Wizard: Steps (۳ مرحله اصلی) ──────────────────────────
+  // ─── Wizard: Steps ───────────────────────────────────────────
 
   const wizardSteps: WizardStep[] = [
     'prerequisites',
@@ -559,6 +660,29 @@ export function FiscalYearTab() {
     }
   }
 
+  // ★ v5.2: محاسبه وضعیت سال برای شرط دکمه بستن
+  const closeYearStatus = useMemo(() => {
+    if (!activeYear) {
+      return { canClose: false, daysUntilEnd: 0, daysPassed: 0, reason: '' }
+    }
+
+    const end = new Date(activeYear.endDate).getTime()
+    const start = new Date(activeYear.startDate).getTime()
+    const now = Date.now()
+    const daysUntilEnd = Math.ceil((end - now) / (1000 * 60 * 60 * 24))
+    const daysPassed = Math.floor((now - start) / (1000 * 60 * 60 * 24))
+
+    // فقط وقتی سال تمام شده (≤۷ روز مانده) یا زودهنگام مجاز (≥۱۸۰ روز گذشته)
+    const canClose = daysUntilEnd <= 7 || daysPassed >= 180
+
+    let reason = ''
+    if (!canClose) {
+      reason = `بستن سال فقط پس از گذشت حداقل ۱۸۰ روز یا در ۷ روز پایانی سال ممکن است (${daysPassed} روز گذشته)`
+    }
+
+    return { canClose, daysUntilEnd, daysPassed, reason }
+  }, [activeYear])
+
   // ─── Render ──────────────────────────────────────────────────
 
   if (!features.canFiscalYearManagement && !features.canCloseFiscalYear) {
@@ -566,9 +690,12 @@ export function FiscalYearTab() {
       <Card className="border-amber-200 bg-amber-50/30">
         <CardContent className="p-6 text-center">
           <CalendarDays className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-gray-900 mb-2">مدیریت سال مالی</h3>
+          <h3 className="text-base font-bold text-gray-900 mb-2">
+            مدیریت سال مالی
+          </h3>
           <p className="text-xs text-gray-500 mb-4">
-            تعریف، فعال‌سازی و بستن سال‌های مالی فقط در پلن پیشرفته و حرفه‌ای در دسترس است.
+            تعریف، فعال‌سازی و بستن سال‌های مالی فقط در پلن پیشرفته و حرفه‌ای
+            در دسترس است.
           </p>
         </CardContent>
       </Card>
@@ -610,14 +737,19 @@ export function FiscalYearTab() {
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <div className="flex-1">
-                  <p className="text-sm font-bold text-gray-800">{activeYear.name}</p>
+                  <p className="text-sm font-bold text-gray-800">
+                    {activeYear.name}
+                  </p>
                   <p className="text-[10px] text-gray-500" dir="ltr">
-                    {isoToJalaliFa(activeYear.startDate)} — {isoToJalaliFa(activeYear.endDate)}
+                    {isoToJalaliFa(activeYear.startDate)} —{' '}
+                    {isoToJalaliFa(activeYear.endDate)}
                   </p>
                 </div>
                 {activeYear.progress !== undefined && (
                   <div className="text-left">
-                    <div className="text-[10px] text-gray-500 mb-0.5">پیشرفت</div>
+                    <div className="text-[10px] text-gray-500 mb-0.5">
+                      پیشرفت
+                    </div>
                     <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-emerald-500"
@@ -644,49 +776,66 @@ export function FiscalYearTab() {
                     {(() => {
                       const start = new Date(activeYear.startDate).getTime()
                       const end = new Date(activeYear.endDate).getTime()
-                      const days = Math.round((end - start) / (1000 * 60 * 60 * 24))
-                      return toFaNum(days) + ' روز'
-                    })()}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[10px] text-gray-500">روزهای باقی‌مانده</div>
-                  <div className="text-xs font-bold text-gray-700">
-                    {(() => {
-                      const end = new Date(activeYear.endDate).getTime()
-                      const now = Date.now()
-                      const days = Math.max(
-                        0,
-                        Math.round((end - now) / (1000 * 60 * 60 * 24))
+                      const days = Math.round(
+                        (end - start) / (1000 * 60 * 60 * 24)
                       )
                       return toFaNum(days) + ' روز'
                     })()}
                   </div>
                 </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-gray-500">
+                    روزهای باقی‌مانده
+                  </div>
+                  <div className="text-xs font-bold text-gray-700">
+                    {toFaNum(closeYearStatus.daysUntilEnd)} روز
+                  </div>
+                </div>
               </div>
 
+              {/* ★ v5.2: دکمه بستن سال مالی با شرط بازه مجاز */}
               {features.canCloseFiscalYear && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-red-300 text-red-600 hover:bg-red-50 text-[11px] h-8 w-full mt-1 gap-1.5"
-                  onClick={openWizard}
-                >
-                  <Archive className="w-3.5 h-3.5" />
-                  بستن سال مالی
-                </Button>
+                <div className="mt-1 space-y-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`text-[11px] h-8 w-full gap-1.5 ${
+                      closeYearStatus.canClose
+                        ? 'border-red-300 text-red-600 hover:bg-red-50'
+                        : 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                    onClick={closeYearStatus.canClose ? openWizard : undefined}
+                    disabled={!closeYearStatus.canClose}
+                    title={
+                      !closeYearStatus.canClose
+                        ? closeYearStatus.reason
+                        : 'شروع فرآیند بستن سال مالی'
+                    }
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    بستن سال مالی
+                  </Button>
+                  {!closeYearStatus.canClose && (
+                    <p className="text-[9px] text-gray-400 text-center">
+                      هنوز برای بستن سال زود است —{' '}
+                      {toFaNum(closeYearStatus.daysPassed)} روز از سال گذشته
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           ) : (
             <div className="py-3 text-center">
               <AlertTriangle className="w-5 h-5 text-amber-500 mx-auto mb-1" />
-              <p className="text-[11px] text-gray-600 mb-2">هیچ سال مالی فعالی وجود ندارد</p>
+              <p className="text-[11px] text-gray-600 mb-2">
+                هیچ سال مالی فعالی وجود ندارد
+              </p>
               <Button
                 size="sm"
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] h-7"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] h-7 gap-1"
                 onClick={() => setFormOpen(true)}
               >
-                <Plus className="w-3 h-3 ml-1" />
+                <Plus className="w-3 h-3" />
                 تعریف سال اول
               </Button>
             </div>
@@ -709,10 +858,10 @@ export function FiscalYearTab() {
               <Button
                 size="sm"
                 variant="outline"
-                className="h-6 text-[11px] border-blue-300 text-blue-600 hover:bg-blue-50"
+                className="h-6 text-[11px] border-blue-300 text-blue-600 hover:bg-blue-50 gap-1"
                 onClick={() => setFormOpen(true)}
               >
-                <Plus className="w-3 h-3 ml-1" />
+                <Plus className="w-3 h-3" />
                 سال جدید
               </Button>
             )}
@@ -784,20 +933,29 @@ export function FiscalYearTab() {
                             <span className="text-[11px] font-medium text-gray-800 truncate">
                               {y.name}
                             </span>
-                            {y.isActive && (
-                              <Badge className="text-[9px] bg-emerald-100 text-emerald-700">
-                                فعال
-                              </Badge>
-                            )}
-                            {y.isClosed && (
-                              <Badge className="text-[9px] bg-gray-200 text-gray-600">
-                                بسته‌شده
-                              </Badge>
-                            )}
+                          {y.isActive && !y.isClosed && (
+  <Badge className="text-[9px] bg-emerald-100 text-emerald-700">
+    فعال
+  </Badge>
+)}
+{y.isClosed && (
+  <Badge className="text-[9px] bg-gray-200 text-gray-600">
+    بسته‌شده
+  </Badge>
+)}
+{!y.isActive && !y.isClosed && (
+  <Badge className="text-[9px] bg-amber-100 text-amber-700 border border-amber-200">
+    غیرفعال
+  </Badge>
+)}
                           </div>
-                          <div className="flex items-center gap-2 text-[9px] text-gray-500" dir="ltr">
+                          <div
+                            className="flex items-center gap-2 text-[9px] text-gray-500"
+                            dir="ltr"
+                          >
                             <span>
-                              {isoToJalaliFa(y.startDate)} — {isoToJalaliFa(y.endDate)}
+                              {isoToJalaliFa(y.startDate)} —{' '}
+                              {isoToJalaliFa(y.endDate)}
                             </span>
                           </div>
                           {y.isClosed && y.closedAt && (
@@ -817,7 +975,10 @@ export function FiscalYearTab() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {y.entryCount > 0 && (
-                      <Badge className="text-[9px] bg-blue-50 text-blue-600" title="تعداد اسناد">
+                      <Badge
+                        className="text-[9px] bg-blue-50 text-blue-600"
+                        title="تعداد اسناد"
+                      >
                         {toFaNum(y.entryCount)} سند
                       </Badge>
                     )}
@@ -891,16 +1052,25 @@ export function FiscalYearTab() {
             <Info className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
             <div className="text-[10px] text-gray-600 leading-relaxed space-y-1">
               <p>
-                <strong className="text-blue-700">سال فعال:</strong> تمام اسناد حسابداری جدید به این
-                سال متصل می‌شوند. در هر لحظه فقط یک سال فعال می‌تواند وجود داشته باشد.
+                <strong className="text-blue-700">سال فعال:</strong> تمام اسناد
+                حسابداری جدید به این سال متصل می‌شوند. در هر لحظه فقط یک سال
+                فعال می‌تواند وجود داشته باشد.
               </p>
               <p>
-                <strong className="text-gray-700">سال بسته‌شده:</strong> قابل ویرایش یا حذف نیست.
-                برای حفظ سابقه حسابداری، سال‌های بسته‌شده دائمی هستند.
+                <strong className="text-gray-700">سال بسته‌شده:</strong> قابل
+                ویرایش یا حذف نیست. برای حفظ سابقه حسابداری، سال‌های بسته‌شده
+                دائمی هستند.
               </p>
               <p>
-                <strong className="text-emerald-700">بستن سال:</strong> سند اختتامیه صادر می‌شود،
-                حساب‌های موقت صفر شده و سود/زیان به سود انباشته منتقل می‌شود. سپس ویزارد راه‌اندازی سال جدید باز می‌شود.
+                <strong className="text-emerald-700">بستن سال:</strong> سند
+                اختتامیه صادر می‌شود، حساب‌های موقت صفر شده و سود/زیان به سود
+                انباشته منتقل می‌شود. سپس ویزارد راه‌اندازی سال جدید خودکار باز
+                می‌شود.
+              </p>
+              <p>
+                <strong className="text-purple-700">هماهنگی با هدر:</strong> هر
+                تغییری در این بخش، به‌صورت خودکار روی فیلتر سال مالی در بالای
+                تمام صفحات اعمال می‌شود.
               </p>
             </div>
           </div>
@@ -921,7 +1091,9 @@ export function FiscalYearTab() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div>
-              <Label className="text-[11px] text-gray-600 mb-0.5 block">نام سال مالی *</Label>
+              <Label className="text-[11px] text-gray-600 mb-0.5 block">
+                نام سال مالی *
+              </Label>
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
@@ -949,8 +1121,12 @@ export function FiscalYearTab() {
             </div>
             <div className="flex items-center justify-between bg-emerald-50/50 border border-emerald-200 rounded p-2">
               <div>
-                <Label className="text-[11px] text-emerald-700">فعال‌سازی به‌عنوان سال جاری</Label>
-                <p className="text-[9px] text-gray-500">سال فعلی غیرفعال و این سال فعال می‌شود</p>
+                <Label className="text-[11px] text-emerald-700">
+                  فعال‌سازی به‌عنوان سال جاری
+                </Label>
+                <p className="text-[9px] text-gray-500">
+                  سال فعلی غیرفعال و این سال فعال می‌شود
+                </p>
               </div>
               <Switch checked={formActivate} onCheckedChange={setFormActivate} />
             </div>
@@ -974,7 +1150,11 @@ export function FiscalYearTab() {
                     {(() => {
                       const start = new Date(formStartISO)
                       const end = new Date(formEndISO)
-                      const days = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                      const days =
+                        Math.round(
+                          (end.getTime() - start.getTime()) /
+                            (1000 * 60 * 60 * 24)
+                        ) + 1
                       return toFaNum(days) + ' روز'
                     })()}
                   </span>
@@ -983,15 +1163,23 @@ export function FiscalYearTab() {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setFormOpen(false)} className="text-xs h-8">
+            <Button
+              variant="outline"
+              onClick={() => setFormOpen(false)}
+              className="text-xs h-8"
+            >
               انصراف
             </Button>
             <Button
               onClick={handleSave}
               disabled={formSaving}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1"
             >
-              {formSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5 ml-1" />}
+              {formSaving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
               ایجاد سال مالی
             </Button>
           </DialogFooter>
@@ -999,10 +1187,13 @@ export function FiscalYearTab() {
       </Dialog>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
-      {/*  ★★★ Wizard بستن سال مالی (نسخه v4.1 — ۳ مرحله)             */}
+      {/*  ★★★ Wizard بستن سال مالی (نسخه v5.2 — ۳ مرحله)              */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       <Dialog open={wizardOpen} onOpenChange={setWizardOpen}>
-        <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto" dir="rtl">
+        <DialogContent
+          className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto"
+          dir="rtl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm">
               <Archive className="w-4 h-4 text-red-600" />
@@ -1038,7 +1229,9 @@ export function FiscalYearTab() {
               </div>
 
               <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۱</span>
+                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">
+                  ۱
+                </span>
                 بررسی پیش‌نیازها
               </h3>
 
@@ -1047,7 +1240,9 @@ export function FiscalYearTab() {
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <div className="text-xs text-emerald-800">
                     <strong>🟢 {preCheckData.closeModeReason}</strong>
-                    <p className="text-[10px] mt-0.5">می‌توانید به‌صورت عادی سال مالی را ببندید.</p>
+                    <p className="text-[10px] mt-0.5">
+                      می‌توانید به‌صورت عادی سال مالی را ببندید.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1059,8 +1254,9 @@ export function FiscalYearTab() {
                     <div className="text-xs text-amber-900">
                       <strong>🟡 بستن زودهنگام سال مالی</strong>
                       <p className="text-[10px] mt-1 leading-relaxed">
-                        شما {toFaNum(preCheckData.activeYear.daysUntilEnd)} روز زودتر از پایان سال مالی اقدام به بستن آن کرده‌اید.
-                        این عملیات ممکن است گزارش‌های مالی سال را ناقص کند.
+                        شما {toFaNum(preCheckData.activeYear.daysUntilEnd)} روز
+                        زودتر از پایان سال مالی اقدام به بستن آن کرده‌اید. این
+                        عملیات ممکن است گزارش‌های مالی سال را ناقص کند.
                       </p>
                     </div>
                   </div>
@@ -1097,7 +1293,8 @@ export function FiscalYearTab() {
                       className="w-3.5 h-3.5 mt-0.5 text-amber-600"
                     />
                     <span className="text-[10px] text-amber-800">
-                      تأیید می‌کنم که از عواقب بستن زودهنگام آگاه هستم و این عملیات غیرقابل بازگشت است.
+                      تأیید می‌کنم که از عواقب بستن زودهنگام آگاه هستم و این
+                      عملیات غیرقابل بازگشت است.
                     </span>
                   </label>
                 </div>
@@ -1112,7 +1309,8 @@ export function FiscalYearTab() {
                       {preCheckData.closeModeReason}
                       <br />
                       <br />
-                      در شرایط بسیار خاص (مثل انحلال شرکت)، با پشتیبانی تماس بگیرید.
+                      در شرایط بسیار خاص (مثل انحلال شرکت)، با پشتیبانی تماس
+                      بگیرید.
                     </p>
                   </div>
                 </div>
@@ -1120,38 +1318,69 @@ export function FiscalYearTab() {
 
               <div className="bg-emerald-50 border border-emerald-200 rounded p-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-emerald-800">{preCheckData.activeYear.name}</span>
-                  <Badge className={`text-[9px] ${preCheckData.activeYear.isYearEnded ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {preCheckData.activeYear.isYearEnded ? 'به پایان رسیده' : `${toFaNum(preCheckData.activeYear.daysUntilEnd)} روز مانده`}
+                  <span className="text-xs font-bold text-emerald-800">
+                    {preCheckData.activeYear.name}
+                  </span>
+                  <Badge
+                    className={`text-[9px] ${
+                      preCheckData.activeYear.isYearEnded
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-blue-100 text-blue-700'
+                    }`}
+                  >
+                    {preCheckData.activeYear.isYearEnded
+                      ? 'به پایان رسیده'
+                      : `${toFaNum(
+                          preCheckData.activeYear.daysUntilEnd
+                        )} روز مانده`}
                   </Badge>
                 </div>
                 <div className="text-[10px] text-gray-600" dir="ltr">
-                  {isoToJalaliFa(preCheckData.activeYear.startDate)} — {isoToJalaliFa(preCheckData.activeYear.endDate)}
+                  {isoToJalaliFa(preCheckData.activeYear.startDate)} —{' '}
+                  {isoToJalaliFa(preCheckData.activeYear.endDate)}
                 </div>
               </div>
 
               <div className="space-y-1.5">
                 <CheckItem
-                  ok={preCheckData.activeYear.isYearEnded || preCheckData.activeYear.daysUntilEnd <= 7}
-                  label={preCheckData.activeYear.isYearEnded
-                    ? 'سال مالی به پایان رسیده است'
-                    : `${toFaNum(preCheckData.activeYear.daysUntilEnd)} روز تا پایان سال مالی باقی مانده`}
-                  warning={!preCheckData.activeYear.isYearEnded && preCheckData.activeYear.daysUntilEnd <= 7}
+                  ok={
+                    preCheckData.activeYear.isYearEnded ||
+                    preCheckData.activeYear.daysUntilEnd <= 7
+                  }
+                  label={
+                    preCheckData.activeYear.isYearEnded
+                      ? 'سال مالی به پایان رسیده است'
+                      : `${toFaNum(
+                          preCheckData.activeYear.daysUntilEnd
+                        )} روز تا پایان سال مالی باقی مانده`
+                  }
+                  warning={
+                    !preCheckData.activeYear.isYearEnded &&
+                    preCheckData.activeYear.daysUntilEnd <= 7
+                  }
                 />
 
                 <CheckItem
-                  ok={preCheckData.blockers.every(b => !b.includes('Draft'))}
-                  label={preCheckData.closingPreview.draftEntriesCount === 0
-                    ? 'هیچ سند پیش‌نویس (Draft) وجود ندارد'
-                    : `${toFaNum(preCheckData.closingPreview.draftEntriesCount)} سند Draft باید تأیید شوند`}
+                  ok={preCheckData.blockers.every((b) => !b.includes('Draft'))}
+                  label={
+                    preCheckData.closingPreview.draftEntriesCount === 0
+                      ? 'هیچ سند پیش‌نویس (Draft) وجود ندارد'
+                      : `${toFaNum(
+                          preCheckData.closingPreview.draftEntriesCount
+                        )} سند Draft باید تأیید شوند`
+                  }
                   error={preCheckData.closingPreview.draftEntriesCount > 0}
                 />
 
                 <CheckItem
                   ok={preCheckData.openingPreview.isBalanced}
-                  label={preCheckData.openingPreview.isBalanced
-                    ? 'حساب‌ها تراز هستند'
-                    : `اختلاف ${toFaNum(preCheckData.openingPreview.difference)} ریال در حساب‌ها`}
+                  label={
+                    preCheckData.openingPreview.isBalanced
+                      ? 'حساب‌ها تراز هستند'
+                      : `اختلاف ${toFaNum(
+                          preCheckData.openingPreview.difference
+                        )} ریال در حساب‌ها`
+                  }
                   warning={!preCheckData.openingPreview.isBalanced}
                 />
               </div>
@@ -1160,7 +1389,9 @@ export function FiscalYearTab() {
                 <div className="bg-red-50 border border-red-200 rounded p-2">
                   <div className="flex items-center gap-1 mb-1">
                     <XCircle className="w-3.5 h-3.5 text-red-600" />
-                    <span className="text-xs font-bold text-red-700">موانع (قبل از ادامه رفع کنید):</span>
+                    <span className="text-xs font-bold text-red-700">
+                      موانع (قبل از ادامه رفع کنید):
+                    </span>
                   </div>
                   <ul className="text-[10px] text-red-700 space-y-0.5 pr-5 list-disc">
                     {preCheckData.blockers.map((b, i) => (
@@ -1174,7 +1405,9 @@ export function FiscalYearTab() {
                 <div className="bg-amber-50 border border-amber-200 rounded p-2">
                   <div className="flex items-center gap-1 mb-1">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                    <span className="text-xs font-bold text-amber-700">هشدارها:</span>
+                    <span className="text-xs font-bold text-amber-700">
+                      هشدارها:
+                    </span>
                   </div>
                   <ul className="text-[10px] text-amber-700 space-y-0.5 pr-5 list-disc">
                     {preCheckData.warnings.map((w, i) => (
@@ -1187,107 +1420,181 @@ export function FiscalYearTab() {
           )}
 
           {/* ─── مرحله ۲: پیش‌نمایش اختتامیه ─── */}
-          {!wizardLoading && preCheckData && wizardStep === 'closing-preview' && (
-            <div className="space-y-3 py-2">
-              <div className="flex items-center gap-1 mb-2">
-                {wizardSteps.map((s, i) => (
+          {!wizardLoading &&
+            preCheckData &&
+            wizardStep === 'closing-preview' && (
+              <div className="space-y-3 py-2">
+                <div className="flex items-center gap-1 mb-2">
+                  {wizardSteps.map((s, i) => (
+                    <div
+                      key={s}
+                      className={`flex-1 h-1 rounded-full ${
+                        wizardSteps.indexOf(wizardStep) >= i
+                          ? 'bg-emerald-500'
+                          : 'bg-gray-200'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">
+                    ۲
+                  </span>
+                  پیش‌نمایش سند اختتامیه
+                </h3>
+
+                <p className="text-[10px] text-gray-600">
+                  سند اختتامیه حساب‌های موقت (درآمد و هزینه) را صفر کرده و
+                  سود/زیان را به حساب سود انباشته منتقل می‌کند.
+                </p>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-center">
+                    <TrendingUp className="w-4 h-4 text-emerald-600 mx-auto mb-1" />
+                    <div className="text-[9px] text-gray-500">کل درآمد</div>
+                    <div className="text-xs font-bold text-emerald-700">
+                      {toFaNum(
+                        Math.round(
+                          preCheckData.closingPreview.totalRevenue
+                        ).toLocaleString('en-US')
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded p-2 text-center">
+                    <TrendingDown className="w-4 h-4 text-red-600 mx-auto mb-1" />
+                    <div className="text-[9px] text-gray-500">کل هزینه</div>
+                    <div className="text-xs font-bold text-red-700">
+                      {toFaNum(
+                        Math.round(
+                          preCheckData.closingPreview.totalExpense
+                        ).toLocaleString('en-US')
+                      )}
+                    </div>
+                  </div>
                   <div
-                    key={s}
-                    className={`flex-1 h-1 rounded-full ${
-                      wizardSteps.indexOf(wizardStep) >= i
-                        ? 'bg-emerald-500'
-                        : 'bg-gray-200'
-                    }`}
-                  />
-                ))}
+                    className={`${
+                      preCheckData.closingPreview.netProfit >= 0
+                        ? 'bg-blue-50 border-blue-200'
+                        : 'bg-orange-50 border-orange-200'
+                    } border rounded p-2 text-center`}
+                  >
+                    <Scale
+                      className={`w-4 h-4 mx-auto mb-1 ${
+                        preCheckData.closingPreview.netProfit >= 0
+                          ? 'text-blue-600'
+                          : 'text-orange-600'
+                      }`}
+                    />
+                    <div className="text-[9px] text-gray-500">
+                      {preCheckData.closingPreview.netProfit >= 0
+                        ? 'سود خالص'
+                        : 'زیان خالص'}
+                    </div>
+                    <div
+                      className={`text-xs font-bold ${
+                        preCheckData.closingPreview.netProfit >= 0
+                          ? 'text-blue-700'
+                          : 'text-orange-700'
+                      }`}
+                    >
+                      {toFaNum(
+                        Math.round(
+                          Math.abs(preCheckData.closingPreview.netProfit)
+                        ).toLocaleString('en-US')
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {preCheckData.closingPreview.revenues.length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded">
+                    <div className="px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3 text-emerald-600" />
+                      <span className="text-[10px] font-bold text-emerald-800">
+                        حساب‌های درآمد (
+                        {toFaNum(
+                          preCheckData.closingPreview.revenues.length
+                        )}
+                        )
+                      </span>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto">
+                      {preCheckData.closingPreview.revenues
+                        .slice(0, 10)
+                        .map((r: any) => (
+                          <div
+                            key={r.accountId}
+                            className="flex justify-between px-3 py-1 text-[10px] border-b border-gray-50"
+                          >
+                            <span className="text-gray-700 truncate">
+                              {r.name}
+                            </span>
+                            <span
+                              className="font-mono text-emerald-700"
+                              dir="ltr"
+                            >
+                              {toFaNum(
+                                Math.round(r.balance).toLocaleString('en-US')
+                              )}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {preCheckData.closingPreview.expenses.length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded">
+                    <div className="px-3 py-1.5 bg-red-50 border-b border-red-100 flex items-center gap-1">
+                      <TrendingDown className="w-3 h-3 text-red-600" />
+                      <span className="text-[10px] font-bold text-red-800">
+                        حساب‌های هزینه (
+                        {toFaNum(
+                          preCheckData.closingPreview.expenses.length
+                        )}
+                        )
+                      </span>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto">
+                      {preCheckData.closingPreview.expenses
+                        .slice(0, 10)
+                        .map((e: any) => (
+                          <div
+                            key={e.accountId}
+                            className="flex justify-between px-3 py-1 text-[10px] border-b border-gray-50"
+                          >
+                            <span className="text-gray-700 truncate">
+                              {e.name}
+                            </span>
+                            <span className="font-mono text-red-700" dir="ltr">
+                              {toFaNum(
+                                Math.round(e.balance).toLocaleString('en-US')
+                              )}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-purple-50 border border-purple-200 rounded p-2 text-[10px] text-purple-800">
+                  <strong>
+                    انتقال به حساب «
+                    {preCheckData.closingPreview.retainedEarningsAccountName}»:
+                  </strong>{' '}
+                  {preCheckData.closingPreview.netProfit >= 0 ? 'سود' : 'زیان'}{' '}
+                  <span className="font-bold font-mono" dir="ltr">
+                    {toFaNum(
+                      Math.round(
+                        Math.abs(preCheckData.closingPreview.netProfit)
+                      ).toLocaleString('en-US')
+                    )}{' '}
+                    ریال
+                  </span>
+                </div>
               </div>
-
-              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">۲</span>
-                پیش‌نمایش سند اختتامیه
-              </h3>
-
-              <p className="text-[10px] text-gray-600">
-                سند اختتامیه حساب‌های موقت (درآمد و هزینه) را صفر کرده و سود/زیان را به حساب سود انباشته منتقل می‌کند.
-              </p>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-center">
-                  <TrendingUp className="w-4 h-4 text-emerald-600 mx-auto mb-1" />
-                  <div className="text-[9px] text-gray-500">کل درآمد</div>
-                  <div className="text-xs font-bold text-emerald-700">
-                    {toFaNum(Math.round(preCheckData.closingPreview.totalRevenue).toLocaleString('en-US'))}
-                  </div>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded p-2 text-center">
-                  <TrendingDown className="w-4 h-4 text-red-600 mx-auto mb-1" />
-                  <div className="text-[9px] text-gray-500">کل هزینه</div>
-                  <div className="text-xs font-bold text-red-700">
-                    {toFaNum(Math.round(preCheckData.closingPreview.totalExpense).toLocaleString('en-US'))}
-                  </div>
-                </div>
-                <div className={`${preCheckData.closingPreview.netProfit >= 0 ? 'bg-blue-50 border-blue-200' : 'bg-orange-50 border-orange-200'} border rounded p-2 text-center`}>
-                  <Scale className={`w-4 h-4 mx-auto mb-1 ${preCheckData.closingPreview.netProfit >= 0 ? 'text-blue-600' : 'text-orange-600'}`} />
-                  <div className="text-[9px] text-gray-500">
-                    {preCheckData.closingPreview.netProfit >= 0 ? 'سود خالص' : 'زیان خالص'}
-                  </div>
-                  <div className={`text-xs font-bold ${preCheckData.closingPreview.netProfit >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
-                    {toFaNum(Math.round(Math.abs(preCheckData.closingPreview.netProfit)).toLocaleString('en-US'))}
-                  </div>
-                </div>
-              </div>
-
-              {preCheckData.closingPreview.revenues.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded">
-                  <div className="px-3 py-1.5 bg-emerald-50 border-b border-emerald-100 flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-emerald-600" />
-                    <span className="text-[10px] font-bold text-emerald-800">
-                      حساب‌های درآمد ({toFaNum(preCheckData.closingPreview.revenues.length)})
-                    </span>
-                  </div>
-                  <div className="max-h-24 overflow-y-auto">
-                    {preCheckData.closingPreview.revenues.slice(0, 10).map((r: any) => (
-                      <div key={r.accountId} className="flex justify-between px-3 py-1 text-[10px] border-b border-gray-50">
-                        <span className="text-gray-700 truncate">{r.name}</span>
-                        <span className="font-mono text-emerald-700" dir="ltr">
-                          {toFaNum(Math.round(r.balance).toLocaleString('en-US'))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {preCheckData.closingPreview.expenses.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded">
-                  <div className="px-3 py-1.5 bg-red-50 border-b border-red-100 flex items-center gap-1">
-                    <TrendingDown className="w-3 h-3 text-red-600" />
-                    <span className="text-[10px] font-bold text-red-800">
-                      حساب‌های هزینه ({toFaNum(preCheckData.closingPreview.expenses.length)})
-                    </span>
-                  </div>
-                  <div className="max-h-24 overflow-y-auto">
-                    {preCheckData.closingPreview.expenses.slice(0, 10).map((e: any) => (
-                      <div key={e.accountId} className="flex justify-between px-3 py-1 text-[10px] border-b border-gray-50">
-                        <span className="text-gray-700 truncate">{e.name}</span>
-                        <span className="font-mono text-red-700" dir="ltr">
-                          {toFaNum(Math.round(e.balance).toLocaleString('en-US'))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-purple-50 border border-purple-200 rounded p-2 text-[10px] text-purple-800">
-                <strong>انتقال به حساب «{preCheckData.closingPreview.retainedEarningsAccountName}»:</strong>{' '}
-                {preCheckData.closingPreview.netProfit >= 0 ? 'سود' : 'زیان'}{' '}
-                <span className="font-bold font-mono" dir="ltr">
-                  {toFaNum(Math.round(Math.abs(preCheckData.closingPreview.netProfit)).toLocaleString('en-US'))} ریال
-                </span>
-              </div>
-            </div>
-          )}
+            )}
 
           {/* ─── مرحله ۳: تأیید نهایی ─── */}
           {!wizardLoading && preCheckData && wizardStep === 'confirm' && (
@@ -1314,17 +1621,27 @@ export function FiscalYearTab() {
 
               {/* خلاصه عملیات */}
               <div className="bg-gray-50 border border-gray-200 rounded p-3 space-y-2">
-                <div className="text-xs font-bold text-gray-800 mb-2">خلاصه عملیات:</div>
+                <div className="text-xs font-bold text-gray-800 mb-2">
+                  خلاصه عملیات:
+                </div>
 
                 <div className="space-y-1.5 text-[10px]">
                   <div className="flex items-center gap-2">
                     <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                    <span>بستن سال مالی «{preCheckData.activeYear.name}»</span>
+                    <span>
+                      بستن سال مالی «{preCheckData.activeYear.name}»
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Check className="w-3 h-3 text-emerald-600 shrink-0" />
                     <span>
-                      صدور سند اختتامیه (سود/زیان: {toFaNum(Math.round(Math.abs(preCheckData.closingPreview.netProfit)).toLocaleString('en-US'))} ریال)
+                      صدور سند اختتامیه (سود/زیان:{' '}
+                      {toFaNum(
+                        Math.round(
+                          Math.abs(preCheckData.closingPreview.netProfit)
+                        ).toLocaleString('en-US')
+                      )}{' '}
+                      ریال)
                     </span>
                   </div>
                 </div>
@@ -1333,14 +1650,17 @@ export function FiscalYearTab() {
               <div className="bg-blue-50 border border-blue-200 rounded p-3 flex items-start gap-2">
                 <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
                 <div className="text-[10px] text-blue-800">
-                  <strong>📋 ادامه فرآیند:</strong> پس از بستن سال مالی، ویزارد راه‌اندازی سال جدید به‌صورت خودکار باز می‌شود تا سال جدید، انبارها و سند افتتاحیه را تنظیم کنید.
+                  <strong>📋 ادامه فرآیند:</strong> پس از بستن سال مالی،
+                  ویزارد راه‌اندازی سال جدید به‌صورت خودکار باز می‌شود تا سال
+                  جدید، انبارها و سند افتتاحیه را تنظیم کنید.
                 </div>
               </div>
 
               <div className="bg-amber-50 border border-amber-200 rounded p-2 flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <div className="text-[10px] text-amber-800">
-                  <strong>توجه:</strong> این عملیات غیرقابل بازگشت است. پس از تأیید، سال مالی بسته شده و قابل بازگشایی نیست.
+                  <strong>توجه:</strong> این عملیات غیرقابل بازگشت است. پس از
+                  تأیید، سال مالی بسته شده و قابل بازگشایی نیست.
                 </div>
               </div>
             </div>
@@ -1350,8 +1670,12 @@ export function FiscalYearTab() {
           {wizardStep === 'executing' && (
             <div className="py-12 text-center">
               <Loader2 className="w-10 h-10 animate-spin text-emerald-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-gray-800 mb-1">در حال اجرای فرآیند...</p>
-              <p className="text-[10px] text-gray-500">لطفاً صبر کنید. این عملیات ممکن است چند ثانیه طول بکشد.</p>
+              <p className="text-sm font-bold text-gray-800 mb-1">
+                در حال اجرای فرآیند...
+              </p>
+              <p className="text-[10px] text-gray-500">
+                لطفاً صبر کنید. این عملیات ممکن است چند ثانیه طول بکشد.
+              </p>
               <div className="mt-4 space-y-1 text-[10px] text-gray-500">
                 <div className="flex items-center gap-2 justify-center">
                   <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
@@ -1376,38 +1700,70 @@ export function FiscalYearTab() {
                   🎉 بستن سال مالی با موفقیت انجام شد
                 </h3>
                 <p className="text-xs text-gray-500">
-                  سال «{wizardResult.closedYear.name}» بسته شد و سند اختتامیه صادر گردید.
+                  سال «{wizardResult.closedYear.name}» بسته شد و سند اختتامیه
+                  صادر گردید.
                 </p>
+                {wizardResult.suggestedNextYearName && (
+                  <p className="text-[11px] text-purple-700 mt-2 font-medium">
+                    ✨ پیشنهاد نام سال بعدی:{' '}
+                    <strong>{wizardResult.suggestedNextYearName}</strong>
+                  </p>
+                )}
                 <p className="text-[11px] text-blue-700 mt-2 font-medium">
                   در حال آماده‌سازی ویزارد راه‌اندازی سال جدید...
                 </p>
               </div>
 
               <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2 text-[10px]">
-                <div className="font-bold text-emerald-800 pb-1 border-b border-emerald-100">نتایج عملیات:</div>
+                <div className="font-bold text-emerald-800 pb-1 border-b border-emerald-100">
+                  نتایج عملیات:
+                </div>
 
                 <div className="flex justify-between">
                   <span>سند اختتامیه:</span>
-                  <span className="font-mono text-emerald-700">{wizardResult.closingEntry.number}</span>
+                  <span className="font-mono text-emerald-700">
+                    {wizardResult.closingEntry.number}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span>کل درآمد:</span>
                   <span className="font-mono text-emerald-600">
-                    {toFaNum(Math.round(wizardResult.closingEntry.totalRevenue).toLocaleString('en-US'))}
+                    {toFaNum(
+                      Math.round(
+                        wizardResult.closingEntry.totalRevenue
+                      ).toLocaleString('en-US')
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>کل هزینه:</span>
                   <span className="font-mono text-red-600">
-                    {toFaNum(Math.round(wizardResult.closingEntry.totalExpense).toLocaleString('en-US'))}
+                    {toFaNum(
+                      Math.round(
+                        wizardResult.closingEntry.totalExpense
+                      ).toLocaleString('en-US')
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between font-bold pt-1 border-t border-emerald-100">
                   <span>
-                    {wizardResult.closingEntry.netProfit >= 0 ? 'سود خالص:' : 'زیان خالص:'}
+                    {wizardResult.closingEntry.netProfit >= 0
+                      ? 'سود خالص:'
+                      : 'زیان خالص:'}
                   </span>
-                  <span className={wizardResult.closingEntry.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}>
-                    {toFaNum(Math.round(Math.abs(wizardResult.closingEntry.netProfit)).toLocaleString('en-US'))} ریال
+                  <span
+                    className={
+                      wizardResult.closingEntry.netProfit >= 0
+                        ? 'text-emerald-700'
+                        : 'text-red-700'
+                    }
+                  >
+                    {toFaNum(
+                      Math.round(
+                        Math.abs(wizardResult.closingEntry.netProfit)
+                      ).toLocaleString('en-US')
+                    )}{' '}
+                    ریال
                   </span>
                 </div>
               </div>
@@ -1415,42 +1771,45 @@ export function FiscalYearTab() {
           )}
 
           {/* Footer */}
-          {!wizardLoading && wizardStep !== 'executing' && wizardStep !== 'completed' && preCheckData && (
-            <DialogFooter className="gap-2 mt-3 pt-2 border-t border-gray-200">
-              {wizardStep !== 'prerequisites' && (
-                <Button
-                  variant="outline"
-                  onClick={goToPrevStep}
-                  className="text-xs h-8 gap-1"
-                >
-                  <ChevronRight className="w-3 h-3" />
-                  مرحله قبل
-                </Button>
-              )}
+          {!wizardLoading &&
+            wizardStep !== 'executing' &&
+            wizardStep !== 'completed' &&
+            preCheckData && (
+              <DialogFooter className="gap-2 mt-3 pt-2 border-t border-gray-200">
+                {wizardStep !== 'prerequisites' && (
+                  <Button
+                    variant="outline"
+                    onClick={goToPrevStep}
+                    className="text-xs h-8 gap-1"
+                  >
+                    <ChevronRight className="w-3 h-3" />
+                    مرحله قبل
+                  </Button>
+                )}
 
-              {wizardStep !== 'confirm' && (
-                <Button
-                  onClick={goToNextStep}
-                  disabled={!canGoNext()}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1"
-                >
-                  مرحله بعد
-                  <ChevronLeft className="w-3 h-3" />
-                </Button>
-              )}
+                {wizardStep !== 'confirm' && (
+                  <Button
+                    onClick={goToNextStep}
+                    disabled={!canGoNext()}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 gap-1"
+                  >
+                    مرحله بعد
+                    <ChevronLeft className="w-3 h-3" />
+                  </Button>
+                )}
 
-              {wizardStep === 'confirm' && (
-                <Button
-                  onClick={executeClose}
-                  disabled={executing}
-                  className="bg-red-600 hover:bg-red-700 text-white text-xs h-8 gap-1.5"
-                >
-                  <Archive className="w-3.5 h-3.5" />
-                  تأیید و بستن سال مالی
-                </Button>
-              )}
-            </DialogFooter>
-          )}
+                {wizardStep === 'confirm' && (
+                  <Button
+                    onClick={executeClose}
+                    disabled={executing}
+                    className="bg-red-600 hover:bg-red-700 text-white text-xs h-8 gap-1.5"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    تأیید و بستن سال مالی
+                  </Button>
+                )}
+              </DialogFooter>
+            )}
 
           {wizardStep === 'completed' && (
             <DialogFooter className="gap-2 mt-3 pt-2 border-t border-gray-200">
@@ -1470,19 +1829,29 @@ export function FiscalYearTab() {
 //  کامپوننت کمکی CheckItem
 // ═══════════════════════════════════════════════════════════════
 
-function CheckItem({ ok, label, warning, error }: {
+function CheckItem({
+  ok,
+  label,
+  warning,
+  error,
+}: {
   ok: boolean
   label: string
   warning?: boolean
   error?: boolean
 }) {
   return (
-    <div className={`flex items-center gap-2 p-2 rounded text-xs ${
-      error ? 'bg-red-50 text-red-700' :
-      warning ? 'bg-amber-50 text-amber-700' :
-      ok ? 'bg-emerald-50 text-emerald-700' :
-      'bg-gray-50 text-gray-600'
-    }`}>
+    <div
+      className={`flex items-center gap-2 p-2 rounded text-xs ${
+        error
+          ? 'bg-red-50 text-red-700'
+          : warning
+          ? 'bg-amber-50 text-amber-700'
+          : ok
+          ? 'bg-emerald-50 text-emerald-700'
+          : 'bg-gray-50 text-gray-600'
+      }`}
+    >
       {error ? (
         <XCircle className="w-3.5 h-3.5 shrink-0" />
       ) : warning ? (
